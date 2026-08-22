@@ -1,0 +1,93 @@
+/* ============================================================
+   抱一 — 设计变量
+   深色为默认主题，浅色通过 <html data-theme="light"> 覆盖。
+   ============================================================ */
+
+:root {
+  /* ---------------- 配色（深色主题） ---------------- */
+  --bg-main: #1e1e2e;
+  --bg-side: #181825;
+  --bg-card: #2a2a3c;
+  --bg-card-hover: #33334d;
+  --bg-input: #23233408;
+  --bg-elevated: #24243a;
+
+  --text-main: #e0e0f0;
+  --text-sub: #9090a8;
+  --text-faint: #6b6b85;
+
+  --accent: #7c6af6;
+  --accent-2: #5b8def;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+
+  --divider: rgba(255, 255, 255, 0.08);
+  --card-border: transparent;
+  --overlay: rgba(10, 10, 18, 0.6);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45);
+
+  /* ---------------- 派生色 ---------------- */
+  --tag-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+  --tag-text: var(--accent);
+  --tag-alt-bg: color-mix(in srgb, var(--accent-2) 12%, transparent);
+  --tag-alt-text: var(--accent-2);
+  --warning-bg: color-mix(in srgb, var(--warning) 14%, transparent);
+  --success-bg: color-mix(in srgb, var(--success) 14%, transparent);
+  --danger-bg: color-mix(in srgb, var(--danger) 14%, transparent);
+  --hover-surface: color-mix(in srgb, var(--text-main) 6%, transparent);
+  --active-surface: color-mix(in srgb, var(--accent) 14%, transparent);
+
+  /* ---------------- 字体 ---------------- */
+  --font-ui: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB',
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-serif: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', STSong, serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace;
+
+  --fs-title: 18px;
+  --fs-card-title: 15px;
+  --fs-body: 13px;
+  --fs-tag: 12px;
+  --fs-mono: 12px;
+
+  /* ---------------- 间距 / 圆角 ---------------- */
+  --gap-card: 16px;
+  --pad-card: 16px;
+  --radius-card: 12px;
+  --radius-input: 8px;
+  --radius-btn: 8px;
+  --radius-tag: 6px;
+
+  --sidebar-w: 200px;
+  --titlebar-h: 38px;
+  --topbar-h: 64px;
+  --search-h: 40px;
+
+  /* ---------------- 动效 ---------------- */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --t-fast: 150ms;
+  --t-page: 200ms;
+}
+
+:root[data-theme='light'] {
+  --bg-main: #f8f9fc;
+  --bg-side: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #ffffff;
+  --bg-elevated: #ffffff;
+
+  --text-main: #1a1a2e;
+  --text-sub: #6b7280;
+  --text-faint: #9ca3af;
+
+  --divider: rgba(26, 26, 46, 0.08);
+  --card-border: #e8e8f0;
+  --overlay: rgba(26, 26, 46, 0.35);
+
+  --shadow-card: 0 1px 2px rgba(26, 26, 46, 0.06);
+  --shadow-card-hover: 0 8px 24px rgba(26, 26, 46, 0.1);
+  --shadow-pop: 0 12px 32px rgba(26, 26, 46, 0.14);
+}

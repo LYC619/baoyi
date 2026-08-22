@@ -1,0 +1,42 @@
+{
+  "name": "baoyi",
+  "productName": "抱一",
+  "version": "0.1.0",
+  "description": "抱一 — 本地资源掌控工具。知止而后得。",
+  "author": "BaoYi",
+  "license": "MIT",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "selfcheck": "node --experimental-strip-types --no-warnings scripts/agent-selfcheck.ts",
+    "inspect": "set ELECTRON_RUN_AS_NODE=1&& electron scripts/inspect-db.cjs",
+    "preview": "vite preview",
+    "rebuild": "electron-builder install-app-deps",
+    "postinstall": "electron-builder install-app-deps",
+    "dist": "npm run build && electron-builder",
+    "dist:dir": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "resedit": "^2.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.13.5",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "electron": "37.10.3",
+    "electron-builder": "^26.0.12",
+    "lucide-vue-next": "^0.475.0",
+    "pinia": "^2.3.1",
+    "sass": "^1.85.0",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.14",
+    "vite-plugin-electron": "^0.29.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0",
+    "vue-tsc": "^2.2.2"
+  }
+}

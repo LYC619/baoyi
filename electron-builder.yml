@@ -1,0 +1,42 @@
+appId: com.baoyi.app
+productName: 抱一
+copyright: Copyright © 2026 BaoYi
+
+directories:
+  output: release/${version}
+  buildResources: resources
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+
+# 应用图标：resources/icon.svg 是矢量源文件。
+# 打包前请导出 resources/icon.ico（Windows，含 256px）与 resources/icon.png（512x512），
+# 再把下面各平台的 icon 字段取消注释。缺省时 electron-builder 会使用 Electron 默认图标。
+win:
+  # icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 抱一
+
+mac:
+  # icon: resources/icon.png
+  target: [dmg]
+  category: public.app-category.utilities
+
+linux:
+  # icon: resources/icon.png
+  target: [AppImage]
+  category: Utility

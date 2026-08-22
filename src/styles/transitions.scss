@@ -1,0 +1,50 @@
+/* ============================================================
+   抱一 — 动效
+   规范：卡片悬浮 150ms、页面切换 200ms 淡入淡出、卡片依次淡入 30ms/张。
+   不做弹跳、旋转等花哨动效。
+   ============================================================ */
+
+.page-enter-active,
+.page-leave-active {
+  transition: opacity var(--t-page) ease;
+}
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+}
+
+/* 卡片入场：由 CardGrid 用 --i 变量设置每张的延迟 */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.card-in {
+  animation: card-in 220ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--t-fast) ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

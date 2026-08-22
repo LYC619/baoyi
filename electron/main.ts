@@ -1,0 +1,104 @@
+import { BrowserWindow, app, net, protocol, shell } from 'electron'
+import fs from 'node:fs'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { registerIpcHandlers } from './ipc/handlers'
+import { closeDb, getSettings, iconsDir } from './services/database'
+
+const APP_ROOT = path.join(__dirname, '..')
+const RENDERER_DIST = path.join(APP_ROOT, 'dist')
+const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
+
+let mainWindow: BrowserWindow | null = null
+const getWindow = () => mainWindow
+
+/** 图标走自定义协议，避免渲染进程直接触碰 file:// */
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'baoyi',
+    privileges: { standard: true, secure: true, supportFetchAPI: true }
+  }
+])
+
+function registerIconProtocol(): void {
+  protocol.handle('baoyi', async (request) => {
+    const url = new URL(request.url)
+    if (url.hostname !== 'icon') return new Response('Not Found', { status: 404 })
+
+    // basename 兜底，杜绝 ../ 穿越到图标目录之外
+    const name = path.basename(decodeURIComponent(url.pathname))
+    const file = path.join(iconsDir(), name)
+    if (!fs.existsSync(file)) return new Response('Not Found', { status: 404 })
+    return net.fetch(pathToFileURL(file).toString())
+  })
+}
+
+function createWindow(): void {
+  const theme = (() => {
+    try {
+      return getSettings().theme
+    } catch {
+      return 'dark' as const
+    }
+  })()
+
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    minWidth: 960,
+    minHeight: 640,
+    show: false,
+    frame: false,
+    backgroundColor: theme === 'light' ? '#F8F9FC' : '#1E1E2E',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  })
+
+  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('closed', () => (mainWindow = null))
+  mainWindow.on('maximize', () => mainWindow?.webContents.send('win:maximize-change', true))
+  mainWindow.on('unmaximize', () => mainWindow?.webContents.send('win:maximize-change', false))
+
+  // 外链一律交给系统浏览器，不在应用内开新窗口
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+
+  if (DEV_SERVER_URL) {
+    void mainWindow.loadURL(DEV_SERVER_URL)
+    mainWindow.webContents.openDevTools({ mode: 'detach' })
+  } else {
+    void mainWindow.loadFile(path.join(RENDERER_DIST, 'index.html'))
+  }
+}
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+  })
+
+  void app.whenReady().then(() => {
+    registerIconProtocol()
+    registerIpcHandlers(getWindow)
+    createWindow()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
+
+  app.on('will-quit', () => closeDb())
+}
