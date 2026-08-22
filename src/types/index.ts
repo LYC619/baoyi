@@ -237,6 +237,15 @@ export interface DataStats {
   iconBytes: number
 }
 
+/** 「关于」页展示的版本与构建信息 */
+export interface AppInfo {
+  /** 来自 package.json，打包后取自安装包元数据 */
+  version: string
+  electron: string
+  chrome: string
+  node: string
+}
+
 /* ------------------------------ 识别日志 ------------------------------ */
 
 /**
@@ -285,6 +294,10 @@ export type Unsubscribe = () => void
 
 /** preload 暴露给渲染进程的完整 API */
 export interface BaoyiApi {
+  app: {
+    /** 版本与构建信息，「关于」页用 */
+    info(): Promise<AppInfo>
+  }
   win: {
     minimize(): void
     toggleMaximize(): void

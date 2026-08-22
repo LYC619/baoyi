@@ -63,25 +63,36 @@ async function launch(id: string): Promise<void> {
   if (!ok) error('启动失败，文件可能已被移动或删除')
 }
 
+/**
+ * 「重新扫描目录」：只负责扫描 + 汇报，不替用户按下识别那一步 ——
+ * 识别是要花 token 的，得由用户点头。
+ */
 async function rescan(): Promise<void> {
   const dirs = settings.settings.scan_dirs
   if (dirs.length === 0) {
     toast('还没有配置扫描目录，先去设置里添加')
-    void router.push({ name: 'settings' })
+    void router.push({ name: 'settings', query: { tab: 'scan' } })
     return
   }
+
   const result = await scan.run(dirs)
   await store.reload()
+
   if (result.pending === 0) {
-    toast(
-      result.settled > 0
-        ? `扫描完成，共 ${result.found} 个程序，目录都已识别过`
-        : `扫描完成，共 ${result.found} 个程序，没有需要识别的目录`
-    )
+    toast(`未发现新软件（共扫描到 ${result.found} 个程序，目录都已处理过）`)
     return
   }
-  success(`${result.pending} 个目录待识别，开始识别`)
-  await completeAi()
+
+  const ok = window.confirm(
+    result.added > 0
+      ? `发现 ${result.added} 个新目录，当前共 ${result.pending} 个待识别。\n是否现在进入识别？`
+      : `没有新增目录，但还有 ${result.pending} 个目录待识别。\n是否现在进入识别？`
+  )
+  if (!ok) {
+    toast(`已记录 ${result.pending} 个待识别目录，随时可到设置里处理`)
+    return
+  }
+  void router.push({ name: 'settings', query: { tab: 'scan', focus: 'pending' } })
 }
 
 async function addManual(): Promise<void> {
@@ -158,7 +169,10 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
             </button>
             <Transition name="fade">
               <div v-if="addMenuOpen" class="menu">
-                <button @click="addMenuOpen = false; rescan()">
+                <button
+                  title="扫描已配置的目录，发现新增软件后可进行 AI 识别"
+                  @click="addMenuOpen = false; rescan()"
+                >
                   <FolderSearch :size="15" />
                   重新扫描目录
                 </button>

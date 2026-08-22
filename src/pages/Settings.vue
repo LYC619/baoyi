@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, version as vueVersion, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
   Bot,
-  Check,
   Database,
   Download,
   Eraser,
   FolderOpen,
   FolderPlus,
+  Github,
   Globe,
+  Info,
   Loader2,
   Moon,
   Palette,
@@ -28,7 +29,7 @@ import { useToast } from '@/composables/useToast'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
 import { formatBytes } from '@/utils'
-import type { DataStats, ScanUnit, SearchProvider, TitleLang } from '@/types'
+import type { AppInfo, DataStats, ScanUnit, SearchProvider, TitleLang } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -46,7 +47,8 @@ const TABS = [
   { id: 'search', label: '搜索服务', icon: Globe },
   { id: 'appearance', label: '外观', icon: Palette },
   { id: 'logs', label: '识别日志', icon: ScrollText },
-  { id: 'data', label: '数据管理', icon: Database }
+  { id: 'data', label: '数据管理', icon: Database },
+  { id: 'about', label: '关于', icon: Info }
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -68,6 +70,16 @@ function go(id: TabId): void {
   tab.value = id
   void router.replace({ name: 'settings', query: { tab: id } })
 }
+
+/**
+ * 主页「重新扫描目录」发现待识别目录后会带着 ?focus=pending 跳过来，
+ * 把「还剩多少要识别」顶到眼前。只是一次性的视觉引导：切走 Tab 或开始识别后就撤掉。
+ */
+const focusPending = ref(route.query.focus === 'pending')
+watch(
+  () => route.query.focus,
+  (v) => (focusPending.value = v === 'pending')
+)
 
 /* ------------------------------- AI 配置 ------------------------------- */
 
@@ -248,7 +260,7 @@ async function runScan(): Promise<void> {
     toast('先添加至少一个扫描目录')
     return
   }
-  const r = await scan.run([...dirs.value])
+  const r = await scan.run(dirs.value)
   await Promise.all([store.reload(), loadUnits()])
 
   // 说清楚三件事：找到多少程序、还要识别几个目录、有几个这次不用再花钱
@@ -269,6 +281,7 @@ async function runAi(): Promise<void> {
     return
   }
   const result = await ai.complete()
+  focusPending.value = false
   // 日志页是切过去才挂载的，那时它自己会拉最新的，这里不用管
   await Promise.all([store.reload(), loadUnits()])
   if (result.processed === 0) {
@@ -317,6 +330,13 @@ async function loadStats(): Promise<void> {
 onMounted(async () => {
   dataDir.value = await window.baoyi.data.dir()
   await loadStats()
+})
+
+/* -------------------------------- 关于 -------------------------------- */
+
+const info = ref<AppInfo | null>(null)
+onMounted(async () => {
+  info.value = await window.baoyi.app.info()
 })
 
 function openDataDir(): void {
@@ -443,8 +463,14 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               识别不对时到「识别日志」翻它当时的判断过程。
             </p>
 
+            <p v-if="focusPending && unitStats.pending > 0" class="callout">
+              还有 <b>{{ unitStats.pending }}</b> 个目录待识别，点下面的「开始识别」交给 AI。
+            </p>
+
             <ul class="tally">
-              <li><b>{{ unitStats.pending }}</b><span>待识别</span></li>
+              <li :class="{ lit: focusPending && unitStats.pending > 0 }">
+                <b>{{ unitStats.pending }}</b><span>待识别</span>
+              </li>
               <li><b>{{ unitStats.done }}</b><span>已识别</span></li>
               <li><b>{{ unitStats.skipped }}</b><span>已跳过</span></li>
               <li :class="{ bad: unitStats.failed > 0 }">
@@ -747,15 +773,57 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               <span class="hint">连设置、分类、日志一起清，重走引导流程</span>
             </div>
           </section>
+        </template>
 
+        <!-- ---------------------------- 关于 ---------------------------- -->
+        <template v-else-if="tab === 'about'">
           <section class="panel about">
-            <BaoyiLogo :size="40" />
+            <BaoyiLogo :size="52" />
             <div>
-              <p class="about__name">抱一 <span class="about__ver">v0.1.0</span></p>
+              <p class="about__name">
+                抱一 <span class="about__ver mono">v{{ info?.version ?? '—' }}</span>
+              </p>
               <p class="about__slogan">知止而后得。</p>
               <p class="about__quote">是以圣人抱一为天下式。——《道德经》第二十二章</p>
             </div>
-            <Check :size="16" class="about__check" />
+          </section>
+
+          <section class="panel">
+            <h2 class="sec-head">这是什么</h2>
+            <p class="sec-desc sec-desc--loose">
+              抱一把散落在各个盘符里的绿色软件收拢成一面卡片墙，交给 AI 认清每一个是什么、
+              能替你解决什么问题，再由你决定留下哪些。
+            </p>
+            <p class="sec-desc sec-desc--loose">
+              不联网同步、不上传任何数据，所有记录都在本机。
+            </p>
+          </section>
+
+          <section class="panel">
+            <h2 class="sec-head">构建信息</h2>
+            <dl class="kv">
+              <dt>抱一</dt>
+              <dd class="mono">v{{ info?.version ?? '—' }}</dd>
+              <dt>Electron</dt>
+              <dd class="mono">{{ info?.electron ?? '—' }}</dd>
+              <dt>Chromium</dt>
+              <dd class="mono">{{ info?.chrome ?? '—' }}</dd>
+              <dt>Node</dt>
+              <dd class="mono">{{ info?.node ?? '—' }}</dd>
+              <dt>Vue</dt>
+              <dd class="mono">{{ vueVersion }}</dd>
+            </dl>
+          </section>
+
+          <section class="panel">
+            <h2 class="sec-head">项目主页</h2>
+            <div class="row">
+              <button class="btn btn--ghost" disabled title="仓库还没公开">
+                <Github :size="14" />
+                GitHub
+              </button>
+              <span class="hint">仓库地址确定后会填在这里。</span>
+            </div>
           </section>
         </template>
       </div>
@@ -839,9 +907,11 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   gap: 16px;
 }
 
+/* 宽屏下内容贴左会显得空旷，限宽后靠 auto 外边距居中 */
 .body > * {
   width: 100%;
-  max-width: 640px;
+  max-width: 720px;
+  margin: 0 auto;
 }
 
 .sec-head {
@@ -871,6 +941,47 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   margin: 16px 0 0;
   padding-top: 14px;
   border-top: 1px solid var(--divider);
+}
+
+/* 关于页的正文按段落读，不是控件旁边的补充说明 */
+.sec-desc--loose {
+  font-size: var(--fs-body);
+  color: var(--text-sub);
+  margin-bottom: 8px;
+}
+.sec-desc--loose:last-child {
+  margin-bottom: 0;
+}
+
+/* 从主页扫描完跳过来时的一次性引导 */
+.callout {
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-input);
+  background: var(--active-surface);
+  color: var(--accent);
+  font-size: var(--fs-tag);
+  line-height: 1.7;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 8px 12px;
+  margin: 0;
+  font-size: var(--fs-body);
+}
+
+.kv dt {
+  color: var(--text-faint);
+  font-size: var(--fs-tag);
+}
+
+.kv dd {
+  margin: 0;
+  color: var(--text-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .form {
@@ -1103,6 +1214,14 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   color: var(--danger);
 }
 
+.tally li.lit {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--active-surface);
+}
+.tally li.lit b {
+  color: var(--accent);
+}
+
 .notes {
   list-style: none;
   margin: 16px 0 0;
@@ -1149,37 +1268,34 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 .about {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 20px;
+  padding: 22px;
 }
 
 .about__name {
   font-family: var(--font-serif);
-  font-size: 16px;
-  letter-spacing: 2px;
+  font-size: 19px;
+  letter-spacing: 3px;
 }
 
 .about__ver {
-  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0;
   color: var(--text-faint);
 }
 
 .about__slogan {
-  font-size: var(--fs-tag);
+  font-family: var(--font-serif);
+  font-size: var(--fs-body);
   color: var(--text-sub);
-  margin-top: 4px;
-}
-
-.about__quote {
-  font-size: 11px;
-  color: var(--text-faint);
   margin-top: 6px;
 }
 
-.about__check {
-  margin-left: auto;
-  color: var(--success);
+.about__quote {
+  font-family: var(--font-serif);
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 6px;
 }
 
 .spin {

@@ -20,6 +20,9 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
 }
 
 const api: BaoyiApi = {
+  app: {
+    info: () => ipcRenderer.invoke('app:info')
+  },
   win: {
     minimize: () => ipcRenderer.send('win:minimize'),
     toggleMaximize: () => ipcRenderer.send('win:toggle-maximize'),

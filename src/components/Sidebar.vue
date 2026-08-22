@@ -38,6 +38,18 @@ const ICONS: Record<string, Component> = {
 
 const iconFor = (name: string) => ICONS[categories.iconOf(name)] ?? Box
 
+/**
+ * 左下角这句话是氛围，不是功能 —— 所以用衬线体、压小、压淡，并带上出处。
+ * 放在模块作用域而不是 setup 里：一次启动认一句，来回切页面时不会跳来跳去。
+ */
+const MOTTOS = [
+  { text: '少则得，多则惑。', from: '《道德经》第二十二章' },
+  { text: '知止而后有定。', from: '《大学》' },
+  { text: '圣人抱一为天下式。', from: '《道德经》第二十二章' },
+  { text: '见素抱朴，少私寡欲。', from: '《道德经》第十九章' }
+]
+const motto = MOTTOS[Math.floor(Math.random() * MOTTOS.length)]
+
 const tagsOpen = ref(false)
 const visibleTags = computed(() =>
   tagsOpen.value ? store.counts.tags : store.counts.tags.slice(0, 8)
@@ -125,7 +137,10 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
       </button>
     </div>
 
-    <p class="sidebar__motto">收藏的数量不重要<br />掌握的数量才重要</p>
+    <footer class="motto">
+      <p class="motto__text">{{ motto.text }}</p>
+      <p class="motto__from">——{{ motto.from }}</p>
+    </footer>
   </nav>
 </template>
 
@@ -230,13 +245,23 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
   color: var(--accent);
 }
 
-.sidebar__motto {
+.motto {
   flex: none;
-  padding: 14px 18px;
+  padding: 14px 18px 16px;
   border-top: 1px solid var(--divider);
   font-family: var(--font-serif);
-  font-size: 11px;
-  line-height: 1.9;
   color: var(--text-faint);
+}
+
+.motto__text {
+  font-size: 13px;
+  letter-spacing: 1px;
+  line-height: 1.7;
+}
+
+.motto__from {
+  margin-top: 4px;
+  font-size: 10px;
+  opacity: 0.72;
 }
 </style>

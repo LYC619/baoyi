@@ -41,6 +41,14 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
   }
 
+  /* ------------------------------ 应用 ------------------------------ */
+  ipcMain.handle('app:info', () => ({
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node
+  }))
+
   /* ------------------------------ 窗口 ------------------------------ */
   ipcMain.on('win:minimize', () => getWindow()?.minimize())
   ipcMain.on('win:toggle-maximize', () => {
