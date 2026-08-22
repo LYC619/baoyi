@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  ChevronRight,
+  ClipboardCheck,
   FolderSearch,
   LayoutGrid,
   List,
@@ -102,6 +104,10 @@ async function addManual(): Promise<void> {
   await completeAi(added.map((a) => a.id))
 }
 
+/**
+ * ids 有值 = 用户点名重新识别某几条，结果直接落库；
+ * 不传 = 跑整批待识别目录，结果先进暂存区等确认。两种情况该说的话不一样。
+ */
 async function completeAi(ids?: string[]): Promise<void> {
   if (!settings.settings.ai.enabled || !settings.settings.ai.api_key) {
     toast('未配置 AI，可在设置里填写 API Key 后手动识别')
@@ -109,10 +115,17 @@ async function completeAi(ids?: string[]): Promise<void> {
   }
   const result = await ai.complete(ids)
   await store.reload()
+
   if (result.failed > 0) {
-    error(`识别完成：注册 ${result.registered} 个，${result.failed} 个失败（可重试）`)
-  } else if (result.registered > 0) {
-    success(`AI 已识别并注册 ${result.registered} 个软件`)
+    error(`识别完成：${result.registered} 个成功，${result.failed} 个失败（可重试）`)
+    return
+  }
+  if (result.registered === 0) return
+
+  if (ids) {
+    success(`已识别并更新 ${result.registered} 个软件`)
+  } else {
+    success(`识别出 ${result.registered} 个软件，去确认面板过目后收录`)
   }
 }
 
@@ -226,6 +239,22 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
           <span class="progress__text truncate">{{ busyText }}</span>
         </div>
       </Transition>
+
+      <!--
+        识别完的条目不直接进库，先停在暂存区。这条提示是它唯一的入口 ——
+        没有它，用户根本不知道刚才那轮识别的结果去哪了。
+      -->
+      <button
+        v-if="store.counts.pending_confirm > 0"
+        class="notice notice--action"
+        @click="router.push({ name: 'confirm' })"
+      >
+        <ClipboardCheck :size="15" />
+        <span>
+          有 {{ store.counts.pending_confirm }} 个新识别的软件待确认，点这里过目后收录。
+        </span>
+        <ChevronRight :size="15" class="notice__go" />
+      </button>
 
       <div
         v-if="store.selection.value === 'unused' && store.items.length > 0"
@@ -469,6 +498,27 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
   background: var(--warning-bg);
   color: var(--warning);
   font-size: var(--fs-body);
+}
+
+/* 可点的那条走强调色，并且要看得出来它是个入口 */
+.notice--action {
+  width: calc(100% - 40px);
+  text-align: left;
+  background: var(--active-surface);
+  color: var(--accent);
+  transition: filter var(--t-fast) ease;
+}
+.notice--action:hover {
+  filter: brightness(1.2);
+}
+
+.notice--action span {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice__go {
+  flex: none;
 }
 
 /* ------------------------------ 内容区 ------------------------------ */

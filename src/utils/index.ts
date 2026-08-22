@@ -9,8 +9,17 @@ export function iconUrl(iconPath: string): string {
   return name ? `baoyi://icon/${encodeURIComponent(name)}` : ''
 }
 
+/**
+ * 取名字只用得到这几个字段。写成结构类型而不是 SoftwareItem，
+ * 是为了让确认面板里的暂存条目也能直接用同一套逻辑。
+ */
+export type NamedEntry = Pick<
+  SoftwareItem,
+  'name_zh' | 'name_en' | 'file_description' | 'file_name'
+>
+
 /** 兜底名：AI 还没识别出来时拿文件本身的信息顶上 */
-function fallbackName(item: SoftwareItem): string {
+function fallbackName(item: NamedEntry): string {
   return item.file_description || item.file_name.replace(/\.exe$/i, '')
 }
 
@@ -21,14 +30,14 @@ function fallbackName(item: SoftwareItem): string {
  * 本来就没有通行中文名，AI 硬译出来的「进程监视器」反而比原名难认。
  * 选中的那一侧没有值时自动落到另一侧，不会显示空标题。
  */
-export function displayName(item: SoftwareItem, lang: TitleLang = 'zh'): string {
+export function displayName(item: NamedEntry, lang: TitleLang = 'zh'): string {
   const [first, second] =
     lang === 'en' ? [item.name_en, item.name_zh] : [item.name_zh, item.name_en]
   return first || second || fallbackName(item)
 }
 
 /** 标题旁边那行小字。和标题同源时返回空，避免把同一个名字显示两遍 */
-export function subtitleName(item: SoftwareItem, lang: TitleLang = 'zh'): string {
+export function subtitleName(item: NamedEntry, lang: TitleLang = 'zh'): string {
   const other = lang === 'en' ? item.name_zh : item.name_en
   return other && other !== displayName(item, lang) ? other : ''
 }

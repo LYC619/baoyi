@@ -14,13 +14,17 @@ import { extractIcon } from '../iconExtractor'
 import { readPeArch, readPeInfo } from '../peReader'
 import { formatHits, search } from '../searchService'
 import {
+  isSkipped,
   listCategories,
   registerSoftware,
+  stagePending,
+  tagPool,
   updateSoftware,
   type RegisterFileFacts
 } from '../database'
 import type { AgentTool } from './loop'
 import { formatSize, isReadableName, readTextFile } from './files'
+import { limitTags as limitTagsTo } from './prompts'
 import { resolveInside as resolveInsideRoots } from './paths'
 
 /** 统计子目录里的 exe 时的护栏，避免在 node_modules 之类的目录里空转 */
@@ -37,6 +41,12 @@ export interface ToolContext {
   /** 只识别 unitDir 直属的 exe（扫描根里的散装程序） */
   looseOnly: boolean
   searchConfig: SearchConfig
+  /**
+   * false 表示识别结果先进暂存区等用户确认（整目录识别走这条）。
+   * true 表示直接写进 software —— 只有「用户点着某一条说重新识别」时才这样，
+   * 那种情况用户已经明确指定了对象，再拦一道确认只是碍事。
+   */
+  direct: boolean
   onRegister?: (info: { name: string; exe_path: string; created: boolean }) => void
   onSkip?: (dir: string, reason: string) => void
 }
@@ -216,8 +226,15 @@ function str(raw: unknown, max: number): string {
   return typeof raw === 'string' ? raw.trim().slice(0, max) : ''
 }
 
+/**
+ * 收口到 prompts.ts 里那份实现 —— 它和「最多新增 1 个」那句提示词写在一起，
+ * 是同一条规则的两半，分开放迟早会各改各的。这里只负责把模型给的原始参数洗干净。
+ */
+function limitTags(raw: unknown, pool: Set<string>): string[] {
+  return limitTagsTo(coerceStringList(raw, 8, 12), pool)
+}
+
 async function register(ctx: ToolContext, args: any): Promise<string> {
-  const known = listCategories().map((c) => c.name)
   const launchers = coerceLaunchers(ctx, args?.launchers)
 
   const nameZh = str(args?.name_zh, 40)
@@ -226,7 +243,9 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
   let url = str(args?.official_url, 200)
   if (url && !/^https?:\/\//i.test(url)) url = ''
 
-  const category = known.includes(str(args?.category, 20)) ? str(args?.category, 20) : '其他'
+  // 分类不再强行改写成「其他」：模型提了一个新分类是有信息量的，
+  // 交给确认面板高亮成「新分类」，由用户决定要不要建。空的才兜底。
+  const category = str(args?.category, 20) || '其他'
 
   const payload: RegisterPayload = {
     name_zh: nameZh,
@@ -234,7 +253,7 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
     summary: str(args?.summary, 60) || '未填写说明',
     description: str(args?.description, 400),
     category,
-    tags: coerceStringList(args?.tags, 5, 12),
+    tags: limitTags(args?.tags, new Set(tagPool())),
     official_url: url,
     launchers,
     source_dir: ctx.unitDir
@@ -245,18 +264,32 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
     ?? launchers[0]
   const { arch: _arch, ...facts } = fileFacts(primary.path)
 
-  const outcome = registerSoftware(payload, facts)
-  if (!outcome) throw new Error('注册失败：没有可用的启动端')
+  // 图标先取好：暂存条目也要在确认面板上显示图标，失败不影响识别结果
+  const icon = (await extractIcon(primary.path)) ?? ''
 
-  // 图标只取默认启动端的；失败不影响注册结果
-  const icon = await extractIcon(outcome.exe_path)
-  if (icon) updateSoftware(outcome.id, { icon_path: icon })
+  if (ctx.direct) {
+    const outcome = registerSoftware(payload, facts)
+    if (!outcome) throw new Error('注册失败：没有可用的启动端')
+    if (icon) updateSoftware(outcome.id, { icon_path: icon })
+    ctx.onRegister?.({ name: nameZh, exe_path: outcome.exe_path, created: outcome.created })
+    return registerReply(nameZh, primary, launchers, outcome.created ? '已注册' : '已更新')
+  }
 
+  if (isSkipped(primary.path)) {
+    // 用户之前明确说过不要它。别再塞进确认面板让他否决第二次
+    return `「${nameZh}」（${primary.path}）之前已被用户标记为不注册，本次不再收录。继续处理这个目录里的其他程序。`
+  }
+
+  const outcome = stagePending(payload, facts, ctx.unitDir, icon)
+  if (!outcome) throw new Error('暂存失败：没有可用的启动端')
   ctx.onRegister?.({ name: nameZh, exe_path: outcome.exe_path, created: outcome.created })
+  return registerReply(nameZh, primary, launchers, '已记录（待用户确认）')
+}
 
+function registerReply(name: string, primary: Launcher, launchers: Launcher[], verb: string): string {
   const extras = launchers.filter((l) => l !== primary)
   return [
-    `${outcome.created ? '已注册' : '已更新'}「${nameZh}」`,
+    `${verb}「${name}」`,
     `默认启动端：${primary.path}`,
     extras.length
       ? `其余启动端 ${extras.length} 个：${extras.map((l) => `${path.basename(l.path)}${l.label ? `(${l.label})` : ''}`).join('、')}`
@@ -291,7 +324,9 @@ async function webSearch(ctx: ToolContext, args: any): Promise<string> {
 /* ------------------------------ 工具定义 ------------------------------ */
 
 export function buildTools(ctx: ToolContext, withSearch: boolean): AgentTool[] {
-  const categories = listCategories().map((c) => c.name)
+  const categories = listCategories()
+  const categoryNames = categories.map((c) => c.name)
+  const pool = tagPool()
 
   const tools: AgentTool[] = [
     {
@@ -349,13 +384,15 @@ export function buildTools(ctx: ToolContext, withSearch: boolean): AgentTool[] {
           description: { type: 'string', description: '详细功能描述，50-100 字' },
           category: {
             type: 'string',
-            description: `分类，只能从以下选择：${categories.join('/')}`,
-            enum: categories
+            description: `按**用途**分类，只能从以下选择：${categories.map((c) => `${c.name}（${c.description}）`).join('；')}`,
+            enum: categoryNames
           },
           tags: {
             type: 'array',
             items: { type: 'string' },
-            description: '2-3 个标签，每个不超过 6 个字'
+            description: pool.length
+              ? `1-3 个标签，描述类型特征或技术属性，不要重复分类已经表达的用途。优先从现有标签池里选：${pool.join('、')}。确实都不合适时，最多新增 1 个。`
+              : '1-3 个标签，描述类型特征或技术属性（便携、开源、CLI、GUI、单文件…），不要重复分类已经表达的用途。'
           },
           official_url: { type: 'string', description: '官网地址，不确定就留空字符串' },
           launchers: {

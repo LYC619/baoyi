@@ -6,6 +6,7 @@ import type {
   BaoyiApi,
   Category,
   IdentifyLogQuery,
+  PendingItem,
   SearchConfig,
   SoftwareItem,
   SoftwareQuery,
@@ -17,6 +18,18 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
   const listener = (_e: IpcRendererEvent, payload: T) => cb(payload)
   ipcRenderer.on(channel, listener)
   return () => ipcRenderer.off(channel, listener)
+}
+
+/**
+ * 渲染进程递过来的对象、数组多半是 Vue 的 reactive 代理 —— 代理过不了
+ * ipcRenderer.invoke 的结构化克隆，调用当场 reject。而 invoke 返回的是 Promise，
+ * 上层 await 一下就成了一次静默失败，表现是「点了没反应」，极难定位。
+ *
+ * 这里是唯一的进出口，统一在这一层拍平成普通值，调用方就不用逐个记得 spread。
+ * 顺带把 undefined 的键抹掉，patch 里没写的字段不会被当成「清空」发过去。
+ */
+function plain<T>(value: T): T {
+  return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T)
 }
 
 const api: BaoyiApi = {
@@ -31,10 +44,10 @@ const api: BaoyiApi = {
     onMaximizeChange: (cb) => subscribe('win:maximize-change', cb)
   },
   software: {
-    list: (query: SoftwareQuery = {}) => ipcRenderer.invoke('software:list', query),
+    list: (query: SoftwareQuery = {}) => ipcRenderer.invoke('software:list', plain(query)),
     get: (id: string) => ipcRenderer.invoke('software:get', id),
     update: (id: string, patch: Partial<SoftwareItem>) =>
-      ipcRenderer.invoke('software:update', id, patch),
+      ipcRenderer.invoke('software:update', id, plain(patch)),
     remove: (id: string) => ipcRenderer.invoke('software:remove', id),
     counts: (unusedDays: number) => ipcRenderer.invoke('software:counts', unusedDays),
     launch: (id: string, launcherPath?: string) =>
@@ -45,16 +58,35 @@ const api: BaoyiApi = {
   },
   categories: {
     list: () => ipcRenderer.invoke('categories:list'),
-    upsert: (category: Category) => ipcRenderer.invoke('categories:upsert', category),
-    remove: (id: string) => ipcRenderer.invoke('categories:remove', id)
+    upsert: (category: Category) => ipcRenderer.invoke('categories:upsert', plain(category)),
+    remove: (id: string) => ipcRenderer.invoke('categories:remove', id),
+    move: (id: string, delta: number) => ipcRenderer.invoke('categories:move', id, delta)
+  },
+  tags: {
+    list: () => ipcRenderer.invoke('tags:list'),
+    create: (name: string) => ipcRenderer.invoke('tags:create', name),
+    rename: (id: number, name: string) => ipcRenderer.invoke('tags:rename', id, name),
+    merge: (fromIds: number[], intoId: number) =>
+      ipcRenderer.invoke('tags:merge', plain(fromIds), intoId),
+    remove: (id: number) => ipcRenderer.invoke('tags:remove', id)
+  },
+  pending: {
+    list: () => ipcRenderer.invoke('pending:list'),
+    count: () => ipcRenderer.invoke('pending:count'),
+    update: (id: string, patch: Partial<PendingItem>) =>
+      ipcRenderer.invoke('pending:update', id, plain(patch)),
+    confirm: (ids: string[]) => ipcRenderer.invoke('pending:confirm', plain(ids)),
+    skip: (ids: string[]) => ipcRenderer.invoke('pending:skip', plain(ids)),
+    skippedCount: () => ipcRenderer.invoke('pending:skipped-count'),
+    clearSkipped: () => ipcRenderer.invoke('pending:clear-skipped')
   },
   settings: {
     getAll: () => ipcRenderer.invoke('settings:get'),
-    patch: (patch: Partial<AppSettings>) => ipcRenderer.invoke('settings:patch', patch)
+    patch: (patch: Partial<AppSettings>) => ipcRenderer.invoke('settings:patch', plain(patch))
   },
   scan: {
     pickDirectory: () => ipcRenderer.invoke('scan:pick-dir'),
-    run: (dirs: string[]) => ipcRenderer.invoke('scan:run', dirs),
+    run: (dirs: string[]) => ipcRenderer.invoke('scan:run', plain(dirs)),
     cancel: () => ipcRenderer.send('scan:cancel'),
     onProgress: (cb) => subscribe('scan:progress', cb),
     units: () => ipcRenderer.invoke('scan:units'),
@@ -62,10 +94,10 @@ const api: BaoyiApi = {
     retry: (dir: string) => ipcRenderer.invoke('scan:reset-one', dir)
   },
   ai: {
-    complete: (ids?: string[]) => ipcRenderer.invoke('ai:complete', ids),
+    complete: (ids?: string[]) => ipcRenderer.invoke('ai:complete', plain(ids)),
     cancel: () => ipcRenderer.send('ai:cancel'),
-    test: (config: AIConfig) => ipcRenderer.invoke('ai:test', config),
-    testSearch: (config: SearchConfig) => ipcRenderer.invoke('ai:test-search', config),
+    test: (config: AIConfig) => ipcRenderer.invoke('ai:test', plain(config)),
+    testSearch: (config: SearchConfig) => ipcRenderer.invoke('ai:test-search', plain(config)),
     onProgress: (cb) => subscribe('ai:progress', cb)
   },
   data: {
@@ -77,7 +109,7 @@ const api: BaoyiApi = {
     reset: (mode: 'library' | 'all') => ipcRenderer.invoke('data:reset', mode)
   },
   logs: {
-    list: (query: IdentifyLogQuery = {}) => ipcRenderer.invoke('logs:list', query),
+    list: (query: IdentifyLogQuery = {}) => ipcRenderer.invoke('logs:list', plain(query)),
     clear: () => ipcRenderer.invoke('logs:clear')
   }
 }

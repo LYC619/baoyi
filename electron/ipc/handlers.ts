@@ -6,6 +6,7 @@ import type {
   AppSettings,
   Category,
   IdentifyLogQuery,
+  PendingItem,
   SearchConfig,
   SoftwareItem,
   SoftwareQuery
@@ -13,7 +14,12 @@ import type {
 import { cancelAi, completeWithAi, testConnection } from '../services/aiService'
 import {
   clearIdentifyLogs,
+  clearSkipped,
+  confirmPending,
+  countPending,
+  countSkipped,
   counts,
+  createTag,
   dataStats,
   deleteSoftware,
   exportAll,
@@ -21,13 +27,21 @@ import {
   getSoftware,
   listCategories,
   listIdentifyLogs,
+  listPending,
   listScanUnits,
   listSoftware,
+  listTags,
+  mergeTags,
+  moveCategory,
   patchSettings,
   removeCategory,
+  removeTag,
+  renameTag,
   resetData,
   resetScanUnit,
   resetScanUnits,
+  skipPending,
+  updatePending,
   updateSoftware,
   upsertCategory
 } from '../services/database'
@@ -95,6 +109,25 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('categories:list', () => listCategories())
   ipcMain.handle('categories:upsert', (_e, category: Category) => upsertCategory(category))
   ipcMain.handle('categories:remove', (_e, id: string) => removeCategory(id))
+  ipcMain.handle('categories:move', (_e, id: string, delta: number) => moveCategory(id, delta))
+
+  /* ------------------------------ 标签 ------------------------------ */
+  ipcMain.handle('tags:list', () => listTags())
+  ipcMain.handle('tags:create', (_e, name: string) => createTag(name))
+  ipcMain.handle('tags:rename', (_e, id: number, name: string) => renameTag(id, name))
+  ipcMain.handle('tags:merge', (_e, fromIds: number[], intoId: number) => mergeTags(fromIds, intoId))
+  ipcMain.handle('tags:remove', (_e, id: number) => removeTag(id))
+
+  /* ---------------------------- 待确认条目 ---------------------------- */
+  ipcMain.handle('pending:list', () => listPending())
+  ipcMain.handle('pending:count', () => countPending())
+  ipcMain.handle('pending:update', (_e, id: string, patch: Partial<PendingItem>) =>
+    updatePending(id, patch)
+  )
+  ipcMain.handle('pending:confirm', (_e, ids: string[]) => confirmPending(ids))
+  ipcMain.handle('pending:skip', (_e, ids: string[]) => skipPending(ids))
+  ipcMain.handle('pending:skipped-count', () => countSkipped())
+  ipcMain.handle('pending:clear-skipped', () => clearSkipped())
 
   /* ------------------------------ 设置 ------------------------------ */
   ipcMain.handle('settings:get', () => getSettings())

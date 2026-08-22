@@ -6,8 +6,12 @@
  */
 
 import path from 'node:path'
-import type { ScanUnit, SoftwareItem } from '../../../src/types'
+import type { Category, ScanUnit, SoftwareItem } from '../../../src/types'
 
+/**
+ * 系统提示。{{categories}} 和 {{tags}} 是插槽，跑之前由 fillIdentifySystem 用
+ * 数据库里的实际分类和标签池填掉 —— 写死在这里等于让 prompt 和用户改过的分类脱节。
+ */
 export const IDENTIFY_SYSTEM = `你是「抱一」的软件识别 agent。抱一是一个本地工具管理器，帮用户看清自己电脑里到底装了什么。
 你的任务是探索一个目录，判断里面有哪些**独立软件**，并把它们注册进抱一。
 
@@ -58,6 +62,27 @@ export const IDENTIFY_SYSTEM = `你是「抱一」的软件识别 agent。抱一
   · 需要确认官网地址
 - 关键词用「软件名 + 功能/用途」，优先中文结果。
 
+## 分类：按用途分，不按技术领域分
+分类回答的是「用户打开它是要做什么」，不是「它属于哪一行」。
+当前分类体系（你只能从中选择一个）：
+{{categories}}
+
+实在没有一个说得通时，才可以提一个新分类名 —— 它会被标记出来交给用户裁决，
+所以不要为了省事随手造，也不要硬塞进一个明显不合适的现有分类。
+
+## 标签：描述特征，不描述用途
+当前标签池（优先复用，确实没有合适的才可新建，最多 1 个）：
+{{tags}}
+
+标签规范：
+- 标签描述软件的**类型特征或技术属性**，不描述用途 —— 用途由分类承担，写在标签里是重复。
+  ✗ 「注册表编辑」「抓包」——这些是用途，分类已经说过了
+  ✓ 「便携」「开源」「CLI」「单文件」
+- 粒度：一个标签至少要能关联 2 个以上软件才有意义。只可能对应一个软件的词不要用。
+  ✗ 「x64dbg 插件」——除了它自己不会有第二个
+- 用上位词，不用下位词。用「逆向」，不要分别写「反汇编」「反编译」「动态调试」。
+- 常见的合适标签：便携、开源、闭源、免费、CLI、GUI、插件式、单文件、跨平台、国产。
+
 ## 硬性要求
 - launchers 里的路径必须是你在 list_directory 或 get_file_info 里真实见过的，不许凭空构造或猜测。
 - 不确定的信息宁可留空，不要编。official_url 拿不准就传空字符串。
@@ -72,6 +97,37 @@ export const IDENTIFY_SYSTEM = `你是「抱一」的软件识别 agent。抱一
   两者都要填，用户可以自己选卡片上先显示哪个。
 - 说明文档里若写着官网地址，直接用它，比搜出来的可靠。
 - 整个任务控制在 10 次工具调用以内，信息够了就下结论。`
+
+/**
+ * 把分类表和标签池填进系统提示。
+ *
+ * 每次识别前现读现填，而不是把列表写死在模板里 —— 用户在设置里加一个分类、
+ * 合并两个标签，下一次识别就该照新的来。这是标签收敛的前半段：
+ * 后半段是 tools.ts 里的 limitTags，它兜住模型不听话的那部分。
+ */
+export function fillIdentifySystem(categories: Category[], pool: string[]): string {
+  const cats = categories.length
+    ? categories.map((c) => `  · ${c.name}${c.description ? ` —— ${c.description}` : ''}`).join('\n')
+    : '  （分类表是空的，直接用「其他」）'
+  const tags = pool.length ? `  ${pool.join('、')}` : '  （标签池还是空的，你可以按下面的规范提 1-3 个）'
+  return IDENTIFY_SYSTEM.replace('{{categories}}', cats).replace('{{tags}}', tags)
+}
+
+/**
+ * 标签收敛的兜底，和上面那段 prompt 是同一条规则的两半：
+ * prompt 负责说「优先复用池里的，最多新增 1 个」，这里负责在模型不听话时执行它。
+ * 模型心情好的时候一口气造五个新词，标签体系就是这么碎掉的。
+ *
+ * 池内的照单全收，池外的只留第一个，总数封顶 3 个。
+ */
+export function limitTags(raw: string[], pool: Set<string>): string[] {
+  const all = raw
+    .filter((t) => typeof t === 'string' && t.trim().length > 0)
+    .map((t) => t.trim().slice(0, 12))
+  const known = all.filter((t) => pool.has(t))
+  const fresh = all.filter((t) => !pool.has(t)).slice(0, 1)
+  return [...new Set([...known, ...fresh])].slice(0, 3)
+}
 
 /** 一个待识别目录的任务描述 */
 export function unitPrompt(unit: ScanUnit, existing: SoftwareItem[]): string {

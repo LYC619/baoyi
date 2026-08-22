@@ -22,6 +22,11 @@ const router = createRouter({
       component: () => import('@/pages/Settings.vue')
     },
     {
+      path: '/confirm',
+      name: 'confirm',
+      component: () => import('@/pages/Confirm.vue')
+    },
+    {
       path: '/onboarding',
       name: 'onboarding',
       component: () => import('@/pages/Onboarding.vue')

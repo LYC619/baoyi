@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
   Bot,
+  ChevronDown,
+  ChevronUp,
   Database,
   Download,
   Eraser,
@@ -13,28 +15,34 @@ import {
   Globe,
   Info,
   Loader2,
+  Merge,
   Moon,
   Palette,
+  Plus,
   RotateCcw,
   ScrollText,
   Sun,
+  Tags,
   Telescope,
   Trash2
 } from 'lucide-vue-next'
 import BaoyiLogo from '@/components/BaoyiLogo.vue'
 import IdentifyLog from '@/components/IdentifyLog.vue'
+import TagBadge from '@/components/TagBadge.vue'
 import { useAI } from '@/composables/useAI'
 import { useScan } from '@/composables/useScan'
 import { useToast } from '@/composables/useToast'
+import { useCategoriesStore } from '@/stores/categories'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
 import { formatBytes } from '@/utils'
-import type { AppInfo, DataStats, ScanUnit, SearchProvider, TitleLang } from '@/types'
+import type { AppInfo, Category, DataStats, ScanUnit, SearchProvider, Tag, TitleLang } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
 const settings = useSettingsStore()
 const store = useSoftwareStore()
+const catStore = useCategoriesStore()
 const { success, error, toast } = useToast()
 const scan = useScan()
 const ai = useAI()
@@ -46,6 +54,7 @@ const TABS = [
   { id: 'ai', label: 'AI 配置', icon: Bot },
   { id: 'search', label: '搜索服务', icon: Globe },
   { id: 'appearance', label: '外观', icon: Palette },
+  { id: 'taxonomy', label: '分类与标签', icon: Tags },
   { id: 'logs', label: '识别日志', icon: ScrollText },
   { id: 'data', label: '数据管理', icon: Database },
   { id: 'about', label: '关于', icon: Info }
@@ -289,10 +298,11 @@ async function runAi(): Promise<void> {
     return
   }
   success(
-    `识别完成：注册 ${result.registered} 个软件` +
+    `识别完成：${result.registered} 个条目待确认` +
       (result.failed > 0 ? `，${result.failed} 个目录失败` : '') +
       `，消耗 ${result.tokens.toLocaleString()} tokens`
   )
+  if (result.registered > 0) void router.push({ name: 'confirm' })
 }
 
 /* -------------------------------- 外观 -------------------------------- */
@@ -315,6 +325,143 @@ async function setUnusedDays(): Promise<void> {
   unusedDays.value = value
   await settings.patch({ unused_days: value })
   await store.refreshCounts()
+}
+
+/* --------------------------- 分类与标签 --------------------------- */
+
+const tags = ref<Tag[]>([])
+const tagFilter = ref<'all' | 'ai' | 'fragment'>('all')
+/** 合并时勾中的源标签 */
+const mergePick = ref<number[]>([])
+const mergeInto = ref<number | null>(null)
+const newCategory = ref('')
+const newTag = ref('')
+
+async function loadTaxonomy(): Promise<void> {
+  await catStore.load()
+  tags.value = await window.baoyi.tags.list()
+}
+
+onMounted(loadTaxonomy)
+
+/** 每个分类名下挂着多少软件。侧边栏计数已经算过一遍，直接借用 */
+const categoryCount = computed(
+  () => new Map(store.counts.categories.map((c) => [c.name, c.count]))
+)
+
+const visibleTags = computed(() => {
+  if (tagFilter.value === 'ai') return tags.value.filter((t) => t.source === 'ai')
+  // 只挂着 0～1 个条目的标签就是碎片：留着只会让标签栏越来越长
+  if (tagFilter.value === 'fragment') return tags.value.filter((t) => t.usage_count <= 1)
+  return tags.value
+})
+
+const TAG_SOURCE_META: Record<Tag['source'], { label: string; tone: 'muted' | 'accent' | 'success' }> = {
+  ai: { label: 'AI 待确认', tone: 'muted' },
+  user: { label: '自建', tone: 'accent' },
+  confirmed: { label: '已确认', tone: 'success' }
+}
+
+async function saveCategory(c: Category, patch: Partial<Category>): Promise<void> {
+  await catStore.upsert({ ...c, ...patch })
+  await store.refreshCounts()
+}
+
+function onCategoryField(c: Category, field: 'name' | 'description' | 'icon', e: Event): void {
+  const value = (e.target as HTMLInputElement).value.trim()
+  if (value === c[field] || (field === 'name' && !value)) return
+  void saveCategory(c, { [field]: value })
+}
+
+async function addCategory(): Promise<void> {
+  const name = newCategory.value.trim()
+  if (!name) return
+  if (catStore.list.some((c) => c.name === name)) {
+    toast('已经有同名分类了')
+    return
+  }
+  const max = catStore.list.reduce((n, c) => Math.max(n, c.sort_order), 0)
+  await catStore.upsert({ id: '', name, description: '', icon: 'box', sort_order: max + 1 })
+  newCategory.value = ''
+  await store.refreshCounts()
+}
+
+async function shiftCategory(id: string, delta: number): Promise<void> {
+  catStore.list = await window.baoyi.categories.move(id, delta)
+}
+
+async function dropCategory(c: Category): Promise<void> {
+  const n = categoryCount.value.get(c.name) ?? 0
+  const warn = n > 0 ? `\n名下 ${n} 个软件会归入「其他」。` : ''
+  if (!window.confirm(`删除分类「${c.name}」？${warn}\n不会删除任何实际文件。`)) return
+  await catStore.remove(c.id)
+  await store.refreshCounts()
+}
+
+async function addTag(): Promise<void> {
+  const name = newTag.value.trim()
+  if (!name) return
+  tags.value = await window.baoyi.tags.create(name)
+  newTag.value = ''
+}
+
+function onTagRename(t: Tag, e: Event): void {
+  const value = (e.target as HTMLInputElement).value.trim()
+  if (!value || value === t.name) return
+  void window.baoyi.tags.rename(t.id, value).then(async (list) => {
+    tags.value = list
+    await store.refreshCounts()
+  })
+}
+
+async function dropTag(t: Tag): Promise<void> {
+  const warn = t.usage_count > 0 ? `\n${t.usage_count} 个软件会失去这个标签。` : ''
+  if (!window.confirm(`删除标签「${t.name}」？${warn}`)) return
+  tags.value = await window.baoyi.tags.remove(t.id)
+  mergePick.value = mergePick.value.filter((id) => id !== t.id)
+  await store.refreshCounts()
+}
+
+function toggleMerge(id: number): void {
+  mergePick.value = mergePick.value.includes(id)
+    ? mergePick.value.filter((x) => x !== id)
+    : [...mergePick.value, id]
+}
+
+/** 勾中的这些并进目标标签，条目上的引用一并替换 */
+async function doMerge(): Promise<void> {
+  const into = mergeInto.value
+  const from = mergePick.value.filter((id) => id !== into)
+  if (into == null || from.length === 0) {
+    toast('先勾选要合并的标签，再选一个目标')
+    return
+  }
+  const target = tags.value.find((t) => t.id === into)?.name ?? ''
+  const names = tags.value.filter((t) => from.includes(t.id)).map((t) => t.name)
+  if (!window.confirm(`把「${names.join('、')}」并入「${target}」？\n所有条目上的引用会一起替换。`)) return
+
+  tags.value = await window.baoyi.tags.merge(from, into)
+  mergePick.value = []
+  mergeInto.value = null
+  await store.refreshCounts()
+  success(`已并入「${target}」`)
+}
+
+/* ------------------------------ 忽略名单 ------------------------------ */
+
+const skippedCount = ref(0)
+
+async function loadSkipped(): Promise<void> {
+  skippedCount.value = await window.baoyi.pending.skippedCount()
+}
+
+onMounted(loadSkipped)
+
+async function clearSkipped(): Promise<void> {
+  if (!window.confirm(`清空忽略名单（${skippedCount.value} 项）？\n这些程序下次识别会重新出现在确认面板里。`)) return
+  const n = await window.baoyi.pending.clearSkipped()
+  await loadSkipped()
+  success(`已清空 ${n} 项`)
 }
 
 /* ------------------------------ 数据管理 ------------------------------ */
@@ -523,6 +670,21 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               </li>
             </ul>
           </section>
+
+          <section v-if="skippedCount > 0" class="panel">
+            <h2 class="sec-head">忽略名单</h2>
+            <p class="sec-desc">
+              你在确认面板里点过「不注册」的程序会记在这里，下次识别不再冒出来。
+              误点了、或者改了主意，清空它就行 —— 下一轮识别会重新问你一遍。
+            </p>
+            <div class="row">
+              <button class="btn btn--ghost" :disabled="busy" @click="clearSkipped">
+                <Eraser :size="14" />
+                清空名单
+              </button>
+              <span class="hint">当前 {{ skippedCount }} 项</span>
+            </div>
+          </section>
         </template>
 
         <!-- --------------------------- AI 配置 --------------------------- -->
@@ -699,11 +861,167 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
           </section>
         </template>
 
+        <!-- ------------------------ 分类与标签 ------------------------ -->
+        <template v-else-if="tab === 'taxonomy'">
+          <section class="panel">
+            <div class="sec-head">
+              <h2>分类</h2>
+              <span class="hint">{{ catStore.list.length }} 个</span>
+            </div>
+            <p class="sec-desc">
+              分类按<b>用途</b>分 —— 回答的是「我现在要干这件事，该开哪个」，
+              而不是「它属于哪一行」。这份列表和每条的说明会原样注入识别 prompt，
+              所以描述写得越准，AI 归类越稳。
+            </p>
+
+            <ul class="cats">
+              <li v-for="(c, i) in catStore.list" :key="c.id">
+                <div class="cats__line">
+                  <div class="cats__move">
+                    <button :disabled="i === 0" title="上移" @click="shiftCategory(c.id, -1)">
+                      <ChevronUp :size="13" />
+                    </button>
+                    <button
+                      :disabled="i === catStore.list.length - 1"
+                      title="下移"
+                      @click="shiftCategory(c.id, 1)"
+                    >
+                      <ChevronDown :size="13" />
+                    </button>
+                  </div>
+                  <input
+                    class="input"
+                    :value="c.name"
+                    placeholder="分类名"
+                    spellcheck="false"
+                    @blur="onCategoryField(c, 'name', $event)"
+                    @keydown.enter="($event.target as HTMLInputElement).blur()"
+                  />
+                  <span class="cats__n">{{ categoryCount.get(c.name) ?? 0 }}</span>
+                  <button class="btn btn--subtle" title="删除" @click="dropCategory(c)">
+                    <Trash2 :size="14" />
+                  </button>
+                </div>
+                <div class="cats__line cats__line--sub">
+                  <input
+                    class="input"
+                    :value="c.description"
+                    placeholder="一句话说明这个分类装什么（会喂给 AI）"
+                    spellcheck="false"
+                    @blur="onCategoryField(c, 'description', $event)"
+                    @keydown.enter="($event.target as HTMLInputElement).blur()"
+                  />
+                  <input
+                    class="input input--icon mono"
+                    :value="c.icon"
+                    placeholder="图标名"
+                    spellcheck="false"
+                    @blur="onCategoryField(c, 'icon', $event)"
+                    @keydown.enter="($event.target as HTMLInputElement).blur()"
+                  />
+                </div>
+              </li>
+            </ul>
+
+            <div class="row row--gap">
+              <input
+                v-model="newCategory"
+                class="input"
+                placeholder="新分类名"
+                spellcheck="false"
+                @keydown.enter="addCategory"
+              />
+              <button class="btn btn--ghost" :disabled="!newCategory.trim()" @click="addCategory">
+                <Plus :size="14" />
+                添加
+              </button>
+            </div>
+            <p class="hint hint--block">
+              图标填 Lucide 名称。侧边栏内置了 bug、bot、search、file-text、
+              sliders-horizontal、globe、image、clapperboard、shield、sticky-note、box，
+              填别的会退回通用图标。
+            </p>
+          </section>
+
+          <section class="panel">
+            <div class="sec-head">
+              <h2>标签</h2>
+              <span class="hint">{{ tags.length }} 个</span>
+            </div>
+            <p class="sec-desc">
+              标签描述<b>特征</b>（便携、开源、CLI），用途交给分类，两边说同一件事就是浪费。
+              只有「自建」和「已确认」的会作为标签池注入 prompt —— AI 自己造的词不进池，
+              否则它造一个新词下一轮就当既成事实继续用，标签只会越长越碎。
+            </p>
+
+            <div class="row">
+              <div class="segmented">
+                <button :class="{ on: tagFilter === 'all' }" @click="tagFilter = 'all'">全部</button>
+                <button :class="{ on: tagFilter === 'ai' }" @click="tagFilter = 'ai'">AI 未确认</button>
+                <button :class="{ on: tagFilter === 'fragment' }" @click="tagFilter = 'fragment'">
+                  碎片（≤1）
+                </button>
+              </div>
+            </div>
+
+            <ul v-if="visibleTags.length" class="tags">
+              <li v-for="t in visibleTags" :key="t.id">
+                <input
+                  type="checkbox"
+                  :checked="mergePick.includes(t.id)"
+                  title="勾选后可合并"
+                  @change="toggleMerge(t.id)"
+                />
+                <input
+                  class="input"
+                  :value="t.name"
+                  spellcheck="false"
+                  @blur="onTagRename(t, $event)"
+                  @keydown.enter="($event.target as HTMLInputElement).blur()"
+                />
+                <TagBadge :label="TAG_SOURCE_META[t.source].label" :tone="TAG_SOURCE_META[t.source].tone" />
+                <span class="tags__n">{{ t.usage_count }}</span>
+                <button class="btn btn--subtle" title="删除" @click="dropTag(t)">
+                  <Trash2 :size="14" />
+                </button>
+              </li>
+            </ul>
+            <p v-else class="empty-line">
+              {{ tagFilter === 'all' ? '还没有任何标签，识别几个目录之后就有了。' : '这个筛选下没有标签。' }}
+            </p>
+
+            <div v-if="mergePick.length > 0" class="row row--gap">
+              <span class="hint">已选 {{ mergePick.length }} 个，并入</span>
+              <select v-model.number="mergeInto" class="input input--pick">
+                <option :value="null">选择目标标签</option>
+                <option v-for="t in tags" :key="t.id" :value="t.id">{{ t.name }}</option>
+              </select>
+              <button class="btn btn--ghost" :disabled="mergeInto == null" @click="doMerge">
+                <Merge :size="14" />
+                合并
+              </button>
+            </div>
+
+            <div class="row row--gap">
+              <input
+                v-model="newTag"
+                class="input"
+                placeholder="新标签名"
+                spellcheck="false"
+                @keydown.enter="addTag"
+              />
+              <button class="btn btn--ghost" :disabled="!newTag.trim()" @click="addTag">
+                <Plus :size="14" />
+                添加
+              </button>
+            </div>
+          </section>
+        </template>
+
         <!-- -------------------------- 识别日志 -------------------------- -->
         <template v-else-if="tab === 'logs'">
           <IdentifyLog @retry="retryUnit" />
         </template>
-
         <!-- -------------------------- 数据管理 -------------------------- -->
         <template v-else-if="tab === 'data'">
           <section class="panel">
@@ -1053,6 +1371,100 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 
 .input--num {
   width: 88px;
+}
+
+.input--icon {
+  width: 150px;
+  flex: none;
+}
+
+.input--pick {
+  width: 180px;
+  flex: none;
+}
+
+/* ------------------------------ 分类列表 ------------------------------ */
+.cats,
+.tags {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cats li {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: var(--radius-input);
+  background: var(--bg-main);
+  border: 1px solid var(--divider);
+}
+
+.cats__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cats__line--sub {
+  padding-left: 28px;
+}
+
+.cats__move {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+}
+
+.cats__move button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 15px;
+  color: var(--text-faint);
+  transition: color var(--t-fast) ease;
+}
+.cats__move button:hover:not(:disabled) {
+  color: var(--accent);
+}
+.cats__move button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.cats__n,
+.tags__n {
+  flex: none;
+  min-width: 26px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--fs-tag);
+  color: var(--text-faint);
+}
+
+.tags {
+  margin-top: 12px;
+}
+
+.tags li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: var(--radius-input);
+  background: var(--bg-main);
+  border: 1px solid var(--divider);
+}
+
+.tags li input[type='checkbox'] {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
 }
 
 .switch {

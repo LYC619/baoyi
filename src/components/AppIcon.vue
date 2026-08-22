@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { SoftwareItem } from '@/types'
-import { displayName, iconUrl } from '@/utils'
+import { displayName, iconUrl, type NamedEntry } from '@/utils'
 
-const props = withDefaults(defineProps<{ item: SoftwareItem; size?: number }>(), { size: 48 })
+// 暂存条目（确认面板）和正式条目共用这个组件，所以只要求它真正用到的那几个字段
+const props = withDefaults(
+  defineProps<{ item: NamedEntry & { icon_path: string }; size?: number }>(),
+  { size: 48 }
+)
 
 const failed = ref(false)
 const src = computed(() => iconUrl(props.item.icon_path))

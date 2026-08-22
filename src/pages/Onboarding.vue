@@ -66,7 +66,8 @@ async function skipAi(): Promise<void> {
 async function finish(): Promise<void> {
   await settings.patch({ onboarded: true })
   await store.reload()
-  void router.push({ name: 'home' })
+  // 识别结果停在暂存区等确认，这时候直接进卡片墙只会看到一片空白
+  void router.push({ name: aiDone.value.registered > 0 ? 'confirm' : 'home' })
 }
 </script>
 
@@ -199,7 +200,7 @@ async function finish(): Promise<void> {
         <div class="bar"><i :style="{ width: `${ai.percent.value}%` }" /></div>
         <p class="stat">
           {{ ai.progress.value?.processed ?? 0 }} / {{ ai.progress.value?.total ?? 0 }} 个目录 ·
-          已注册 {{ ai.progress.value?.registered ?? 0 }} 个软件
+          已认出 {{ ai.progress.value?.registered ?? 0 }} 个软件
         </p>
         <p class="stat truncate">{{ ai.activity.value || '正在启动…' }}</p>
 
@@ -212,13 +213,16 @@ async function finish(): Promise<void> {
       <section v-else class="step step--center">
         <div class="done-mark"><Check :size="30" /></div>
         <h2 class="head">好了</h2>
-        <p class="lead">
-          已收录 {{ store.counts.all }} 个软件<span v-if="aiDone.registered > 0">，
-          其中 {{ aiDone.registered }} 个由 AI 识别并整理好了说明</span>。<br />
+        <p v-if="aiDone.registered > 0" class="lead">
+          AI 认出了 {{ aiDone.registered }} 个软件，还差你点一次头。<br />
+          它给的名字和分类不一定对，过一遍再收录 —— 错进了库，往后就没人会回头改了。
+        </p>
+        <p v-else class="lead">
+          已收录 {{ store.counts.all }} 个软件。<br />
           接下来做的事很简单：用它，或者放下它。
         </p>
         <button class="btn btn--primary btn--lg" @click="finish">
-          进入卡片墙
+          {{ aiDone.registered > 0 ? `去确认这 ${aiDone.registered} 个` : '进入卡片墙' }}
           <ArrowRight :size="15" />
         </button>
       </section>

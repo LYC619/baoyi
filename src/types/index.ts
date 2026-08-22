@@ -93,6 +93,52 @@ export interface RegisterPayload {
   source_dir: string
 }
 
+/**
+ * 一条等用户过目的识别结果。
+ *
+ * agent 不再直接往 software 表写 —— 它给出的名字、分类、标签都可能是错的，
+ * 而错到库里以后没人会回头改。先落在这里，用户点过头才成为条目。
+ */
+export interface PendingItem {
+  id: string
+  created_at: number
+  /** 来自哪个待识别目录 */
+  scan_unit_id: string
+
+  exe_path: string
+  icon_path: string
+  file_name: string
+  file_description: string
+  company: string
+  version: string
+  file_size: number
+  external_active_at: number
+
+  name_zh: string
+  name_en: string
+  summary: string
+  description: string
+  category: string
+  tags: string[]
+  official_url: string
+  launchers: Launcher[]
+  source_dir: string
+
+  /** AI 给的分类不在现有分类表里 —— 确认面板要标出来 */
+  new_category: boolean
+  /** tags 里哪几个是标签池里没有的新词 */
+  new_tags: string[]
+}
+
+/** 确认写入的结果 */
+export interface ConfirmResult {
+  registered: number
+  /** 新建的分类名 */
+  categories: string[]
+  /** 转正的标签名 */
+  tags: string[]
+}
+
 /** 一个待识别单元：交给 agent 自主探索的目录 */
 export type ScanUnitStatus = 'pending' | 'done' | 'skipped' | 'failed'
 
@@ -114,8 +160,30 @@ export interface ScanUnit {
 export interface Category {
   id: string
   name: string
+  /** 一句话说明这个分类装什么，同时喂给识别 agent 当判据 */
+  description: string
   icon: string
   sort_order: number
+}
+
+/**
+ * 标签来源。
+ * ai        —— agent 新造的，还没被用户认可
+ * user      —— 用户手工建的
+ * confirmed —— 用户在确认面板里认可过的 AI 标签
+ *
+ * 只有 user / confirmed 会作为「标签池」注入 prompt，ai 的不进池 ——
+ * 否则 agent 造一个新词，下一轮就把它当既成事实继续用，标签只会越长越碎。
+ */
+export type TagSource = 'ai' | 'user' | 'confirmed'
+
+export interface Tag {
+  id: number
+  name: string
+  source: TagSource
+  /** 实际有多少条目在用它。读的时候现算，不存计数列，见 database.ts */
+  usage_count: number
+  created_at: number
 }
 
 export interface AIConfig {
@@ -176,6 +244,8 @@ export interface SidebarCounts {
   pending: number
   /** 还没跑过 agent 的目录数。它们还不是条目，所以单独计 */
   pending_units: number
+  /** 识别完、等用户确认的条目数 */
+  pending_confirm: number
   categories: Array<{ name: string; count: number }>
   tags: Array<{ name: string; count: number }>
 }
@@ -216,7 +286,7 @@ export interface ScanResult {
 export interface AIResult {
   /** 处理过的目录数 + 补全过的遗留条目数 */
   processed: number
-  /** 新注册的软件条目数 */
+  /** 新注册的软件条目数。走确认流程时这里是「暂存待确认」的条数 */
   registered: number
   skipped: number
   failed: number
@@ -326,6 +396,31 @@ export interface BaoyiApi {
     list(): Promise<Category[]>
     upsert(category: Category): Promise<Category[]>
     remove(id: string): Promise<Category[]>
+    /** 上下挪一格。拖拽排序留给以后，这个能到达同样的顺序 */
+    move(id: string, delta: number): Promise<Category[]>
+  }
+  tags: {
+    list(): Promise<Tag[]>
+    /** 用户手工建标签，直接进池 */
+    create(name: string): Promise<Tag[]>
+    rename(id: number, name: string): Promise<Tag[]>
+    /** 把若干标签并进一个，所有条目上的引用一并替换 */
+    merge(fromIds: number[], intoId: number): Promise<Tag[]>
+    remove(id: number): Promise<Tag[]>
+  }
+  pending: {
+    /** 等确认的识别结果 */
+    list(): Promise<PendingItem[]>
+    count(): Promise<number>
+    update(id: string, patch: Partial<PendingItem>): Promise<PendingItem | null>
+    /** 写进 software；顺带建新分类、把 AI 标签转正 */
+    confirm(ids: string[]): Promise<ConfirmResult>
+    /** 不注册，并记进忽略名单，下次扫描不再冒出来 */
+    skip(ids: string[]): Promise<number>
+    /** 忽略名单条数 */
+    skippedCount(): Promise<number>
+    /** 清空忽略名单，被否决过的程序下次识别会重新出现 */
+    clearSkipped(): Promise<number>
   }
   settings: {
     getAll(): Promise<AppSettings>

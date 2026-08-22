@@ -11,6 +11,7 @@ const EMPTY_COUNTS: SidebarCounts = {
   unused: 0,
   pending: 0,
   pending_units: 0,
+  pending_confirm: 0,
   categories: [],
   tags: []
 }

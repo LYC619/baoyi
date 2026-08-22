@@ -24,6 +24,7 @@ import {
   readTextFile
 } from '../electron/services/agent/files.ts'
 import { readExternalActiveAt } from '../electron/services/activity.ts'
+import { fillIdentifySystem, limitTags } from '../electron/services/agent/prompts.ts'
 import { activityOf, displayName, groupRounds, subtitleName } from '../src/utils/index.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
@@ -472,6 +473,57 @@ async function main(): Promise<void> {
     db.close()
   })
 
+  await check('暂存 / 确认 / 忽略那几条 SQL 和表结构对得上', async () => {
+    // 列名写错、命名参数漏一个，这类错误 vue-tsc 一个都看不见 —— 它们只会在
+    // 用户点下「确认」的那一刻抛出来。prepare 一遍就能全部逼出来：
+    // SQLite 在 prepare 阶段就会校验表名、列名和参数。
+    const bundle = path.join(import.meta.dirname, '..', 'dist-electron', 'main.js')
+    if (!fs.existsSync(bundle)) {
+      console.log('       （跳过：先 npm run build 才有 dist-electron/main.js）')
+      return
+    }
+    const source = await fsp.readFile(bundle, 'utf8')
+    const sqlAround = (anchor: string): string => {
+      const at = source.indexOf(anchor)
+      assert.ok(at > 0, `构建产物里找不到 ${anchor}`)
+      const open = source.lastIndexOf('`', at)
+      const close = source.indexOf('`', at)
+      return source.slice(open + 1, close)
+    }
+
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(':memory:')
+    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS software'))
+
+    for (const anchor of [
+      'INSERT INTO pending_software',
+      'UPDATE pending_software SET',
+      'INSERT INTO skip_list',
+      'INSERT INTO tags',
+      'INSERT INTO categories'
+    ]) {
+      assert.doesNotThrow(() => db.prepare(sqlAround(anchor)), `${anchor} 这条语句和表结构对不上`)
+    }
+
+    // 「长期未用」的判据换成了两个时间取晚的那个，写错这里等于整个分组失效
+    db.prepare(
+      `INSERT INTO software (id, created_at, updated_at, exe_path, file_name, last_used_at, external_active_at)
+       VALUES ('a', 0, 0, 'C:\\a.exe', 'a.exe', 0, 9000),
+              ('b', 0, 0, 'C:\\b.exe', 'b.exe', 9000, 0),
+              ('c', 0, 0, 'C:\\c.exe', 'c.exe', 0, 0)`
+    ).run()
+    const stale = db
+      .prepare('SELECT id FROM software WHERE MAX(last_used_at, external_active_at) < 5000')
+      .all() as Array<{ id: string }>
+    assert.deepEqual(
+      stale.map((r) => r.id),
+      ['c'],
+      '只有两个时间都读不到的才算长期未用'
+    )
+
+    db.close()
+  })
+
   /* --------------------------- 外部活跃时间 --------------------------- */
 
   console.log('\n外部活跃时间')
@@ -535,6 +587,45 @@ async function main(): Promise<void> {
     const never = activityOf(base)
     assert.equal(never.source, 'none')
     assert.equal(never.label, '从未使用')
+  })
+
+  /* --------------------------- 分类与标签 --------------------------- */
+
+  console.log('\n分类与标签')
+
+  const CATS = [
+    { id: 'find', name: '文件搜索', description: '查找、定位、磁盘分析', icon: 'search', sort_order: 1 },
+    { id: 'other', name: '其他', description: '无法归入以上分类', icon: 'box', sort_order: 2 }
+  ]
+
+  await check('插槽真的被填上了 —— 漏填等于把 {{tags}} 原样发给模型', () => {
+    const filled = fillIdentifySystem(CATS, ['便携', '开源'])
+    assert.ok(!filled.includes('{{'), `提示词里还留着没替换的插槽：${filled.match(/\{\{\w+\}\}/)?.[0]}`)
+    assert.match(filled, /文件搜索 —— 查找、定位、磁盘分析/, '分类描述要一起注入，AI 才有判据')
+    assert.match(filled, /便携、开源/)
+  })
+
+  await check('分类表或标签池为空时也给得出一句能用的话', () => {
+    const filled = fillIdentifySystem([], [])
+    assert.ok(!filled.includes('{{'))
+    assert.match(filled, /标签池还是空的/)
+  })
+
+  await check('模型一口气造五个新词时，只放行一个', () => {
+    const pool = new Set(['便携', '开源', 'CLI'])
+    const out = limitTags(['便携', '开源', '反汇编', '脱壳', '调试器'], pool)
+    assert.deepEqual(out, ['便携', '开源', '反汇编'], `实际拿到 ${JSON.stringify(out)}`)
+  })
+
+  await check('总数封顶 3 个，池内的也不例外', () => {
+    const pool = new Set(['便携', '开源', 'CLI', 'GUI', '单文件'])
+    assert.equal(limitTags(['便携', '开源', 'CLI', 'GUI', '单文件'], pool).length, 3)
+  })
+
+  await check('空数组、空串、重复项都不该混进去', () => {
+    const pool = new Set(['便携'])
+    assert.deepEqual(limitTags([], pool), [])
+    assert.deepEqual(limitTags(['便携', '便携', '  ', ''], pool), ['便携'])
   })
 
   /* --------------------------- 卡片标题 --------------------------- */

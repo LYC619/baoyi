@@ -18,16 +18,17 @@ import type {
   SoftwareItem
 } from '../../src/types'
 import { runAgent, probeToolCalling, type AgentEvent } from './agent/loop'
-import { IDENTIFY_SYSTEM, itemPrompt, unitPrompt } from './agent/prompts'
+import { fillIdentifySystem, itemPrompt, unitPrompt } from './agent/prompts'
 import { buildTools, type ToolContext } from './agent/tools'
 import {
   getSettings,
   listBySourceDir,
+  listCategories,
   listForAi,
   listUnfinishedUnits,
   markScanUnit,
-  pruneStaleBySourceDir,
   saveIdentifyLog,
+  tagPool,
   updateSoftware
 } from './database'
 import { searchAvailable } from './searchService'
@@ -86,7 +87,7 @@ function describeEvent(e: AgentEvent): string {
       case 'read_text_file':
         return `阅读 ${path.basename(String(args.path ?? ''))}`
       case 'register_software':
-        return `注册「${args.name_zh ?? '?'}」`
+        return `识别出「${args.name_zh ?? '?'}」`
       case 'skip_directory':
         return `跳过 ${path.basename(String(args.path ?? ''))}`
       case 'web_search':
@@ -114,12 +115,12 @@ interface UnitOutcome {
 async function identifyUnit(
   unit: ScanUnit,
   ai: AIConfig,
+  system: string,
   searchConfig: SearchConfig,
   withSearch: boolean,
   signal: AbortSignal,
   onEvent: (e: AgentEvent) => void
 ): Promise<UnitOutcome> {
-  const startedAt = Date.now()
   const hadEntries = listBySourceDir(unit.dir)
 
   let registered = 0
@@ -132,6 +133,8 @@ async function identifyUnit(
     unitDir: unit.dir,
     looseOnly: unit.loose_only,
     searchConfig,
+    // 整目录识别的结果先进暂存区，等用户在确认面板过目
+    direct: false,
     onRegister: () => {
       registered++
     },
@@ -143,7 +146,7 @@ async function identifyUnit(
 
   const result = await runAgent({
     config: ai,
-    system: IDENTIFY_SYSTEM,
+    system,
     user: unitPrompt(unit, hadEntries),
     tools: buildTools(ctx, withSearch),
     maxTurns: MAX_TURNS_PER_UNIT,
@@ -160,24 +163,19 @@ async function identifyUnit(
     return { ...base, registered, skipped, failed: false, tokens: result.tokens, note: '已取消' }
   }
 
-  // 重跑时清掉上一轮留下、这一轮没再确认、用户也没碰过的残留条目
-  if (registered > 0 && hadEntries.length > 0) {
-    pruneStaleBySourceDir(unit.dir, startedAt)
-  }
-
   // 「未注册任何条目」这句话本身不解释任何事情：模型是想清楚了才收尾，还是被轮数上限
   // 掐断的？两者要改的东西完全不同（前者调判据，后者调探索策略），所以必须分开说
   const stalled = result.stopReason === 'max_turns'
   const note =
     registered > 0
       ? stalled
-        ? `注册 ${registered} 项（达到 ${MAX_TURNS_PER_UNIT} 轮上限提前结束，可能还有遗漏）`
-        : `注册 ${registered} 项`
+        ? `待确认 ${registered} 项（达到 ${MAX_TURNS_PER_UNIT} 轮上限提前结束，可能还有遗漏）`
+        : `待确认 ${registered} 项`
       : skipReasons.length > 0
         ? skipReasons.join('；')
         : stalled
-          ? `达到 ${MAX_TURNS_PER_UNIT} 轮上限仍未下结论，没有注册任何条目`
-          : result.text.slice(0, 200) || '未注册任何条目'
+          ? `达到 ${MAX_TURNS_PER_UNIT} 轮上限仍未下结论，没有识别出任何条目`
+          : result.text.slice(0, 200) || '未识别出任何条目'
 
   return { ...base, registered, skipped: registered === 0, failed: false, tokens: result.tokens, note }
 }
@@ -187,6 +185,7 @@ async function identifyUnit(
 async function identifyItem(
   item: SoftwareItem,
   ai: AIConfig,
+  system: string,
   searchConfig: SearchConfig,
   withSearch: boolean,
   signal: AbortSignal,
@@ -200,6 +199,8 @@ async function identifyItem(
     unitDir: dir,
     looseOnly: true,
     searchConfig,
+    // 用户点着这一条说「重新识别」，对象已经明确，再拦一道确认只是碍事
+    direct: true,
     onRegister: () => {
       registered++
     }
@@ -207,7 +208,7 @@ async function identifyItem(
 
   const result = await runAgent({
     config: ai,
-    system: IDENTIFY_SYSTEM,
+    system,
     user: itemPrompt(item),
     tools: buildTools(ctx, withSearch),
     maxTurns: 10,
@@ -275,6 +276,9 @@ export async function completeWithAi(
   const ai = settings.ai
   const searchConfig = settings.search
   const withSearch = searchAvailable(searchConfig)
+
+  // 分类和标签池现读现填。用户刚在设置里合并过两个标签，这一轮就该按合并后的来
+  const system = fillIdentifySystem(listCategories(), tagPool())
 
   // 指定了 ids 就只补这几条；否则跑完所有待识别目录 + 遗留的待补全条目
   const jobs: Job[] = ids?.length
@@ -346,8 +350,8 @@ export async function completeWithAi(
     try {
       outcome =
         job.kind === 'unit'
-          ? await identifyUnit(job.unit, ai, searchConfig, withSearch, signal, onEvent)
-          : await identifyItem(job.item, ai, searchConfig, withSearch, signal, onEvent)
+          ? await identifyUnit(job.unit, ai, system, searchConfig, withSearch, signal, onEvent)
+          : await identifyItem(job.item, ai, system, searchConfig, withSearch, signal, onEvent)
     } catch (err) {
       // runAgent 自己吞掉了工具异常，能到这里的都是编排层的意外
       outcome = {

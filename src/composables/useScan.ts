@@ -32,18 +32,12 @@ export function useScan() {
     return '扫描完成'
   })
 
-  /**
-   * dirs 往往直接来自 settings store，那是一个 reactive 代理数组。
-   * 代理过不了 ipcRenderer.invoke 的结构化克隆（DataCloneError），而 invoke 返回的是
-   * Promise，调用方 await 一下就变成一次静默 reject —— 表现正是「点了没反应」。
-   * 在这里拍平成普通数组，所有调用方就都不用记得自己 spread 一次。
-   */
   async function run(dirs: string[]): Promise<ScanResult> {
     if (running.value || dirs.length === 0) return { found: 0, added: 0, pending: 0, settled: 0 }
     running.value = true
     progress.value = { phase: 'walking', current: '', found: 0, processed: 0, total: 0 }
     try {
-      const result = await window.baoyi.scan.run([...dirs])
+      const result = await window.baoyi.scan.run(dirs)
       lastResult.value = result
       return result
     } finally {

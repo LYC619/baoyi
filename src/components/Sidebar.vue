@@ -2,18 +2,24 @@
 import { computed, ref } from 'vue'
 import {
   Archive,
+  Bot,
   Box,
+  Bug,
   ChevronDown,
   Clapperboard,
   Code2,
+  FileText,
   Folder,
   Globe,
   Hash,
   Image,
   Layers,
+  Search,
   Settings2,
   Shield,
+  SlidersHorizontal,
   Sparkles,
+  StickyNote,
   Timer,
   Zap
 } from 'lucide-vue-next'
@@ -24,16 +30,23 @@ import { useSoftwareStore } from '@/stores/software'
 const store = useSoftwareStore()
 const categories = useCategoriesStore()
 
+/** 分类图标名 → 组件。旧名字留着，用户自建的分类可能还在用 */
 const ICONS: Record<string, Component> = {
-  'code-2': Code2,
-  image: Image,
+  bug: Bug,
+  bot: Bot,
+  search: Search,
+  'file-text': FileText,
+  'sliders-horizontal': SlidersHorizontal,
   globe: Globe,
+  image: Image,
+  clapperboard: Clapperboard,
+  shield: Shield,
+  'sticky-note': StickyNote,
+  box: Box,
+  'code-2': Code2,
   'settings-2': Settings2,
   folder: Folder,
-  clapperboard: Clapperboard,
-  zap: Zap,
-  shield: Shield,
-  box: Box
+  zap: Zap
 }
 
 const iconFor = (name: string) => ICONS[categories.iconOf(name)] ?? Box

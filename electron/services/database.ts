@@ -8,34 +8,56 @@ import type {
   AgentEvent,
   AppSettings,
   Category,
+  ConfirmResult,
   DataStats,
   IdentifyLog,
   IdentifyLogQuery,
   IdentifyLogStatus,
   Launcher,
+  PendingItem,
   RegisterPayload,
   ScannedFile,
   ScanUnit,
   ScanUnitStatus,
   SidebarCounts,
   SoftwareItem,
-  SoftwareQuery
+  SoftwareQuery,
+  Tag,
+  TagSource
 } from '../../src/types'
 
 type Row = Record<string, any>
 
 let db: Database.Database | null = null
 
-export const DEFAULT_CATEGORIES: Array<Omit<Category, 'id'> & { id: string }> = [
-  { id: 'dev', name: '开发工具', icon: 'code-2', sort_order: 1 },
-  { id: 'image', name: '图片处理', icon: 'image', sort_order: 2 },
-  { id: 'network', name: '网络工具', icon: 'globe', sort_order: 3 },
-  { id: 'system', name: '系统工具', icon: 'settings-2', sort_order: 4 },
-  { id: 'file', name: '文件管理', icon: 'folder', sort_order: 5 },
-  { id: 'media', name: '音视频', icon: 'clapperboard', sort_order: 6 },
-  { id: 'efficiency', name: '效率工具', icon: 'zap', sort_order: 7 },
-  { id: 'security', name: '安全工具', icon: 'shield', sort_order: 8 },
-  { id: 'other', name: '其他', icon: 'box', sort_order: 9 }
+/** 归不进任何分类时的落脚点。它也是分类表里真实存在的一条，不是特殊值 */
+const FALLBACK_CATEGORY = '其他'
+
+/**
+ * 按**用途**分，不按技术领域分。
+ *
+ * 0.1.x 那套（开发工具 / 系统工具 / 效率工具…）是按软件「属于哪一行」划的，
+ * 结果同一格里 x64dbg 和 VS Code 并排 —— 对「我现在要干这件事，该开哪个」
+ * 毫无帮助。这套问的是「你打开它是要做什么」。
+ */
+export const DEFAULT_CATEGORIES: Category[] = [
+  { id: 'reverse', name: '逆向分析', description: '逆向、调试、反编译', icon: 'bug', sort_order: 1 },
+  { id: 'ai-coding', name: 'AI 编程', description: 'AI 辅助开发、代码生成', icon: 'bot', sort_order: 2 },
+  { id: 'find', name: '文件搜索', description: '查找、定位、磁盘分析', icon: 'search', sort_order: 3 },
+  { id: 'edit', name: '编辑查看', description: '文本、十六进制、数据查看编辑', icon: 'file-text', sort_order: 4 },
+  { id: 'control', name: '系统调控', description: '进程、注册表、权限、启动项管理', icon: 'sliders-horizontal', sort_order: 5 },
+  { id: 'network', name: '网络调试', description: '抓包、代理、远程、下载', icon: 'globe', sort_order: 6 },
+  { id: 'image', name: '图像处理', description: '截图、编辑、格式转换', icon: 'image', sort_order: 7 },
+  { id: 'media', name: '媒体影音', description: '播放、转码、录制', icon: 'clapperboard', sort_order: 8 },
+  { id: 'security', name: '安全隐私', description: '加密、擦除、杀毒、沙盒', icon: 'shield', sort_order: 9 },
+  { id: 'office', name: '办公效率', description: '笔记、PDF、OCR、剪贴板', icon: 'sticky-note', sort_order: 10 },
+  { id: 'other', name: FALLBACK_CATEGORY, description: '无法归入以上分类', icon: 'box', sort_order: 11 }
+]
+
+/** 0.1.x 的默认分类。升级时整体退休，名下的条目退回「其他」 */
+const RETIRED_CATEGORY_NAMES = [
+  '开发工具', '图片处理', '网络工具', '系统工具',
+  '文件管理', '音视频', '效率工具', '安全工具', '未分类'
 ]
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -96,7 +118,7 @@ function initSchema(d: Database.Database): void {
       name_en TEXT DEFAULT '',
       summary TEXT DEFAULT '',
       description TEXT DEFAULT '',
-      category TEXT DEFAULT '未分类',
+      category TEXT DEFAULT '其他',
       tags TEXT DEFAULT '[]',
       official_url TEXT DEFAULT '',
       ai_status TEXT DEFAULT 'pending',
@@ -131,8 +153,57 @@ function initSchema(d: Database.Database): void {
     CREATE TABLE IF NOT EXISTS categories (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      description TEXT DEFAULT '',
       icon TEXT DEFAULT '',
       sort_order INTEGER DEFAULT 0
+    );
+
+    -- 标签池。只有 source 为 user / confirmed 的会注入 prompt，
+    -- agent 新造的先记成 ai，等用户在确认面板里点头才转正。
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      source TEXT DEFAULT 'ai',
+      created_at INTEGER NOT NULL
+    );
+
+    -- 识别结果的暂存区：agent 认完先落在这里，用户确认后才进 software。
+    -- exe_path 唯一，同一个程序反复识别只会占一行。
+    CREATE TABLE IF NOT EXISTS pending_software (
+      id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      scan_unit_id TEXT DEFAULT '',
+
+      exe_path TEXT NOT NULL UNIQUE,
+      icon_path TEXT DEFAULT '',
+      file_name TEXT NOT NULL,
+      file_description TEXT DEFAULT '',
+      company TEXT DEFAULT '',
+      version TEXT DEFAULT '',
+      file_size INTEGER DEFAULT 0,
+      external_active_at INTEGER DEFAULT 0,
+
+      name_zh TEXT DEFAULT '',
+      name_en TEXT DEFAULT '',
+      summary TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      category TEXT DEFAULT '其他',
+      tags TEXT DEFAULT '[]',
+      official_url TEXT DEFAULT '',
+      launchers TEXT DEFAULT '[]',
+      source_dir TEXT DEFAULT '',
+
+      new_category INTEGER DEFAULT 0,
+      new_tags TEXT DEFAULT '[]'
+    );
+
+    -- 用户明确说过「不注册」的程序。下次识别到同一个路径直接不再暂存，
+    -- 否则每次重扫都要把同一批东西再否决一遍。
+    CREATE TABLE IF NOT EXISTS skip_list (
+      exe_path TEXT PRIMARY KEY,
+      label TEXT DEFAULT '',
+      source_dir TEXT DEFAULT '',
+      created_at INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -168,6 +239,7 @@ function initSchema(d: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_scan_units_status ON scan_units(status);
     CREATE INDEX IF NOT EXISTS idx_identify_logs_status ON identify_logs(status);
     CREATE INDEX IF NOT EXISTS idx_identify_logs_created ON identify_logs(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_pending_dir ON pending_software(source_dir);
   `)
 
   migrate(d)
@@ -177,11 +249,16 @@ function initSchema(d: Database.Database): void {
 function seedCategories(d: Database.Database): void {
   const seeded = d.prepare('SELECT COUNT(*) AS n FROM categories').get() as { n: number }
   if (seeded.n > 0) return
+  insertCategories(d, DEFAULT_CATEGORIES)
+}
+
+function insertCategories(d: Database.Database, rows: Category[]): void {
   const stmt = d.prepare(
-    'INSERT INTO categories (id, name, icon, sort_order) VALUES (@id, @name, @icon, @sort_order)'
+    `INSERT OR REPLACE INTO categories (id, name, description, icon, sort_order)
+     VALUES (@id, @name, @description, @icon, @sort_order)`
   )
-  const tx = d.transaction((rows: Category[]) => rows.forEach((r) => stmt.run(r)))
-  tx(DEFAULT_CATEGORIES)
+  const tx = d.transaction(() => rows.forEach((r) => stmt.run(r)))
+  tx()
 }
 
 /**
@@ -204,6 +281,37 @@ function migrate(d: Database.Database): void {
   // 刚补出来的 external_active_at 全是 0，等于让存量条目继续显示「从未使用」——
   // 而那正是这个字段要治的毛病。补列的同一次启动就把它填上，只跑这一次。
   if (!existing.has('external_active_at')) backfillExternalActive(d)
+
+  migrateCategories(d)
+}
+
+/**
+ * 0.2 把分类从「按技术领域」换成「按用途」。
+ *
+ * 用 categories 表有没有 description 列当作版本标记 —— 这一列正是 0.2 加的，
+ * 不用再单开一张 meta 表。判断只做一次：列补上以后就再也不会进来。
+ */
+function migrateCategories(d: Database.Database): void {
+  const cols = new Set(
+    (d.prepare('PRAGMA table_info(categories)').all() as Row[]).map((c) => c.name as string)
+  )
+  if (cols.has('description')) return
+  d.exec(`ALTER TABLE categories ADD COLUMN description TEXT DEFAULT ''`)
+
+  const tx = d.transaction(() => {
+    // 旧的默认分类整体退休，用户自己加的那些留着
+    const retiredIds = ['dev', 'image', 'network', 'system', 'file', 'media', 'efficiency', 'security', 'other']
+    const del = d.prepare('DELETE FROM categories WHERE id = ?')
+    for (const id of retiredIds) del.run(id)
+
+    insertCategories(d, DEFAULT_CATEGORIES)
+
+    // 挂在退休分类下的条目退回「其他」。新分类是按用途分的，
+    // 旧的「开发工具」映射不到任何一个新分类 —— 与其猜，不如让用户重新归。
+    const reset = d.prepare(`UPDATE software SET category = ? WHERE category = ?`)
+    for (const name of RETIRED_CATEGORY_NAMES) reset.run(FALLBACK_CATEGORY, name)
+  })
+  tx()
 }
 
 /** 逐条读磁盘补 external_active_at。软件条目是千级，一次几百毫秒，只在升级时发生 */
@@ -274,7 +382,7 @@ function rowToItem(row: Row): SoftwareItem {
     name_en: row.name_en ?? '',
     summary: row.summary ?? '',
     description: row.description ?? '',
-    category: row.category ?? '未分类',
+    category: row.category ?? FALLBACK_CATEGORY,
     tags: safeJsonArray(row.tags),
     official_url: row.official_url ?? '',
     ai_status: row.ai_status ?? 'pending',
@@ -540,6 +648,300 @@ export function listBySourceDir(dir: string): SoftwareItem[] {
     .prepare('SELECT * FROM software WHERE source_dir = ? ORDER BY created_at')
     .all(dir) as Row[]
   return rows.map(rowToItem)
+}
+
+/* ------------------------------ 暂存与确认 ------------------------------ */
+
+function rowToPending(row: Row): PendingItem {
+  return {
+    id: row.id,
+    created_at: row.created_at,
+    scan_unit_id: row.scan_unit_id ?? '',
+    exe_path: row.exe_path,
+    icon_path: row.icon_path ?? '',
+    file_name: row.file_name,
+    file_description: row.file_description ?? '',
+    company: row.company ?? '',
+    version: row.version ?? '',
+    file_size: row.file_size ?? 0,
+    external_active_at: row.external_active_at ?? 0,
+    name_zh: row.name_zh ?? '',
+    name_en: row.name_en ?? '',
+    summary: row.summary ?? '',
+    description: row.description ?? '',
+    category: row.category ?? FALLBACK_CATEGORY,
+    tags: safeJsonArray(row.tags),
+    official_url: row.official_url ?? '',
+    launchers: safeLaunchers(row.launchers, row.exe_path),
+    source_dir: row.source_dir ?? '',
+    new_category: row.new_category === 1,
+    new_tags: safeJsonArray(row.new_tags)
+  }
+}
+
+export function listPending(): PendingItem[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM pending_software ORDER BY source_dir, created_at')
+    .all() as Row[]
+  return rows.map(rowToPending)
+}
+
+export function countPending(): number {
+  return (getDb().prepare('SELECT COUNT(*) AS n FROM pending_software').get() as { n: number }).n
+}
+
+export function isSkipped(exePath: string): boolean {
+  return !!getDb().prepare('SELECT 1 FROM skip_list WHERE exe_path = ?').get(exePath)
+}
+
+export interface StageOutcome {
+  id: string
+  created: boolean
+  exe_path: string
+}
+
+/**
+ * agent 识别完的落脚点。
+ *
+ * 和 0.1.x 直接写 software 的区别就一件事：这里写完不算数，等用户在确认面板点头。
+ * 顺带把「AI 提了个新分类」「AI 造了个新标签」标出来，面板要靠它高亮。
+ * 用户明确否决过的路径直接不收，否则每次重扫都要再否决一遍。
+ */
+export function stagePending(
+  payload: RegisterPayload,
+  facts: RegisterFileFacts,
+  scanUnitId: string,
+  iconPath: string
+): StageOutcome | null {
+  const launchers = normalizeLaunchers(payload.launchers)
+  if (launchers.length === 0) return null
+  const primary = launchers.find((l) => l.is_default) ?? launchers[0]
+  if (isSkipped(primary.path)) return null
+
+  const d = getDb()
+  const now = Date.now()
+  const knownCategories = new Set(listCategories().map((c) => c.name))
+  const pool = new Set(tagPool())
+  const newTags = payload.tags.filter((t) => !pool.has(t))
+
+  const existing = d.prepare('SELECT id FROM pending_software WHERE exe_path = ?').get(primary.path) as
+    | Row
+    | undefined
+  const id = existing?.id ?? randomUUID()
+
+  const values = {
+    id,
+    created_at: existing ? undefined : now,
+    scan_unit_id: scanUnitId,
+    exe_path: primary.path,
+    icon_path: iconPath,
+    file_name: facts.file_name,
+    file_description: facts.file_description,
+    company: facts.company,
+    version: facts.version,
+    file_size: facts.file_size,
+    external_active_at: facts.external_active_at,
+    name_zh: payload.name_zh,
+    name_en: payload.name_en,
+    summary: payload.summary,
+    description: payload.description,
+    category: payload.category || FALLBACK_CATEGORY,
+    tags: JSON.stringify(payload.tags),
+    official_url: payload.official_url,
+    launchers: JSON.stringify(launchers),
+    source_dir: payload.source_dir,
+    new_category: knownCategories.has(payload.category) ? 0 : 1,
+    new_tags: JSON.stringify(newTags)
+  }
+
+  const tx = d.transaction(() => {
+    if (existing) {
+      d.prepare(
+        `UPDATE pending_software SET
+           scan_unit_id = @scan_unit_id, file_name = @file_name,
+           file_description = @file_description, company = @company, version = @version,
+           file_size = @file_size, external_active_at = @external_active_at,
+           icon_path = @icon_path,
+           name_zh = @name_zh, name_en = @name_en, summary = @summary, description = @description,
+           category = @category, tags = @tags, official_url = @official_url,
+           launchers = @launchers, source_dir = @source_dir,
+           new_category = @new_category, new_tags = @new_tags
+         WHERE id = @id`
+      ).run({ ...values, created_at: undefined })
+    } else {
+      d.prepare(
+        `INSERT INTO pending_software
+           (id, created_at, scan_unit_id, exe_path, icon_path, file_name, file_description,
+            company, version, file_size, external_active_at, name_zh, name_en, summary,
+            description, category, tags, official_url, launchers, source_dir,
+            new_category, new_tags)
+         VALUES
+           (@id, @created_at, @scan_unit_id, @exe_path, @icon_path, @file_name, @file_description,
+            @company, @version, @file_size, @external_active_at, @name_zh, @name_en, @summary,
+            @description, @category, @tags, @official_url, @launchers, @source_dir,
+            @new_category, @new_tags)`
+      ).run({ ...values, created_at: now })
+    }
+
+    // AI 造的新词先记成 ai，不进池 —— 用户确认那一步才转正
+    for (const t of newTags) insertTag(d, t, 'ai')
+  })
+  tx()
+
+  return { id, created: !existing, exe_path: primary.path }
+}
+
+const PENDING_EDITABLE = new Set([
+  'name_zh', 'name_en', 'summary', 'description', 'category', 'tags', 'official_url'
+])
+
+/** 确认面板里改一个字段就存一次，不攒到最后 —— 中途关掉窗口不该丢改动 */
+export function updatePending(id: string, patch: Partial<PendingItem>): PendingItem | null {
+  const d = getDb()
+  const entries = Object.entries(patch).filter(([k]) => PENDING_EDITABLE.has(k))
+  if (entries.length > 0) {
+    const params: Row = { id }
+    for (const [k, v] of entries) params[k] = k === 'tags' ? JSON.stringify(v ?? []) : String(v ?? '')
+
+    // 用户动过手的分类 / 标签就不再是「AI 提议」了，标记跟着撤掉
+    const sets = entries.map(([k]) => `${k} = @${k}`)
+    if (patch.category !== undefined) sets.push('new_category = 0')
+    if (patch.tags !== undefined) sets.push(`new_tags = '[]'`)
+    d.prepare(`UPDATE pending_software SET ${sets.join(', ')} WHERE id = @id`).run(params)
+  }
+  const row = d.prepare('SELECT * FROM pending_software WHERE id = ?').get(id) as Row | undefined
+  return row ? rowToPending(row) : null
+}
+
+/**
+ * 确认写入：暂存条目搬进 software。
+ *
+ * 同一趟里把 AI 提的新分类建出来、把它造的新标签转正 —— 用户点了确认，
+ * 就是认可了这两件事，不该再让他去管理页补一遍。
+ */
+export function confirmPending(ids: string[]): ConfirmResult {
+  const d = getDb()
+  if (ids.length === 0) return { registered: 0, categories: [], tags: [] }
+
+  const placeholders = ids.map(() => '?').join(',')
+  const rows = d
+    .prepare(`SELECT * FROM pending_software WHERE id IN (${placeholders})`)
+    .all(...ids) as Row[]
+  if (rows.length === 0) return { registered: 0, categories: [], tags: [] }
+
+  const startedAt = Date.now()
+  const knownCategories = new Set(listCategories().map((c) => c.name))
+  const createdCategories: string[] = []
+  const promotedTags: string[] = []
+  let registered = 0
+
+  for (const row of rows) {
+    const item = rowToPending(row)
+
+    if (item.category && !knownCategories.has(item.category)) {
+      const next = (d.prepare('SELECT MAX(sort_order) AS n FROM categories').get() as { n: number | null }).n ?? 0
+      insertCategories(d, [
+        { id: randomUUID(), name: item.category, description: 'AI 识别时提议，已确认', icon: 'box', sort_order: next + 1 }
+      ])
+      knownCategories.add(item.category)
+      createdCategories.push(item.category)
+    }
+
+    const outcome = registerSoftware(
+      {
+        name_zh: item.name_zh,
+        name_en: item.name_en,
+        summary: item.summary,
+        description: item.description,
+        category: item.category || FALLBACK_CATEGORY,
+        tags: item.tags,
+        official_url: item.official_url,
+        launchers: item.launchers,
+        source_dir: item.source_dir
+      },
+      {
+        file_name: item.file_name,
+        file_description: item.file_description,
+        company: item.company,
+        version: item.version,
+        file_size: item.file_size,
+        external_active_at: item.external_active_at
+      }
+    )
+    if (!outcome) continue
+    registered++
+
+    if (item.icon_path) updateSoftware(outcome.id, { icon_path: item.icon_path })
+
+    // 确认时条目上挂着的 AI 标签就此转正入池；用户自己敲进去的新词直接算 user
+    for (const name of item.tags) {
+      const tag = d.prepare('SELECT id, source FROM tags WHERE name = ?').get(name) as Row | undefined
+      if (!tag) {
+        insertTag(d, name, 'user')
+        promotedTags.push(name)
+      } else if (tag.source === 'ai') {
+        d.prepare(`UPDATE tags SET source = 'confirmed' WHERE id = ?`).run(tag.id)
+        promotedTags.push(name)
+      }
+    }
+
+    d.prepare('DELETE FROM pending_software WHERE id = ?').run(item.id)
+  }
+
+  pruneStaleAfterConfirm(d, [...new Set(rows.map((r) => r.source_dir as string))], startedAt)
+  pruneOrphanAiTags(d)
+
+  return { registered, categories: createdCategories, tags: [...new Set(promotedTags)] }
+}
+
+/**
+ * 一个目录暂存的条目全部处理完之后，清掉上一轮注册过、这一轮没再出现、用户也没碰过的残留。
+ * 「全部处理完」这个前提不能省：只确认了一半就清理，会连带删掉另一半对应的旧条目。
+ */
+function pruneStaleAfterConfirm(d: Database.Database, dirs: string[], olderThan: number): void {
+  for (const dir of dirs) {
+    if (!dir) continue
+    const left = d.prepare('SELECT COUNT(*) AS n FROM pending_software WHERE source_dir = ?').get(dir) as { n: number }
+    if (left.n > 0) continue
+    pruneStaleBySourceDir(dir, olderThan)
+  }
+}
+
+/** 忽略名单里现在有多少条。设置页要能看见它，否则误点的「不注册」就成了死结 */
+export function countSkipped(): number {
+  return (getDb().prepare('SELECT COUNT(*) AS n FROM skip_list').get() as { n: number }).n
+}
+
+/** 清空忽略名单：这些程序下次识别会重新出现在确认面板里 */
+export function clearSkipped(): number {
+  return getDb().prepare('DELETE FROM skip_list').run().changes
+}
+
+/** 用户说「不注册」：从暂存区移走并记进忽略名单，下次识别不再冒出来 */
+export function skipPending(ids: string[]): number {
+  const d = getDb()
+  if (ids.length === 0) return 0
+  const now = Date.now()
+  let n = 0
+
+  const tx = d.transaction(() => {
+    const get = d.prepare('SELECT * FROM pending_software WHERE id = ?')
+    const add = d.prepare(
+      `INSERT INTO skip_list (exe_path, label, source_dir, created_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(exe_path) DO NOTHING`
+    )
+    const del = d.prepare('DELETE FROM pending_software WHERE id = ?')
+    for (const id of ids) {
+      const row = get.get(id) as Row | undefined
+      if (!row) continue
+      add.run(row.exe_path, row.name_zh || row.file_name, row.source_dir ?? '', now)
+      del.run(id)
+      n++
+    }
+    pruneOrphanAiTags(d)
+  })
+  tx()
+  return n
 }
 
 /* ------------------------------ 扫描单元 ------------------------------ */
@@ -882,6 +1284,7 @@ export function counts(unusedDays: number): SidebarCounts {
     ),
     pending: pendingItems,
     pending_units: pendingUnits,
+    pending_confirm: one('SELECT COUNT(*) AS n FROM pending_software'),
     categories,
     tags: [...tagMap.entries()]
       .map(([name, count]) => ({ name, count }))
@@ -898,12 +1301,25 @@ export function listCategories(): Category[] {
 }
 
 export function upsertCategory(c: Category): Category[] {
-  getDb()
-    .prepare(
-      `INSERT INTO categories (id, name, icon, sort_order) VALUES (@id, @name, @icon, @sort_order)
-       ON CONFLICT(id) DO UPDATE SET name = @name, icon = @icon, sort_order = @sort_order`
-    )
-    .run({ ...c, id: c.id || randomUUID() })
+  const d = getDb()
+  const id = c.id || randomUUID()
+  const previous = d.prepare('SELECT name FROM categories WHERE id = ?').get(id) as Row | undefined
+
+  const tx = d.transaction(() => {
+    d.prepare(
+      `INSERT INTO categories (id, name, description, icon, sort_order)
+       VALUES (@id, @name, @description, @icon, @sort_order)
+       ON CONFLICT(id) DO UPDATE SET
+         name = @name, description = @description, icon = @icon, sort_order = @sort_order`
+    ).run({ ...c, id, description: c.description ?? '', icon: c.icon ?? '' })
+
+    // 分类是靠名字挂在条目上的，改名必须把引用一起改，否则一改名条目全掉进「其他」
+    if (previous && previous.name !== c.name) {
+      d.prepare('UPDATE software SET category = ? WHERE category = ?').run(c.name, previous.name)
+      d.prepare('UPDATE pending_software SET category = ? WHERE category = ?').run(c.name, previous.name)
+    }
+  })
+  tx()
   return listCategories()
 }
 
@@ -911,11 +1327,182 @@ export function removeCategory(id: string): Category[] {
   const d = getDb()
   const row = d.prepare('SELECT name FROM categories WHERE id = ?').get(id) as Row | undefined
   if (row) {
-    // 分类是虚拟的，删除时把归属条目退回「未分类」，不动实际文件
-    d.prepare(`UPDATE software SET category = '未分类' WHERE category = ?`).run(row.name)
-    d.prepare('DELETE FROM categories WHERE id = ?').run(id)
+    // 分类是虚拟的，删除时把归属条目退回「其他」，不动实际文件
+    const tx = d.transaction(() => {
+      d.prepare('UPDATE software SET category = ? WHERE category = ?').run(FALLBACK_CATEGORY, row.name)
+      d.prepare('UPDATE pending_software SET category = ? WHERE category = ?').run(FALLBACK_CATEGORY, row.name)
+      d.prepare('DELETE FROM categories WHERE id = ?').run(id)
+    })
+    tx()
   }
   return listCategories()
+}
+
+/**
+ * 上下挪一格。和相邻那条交换 sort_order 即可 —— 拖拽排序留给以后，
+ * 这个按钮能到达完全一样的顺序，还能用键盘操作。
+ */
+export function moveCategory(id: string, delta: number): Category[] {
+  const list = listCategories()
+  const from = list.findIndex((c) => c.id === id)
+  const to = from + (delta < 0 ? -1 : 1)
+  if (from < 0 || to < 0 || to >= list.length) return list
+
+  const reordered = [...list]
+  ;[reordered[from], reordered[to]] = [reordered[to], reordered[from]]
+
+  const d = getDb()
+  const stmt = d.prepare('UPDATE categories SET sort_order = ? WHERE id = ?')
+  // 整体重排一遍，顺便把历史上重复 / 空缺的 sort_order 抹平
+  const tx = d.transaction(() => reordered.forEach((c, i) => stmt.run(i + 1, c.id)))
+  tx()
+  return listCategories()
+}
+
+/* ------------------------------- 标签 ------------------------------- */
+
+/**
+ * 每个标签实际被多少条目用着。
+ *
+ * ponytail: 规划里 tags 表带一个 usage_count 列，这里改成读的时候现算。
+ * 标签存在 software.tags 的 JSON 数组里，详情页随手一改就会让计数列失真，
+ * 而这个数字的唯一用途恰恰是「找出只挂着一个条目的碎片标签」—— 失真就没意义了。
+ * 数据量在千级，一次全表扫描的代价可以忽略。
+ */
+function tagUsage(d: Database.Database): Map<string, number> {
+  const map = new Map<string, number>()
+  const rows = d.prepare('SELECT tags FROM software WHERE is_archived = 0').all() as Row[]
+  for (const r of rows) {
+    for (const t of safeJsonArray(r.tags)) map.set(t, (map.get(t) ?? 0) + 1)
+  }
+  return map
+}
+
+export function listTags(): Tag[] {
+  const d = getDb()
+  const usage = tagUsage(d)
+  const rows = d.prepare('SELECT * FROM tags ORDER BY name').all() as Row[]
+  return rows
+    .map((r) => ({
+      id: r.id as number,
+      name: r.name as string,
+      source: (r.source ?? 'ai') as TagSource,
+      usage_count: usage.get(r.name) ?? 0,
+      created_at: r.created_at as number
+    }))
+    .sort((a, b) => b.usage_count - a.usage_count || a.name.localeCompare(b.name, 'zh'))
+}
+
+/**
+ * 注入 prompt 的标签池：只给用户认可过的。
+ * agent 自己造的（source='ai'）不进池 —— 否则它造一个新词，下一轮就当成既成事实
+ * 继续沿用，标签只会越长越碎，而这正是标签池要防的事。
+ */
+export function tagPool(): string[] {
+  return (
+    getDb()
+      .prepare(`SELECT name FROM tags WHERE source IN ('user','confirmed') ORDER BY name`)
+      .all() as Row[]
+  ).map((r) => r.name as string)
+}
+
+function insertTag(d: Database.Database, name: string, source: TagSource): void {
+  d.prepare(
+    `INSERT INTO tags (name, source, created_at) VALUES (?, ?, ?)
+     ON CONFLICT(name) DO NOTHING`
+  ).run(name, source, Date.now())
+}
+
+export function createTag(name: string): Tag[] {
+  const clean = name.trim().slice(0, 12)
+  if (clean) insertTag(getDb(), clean, 'user')
+  return listTags()
+}
+
+export function renameTag(id: number, name: string): Tag[] {
+  const d = getDb()
+  const clean = name.trim().slice(0, 12)
+  const row = d.prepare('SELECT name FROM tags WHERE id = ?').get(id) as Row | undefined
+  if (!clean || !row || row.name === clean) return listTags()
+
+  // 改成一个已存在的名字，等同于合并
+  const collide = d.prepare('SELECT id FROM tags WHERE name = ?').get(clean) as Row | undefined
+  if (collide) return mergeTags([id], collide.id as number)
+
+  const tx = d.transaction(() => {
+    d.prepare('UPDATE tags SET name = ? WHERE id = ?').run(clean, id)
+    replaceTagInEntries(d, [row.name as string], clean)
+  })
+  tx()
+  return listTags()
+}
+
+/** 把 fromIds 这些标签并进 intoId，条目上的引用一并替换并去重 */
+export function mergeTags(fromIds: number[], intoId: number): Tag[] {
+  const d = getDb()
+  const target = d.prepare('SELECT name FROM tags WHERE id = ?').get(intoId) as Row | undefined
+  if (!target) return listTags()
+
+  const sources = fromIds
+    .filter((id) => id !== intoId)
+    .map((id) => d.prepare('SELECT id, name FROM tags WHERE id = ?').get(id) as Row | undefined)
+    .filter((r): r is Row => !!r)
+  if (sources.length === 0) return listTags()
+
+  const tx = d.transaction(() => {
+    replaceTagInEntries(d, sources.map((s) => s.name as string), target.name as string)
+    const del = d.prepare('DELETE FROM tags WHERE id = ?')
+    for (const s of sources) del.run(s.id)
+    // 并过之后目标标签就是用户的意思了，顺手转正
+    d.prepare(`UPDATE tags SET source = 'confirmed' WHERE id = ? AND source = 'ai'`).run(intoId)
+  })
+  tx()
+  return listTags()
+}
+
+export function removeTag(id: number): Tag[] {
+  const d = getDb()
+  const row = d.prepare('SELECT name FROM tags WHERE id = ?').get(id) as Row | undefined
+  if (!row) return listTags()
+  const tx = d.transaction(() => {
+    replaceTagInEntries(d, [row.name as string], '')
+    d.prepare('DELETE FROM tags WHERE id = ?').run(id)
+  })
+  tx()
+  return listTags()
+}
+
+/**
+ * 把条目（含暂存）标签数组里的 from 换成 to，to 为空串表示删除。
+ * 标签存的是 JSON 数组，只能读出来改完写回去 —— SQL 里没法原地改。
+ */
+function replaceTagInEntries(d: Database.Database, from: string[], to: string): void {
+  const drop = new Set(from)
+  for (const table of ['software', 'pending_software']) {
+    const rows = d.prepare(`SELECT id, tags FROM ${table}`).all() as Row[]
+    const stmt = d.prepare(`UPDATE ${table} SET tags = ? WHERE id = ?`)
+    for (const r of rows) {
+      const tags = safeJsonArray(r.tags)
+      if (!tags.some((t) => drop.has(t))) continue
+      const next = tags.map((t) => (drop.has(t) ? to : t)).filter(Boolean)
+      stmt.run(JSON.stringify([...new Set(next)]), r.id)
+    }
+  }
+}
+
+/** 清掉没有任何条目（含暂存区）在用的 AI 待确认标签，别让否决过的词一直留在管理页 */
+function pruneOrphanAiTags(d: Database.Database): void {
+  const used = new Set<string>()
+  for (const table of ['software', 'pending_software']) {
+    for (const r of d.prepare(`SELECT tags FROM ${table}`).all() as Row[]) {
+      for (const t of safeJsonArray(r.tags)) used.add(t)
+    }
+  }
+  const stale = (d.prepare(`SELECT id, name FROM tags WHERE source = 'ai'`).all() as Row[]).filter(
+    (t) => !used.has(t.name as string)
+  )
+  const del = d.prepare('DELETE FROM tags WHERE id = ?')
+  for (const t of stale) del.run(t.id)
 }
 
 /* ------------------------------- 设置 ------------------------------- */
@@ -1066,12 +1653,17 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
   const tx = d.transaction(() => {
     d.prepare('DELETE FROM software').run()
     d.prepare('DELETE FROM scan_units').run()
+    d.prepare('DELETE FROM pending_software').run()
+    d.prepare('DELETE FROM skip_list').run()
+    // 没被认可过的 AI 标签跟着识别数据一起清；用户建的和确认过的是资产，留着
+    d.prepare(`DELETE FROM tags WHERE source = 'ai'`).run()
     if (mode === 'all') {
       // 识别日志只在恢复出厂时清。反复调 prompt 时要的正是「改之前那次是怎么判断的」，
       // 清空识别数据后还能拿旧日志对照，这是它最主要的用途
       d.prepare('DELETE FROM identify_logs').run()
       d.prepare('DELETE FROM settings').run()
       d.prepare('DELETE FROM categories').run()
+      d.prepare('DELETE FROM tags').run()
     }
   })
   tx()
