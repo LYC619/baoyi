@@ -6,7 +6,7 @@ import AppIcon from './AppIcon.vue'
 import MasteryDots from './MasteryDots.vue'
 import TagBadge from './TagBadge.vue'
 import { useSettingsStore } from '@/stores/settings'
-import { daysSince, displayName, formatRelative, subtitleName } from '@/utils'
+import { activityOf, daysSince, displayName, subtitleName } from '@/utils'
 
 const props = withDefaults(
   defineProps<{
@@ -26,7 +26,8 @@ const settings = useSettingsStore()
 const lang = computed(() => settings.settings.title_lang)
 const name = computed(() => displayName(props.item, lang.value))
 const subtitle = computed(() => subtitleName(props.item, lang.value))
-const isUnused = computed(() => daysSince(props.item.last_used_at) > props.unusedDays)
+const activity = computed(() => activityOf(props.item))
+const isUnused = computed(() => daysSince(activity.value.at) > props.unusedDays)
 const pending = computed(() => props.item.ai_status !== 'done')
 
 /* 单击进详情、双击启动：单击先延后，等确认没有第二下再走 */
@@ -92,8 +93,13 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
         </div>
         <div class="card__meta">
           <MasteryDots :level="item.mastery_level" :show-label="false" />
-          <span class="card__time" :class="{ 'card__time--warn': isUnused }">
-            {{ formatRelative(item.last_used_at) }}
+          <span
+            class="card__time"
+            :class="[`card__time--${activity.source}`, { 'card__time--warn': isUnused }]"
+            :title="activity.hint"
+          >
+            <i v-if="activity.source !== 'none'" class="card__dot" />
+            {{ activity.label }}
           </span>
         </div>
       </footer>
@@ -226,6 +232,9 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
 }
 
 .card__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: var(--fs-tag);
   color: var(--text-faint);
   white-space: nowrap;
@@ -233,6 +242,22 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
 
 .card__time--warn {
   color: var(--warning);
+}
+
+/*
+ * 时间是抱一记的还是从磁盘推的，差别不小 —— 实心点是抱一亲眼见过的启动，
+ * 空心点只是「目录里的配置文件那天被改过」。悬浮有完整说明。
+ */
+.card__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  flex: none;
+}
+
+.card__time--baoyi .card__dot {
+  background: currentColor;
 }
 
 .card__play {

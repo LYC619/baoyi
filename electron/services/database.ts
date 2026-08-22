@@ -3,6 +3,7 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { readExternalActiveAt } from './activity'
 import type {
   AgentEvent,
   AppSettings,
@@ -109,7 +110,10 @@ function initSchema(d: Database.Database): void {
 
       last_used_at INTEGER DEFAULT 0,
       use_count INTEGER DEFAULT 0,
-      is_archived INTEGER DEFAULT 0
+      is_archived INTEGER DEFAULT 0,
+
+      -- 软件目录里配置文件的最新 mtime，见 services/activity.ts
+      external_active_at INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS scan_units (
@@ -190,11 +194,27 @@ function migrate(d: Database.Database): void {
   )
   const added: Array<[string, string]> = [
     ['source_dir', `TEXT DEFAULT ''`],
-    ['launchers', `TEXT DEFAULT '[]'`]
+    ['launchers', `TEXT DEFAULT '[]'`],
+    ['external_active_at', 'INTEGER DEFAULT 0']
   ]
   for (const [name, decl] of added) {
     if (!existing.has(name)) d.exec(`ALTER TABLE software ADD COLUMN ${name} ${decl}`)
   }
+
+  // 刚补出来的 external_active_at 全是 0，等于让存量条目继续显示「从未使用」——
+  // 而那正是这个字段要治的毛病。补列的同一次启动就把它填上，只跑这一次。
+  if (!existing.has('external_active_at')) backfillExternalActive(d)
+}
+
+/** 逐条读磁盘补 external_active_at。软件条目是千级，一次几百毫秒，只在升级时发生 */
+function backfillExternalActive(d: Database.Database): void {
+  const rows = d.prepare('SELECT id, exe_path FROM software').all() as Row[]
+  if (rows.length === 0) return
+  const stmt = d.prepare('UPDATE software SET external_active_at = ? WHERE id = ?')
+  const tx = d.transaction(() => {
+    for (const r of rows) stmt.run(readExternalActiveAt(r.exe_path), r.id)
+  })
+  tx()
 }
 
 /* ------------------------------ 行 <-> 对象 ------------------------------ */
@@ -266,7 +286,8 @@ function rowToItem(row: Row): SoftwareItem {
     mastery_level: row.mastery_level ?? 'new',
     last_used_at: row.last_used_at ?? 0,
     use_count: row.use_count ?? 0,
-    is_archived: row.is_archived === 1
+    is_archived: row.is_archived === 1,
+    external_active_at: row.external_active_at ?? 0
   }
 }
 
@@ -276,7 +297,7 @@ const WRITABLE_COLUMNS = new Set([
   'source_dir', 'name_zh', 'name_en', 'summary', 'description', 'category', 'tags',
   'official_url', 'ai_status', 'launchers',
   'why_choose', 'use_cases', 'notes', 'alternatives', 'mastery_level',
-  'last_used_at', 'use_count', 'is_archived'
+  'last_used_at', 'use_count', 'is_archived', 'external_active_at'
 ])
 
 const JSON_COLUMNS = new Set(['tags', 'alternatives', 'launchers'])
@@ -293,6 +314,13 @@ function toColumnValue(key: string, value: unknown): string | number {
 
 /* -------------------------------- 查询 -------------------------------- */
 
+/**
+ * 「上次活跃」在 SQL 里的表达式：抱一记到的启动时间和外部活跃时间取晚的那个。
+ * 长期未用的判定和默认排序都走它 —— 只看 last_used_at 会把刚导入的整库
+ * 一律算成「从未使用」，那是抱一还没开始记账，不是用户真的没用过。
+ */
+const ACTIVE_AT = 'MAX(last_used_at, external_active_at)'
+
 export function listSoftware(query: SoftwareQuery = {}): SoftwareItem[] {
   const d = getDb()
   const where: string[] = []
@@ -306,8 +334,8 @@ export function listSoftware(query: SoftwareQuery = {}): SoftwareItem[] {
     if (group === 'unused') {
       const days = query.unused_days ?? 60
       params.cutoff = Date.now() - days * 86400_000
-      // 从未使用过的（last_used_at = 0）同样算长期未用
-      where.push('(last_used_at = 0 OR last_used_at < @cutoff)')
+      // 两边都读不到时间的（= 0）同样算长期未用
+      where.push(`${ACTIVE_AT} < @cutoff`)
     } else if (group === 'pending') {
       where.push(`ai_status IN ('pending', 'failed')`)
     }
@@ -342,7 +370,7 @@ export function listSoftware(query: SoftwareQuery = {}): SoftwareItem[] {
         ? 'use_count DESC, last_used_at DESC'
         : query.sort === 'added'
           ? 'created_at DESC'
-          : 'last_used_at DESC, created_at DESC'
+          : `${ACTIVE_AT} DESC, created_at DESC`
 
   const rows = d
     .prepare(`SELECT * FROM software WHERE ${where.join(' AND ')} ORDER BY ${order}`)
@@ -414,6 +442,8 @@ export interface RegisterFileFacts {
   company: string
   version: string
   file_size: number
+  /** 软件目录里配置文件的最新 mtime，见 services/activity.ts */
+  external_active_at: number
 }
 
 export interface RegisterOutcome {
@@ -461,6 +491,7 @@ export function registerSoftware(
          launchers = @launchers, source_dir = @source_dir,
          file_name = @file_name, file_description = @file_description,
          company = @company, version = @version, file_size = @file_size,
+         external_active_at = @external_active_at,
          ai_status = 'done', updated_at = @updated_at
        WHERE id = @id`
     ).run({ ...aiFields, ...facts, id: existing.id, updated_at: now })
@@ -472,11 +503,11 @@ export function registerSoftware(
     `INSERT INTO software
        (id, created_at, updated_at, exe_path, icon_path, file_name, file_description,
         company, version, file_size, source_dir, name_zh, name_en, summary, description,
-        category, tags, official_url, ai_status, launchers)
+        category, tags, official_url, ai_status, launchers, external_active_at)
      VALUES
        (@id, @created_at, @updated_at, @exe_path, '', @file_name, @file_description,
         @company, @version, @file_size, @source_dir, @name_zh, @name_en, @summary, @description,
-        @category, @tags, @official_url, 'done', @launchers)`
+        @category, @tags, @official_url, 'done', @launchers, @external_active_at)`
   ).run({ ...aiFields, ...facts, id, created_at: now, updated_at: now, exe_path: primary.path })
 
   return { id, created: true, exe_path: primary.path }
@@ -749,10 +780,12 @@ export function insertScanned(files: ScannedFile[]): SoftwareItem[] {
   const stmt = d.prepare(`
     INSERT OR IGNORE INTO software
       (id, created_at, updated_at, exe_path, icon_path, file_name,
-       file_description, company, version, file_size, name_zh, ai_status, source_dir, launchers)
+       file_description, company, version, file_size, name_zh, ai_status, source_dir, launchers,
+       external_active_at)
     VALUES
       (@id, @created_at, @updated_at, @exe_path, '', @file_name,
-       @file_description, @company, @version, @file_size, @name_zh, 'pending', @source_dir, @launchers)
+       @file_description, @company, @version, @file_size, @name_zh, 'pending', @source_dir, @launchers,
+       @external_active_at)
   `)
 
   const inserted: string[] = []
@@ -770,6 +803,7 @@ export function insertScanned(files: ScannedFile[]): SoftwareItem[] {
         version: f.version,
         file_size: f.file_size,
         source_dir: path.dirname(f.exe_path),
+        external_active_at: readExternalActiveAt(f.exe_path),
         launchers: JSON.stringify([
           { path: f.exe_path, label: '默认', kind: 'main', is_default: true }
         ]),
@@ -843,7 +877,7 @@ export function counts(unusedDays: number): SidebarCounts {
     all: one('SELECT COUNT(*) AS n FROM software WHERE is_archived = 0'),
     archived: one('SELECT COUNT(*) AS n FROM software WHERE is_archived = 1'),
     unused: one(
-      'SELECT COUNT(*) AS n FROM software WHERE is_archived = 0 AND (last_used_at = 0 OR last_used_at < ?)',
+      `SELECT COUNT(*) AS n FROM software WHERE is_archived = 0 AND ${ACTIVE_AT} < ?`,
       cutoff
     ),
     pending: pendingItems,

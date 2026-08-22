@@ -23,7 +23,8 @@ import {
   looksBinary,
   readTextFile
 } from '../electron/services/agent/files.ts'
-import { displayName, groupRounds, subtitleName } from '../src/utils/index.ts'
+import { readExternalActiveAt } from '../electron/services/activity.ts'
+import { activityOf, displayName, groupRounds, subtitleName } from '../src/utils/index.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -471,8 +472,72 @@ async function main(): Promise<void> {
     db.close()
   })
 
-  /* --------------------------- 卡片标题 --------------------------- */
+  /* --------------------------- 外部活跃时间 --------------------------- */
 
+  console.log('\n外部活跃时间')
+
+  const act = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-act-'))
+  const exe = path.join(act, 'Tool.exe')
+  const long = Date.now() - 400 * 86_400_000
+  const recent = Date.now() - 3 * 86_400_000
+
+  await check('配置文件被改过时，取配置的时间而不是 exe 的', async () => {
+    await fsp.writeFile(exe, 'MZ')
+    await fsp.utimes(exe, new Date(long), new Date(long))
+    const cfg = path.join(act, 'Tool.ini')
+    await fsp.writeFile(cfg, '[main]')
+    await fsp.utimes(cfg, new Date(recent), new Date(recent))
+
+    const at = readExternalActiveAt(exe)
+    assert.ok(
+      Math.abs(at - recent) < 2000,
+      `应当取 Tool.ini 的 mtime，实际 ${new Date(at).toISOString()}`
+    )
+  })
+
+  await check('没有配置文件时退回 exe 自己的 mtime', async () => {
+    const bare = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-act-bare-'))
+    const only = path.join(bare, 'Solo.exe')
+    await fsp.writeFile(only, 'MZ')
+    await fsp.utimes(only, new Date(long), new Date(long))
+    assert.ok(Math.abs(readExternalActiveAt(only) - long) < 2000)
+    fs.rmSync(bare, { recursive: true, force: true })
+  })
+
+  await check('落在未来的 mtime 不采信 —— 否则「长期未用」永远筛不到它', async () => {
+    const weird = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-act-future-'))
+    const f = path.join(weird, 'Future.exe')
+    const ahead = Date.now() + 365 * 86_400_000
+    await fsp.writeFile(f, 'MZ')
+    await fsp.utimes(f, new Date(ahead), new Date(ahead))
+    assert.equal(readExternalActiveAt(f), 0)
+    fs.rmSync(weird, { recursive: true, force: true })
+  })
+
+  await check('读不到的路径返回 0，而不是抛出来打断注册', () => {
+    assert.equal(readExternalActiveAt(path.join(act, '并不存在', 'x.exe')), 0)
+  })
+
+  fs.rmSync(act, { recursive: true, force: true })
+
+  await check('上次活跃优先信抱一自己的记录，其次才是磁盘推算', () => {
+    const base = { last_used_at: 0, external_active_at: 0 } as any
+
+    const launched = activityOf({ ...base, last_used_at: recent, external_active_at: long })
+    assert.equal(launched.source, 'baoyi')
+    assert.equal(launched.at, recent, '抱一记到过启动就不该再看磁盘')
+
+    const external = activityOf({ ...base, external_active_at: recent })
+    assert.equal(external.source, 'external')
+    assert.equal(external.at, recent)
+    assert.notEqual(external.label, '从未使用', '有活跃痕迹就不该再说「从未使用」')
+
+    const never = activityOf(base)
+    assert.equal(never.source, 'none')
+    assert.equal(never.label, '从未使用')
+  })
+
+  /* --------------------------- 卡片标题 --------------------------- */
   console.log('\n卡片标题')
 
   const procmon = {

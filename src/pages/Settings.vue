@@ -679,7 +679,10 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
           <section class="panel">
             <h2 class="sec-head">精简提醒</h2>
             <p class="sec-desc">
-              超过设定天数没有启动过的软件，会被归入「长期未用」，辅助你审视是否还需要它。
+              超过设定天数没有动静的软件会被归入「长期未用」，辅助你审视是否还需要它。
+              判定不只看你通过抱一启动的记录 —— 抱一还会读软件目录里配置文件的最后修改时间，
+              所以刚导入的库不会整片显示成「从未使用」。卡片上实心点是抱一记到的启动，
+              空心点是这种从磁盘推出来的近似时间。
             </p>
             <div class="row">
               <input

@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { Launcher, RegisterPayload, SearchConfig } from '../../../src/types'
+import { readExternalActiveAt } from '../activity'
 import { extractIcon } from '../iconExtractor'
 import { readPeArch, readPeInfo } from '../peReader'
 import { formatHits, search } from '../searchService'
@@ -152,6 +153,7 @@ function fileFacts(exePath: string): RegisterFileFacts & { arch: string } {
     company: pe.company,
     version: pe.version,
     file_size: size,
+    external_active_at: readExternalActiveAt(exePath),
     arch: readPeArch(exePath)
   }
 }

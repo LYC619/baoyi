@@ -19,7 +19,7 @@ import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSoftwareStore } from '@/stores/software'
 import type { MasteryLevel, SoftwareItem } from '@/types'
-import { MASTERY_META, MASTERY_ORDER, displayName, formatBytes, formatDate, formatRelative } from '@/utils'
+import { MASTERY_META, MASTERY_ORDER, activityOf, displayName, formatBytes, formatDate } from '@/utils'
 
 const props = defineProps<{ id: string }>()
 
@@ -42,6 +42,13 @@ onMounted(load)
 watch(() => props.id, load)
 
 const name = computed(() => (item.value ? displayName(item.value) : ''))
+
+/** 上次活跃：抱一记的启动时间，或退回从软件目录推出来的外部活跃时间 */
+const activity = computed(() =>
+  item.value
+    ? activityOf(item.value)
+    : ({ at: 0, source: 'none', label: '—', hint: '' } as ReturnType<typeof activityOf>)
+)
 
 /** 分类下拉里要能显示 AI 给出的、但用户分类表里还没有的分类名 */
 const categoryOptions = computed(() => {
@@ -322,7 +329,12 @@ function copyPath(target: string): void {
             <h2 class="sec-title">使用统计</h2>
             <dl class="kv">
               <dt>上次使用</dt>
-              <dd>{{ formatRelative(item.last_used_at) }}</dd>
+              <dd :title="activity.hint">
+                {{ activity.label }}
+                <span class="src" :class="`src--${activity.source}`">
+                  {{ { baoyi: '由抱一启动', external: '外部活跃', none: '' }[activity.source] }}
+                </span>
+              </dd>
               <dt>启动次数</dt>
               <dd>{{ item.use_count }}</dd>
               <dt>收录于</dt>
@@ -335,6 +347,10 @@ function copyPath(target: string): void {
                 />
               </dd>
             </dl>
+            <p v-if="activity.source === 'external'" class="sec-note sec-note--foot">
+              抱一还没记到过你启动它。这个时间来自软件目录里配置文件的最后修改时间 ——
+              是个近似值，只用来区分「装了没碰过」和「最近还在用」。
+            </p>
           </section>
 
           <section class="panel">
@@ -637,6 +653,23 @@ function copyPath(target: string): void {
   line-height: 1.7;
   color: var(--text-faint);
   margin: -4px 0 10px;
+}
+
+/* 同一段说明放在区块末尾时，上下留白要反过来 */
+.sec-note--foot {
+  margin: 10px 0 0;
+}
+
+/* 时间是抱一亲眼见过的启动，还是从磁盘 mtime 推出来的 */
+.src {
+  margin-left: 6px;
+  font-size: 11px;
+}
+.src--baoyi {
+  color: var(--success);
+}
+.src--external {
+  color: var(--text-faint);
 }
 
 .launchers {

@@ -66,6 +66,52 @@ export function daysSince(ts: number): number {
   return Math.floor((Date.now() - ts) / DAY)
 }
 
+/** 这条「上次活跃」是抱一自己记的，还是从磁盘上推出来的 */
+export type ActivitySource = 'baoyi' | 'external' | 'none'
+
+export interface Activity {
+  /** 用于「长期未用」判定的时间戳，0 表示读不出来 */
+  at: number
+  source: ActivitySource
+  /** 卡片和详情页上那行字 */
+  label: string
+  /** 悬浮说明，讲清这个时间是哪来的 */
+  hint: string
+}
+
+/**
+ * 一个条目的「上次活跃」。
+ *
+ * 抱一启动过的以自己的记录为准；没启动过的退回外部活跃时间 —— 软件目录里
+ * 配置文件的最新修改时间。两者都没有，才是真的「从未使用」。
+ * 只看 last_used_at 会让刚导入的整个库都显示「从未使用」，那说的是抱一自己
+ * 还没开始记账，不是用户没用过。
+ */
+export function activityOf(item: SoftwareItem): Activity {
+  if (item.last_used_at > 0) {
+    return {
+      at: item.last_used_at,
+      source: 'baoyi',
+      label: formatRelative(item.last_used_at),
+      hint: `由抱一启动 · ${formatDate(item.last_used_at)}`
+    }
+  }
+  if (item.external_active_at > 0) {
+    return {
+      at: item.external_active_at,
+      source: 'external',
+      label: formatRelative(item.external_active_at),
+      hint: `外部活跃 · ${formatDate(item.external_active_at)}（依据软件目录里配置文件的最后修改时间，未经抱一启动）`
+    }
+  }
+  return {
+    at: 0,
+    source: 'none',
+    label: '从未使用',
+    hint: '抱一没记到过启动，目录里也读不出活跃痕迹'
+  }
+}
+
 export const MASTERY_META: Record<MasteryLevel, { label: string; dots: number }> = {
   proficient: { label: '熟练', dots: 3 },
   familiar: { label: '会用', dots: 2 },

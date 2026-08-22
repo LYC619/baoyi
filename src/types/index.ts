@@ -59,9 +59,15 @@ export interface SoftwareItem {
   mastery_level: MasteryLevel
 
   // 使用统计
+  /** 用户通过抱一启动的时间。0 = 抱一没记到过 */
   last_used_at: number
   use_count: number
   is_archived: boolean
+  /**
+   * 外部活跃时间：软件目录里配置文件的最新 mtime（读不到配置时退回 exe 的 mtime）。
+   * 用来回答「抱一之前你有没有在用它」，见 electron/services/activity.ts。
+   */
+  external_active_at: number
 }
 
 /** 新增软件时的最小信息（扫描结果） */

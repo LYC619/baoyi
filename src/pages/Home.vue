@@ -234,7 +234,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
         <Timer :size="15" />
         <span>
           以下 {{ store.items.length }} 个软件超过 {{ settings.settings.unused_days }}
-          天没有启动过。留不留，值得再看一眼。
+          天没有动静了 —— 抱一没记到启动，它们目录里的配置文件也没被改过。留不留，值得再看一眼。
         </span>
       </div>
 
