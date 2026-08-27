@@ -9,8 +9,11 @@ import {
   Database,
   Download,
   Eraser,
+  Eye,
+  EyeOff,
   FolderOpen,
   FolderPlus,
+  FolderTree,
   Github,
   Globe,
   Info,
@@ -18,7 +21,9 @@ import {
   Merge,
   Moon,
   Palette,
+  Pencil,
   Plus,
+  RefreshCw,
   RotateCcw,
   ScrollText,
   Sun,
@@ -26,17 +31,31 @@ import {
   Telescope,
   Trash2
 } from 'lucide-vue-next'
-import BaoyiLogo from '@/components/BaoyiLogo.vue'
-import IdentifyLog from '@/components/IdentifyLog.vue'
-import TagBadge from '@/components/TagBadge.vue'
+import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
+import IdentifyLog from '@/components/identify/IdentifyLog.vue'
+import ReportDialog from '@/components/identify/ReportDialog.vue'
+import TagBadge from '@/components/ui/TagBadge.vue'
 import { useAI } from '@/composables/useAI'
 import { useScan } from '@/composables/useScan'
 import { useToast } from '@/composables/useToast'
-import { useCategoriesStore } from '@/stores/categories'
+import { ICON_NAMES, useCategoriesStore } from '@/stores/categories'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
-import { formatBytes } from '@/utils'
-import type { AppInfo, Category, DataStats, ScanUnit, SearchProvider, Tag, TitleLang } from '@/types'
+import { formatBytes, searchCalls } from '@/utils'
+import type {
+  AIConfig,
+  AIProfile,
+  AppInfo,
+  Category,
+  DataStats,
+  IdentifyReport,
+  OrganizePlan,
+  ScanUnit,
+  SearchCallRecord,
+  SearchProvider,
+  Tag,
+  TitleLang
+} from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,6 +70,7 @@ const ai = useAI()
 
 const TABS = [
   { id: 'scan', label: '扫描与识别', icon: Telescope },
+  { id: 'organize', label: '目录整理', icon: FolderTree },
   { id: 'ai', label: 'AI 配置', icon: Bot },
   { id: 'search', label: '搜索服务', icon: Globe },
   { id: 'appearance', label: '外观', icon: Palette },
@@ -100,31 +120,161 @@ const unusedDays = ref(settings.settings.unused_days)
 
 const testing = ref(false)
 const testResult = ref<{ ok: boolean; message: string } | null>(null)
+/**
+ * 让 Key 明文可见。
+ *
+ * 不只是「方便核对」：Chromium 的 type=password 在 Windows 中文输入法下会吞掉
+ * 候选框，粘贴之外的输入看着像卡死（用户报过一次「删掉 Key 之后就打不进字了」）。
+ * 留一个出口，遇上就点开它。
+ */
+const keyVisible = ref(false)
+
+/** 当前表单凑成的一份配置，测试、拉模型、存 profile 都用它 */
+function currentAiConfig(): AIConfig {
+  return {
+    api_url: apiUrl.value.trim(),
+    api_key: apiKey.value.trim(),
+    model: model.value.trim(),
+    enabled: enabled.value
+  }
+}
 
 async function saveAi(): Promise<void> {
-  await settings.patch({
-    ai: {
-      api_url: apiUrl.value.trim(),
-      api_key: apiKey.value.trim(),
-      model: model.value.trim(),
-      enabled: enabled.value
-    }
-  })
-  success('AI 配置已保存')
+  const ai = currentAiConfig()
+  // 选中某套配置时，保存同时更新那一套 —— 否则改完再切走一趟就白改了
+  const profiles = settings.settings.ai_profiles.map((p) =>
+    p.id === settings.settings.ai_profile_id ? { ...p, ...ai } : p
+  )
+  await settings.patch({ ai, ai_profiles: profiles })
+  success(activeProfile.value ? `已保存到「${activeProfile.value.name}」` : 'AI 配置已保存')
 }
 
 async function testConnection(): Promise<void> {
   testing.value = true
   testResult.value = null
   try {
-    testResult.value = await window.baoyi.ai.test({
-      api_url: apiUrl.value.trim(),
-      api_key: apiKey.value.trim(),
-      model: model.value.trim(),
-      enabled: true
-    })
+    testResult.value = await window.baoyi.ai.test({ ...currentAiConfig(), enabled: true })
   } finally {
     testing.value = false
+  }
+}
+
+/* --------------------------- 接口配置的存与切 --------------------------- */
+
+const profiles = computed(() => settings.settings.ai_profiles)
+const activeProfile = computed(
+  () => profiles.value.find((p) => p.id === settings.settings.ai_profile_id) ?? null
+)
+
+/** 表单和选中的那套是否已经不一致 —— 用来提示「记得保存」 */
+const aiDirty = computed(() => {
+  const p = activeProfile.value
+  if (!p) return false
+  const c = currentAiConfig()
+  return p.api_url !== c.api_url || p.api_key !== c.api_key || p.model !== c.model
+})
+
+function fillForm(cfg: AIConfig): void {
+  apiUrl.value = cfg.api_url
+  apiKey.value = cfg.api_key
+  model.value = cfg.model
+  enabled.value = cfg.enabled
+}
+
+/** 换一套配置：铺回表单，同时落到 settings.ai —— 主进程读的就是那里 */
+async function switchProfile(id: string): Promise<void> {
+  const p = profiles.value.find((x) => x.id === id)
+  if (!p) return
+  const { id: _id, name, ...cfg } = p
+  fillForm(cfg)
+  profileName.value = name
+  await settings.patch({ ai: cfg, ai_profile_id: id })
+  testResult.value = null
+  modelList.value = []
+  success(`已切换到「${p.name}」`)
+}
+
+/**
+ * 配置名单独一个输入框，不走 window.prompt —— Electron 里 prompt 是空实现，
+ * 点了什么都不会发生，看起来就跟按钮坏了一样。
+ */
+const profileName = ref(activeProfile.value?.name ?? '')
+
+/** 名字空着时拿域名兜一个，省得每次都要自己想 */
+const namePlaceholder = computed(() => {
+  try {
+    return new URL(apiUrl.value.trim()).hostname.replace(/^api\./, '') || '配置名'
+  } catch {
+    return '配置名'
+  }
+})
+
+const canRename = computed(
+  () => !!activeProfile.value && !!profileName.value.trim() && profileName.value.trim() !== activeProfile.value.name
+)
+
+async function addProfile(): Promise<void> {
+  const name = profileName.value.trim() || namePlaceholder.value
+  if (name === '配置名') {
+    error('先给这套配置起个名字')
+    return
+  }
+  // ponytail: 时间戳做 id 就够 —— 存一套要点一次按钮，人手点不出同毫秒的两条。
+  // 不用 crypto.randomUUID()：打包后渲染进程跑在 file:// 下，它算不算安全上下文
+  // 随 Chromium 版本变，缺了就是静默炸在生产环境，而这里根本不需要那种强度。
+  const profile: AIProfile = { id: `p${Date.now().toString(36)}`, name, ...currentAiConfig() }
+  profileName.value = name
+  await settings.patch({
+    ai: currentAiConfig(),
+    ai_profiles: [...profiles.value, profile],
+    ai_profile_id: profile.id
+  })
+  success(`已存为「${name}」`)
+}
+
+async function renameProfile(): Promise<void> {
+  const p = activeProfile.value
+  if (!p || !canRename.value) return
+  const name = profileName.value.trim()
+  await settings.patch({
+    ai_profiles: profiles.value.map((x) => (x.id === p.id ? { ...x, name } : x))
+  })
+  success(`已改名为「${name}」`)
+}
+
+/**
+ * 删掉当前这套。只从列表里摘掉，**不动** settings.ai ——
+ * 删配置不该顺手把正在用的接口也拔了，识别会立刻开始报 401。
+ */
+async function removeProfile(): Promise<void> {
+  const p = activeProfile.value
+  if (!p) return
+  // confirm 在 Electron 里是能用的（prompt 才是空实现），删除这种不可逆操作值得拦一道
+  if (!window.confirm(`删除配置「${p.name}」？\n\n当前填在表单里的接口不会被清掉。`)) return
+  await settings.patch({
+    ai_profiles: profiles.value.filter((x) => x.id !== p.id),
+    ai_profile_id: ''
+  })
+  // 名字框留着已删掉的名字会让人以为没删干净
+  profileName.value = ''
+  success(`已删除「${p.name}」`)
+}
+
+/* ------------------------------ 模型列表 ------------------------------ */
+
+const modelList = ref<string[]>([])
+const modelsLoading = ref(false)
+
+async function loadModels(): Promise<void> {
+  modelsLoading.value = true
+  try {
+    const r = await window.baoyi.ai.models(currentAiConfig())
+    modelList.value = r.models
+    // 失败原因得说出来：中转站不实现 /models 是常事，静默清空只会让人以为 Key 废了
+    if (!r.ok) error(r.message)
+    else if (!r.models.includes(model.value.trim())) toast(`${r.message}，点开模型框挑一个`)
+  } finally {
+    modelsLoading.value = false
   }
 }
 
@@ -169,6 +319,8 @@ const searchEndpoint = ref(settings.settings.search.endpoint)
 const searchEnabled = ref(settings.settings.search.enabled)
 const searchTesting = ref(false)
 const searchResult = ref<{ ok: boolean; message: string } | null>(null)
+const searchLogOpen = ref(false)
+const searchLog = ref<SearchCallRecord[]>([])
 
 const providerHint = computed(
   () => PROVIDERS.find((p) => p.value === searchProvider.value)?.hint ?? ''
@@ -180,18 +332,63 @@ const needsEndpoint = computed(
   () => searchProvider.value === 'searxng' || searchProvider.value === 'bing'
 )
 
+/** 一份搜索配置够不够真的发出一次搜索（不看 enabled）。和主进程 searchAvailable 同一条判据 */
+function usable(cfg: { provider: SearchProvider; api_key: string; endpoint: string }): boolean {
+  if (cfg.provider === 'model_builtin') return false
+  if (cfg.provider === 'searxng') return cfg.endpoint.trim().length > 0
+  return cfg.api_key.trim().length > 0
+}
+
+const searchUsable = computed(() =>
+  usable({
+    provider: searchProvider.value,
+    api_key: searchKey.value,
+    endpoint: searchEndpoint.value
+  })
+)
+
+const switchHint = computed(() => {
+  if (searchProvider.value === 'model_builtin') return '当前服务商本来就不联网，无需开关'
+  if (searchUsable.value) return ''
+  return searchProvider.value === 'searxng' ? '请先填入实例地址' : '请先填入 API Key'
+})
+
 function currentSearchConfig() {
   return {
     provider: searchProvider.value,
     api_key: searchKey.value.trim(),
     endpoint: searchEndpoint.value.trim(),
-    enabled: searchEnabled.value
+    // 配置不完整时不许它是开着的：开着但没 Key，agent 那边照样拿不到工具，
+    // 而用户看着开关是开的，只会以为搜索在工作
+    enabled: searchEnabled.value && searchUsable.value
   }
 }
 
+/**
+ * 保存搜索配置。
+ *
+ * 从「配置不全」变成「配置齐了」时顺手把开关打开 —— 0.4 之前这两件事是分开的，
+ * 于是出现过「Key 填了、开关没开」这种状态：主进程照 enabled 判断，不注册
+ * web_search 工具，而提示词还在教模型去搜，白烧轮数，冷门软件（cc-gui、Kelivo）
+ * 直接认不出来。用户填 Key 的意图就是要用搜索，没有第二种解释。
+ *
+ * 只在这个**跨越**上自动开，不是「只要 Key 有效就开」—— 后者会把用户刚刚
+ * 主动关掉的开关又扳回去（开关本身是即时落盘的，见 toggleSearch）。
+ */
 async function saveSearch(): Promise<void> {
+  const autoOn = !usable(settings.settings.search) && searchUsable.value && !searchEnabled.value
+  if (autoOn) searchEnabled.value = true
   await settings.patch({ search: currentSearchConfig() })
-  success('搜索配置已保存')
+  success(autoOn ? '搜索配置已保存，并已自动启用' : '搜索配置已保存')
+}
+
+/** 开关自己改动时也要落盘，否则关掉之后不重启就还是开着的 */
+async function toggleSearch(): Promise<void> {
+  if (!searchUsable.value) {
+    searchEnabled.value = false
+    return
+  }
+  await settings.patch({ search: currentSearchConfig() })
 }
 
 async function testSearchConn(): Promise<void> {
@@ -202,6 +399,35 @@ async function testSearchConn(): Promise<void> {
   } finally {
     searchTesting.value = false
   }
+}
+
+/**
+ * 最近的搜索调用记录。从识别日志的 web_search 事件里现取，不新建表 ——
+ * 每一次搜索本来就完整记在那里了，再存一份就有两个会不一致的真相。
+ */
+async function loadSearchLog(): Promise<void> {
+  searchLog.value = searchCalls(await window.baoyi.logs.list({ limit: 100 }))
+}
+
+function toggleSearchLog(): void {
+  searchLogOpen.value = !searchLogOpen.value
+  if (searchLogOpen.value) void loadSearchLog()
+}
+
+const SEARCH_STATUS_META: Record<
+  SearchCallRecord['status'],
+  { label: string; tone: 'success' | 'warning' | 'muted' }
+> = {
+  ok: { label: '成功', tone: 'success' },
+  empty: { label: '无结果', tone: 'muted' },
+  timeout: { label: '超时', tone: 'warning' },
+  failed: { label: '失败', tone: 'warning' }
+}
+
+function callTime(ts: number): string {
+  const d = new Date(ts)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 /* ---------------------------- 扫描与识别 ---------------------------- */
@@ -280,6 +506,10 @@ async function runScan(): Promise<void> {
     parts.push('没有需要识别的目录')
   }
   if (r.settled > 0) parts.push(`${r.settled} 个已识别过，跳过`)
+  // 散落文件只提一句：它们还不是「装好的软件」，识别它们没有意义，但用户该知道有这回事
+  if (r.loose_files.length > 0) {
+    parts.push(`另有 ${r.loose_files.length} 个未整理的散落文件（安装包或压缩包），本次未处理`)
+  }
   success(`扫描完成：${parts.join('，')}`)
 }
 
@@ -302,7 +532,20 @@ async function runAi(): Promise<void> {
       (result.failed > 0 ? `，${result.failed} 个目录失败` : '') +
       `，消耗 ${result.tokens.toLocaleString()} tokens`
   )
-  if (result.registered > 0) void router.push({ name: 'confirm' })
+  if (result.registered > 0) {
+    void router.push({ name: 'confirm' })
+    return
+  }
+  // 一个都没认出来 —— 这时候用户最需要的正是「为什么」，直接把报告推到面前。
+  // 认出来了就先去确认，报告随时能在识别日志页翻到
+  if (result.report_id) await showReport(result.report_id)
+}
+
+/** 汇总报告弹窗。识别日志页顶部也有一份历史列表，两处用的是同一个组件 */
+const runReport = ref<IdentifyReport | null>(null)
+
+async function showReport(id: string): Promise<void> {
+  runReport.value = (await window.baoyi.logs.reports()).find((r) => r.id === id) ?? null
 }
 
 /* -------------------------------- 外观 -------------------------------- */
@@ -447,8 +690,66 @@ async function doMerge(): Promise<void> {
   success(`已并入「${target}」`)
 }
 
-/* ------------------------------ 忽略名单 ------------------------------ */
+/* ------------------------------ 目录整理 ------------------------------ */
 
+const organizeRoot = computed(() => settings.settings.organize_root)
+const plans = ref<OrganizePlan[]>([])
+const openPlan = ref('')
+const undoing = ref('')
+
+async function loadPlans(): Promise<void> {
+  plans.value = await window.baoyi.organize.plans()
+}
+
+onMounted(loadPlans)
+
+async function pickOrganizeRoot(): Promise<void> {
+  const dir = await window.baoyi.organize.pickRoot()
+  if (!dir) return
+  // 整理目标不该同时是扫描目录：搬进去的软件会在下一轮重扫时又被发现一遍
+  if (dirs.value.some((d) => dir.toLowerCase().startsWith(d.toLowerCase()))) {
+    toast('这个目录在扫描范围里，整理进去的软件下次扫描会被重复发现。建议换一个')
+  }
+  await settings.patch({ organize_root: dir })
+  success('整理目标目录已保存')
+}
+
+async function clearOrganizeRoot(): Promise<void> {
+  await settings.patch({ organize_root: '' })
+}
+
+/** 一条整理记录里成功了几步 —— 列表上直接显示它，比总步数有意义 */
+function planTally(p: OrganizePlan) {
+  return {
+    moved: p.steps.filter((s) => s.ok && s.type === 'move').length,
+    linked: p.steps.filter((s) => s.ok && s.type === 'junction').length,
+    failed: p.steps.filter((s) => !s.ok).length
+  }
+}
+
+async function undoPlan(p: OrganizePlan): Promise<void> {
+  const t = planTally(p)
+  const ok = window.confirm(
+    `撤销这次整理？\n\n移动过的 ${t.moved} 个文件夹会搬回原来的位置，` +
+      `建立的 ${t.linked} 个链接会被删除（不影响真实文件）。\n\n确认继续？`
+  )
+  if (!ok) return
+
+  undoing.value = p.id
+  try {
+    const r = await window.baoyi.organize.undo(p.id)
+    await Promise.all([loadPlans(), store.reload()])
+    if (r.failed > 0) {
+      error(`撤销完成 ${r.restored} 条，${r.failed} 条失败：${r.notes.slice(0, 2).join('；')}`)
+      return
+    }
+    success(`已还原 ${r.restored} 条`)
+  } finally {
+    undoing.value = ''
+  }
+}
+
+/* ------------------------------ 忽略名单 ------------------------------ */
 const skippedCount = ref(0)
 
 async function loadSkipped(): Promise<void> {
@@ -503,8 +804,8 @@ async function exportMarkdown(): Promise<void> {
 async function reset(mode: 'library' | 'all'): Promise<void> {
   const warning =
     mode === 'library'
-      ? `清空所有软件条目、待识别目录和图标缓存，重新开始识别。\n\n保留：API Key、搜索配置、扫描目录、自定义分类、识别日志。\n不会删除磁盘上的任何实际软件文件。\n\n确认继续？`
-      : `恢复出厂：连 API Key、搜索配置、扫描目录、自定义分类、识别日志一起清空，并重新走一遍引导流程。\n\n不会删除磁盘上的任何实际软件文件。\n\n确认继续？`
+      ? `清空所有软件条目、待识别目录、整理记录和图标缓存，重新开始识别。\n\n保留：API Key、搜索配置、扫描目录、自定义分类、识别日志。\n不会删除磁盘上的任何实际软件文件 —— 但已经整理过的文件夹会留在整理后的位置，整理记录清掉之后就无法再自动撤销了。\n\n确认继续？`
+      : `恢复出厂：连 API Key、搜索配置、扫描目录、自定义分类、识别日志、整理记录一起清空，并重新走一遍引导流程。\n\n不会删除磁盘上的任何实际软件文件，但整理记录清掉之后就无法再自动撤销整理了。\n\n确认继续？`
   if (!window.confirm(warning)) return
 
   resetting.value = true
@@ -520,10 +821,8 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
     }
 
     // 设置页里那几个 ref 是进页面时快照的，重置后要跟着回到当前值
-    apiUrl.value = settings.settings.ai.api_url
-    apiKey.value = settings.settings.ai.api_key
-    model.value = settings.settings.ai.model
-    enabled.value = settings.settings.ai.enabled
+    fillForm(settings.settings.ai)
+    profileName.value = activeProfile.value?.name ?? ''
     testResult.value = null
     searchResult.value = null
 
@@ -687,6 +986,108 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
           </section>
         </template>
 
+        <!-- --------------------------- 目录整理 --------------------------- -->
+        <template v-else-if="tab === 'organize'">
+          <section class="panel">
+            <div class="sec-head">
+              <h2>整理目标目录</h2>
+              <button class="btn btn--ghost" @click="pickOrganizeRoot">
+                <FolderPlus :size="14" />
+                {{ organizeRoot ? '换一个' : '选择目录' }}
+              </button>
+            </div>
+            <p class="sec-desc">
+              抱一会把软件按分类归置到这个目录下，比如
+              <span class="mono">E:\Toolkit\逆向分析\x64dbg\</span>。
+              它和扫描目录是<b>分开的</b> —— 扫描是「去哪里找」，这里是「归到哪里去」，
+              把整理目标也加进扫描列表只会让下一轮重扫把搬进来的软件再发现一遍。
+            </p>
+
+            <div v-if="organizeRoot" class="datadir">
+              <span class="datadir__label">目标位置</span>
+              <span class="datadir__path mono truncate" :title="organizeRoot">{{ organizeRoot }}</span>
+              <button class="btn btn--subtle" title="清除" @click="clearOrganizeRoot">
+                <Trash2 :size="14" />
+              </button>
+            </div>
+            <p v-else class="empty-line">还没有设置，整理功能需要先指定一个目标目录。</p>
+
+            <div class="row">
+              <button
+                class="btn btn--primary"
+                :disabled="!organizeRoot"
+                @click="router.push({ name: 'organize' })"
+              >
+                <FolderTree :size="14" />
+                开始整理
+              </button>
+              <span class="hint">会先出一份方案给你逐条过目，不会直接动文件</span>
+            </div>
+
+            <p class="sec-desc sec-desc--foot">
+              绿色软件会被<b>剪切</b>到目标目录并把文件夹名规范成英文正式名。
+              安装版默认只在目标目录里放一个 junction 链接指向原安装位置 ——
+              装过的软件在注册表里留着固定路径，搬走就坏了。
+              识别时判定为「可安全移动」的安装版也会剪切，但执行前会再查一遍注册表引用，
+              发现问题会在方案里标出来由你决定。
+            </p>
+          </section>
+
+          <section class="panel">
+            <div class="sec-head">
+              <h2>整理历史</h2>
+              <span class="hint">{{ plans.length }} 次</span>
+            </div>
+            <p class="sec-desc">
+              每次整理都完整记下动过哪些目录，所以任何一次都能原路撤回。
+              想撤就趁记录还在 —— 它会跟着「清空识别数据」一起清掉。
+            </p>
+
+            <ul v-if="plans.length" class="plans">
+              <li v-for="p in plans" :key="p.id">
+                <div class="plans__line">
+                  <button
+                    class="plans__toggle"
+                    @click="openPlan = openPlan === p.id ? '' : p.id"
+                  >
+                    <ChevronDown :size="13" :class="['chev', { 'chev--open': openPlan === p.id }]" />
+                    <span>{{ new Date(p.created_at).toLocaleString('sv') }}</span>
+                  </button>
+                  <span class="plans__sum">
+                    移动 {{ planTally(p).moved }}　链接 {{ planTally(p).linked }}
+                    <span v-if="planTally(p).failed > 0" class="bad">
+                      　失败 {{ planTally(p).failed }}
+                    </span>
+                  </span>
+                  <TagBadge v-if="p.undone_at > 0" label="已撤销" tone="muted" />
+                  <button
+                    v-else
+                    class="btn btn--subtle"
+                    :disabled="undoing === p.id"
+                    @click="undoPlan(p)"
+                  >
+                    <Loader2 v-if="undoing === p.id" :size="13" class="spin" />
+                    <RotateCcw v-else :size="13" />
+                    撤销
+                  </button>
+                </div>
+
+                <ul v-if="openPlan === p.id" class="steps">
+                  <li v-for="(s, i) in p.steps" :key="i" :class="{ bad: !s.ok }">
+                    <span class="steps__type">{{ s.type === 'move' ? '移动' : '链接' }}</span>
+                    <span class="steps__name truncate" :title="s.name">{{ s.name }}</span>
+                    <span class="steps__path mono truncate" :title="`${s.from} → ${s.to}`">
+                      {{ s.from }} → {{ s.to }}
+                    </span>
+                    <span v-if="s.note" class="steps__note">{{ s.note }}</span>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+            <p v-else class="empty-line">还没有整理过。</p>
+          </section>
+        </template>
+
         <!-- --------------------------- AI 配置 --------------------------- -->
         <template v-else-if="tab === 'ai'">
           <section class="panel">
@@ -698,18 +1099,105 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               </label>
             </div>
 
+            <div class="profiles">
+              <select
+                class="input profiles__pick"
+                :value="settings.settings.ai_profile_id"
+                @change="switchProfile(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="" disabled>
+                  {{ profiles.length ? '选择已存的配置…' : '还没有存过配置' }}
+                </option>
+                <option v-for="p in profiles" :key="p.id" :value="p.id">
+                  {{ p.name }} · {{ p.model }}
+                </option>
+              </select>
+              <input
+                v-model="profileName"
+                class="input profiles__name"
+                spellcheck="false"
+                :placeholder="namePlaceholder"
+                @keydown.enter="renameProfile"
+              />
+              <button class="btn btn--subtle" title="把当前填的存成一套" @click="addProfile">
+                <Plus :size="14" />
+                存为新配置
+              </button>
+              <button
+                class="btn btn--subtle"
+                :disabled="!canRename"
+                title="用左边的名字重命名当前配置"
+                @click="renameProfile"
+              >
+                <Pencil :size="14" />
+              </button>
+              <button
+                class="btn btn--subtle"
+                :disabled="!activeProfile"
+                title="删除当前配置"
+                @click="removeProfile"
+              >
+                <Trash2 :size="14" />
+              </button>
+            </div>
+
             <div class="form">
               <label class="field">
                 <span class="field__label">接口地址</span>
-                <input v-model="apiUrl" class="input mono" placeholder="https://api.deepseek.com/v1" />
+                <input
+                  v-model="apiUrl"
+                  class="input mono"
+                  spellcheck="false"
+                  placeholder="https://api.deepseek.com/v1"
+                />
               </label>
               <label class="field">
                 <span class="field__label">API Key</span>
-                <input v-model="apiKey" class="input mono" type="password" placeholder="sk-…" />
+                <span class="field__wrap">
+                  <input
+                    v-model="apiKey"
+                    class="input mono"
+                    :type="keyVisible ? 'text' : 'password'"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="sk-…"
+                  />
+                  <button
+                    class="field__eye"
+                    type="button"
+                    :title="keyVisible ? '隐藏' : '显示'"
+                    @click="keyVisible = !keyVisible"
+                  >
+                    <EyeOff v-if="keyVisible" :size="14" />
+                    <Eye v-else :size="14" />
+                  </button>
+                </span>
               </label>
               <label class="field">
                 <span class="field__label">模型</span>
-                <input v-model="model" class="input mono" placeholder="deepseek-chat" />
+                <span class="field__wrap">
+                  <input
+                    v-model="model"
+                    class="input mono"
+                    list="ai-models"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="deepseek-chat"
+                  />
+                  <datalist id="ai-models">
+                    <option v-for="m in modelList" :key="m" :value="m" />
+                  </datalist>
+                  <button
+                    class="field__eye"
+                    type="button"
+                    :disabled="modelsLoading"
+                    title="拉取模型列表"
+                    @click="loadModels"
+                  >
+                    <Loader2 v-if="modelsLoading" :size="14" class="spin" />
+                    <RefreshCw v-else :size="14" />
+                  </button>
+                </span>
               </label>
             </div>
 
@@ -719,6 +1207,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
                 <Loader2 v-if="testing" :size="14" class="spin" />
                 测试连接
               </button>
+              <span v-if="aiDirty" class="dirty">「{{ activeProfile?.name }}」有未保存的改动</span>
             </div>
 
             <p v-if="testResult" class="result" :class="{ 'result--bad': !testResult.ok }">
@@ -728,7 +1217,9 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             <p class="sec-desc sec-desc--foot">
               需要一个<b>支持 function calling</b> 的模型，兼容 OpenAI 格式的服务商都能用。
               deepseek-chat、qwen-plus、gpt-4o-mini 都够用。
-              「测试连接」会真的发一次工具调用来验证，而不只是看能不能连通。
+              「测试连接」会真的发一次工具调用来验证，而不只是看能不能连通 ——
+              模型列表里哪些支持工具调用，接口不会告诉你，挑完还是得测一次。
+              多套配置存在本地库里，Key 明文存放，和其他设置一样。
             </p>
           </section>
         </template>
@@ -738,9 +1229,14 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
           <section class="panel">
             <div class="sec-head">
               <h2>联网搜索</h2>
-              <label class="switch">
-                <input v-model="searchEnabled" type="checkbox" @change="saveSearch" />
-                <span>{{ searchEnabled ? '已启用' : '已关闭' }}</span>
+              <label class="switch" :class="{ 'switch--off': !searchUsable }" :title="switchHint">
+                <input
+                  v-model="searchEnabled"
+                  type="checkbox"
+                  :disabled="!searchUsable"
+                  @change="toggleSearch"
+                />
+                <span>{{ searchEnabled && searchUsable ? '已启用' : '已关闭' }}</span>
               </label>
             </div>
             <p class="sec-desc">
@@ -748,6 +1244,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               AI 可以自己上网查一下再下结论。一眼能认出的软件（7-Zip、Everything）不会触发搜索，
               不用担心额度被白白消耗。
             </p>
+            <p v-if="switchHint" class="hint hint--block">{{ switchHint }}。</p>
 
             <div class="form">
               <label class="field">
@@ -793,7 +1290,40 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             <p class="sec-desc sec-desc--foot">
               查证顺序是先本地后联网：PE 信息 → 目录里的说明文档 → 联网搜索。
               本地文档往往比搜索更准 —— 它写的就是这一份程序本身。
+              开关关掉时 agent 那边根本不会注册 <span class="mono">web_search</span> 工具，
+              提示词也会改成「只依据本地信息判断」，不会白花轮数去调一个用不了的工具。
             </p>
+          </section>
+
+          <!-- 额度花在哪了。数据全部从识别日志里现取，不单独记账 -->
+          <section class="panel">
+            <button class="sec-head sec-head--btn" @click="toggleSearchLog">
+              <h2>最近调用日志</h2>
+              <ChevronDown :size="14" :class="['chev', { 'chev--open': searchLogOpen }]" />
+            </button>
+
+            <template v-if="searchLogOpen">
+              <p class="sec-desc">
+                最近 20 次 <span class="mono">web_search</span> 调用，从识别日志里提取 ——
+                所以时间精确到「哪一次识别」，同一次识别里的几次搜索共用一个时间戳。
+                清空识别日志会连带清掉它。
+              </p>
+              <ul v-if="searchLog.length" class="calls">
+                <li v-for="(c, i) in searchLog" :key="i">
+                  <span class="calls__time mono">{{ callTime(c.at) }}</span>
+                  <span class="calls__q truncate" :title="c.query">{{ c.query }}</span>
+                  <span class="calls__from truncate" :title="c.label">{{ c.label }}</span>
+                  <span class="calls__ms mono">{{ c.ms > 0 ? `${(c.ms / 1000).toFixed(1)}s` : '—' }}</span>
+                  <TagBadge
+                    :label="SEARCH_STATUS_META[c.status].label"
+                    :tone="SEARCH_STATUS_META[c.status].tone"
+                  />
+                </li>
+              </ul>
+              <p v-else class="empty-line">
+                还没有搜索调用记录。开启搜索并跑一次识别之后，认不出来的程序会触发它。
+              </p>
+            </template>
           </section>
         </template>
 
@@ -937,9 +1467,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               </button>
             </div>
             <p class="hint hint--block">
-              图标填 Lucide 名称。侧边栏内置了 bug、bot、search、file-text、
-              sliders-horizontal、globe、image、clapperboard、shield、sticky-note、box，
-              填别的会退回通用图标。
+              图标填 Lucide 名称。内置了 {{ ICON_NAMES.join('、') }}，填别的会退回通用图标。
             </p>
           </section>
 
@@ -1149,6 +1677,8 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
         </template>
       </div>
     </div>
+
+    <ReportDialog v-if="runReport" :report="runReport" @close="runReport = null" />
   </div>
 </template>
 
@@ -1310,6 +1840,54 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   flex-direction: column;
   gap: 12px;
   margin-bottom: 14px;
+}
+
+/* ------------------------- 接口配置的存与切 ------------------------- */
+.profiles {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.profiles__pick,
+.profiles__name {
+  flex: 1;
+  min-width: 140px;
+}
+
+/* 输入框右侧塞一个小按钮（显示密码 / 拉模型列表） */
+.field__wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.field__wrap .input {
+  padding-right: 36px;
+}
+
+.field__eye {
+  position: absolute;
+  right: 1px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: calc(100% - 2px);
+  border-radius: 0 var(--radius-input) var(--radius-input) 0;
+  color: var(--text-faint);
+}
+.field__eye:hover {
+  color: var(--text-main);
+}
+.field__eye:disabled {
+  cursor: default;
+}
+
+.dirty {
+  font-size: var(--fs-tag);
+  color: var(--warning);
 }
 
 .row {
@@ -1480,6 +2058,83 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   accent-color: var(--accent);
   width: 15px;
   height: 15px;
+}
+
+/* 配置不全时开关点不动。压淡是为了让「点不动」看起来是有理由的，而不是坏了 */
+.switch--off {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.switch--off input {
+  cursor: not-allowed;
+}
+
+/* 可折叠的小标题 */
+.sec-head--btn {
+  width: 100%;
+  cursor: pointer;
+  color: var(--text-main);
+}
+.sec-head--btn:hover {
+  color: var(--accent);
+}
+
+.chev {
+  flex: none;
+  color: var(--text-faint);
+  transition: transform var(--t-fast) ease;
+}
+.chev--open {
+  transform: rotate(180deg);
+}
+
+/* ------------------------------ 搜索调用日志 ------------------------------ */
+.calls {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.calls li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-tag);
+  background: var(--bg-main);
+  border: 1px solid var(--divider);
+  font-size: var(--fs-tag);
+}
+
+.calls__time {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.calls__q {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-main);
+}
+
+.calls__from {
+  flex: none;
+  max-width: 26%;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.calls__ms {
+  flex: none;
+  width: 44px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .result {
@@ -1680,6 +2335,97 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   color: var(--danger);
 }
 
+/* ------------------------------ 整理历史 ------------------------------ */
+.plans {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plans li {
+  padding: 9px 10px;
+  border-radius: var(--radius-input);
+  background: var(--bg-main);
+  border: 1px solid var(--divider);
+}
+
+.plans__line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.plans__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-tag);
+  color: var(--text-sub);
+  font-variant-numeric: tabular-nums;
+  transition: color var(--t-fast) ease;
+}
+.plans__toggle:hover {
+  color: var(--text-main);
+}
+
+.plans__sum {
+  margin-left: auto;
+  font-size: var(--fs-tag);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.plans__sum .bad {
+  color: var(--danger);
+}
+
+/* 明细是「出了问题才会展开看」的东西，所以压小、压淡，一行一步 */
+.steps {
+  list-style: none;
+  margin: 9px 0 0;
+  padding: 9px 0 0;
+  border-top: 1px solid var(--divider);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.steps li {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 130px) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 11px;
+}
+
+.steps__type {
+  color: var(--text-faint);
+}
+
+.steps__name {
+  color: var(--text-sub);
+}
+
+.steps__path {
+  color: var(--text-faint);
+}
+
+.steps li.bad .steps__name {
+  color: var(--danger);
+}
+
+.steps__note {
+  grid-column: 2 / -1;
+  color: var(--warning);
+  line-height: 1.6;
+}
+
 .about {
   display: flex;
   align-items: center;
@@ -1688,7 +2434,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 }
 
 .about__name {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 19px;
   letter-spacing: 3px;
 }
@@ -1700,14 +2446,14 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 }
 
 .about__slogan {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: var(--fs-body);
   color: var(--text-sub);
   margin-top: 6px;
 }
 
 .about__quote {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 11px;
   color: var(--text-faint);
   margin-top: 6px;

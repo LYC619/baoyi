@@ -15,7 +15,14 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { runAgent, type AgentEvent, type AgentTool } from '../electron/services/agent/loop.ts'
+import { reactive, ref } from 'vue'
+import {
+  apiBase,
+  parseModelList,
+  runAgent,
+  type AgentEvent,
+  type AgentTool
+} from '../electron/services/agent/loop.ts'
 import { isInside, resolveInside } from '../electron/services/agent/paths.ts'
 import {
   decodeText,
@@ -25,7 +32,42 @@ import {
 } from '../electron/services/agent/files.ts'
 import { readExternalActiveAt } from '../electron/services/activity.ts'
 import { fillIdentifySystem, limitTags } from '../electron/services/agent/prompts.ts'
-import { activityOf, displayName, groupRounds, subtitleName } from '../src/utils/index.ts'
+import {
+  BUILTIN_TAGS,
+  DEFAULT_CATEGORIES,
+  FALLBACK_CATEGORY,
+  mapCategory
+} from '../electron/services/taxonomy.ts'
+import { planRoot, skippable } from '../electron/services/scanPlan.ts'
+import {
+  defaultAction,
+  defaultFolder,
+  nestedInside,
+  rebase,
+  sameVolume,
+  sanitizeFolder,
+  targetDir
+} from '../electron/services/organize/plan.ts'
+import {
+  isLink,
+  LINK_MARK,
+  makeJunction,
+  moveDir,
+  removeJunction,
+  writeLinkMark
+} from '../electron/services/organize/fsops.ts'
+import {
+  activityOf,
+  compareVersions,
+  displayName,
+  groupRounds,
+  logToText,
+  parseVersion,
+  plain,
+  searchCalls,
+  subtitleName,
+  versionOf
+} from '../src/utils/index.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -103,6 +145,132 @@ function echoTool(calls: Array<{ name: string; args: any }>): AgentTool {
 /* ------------------------------ 用例 ------------------------------ */
 
 async function main(): Promise<void> {
+  /* --------------------------- 扫描：拆识别单元 --------------------------- */
+
+  console.log('\n扫描 · 拆识别单元')
+
+  // 这棵树照 D:\Software 的真实形状搭的。判错「软件目录 / 收纳目录」的代价不对称：
+  // 一个单元就是一次 agent 会话，沙箱只开放 unit.dir 那棵子树，所以把一个软件拆成
+  // 两个单元之后，32 位和 64 位就永远合不回一条了。这一节主要守的是那一侧。
+  const scanRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-scan-'))
+  const rel = (p: string): string => path.relative(scanRoot, p).split(path.sep).join('/')
+
+  const touch = async (...paths: string[]): Promise<void> => {
+    for (const r of paths) {
+      const full = path.join(scanRoot, ...r.split('/'))
+      await fsp.mkdir(path.dirname(full), { recursive: true })
+      await fsp.writeFile(full, 'x')
+    }
+  }
+
+  await touch(
+    // 扫描根那一层：散落的 exe 和压缩包只记不识别，别的杂文件连记都不记
+    'ADU.AI-1.0.0-x64.exe',
+    'NoteEditor.rar',
+    'notes.txt',
+    // 本层就有 exe —— 软件目录
+    'BlueStacks X/HD-Player.exe',
+    'BlueStacks X/plugins/helper.exe',
+    // 清一色文件夹的收纳目录，要下钻
+    '1.system/ProcessMonitor/Procmon.exe',
+    '1.system/0.安装包/setup.zip',
+    // 主程序不在本层、靠 .bat 起：整棵子树算一条，不许拆到 support\ 去
+    '1.system/ghidra_12.0.4_PUBLIC_20260303/ghidra_12.0.4_PUBLIC/ghidraRun.bat',
+    '1.system/ghidra_12.0.4_PUBLIC_20260303/ghidra_12.0.4_PUBLIC/support/launch.exe',
+    // 收纳目录里躺着还没解压的压缩包，不该因此被当成软件目录
+    '3.实用工具/PDF-XChange.rar',
+    '3.实用工具/LockHunter/LockHunter.exe',
+    // 32 位和 64 位分在两个子文件夹里，本层只有说明文档
+    'XMouseButtonControl_2.20.5_Portable/Readme Portable.txt',
+    'XMouseButtonControl_2.20.5_Portable/32bit (x86)/XMouseButtonControl.exe',
+    'XMouseButtonControl_2.20.5_Portable/64bit (x64)/XMouseButtonControl.exe',
+    // 真正的合集目录：下钻两层才见到 exe
+    'ITEM/Win11右键菜单样式更改工具/W11ClassicMenu/ClassicMenu.exe',
+    'ITEM/Win11右键菜单样式更改工具/NilesoftShell/shell.exe',
+    // 第 4 层，超出下钻上限
+    '深/a/b/c/deep.exe',
+    // 忽略名单，任何层级都该跳过
+    'node_modules/pkg/bin.exe',
+    '1.system/.git/hooks/pre-commit.exe'
+  )
+  // 整棵子树都是空的，下钻完也该什么都不留下
+  await fsp.mkdir(path.join(scanRoot, 'Adobe Illustrator 2026', 'Presets'), { recursive: true })
+
+  const plan = await planRoot(scanRoot)
+  const found = new Set(plan.units.map((u) => rel(u.dir)))
+  const under = (prefix: string): string[] => [...found].filter((d) => d.startsWith(prefix))
+
+  await check('本层有 exe 的目录直接成单元', () => {
+    assert.ok(found.has('BlueStacks X'), `实际拆出：${[...found].join(' | ')}`)
+    assert.ok(found.has('1.system/ProcessMonitor'), '收纳目录下钻后该找到它')
+  })
+
+  await check('清一色文件夹的收纳目录会下钻，不整个丢给 agent', () => {
+    assert.ok(!found.has('1.system'), '1.system 本身不该成为单元')
+    assert.ok(!found.has('ITEM'))
+    assert.ok(
+      found.has('ITEM/Win11右键菜单样式更改工具/W11ClassicMenu'),
+      '第 3 层照样要成单元'
+    )
+    assert.ok(found.has('ITEM/Win11右键菜单样式更改工具/NilesoftShell'))
+  })
+
+  await check('没解压的压缩包不算「这一层有东西」', () => {
+    // 3.实用工具 底下躺着 PDF-XChange.rar，它仍然是收纳目录
+    assert.ok(!found.has('3.实用工具'), '压缩包让它被误判成软件目录了')
+    assert.ok(found.has('3.实用工具/LockHunter'))
+  })
+
+  await check('主程序在子目录里的软件不被拆开 —— 拆了就永远合不回一条', () => {
+    assert.ok(
+      found.has('XMouseButtonControl_2.20.5_Portable'),
+      '32bit / 64bit 必须留在同一个单元里'
+    )
+    assert.deepEqual(under('XMouseButtonControl_2.20.5_Portable/'), [], '被拆开了')
+    // Ghidra 靠 ghidraRun.bat 启动，本层没有 exe，但它是一个软件而不是收纳目录
+    const ghidra = '1.system/ghidra_12.0.4_PUBLIC_20260303/ghidra_12.0.4_PUBLIC'
+    assert.ok(found.has(ghidra), 'Ghidra 整棵子树该是一条，实际没有它')
+    assert.deepEqual(under(`${ghidra}/`), [], 'support\\ 不该单独成单元')
+  })
+
+  await check('下钻到第 3 层还没见到 exe 就放弃', () => {
+    assert.deepEqual(under('深'), [], '第 4 层的 exe 不该被拆出单元')
+  })
+
+  await check('一个 exe 都没有的目录不惊动 agent', () => {
+    assert.ok(!found.has('1.system/0.安装包'), '里面只有一个 zip')
+    assert.deepEqual(under('Adobe'), [], '整棵子树是空的')
+  })
+
+  await check('忽略目录在任何层级都跳过', () => {
+    assert.deepEqual(under('node_modules'), [])
+    assert.equal([...found].some((d) => d.includes('.git')), false)
+    assert.equal(skippable('node_modules'), true)
+    assert.equal(skippable('.hidden'), true)
+    assert.equal(skippable('1.system'), false, '数字开头的收纳目录不该被当成隐藏目录')
+  })
+
+  await check('exe 数量把子目录一起算进去 —— agent 靠它判断值不值得进去', () => {
+    const count = (d: string): number | undefined =>
+      plan.units.find((u) => rel(u.dir) === d)?.exe_count
+    assert.equal(count('BlueStacks X'), 2, 'HD-Player.exe + plugins\\helper.exe')
+    assert.equal(count('XMouseButtonControl_2.20.5_Portable'), 2)
+    assert.equal(count('1.system/ProcessMonitor'), 1)
+  })
+
+  await check('扫描根那一层的散落 exe 和压缩包只记录，不生成单元', () => {
+    assert.deepEqual(plan.loose.map(rel).sort(), ['ADU.AI-1.0.0-x64.exe', 'NoteEditor.rar'])
+    assert.ok(!found.has(''), '扫描根自己不该成为一个单元')
+  })
+
+  await check('取消信号一进来就收手', async () => {
+    const stopped = await planRoot(scanRoot, { cancelled: () => true })
+    assert.equal(stopped.units.length, 0)
+    assert.equal(stopped.loose.length, 0)
+  })
+
+  await fsp.rm(scanRoot, { recursive: true, force: true })
+
   console.log('\nagent loop')
 
   await check('执行工具、回灌结果、模型不再调用时收工', async () => {
@@ -205,6 +373,74 @@ async function main(): Promise<void> {
       assert.equal(result.stopReason, 'done')
       const toolMsg = mock.sent[1].messages.find((m: any) => m.role === 'tool')
       assert.match(toolMsg.content, /磁盘不见了/)
+    } finally {
+      mock.restore()
+    }
+  })
+
+  await check('同一个错误连续 3 次就终止整次运行，不让模型换措辞接着重试', async () => {
+    const calls: any[] = []
+    const boom: AgentTool = {
+      name: 'probe',
+      description: '总是同一个错误',
+      parameters: { type: 'object', properties: { v: { type: 'string' } } },
+      execute: async (args) => {
+        calls.push(args)
+        throw new Error('table pending_software has no column named is_portable')
+      }
+    }
+    // 参数每轮都不一样：按「同参数」去重的 MAX_REPEAT 拦不住这种打转，
+    // 数据库缺列那次就是这么白烧了 8 轮
+    const mock = mockModel([
+      { tool: { name: 'probe', args: { v: 'a' } } },
+      { tool: { name: 'probe', args: { v: 'b' } } },
+      { tool: { name: 'probe', args: { v: 'c' } } }
+    ])
+    try {
+      const result = await runAgent({
+        config: CONFIG,
+        system: 's',
+        user: 'u',
+        tools: [boom],
+        maxTurns: 12
+      })
+      assert.equal(result.stopReason, 'error')
+      assert.equal(calls.length, 3, `应在第 3 次同错后终止，实际执行了 ${calls.length} 次`)
+      assert.match(result.error, /has no column named is_portable/, '原始错误要原样报上去')
+    } finally {
+      mock.restore()
+    }
+  })
+
+  await check('中间成功过一次就重新计数，零散的同名错误不会误伤会话', async () => {
+    let n = 0
+    const flaky: AgentTool = {
+      name: 'probe',
+      description: '错两次、成一次、再错一次',
+      parameters: { type: 'object', properties: { v: { type: 'string' } } },
+      execute: async () => {
+        n++
+        if (n === 3) return '这次成了'
+        throw new Error('同一个错误')
+      }
+    }
+    const mock = mockModel([
+      { tool: { name: 'probe', args: { v: 'a' } } },
+      { tool: { name: 'probe', args: { v: 'b' } } },
+      { tool: { name: 'probe', args: { v: 'c' } } },
+      { tool: { name: 'probe', args: { v: 'd' } } },
+      { text: '收尾' }
+    ])
+    try {
+      const result = await runAgent({
+        config: CONFIG,
+        system: 's',
+        user: 'u',
+        tools: [flaky],
+        maxTurns: 6
+      })
+      assert.equal(result.stopReason, 'done', '错误不连续就不该终止')
+      assert.equal(n, 4)
     } finally {
       mock.restore()
     }
@@ -500,10 +736,39 @@ async function main(): Promise<void> {
       'UPDATE pending_software SET',
       'INSERT INTO skip_list',
       'INSERT INTO tags',
-      'INSERT INTO categories'
+      'INSERT INTO categories',
+      // 0.3 新增的几条。整理会改动用户磁盘上的真实路径，而这几条负责把库里的
+      // 记录跟着改过去 —— 列名写错的表现是「整理完点启动就失败」，且那时候
+      // 用户已经不知道是整理干的了
+      'INSERT INTO organize_plans',
+      'UPDATE organize_plans SET undone_at',
+      'UPDATE software SET exe_path = @exe_path',
+      'INSERT INTO software\n       (id, created_at, updated_at, exe_path',
+      // 0.4 新增的汇总报告。列名写错的表现是「识别跑完了但报告永远打不开」
+      'INSERT INTO identification_reports',
+      'DELETE FROM identification_reports WHERE id NOT IN'
     ]) {
       assert.doesNotThrow(() => db.prepare(sqlAround(anchor)), `${anchor} 这条语句和表结构对不上`)
     }
+
+    // 三态的 is_portable：NULL 必须能和 0 区分开。压成同一个值的后果是
+    // 「还没判断过」的条目被当成「判断为不是绿色软件」，整理时按安装版处理。
+    // 时间字段一律给足，免得这几行落进下面那个「长期未用」的判定里
+    db.prepare(
+      `INSERT INTO software (id, created_at, updated_at, exe_path, file_name,
+         last_used_at, external_active_at, is_portable, move_risk)
+       VALUES ('p1', 0, 0, 'C:\\p1.exe', 'p1.exe', 9000, 9000, 1, 'safe'),
+              ('p2', 0, 0, 'C:\\p2.exe', 'p2.exe', 9000, 9000, 0, 'risky'),
+              ('p3', 0, 0, 'C:\\p3.exe', 'p3.exe', 9000, 9000, NULL, 'unknown')`
+    ).run()
+    const portable = db
+      .prepare('SELECT id FROM software WHERE is_portable = 1')
+      .all() as Array<{ id: string }>
+    assert.deepEqual(portable.map((r) => r.id), ['p1'], 'is_portable = 1 只该命中真正的绿色软件')
+    const unjudged = db
+      .prepare('SELECT id FROM software WHERE is_portable IS NULL')
+      .all() as Array<{ id: string }>
+    assert.deepEqual(unjudged.map((r) => r.id), ['p3'], 'NULL 和 0 被压成了同一个值')
 
     // 「长期未用」的判据换成了两个时间取晚的那个，写错这里等于整个分组失效
     db.prepare(
@@ -593,6 +858,64 @@ async function main(): Promise<void> {
 
   console.log('\n分类与标签')
 
+  // 这一节守的是 0.4 那次迁移。rebuildCategories 会改写库里**每一条**软件的
+  // category，映射目标一个字写错，那一批条目就落进一个分类表里根本不存在的格子 ——
+  // 表现是「侧边栏有这个分类、点进去 0 条」，而且没有回头路。
+  await check('每个映射目标都真的是一个新分类，不是打错的名字', () => {
+    const names = new Set(DEFAULT_CATEGORIES.map((c) => c.name))
+    for (const from of [
+      '逆向分析', 'AI 编程', '编辑查看', '系统调控', '文件搜索',
+      '网络调试', '图像处理', '媒体影音', '安全隐私', '办公效率'
+    ]) {
+      const to = mapCategory(from)
+      assert.ok(names.has(to), `${from} → ${to}，而「${to}」不在新分类表里`)
+      assert.notEqual(to, from, `${from} 是旧分类，不该原样留下`)
+    }
+  })
+
+  await check('0.1 的分类、用户自建的分类都退回「其他」', () => {
+    for (const from of ['开发工具-旧', '未分类', '我自己建的', '']) {
+      assert.equal(mapCategory(from), FALLBACK_CATEGORY, `${from} 应该兜到「其他」`)
+    }
+    // 「开发工具」这个名字 0.1 用过、0.4 又用上了 —— 现在它是合法分类，不该被兜走
+    assert.equal(mapCategory('开发工具'), '开发工具')
+  })
+
+  await check('已经是新分类的原样不动 —— 重复迁移不该把它们冲掉', () => {
+    for (const c of DEFAULT_CATEGORIES) assert.equal(mapCategory(c.name), c.name)
+  })
+
+  await check('分类表本身自洽：5 条、名字不重、有兜底、排序连续', () => {
+    assert.equal(DEFAULT_CATEGORIES.length, 5)
+    const names = DEFAULT_CATEGORIES.map((c) => c.name)
+    assert.equal(new Set(names).size, 5, '分类名重了 —— 分类是靠名字挂在条目上的')
+    assert.equal(new Set(DEFAULT_CATEGORIES.map((c) => c.id)).size, 5, 'id 重了')
+    assert.ok(names.includes(FALLBACK_CATEGORY), '兜底分类必须真的在表里')
+    assert.deepEqual(DEFAULT_CATEGORIES.map((c) => c.sort_order), [1, 2, 3, 4, 5])
+    for (const c of DEFAULT_CATEGORIES) {
+      assert.ok(c.description.length > 0, `${c.name} 没有说明 —— 它会被注入 prompt 当判据`)
+      assert.ok(c.icon.length > 0, `${c.name} 没有图标名`)
+    }
+  })
+
+  await check('内置标签 10 个，不重复，且都在标签名长度上限内', () => {
+    assert.equal(BUILTIN_TAGS.length, 10)
+    assert.equal(new Set(BUILTIN_TAGS).size, 10)
+    for (const t of BUILTIN_TAGS) {
+      // createTag / limitTags 都按 12 字符截断，超了会导致池里的名字和条目上的对不上
+      assert.ok(t.length > 0 && t.length <= 12, `「${t}」长度 ${t.length}，会被截断`)
+      assert.equal(t.trim(), t, `「${t}」两头有空白`)
+    }
+  })
+
+  await check('内置标签直接可用作标签池 —— 它们必须能原样通过 limitTags', () => {
+    const pool = new Set(BUILTIN_TAGS)
+    // 池内的照单全收（封顶 3 个）。要是有哪个被 limitTags 洗掉了，
+    // 说明它进不了自己所在的池子，注入 prompt 就是骗模型
+    assert.deepEqual(limitTags(['便携', '开源', 'AI 相关'], pool), ['便携', '开源', 'AI 相关'])
+    assert.deepEqual(limitTags(['跨平台', '单文件'], pool), ['跨平台', '单文件'])
+  })
+
   const CATS = [
     { id: 'find', name: '文件搜索', description: '查找、定位、磁盘分析', icon: 'search', sort_order: 1 },
     { id: 'other', name: '其他', description: '无法归入以上分类', icon: 'box', sort_order: 2 }
@@ -628,6 +951,194 @@ async function main(): Promise<void> {
     assert.deepEqual(limitTags(['便携', '便携', '  ', ''], pool), ['便携'])
   })
 
+  /* --------------------------- 搜索开关与提示词 --------------------------- */
+  console.log('\n搜索开关与提示词')
+
+  // 这一节守的是 0.4 修掉的那个 bug：搜索开关关着时 buildTools 不注册 web_search，
+  // 可提示词还在教模型「拿不准就 web_search」—— 模型于是去调一个不存在的工具，
+  // 白烧一轮。冷门软件本来就要多看几眼，轮数一浪费就直接认不出来了。
+  await check('搜索关掉时，提示词不再让模型去调 web_search', () => {
+    const off = fillIdentifySystem(CATS, ['便携'], false)
+    assert.ok(!off.includes('{{'), `还留着没替换的插槽：${off.match(/\{\{\w+\}\}/)?.[0]}`)
+    assert.ok(
+      !/拿不准[^\n]*web_search|才用 web_search|就先读它，读完还不清楚再联网/.test(off),
+      '关掉搜索后还在教模型调 web_search'
+    )
+    assert.match(off, /没有 web_search 工具/, '要明确告诉它这个工具不存在')
+    assert.match(off, /仅根据本地文件信息判断/, '要给出替代做法，而不是只说「不能搜」')
+  })
+
+  await check('搜索开着时那两段照旧在', () => {
+    const on = fillIdentifySystem(CATS, ['便携'], true)
+    assert.ok(!on.includes('{{'))
+    assert.match(on, /3\. \*\*联网搜索\*\*（web_search）/)
+    assert.match(on, /关键词用「软件名 \+ 功能\/用途」/)
+    assert.ok(!on.includes('没有 web_search 工具'), '开着的时候不该出现禁用说明')
+  })
+
+  await check('默认参数按「有搜索」算 —— 漏传不该让提示词变成禁用版', () => {
+    assert.equal(fillIdentifySystem(CATS, ['便携']), fillIdentifySystem(CATS, ['便携'], true))
+  })
+
+  /* --------------------------- 多版本去重 --------------------------- */
+  console.log('\n多版本去重')
+
+  await check('从路径里抠版本号，取最后一个像版本号的片段', () => {
+    // 1.system 里那个 1. 不是版本号，取错了就会把两个版本判成一样新
+    assert.deepEqual(parseVersion('D:\\Software\\1.system\\CC Switch\\v3.16.5'), [3, 16, 5])
+    assert.deepEqual(parseVersion('CC Switch v3.16.1'), [3, 16, 1])
+    assert.deepEqual(parseVersion('D:\\Tools\\Everything'), [], '没有版本号就是空')
+    assert.deepEqual(parseVersion('x64dbg'), [], '孤零零一个数字不算版本号')
+  })
+
+  await check('逐段比大小，段数不同时缺的按 0 算', () => {
+    assert.ok(compareVersions([3, 16, 5], [3, 16, 1]) > 0)
+    assert.ok(compareVersions([3, 16], [3, 16, 1]) < 0, '3.16 比 3.16.1 旧')
+    assert.equal(compareVersions([1, 2, 3], [1, 2, 3]), 0)
+    // 逐段比而不是按字符串：字符串比较会判定 3.9 > 3.16
+    assert.ok(compareVersions([3, 16], [3, 9]) > 0, '按字符串比会把 3.16 判成更旧')
+    assert.ok(compareVersions([2], []) > 0, '认不出版本号的排在后面')
+  })
+
+  await check('路径里的版本号优先于 PE 版本号', () => {
+    // 多版本并存时目录名就是用来区分版本的，而 PE 版本常常没跟着打包更新
+    const item = {
+      source_dir: 'D:\\Software\\CC Switch\\v3.16.5',
+      exe_path: 'D:\\Software\\CC Switch\\v3.16.5\\cc.exe',
+      version: '1.0.0.0'
+    }
+    assert.deepEqual(versionOf(item), [3, 16, 5])
+    assert.deepEqual(
+      versionOf({ source_dir: 'D:\\Tools\\LockHunter', exe_path: 'D:\\Tools\\LockHunter\\lh.exe', version: '3.4.2' }),
+      [3, 4, 2],
+      '路径里认不出来才退回 PE 版本'
+    )
+  })
+
+  await check('同名多版本里挑得出最新那个', () => {
+    const rows = [
+      { source_dir: 'D:\\S\\CC Switch\\v3.16.1', exe_path: '', version: '' },
+      { source_dir: 'D:\\S\\CC Switch\\v3.16.5', exe_path: '', version: '' },
+      { source_dir: 'D:\\S\\CC Switch\\v3.9.0', exe_path: '', version: '' }
+    ]
+    const sorted = [...rows].sort((a, b) => compareVersions(versionOf(b), versionOf(a)))
+    assert.match(sorted[0].source_dir, /v3\.16\.5$/, `排序结果：${sorted.map((r) => r.source_dir).join(' | ')}`)
+    assert.match(sorted[2].source_dir, /v3\.9\.0$/)
+  })
+
+  /* --------------------------- 日志复制成文本 --------------------------- */
+  console.log('\n日志复制成文本')
+
+  const sampleLog = {
+    id: 'l1',
+    dir: 'D:\\Software\\1.system\\RegistryFinder64',
+    label: 'RegistryFinder64',
+    kind: 'unit' as const,
+    status: 'success' as const,
+    summary: '待确认 1 项',
+    registered: 1,
+    rounds: 3,
+    duration_ms: 96_900,
+    tokens: 85_550,
+    stop_reason: 'done' as const,
+    events: [
+      { type: 'turn' as const, index: 1 },
+      { type: 'tool_call' as const, name: 'list_directory', args: { path: 'D:\\S\\RF' } },
+      { type: 'tool_result' as const, name: 'list_directory', text: '目录：D:\\S\\RF\n本级 exe（1）', isError: false, ms: 12 },
+      { type: 'turn' as const, index: 2 },
+      { type: 'text' as const, name: '', text: '看起来是注册表搜索工具' } as any
+    ],
+    created_at: 1_700_000_000_000
+  }
+
+  await check('头三行给出目录、状态和成本', () => {
+    const text = logToText(sampleLog)
+    const lines = text.split('\n')
+    assert.match(lines[0], /^目录：D:\\Software\\1\.system\\RegistryFinder64$/)
+    assert.match(lines[1], /^状态：识别完成/)
+    assert.match(lines[2], /轮次：3 \| 耗时：96\.9s \| Tokens：85,550/)
+  })
+
+  await check('每一轮的调用、完整返回、模型原话都在，一个字不省', () => {
+    const text = logToText(sampleLog)
+    assert.match(text, /\[轮次 1\] → list_directory .*D:\\\\S\\\\RF/)
+    // 页面上折叠到 6 行，复制出去必须是全文 —— 它是要贴进 issue 的
+    assert.match(text, /返回：目录：D:\\S\\RF\n本级 exe（1）/)
+    assert.match(text, /\[轮次 2\] 模型推理：看起来是注册表搜索工具/)
+  })
+
+  await check('撞上轮数上限时在头部就说清楚', () => {
+    const text = logToText({ ...sampleLog, stop_reason: 'max_turns' })
+    assert.match(text, /达到轮数上限被强制结束/)
+  })
+
+  /* --------------------------- 搜索调用记录 --------------------------- */
+  console.log('\n搜索调用记录')
+
+  const searchLog = (id: string, at: number, events: any[]) => ({
+    ...sampleLog,
+    id,
+    created_at: at,
+    events
+  })
+
+  await check('从事件流里认出每一次搜索，并给出结论', () => {
+    const calls = searchCalls([
+      searchLog('a', 2000, [
+        { type: 'turn', index: 1 },
+        { type: 'tool_call', name: 'list_directory', args: { path: 'x' } },
+        { type: 'tool_result', name: 'list_directory', text: '目录', isError: false, ms: 5 },
+        { type: 'tool_call', name: 'web_search', args: { query: 'cc-gui 是什么' } },
+        { type: 'tool_result', name: 'web_search', text: '「cc-gui」的搜索结果：\n[1] ...', isError: false, ms: 1400 }
+      ]),
+      searchLog('b', 1000, [
+        { type: 'tool_call', name: 'web_search', args: { query: 'Kelivo' } },
+        { type: 'tool_result', name: 'web_search', text: '「Kelivo」没有搜到结果。请依据本地信息判断。', isError: false, ms: 900 }
+      ])
+    ])
+    assert.equal(calls.length, 2, `实际取到 ${calls.length} 条`)
+    // 新的在前
+    assert.equal(calls[0].query, 'cc-gui 是什么')
+    assert.equal(calls[0].status, 'ok')
+    assert.equal(calls[0].ms, 1400)
+    assert.equal(calls[1].status, 'empty', '搜到 0 条和搜失败不是一回事')
+    assert.ok(!calls.some((c) => c.query === ''), 'list_directory 不该被算成搜索')
+  })
+
+  await check('失败和超时分开记 —— webSearch 不抛异常，只能从文案上认', () => {
+    const calls = searchCalls([
+      searchLog('t', 3000, [
+        { type: 'tool_call', name: 'web_search', args: { query: 'a' } },
+        { type: 'tool_result', name: 'web_search', text: '搜索「a」失败：The operation was aborted due to timeout。请依据本地信息判断。', isError: false, ms: 20_000 }
+      ]),
+      searchLog('f', 2000, [
+        { type: 'tool_call', name: 'web_search', args: { query: 'b' } },
+        { type: 'tool_result', name: 'web_search', text: '搜索「b」失败：HTTP 401 Unauthorized。请依据本地信息判断。', isError: false, ms: 300 }
+      ])
+    ])
+    assert.equal(calls[0].status, 'timeout')
+    assert.equal(calls[1].status, 'failed')
+  })
+
+  await check('0.4 之前的老日志没有 ms，读出来是 0 而不是崩掉', () => {
+    const calls = searchCalls([
+      searchLog('old', 1000, [
+        { type: 'tool_call', name: 'web_search', args: { query: 'old' } },
+        { type: 'tool_result', name: 'web_search', text: '「old」的搜索结果：\n[1] x', isError: false }
+      ])
+    ])
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].ms, 0)
+  })
+
+  await check('调用没有对应返回时算失败，不静默丢掉这一次额度', () => {
+    const calls = searchCalls([
+      searchLog('cut', 1000, [{ type: 'tool_call', name: 'web_search', args: { query: '被截断了' } }])
+    ])
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].status, 'failed')
+  })
+
   /* --------------------------- 卡片标题 --------------------------- */
   console.log('\n卡片标题')
 
@@ -653,6 +1164,273 @@ async function main(): Promise<void> {
     const nothing = { name_zh: '', name_en: '', file_description: '', file_name: 'AmazTool.exe' } as any
     assert.equal(displayName(nothing, 'zh'), 'AmazTool')
     assert.equal(displayName(nothing, 'en'), 'AmazTool')
+  })
+
+  /* --------------------------- IPC 边界 --------------------------- */
+  console.log('\nIPC 边界（reactive 代理拍平）')
+
+  // structuredClone 用的是和 contextBridge 同一套结构化克隆算法，
+  // 所以这里能不开 Electron 就复现「点了没反应」那个失败。
+  const cloneable = (v: unknown): boolean => {
+    try {
+      structuredClone(v)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  await check('reactive 代理直接递过去会被结构化克隆拒收（这就是那个 bug）', () => {
+    const store = ref({ scan_dirs: ['D:\\Software'] })
+    assert.equal(cloneable(store.value.scan_dirs), false, '代理竟然能克隆？那这个护栏就没意义了')
+    const item = reactive({ tags: ['t'] })
+    assert.equal(cloneable({ tags: item.tags }), false, '嵌在对象里的代理同样过不去')
+  })
+
+  await check('plain() 拍平之后能过克隆，且值不变', () => {
+    const store = ref({ scan_dirs: ['D:\\Software\\1.system', 'E:\\Tools'] })
+    const flat = plain(store.value.scan_dirs)
+    assert.ok(cloneable(flat), 'plain() 之后还是克隆不了，护栏失效')
+    assert.deepEqual(flat, ['D:\\Software\\1.system', 'E:\\Tools'])
+
+    const item = reactive({ tags: ['a', 'b'] })
+    assert.ok(cloneable(plain({ tags: item.tags })), '嵌套代理没被拍平')
+  })
+
+  await check('plain(undefined) 保持 undefined —— ai.complete() 不传 ids 时靠这个', () => {
+    assert.equal(plain(undefined), undefined)
+  })
+
+  /* --------------------------- 整理：路径计算 --------------------------- */
+  console.log('\n整理 · 目标路径与文件夹名')
+
+  await check('非法字符和结尾的点/空格都被剥掉', () => {
+    assert.equal(sanitizeFolder('IDA Pro 8.3'), 'IDA Pro 8.3')
+    assert.equal(sanitizeFolder('x64:dbg?'), 'x64dbg')
+    assert.equal(sanitizeFolder('Tool/Kit\\v2'), 'ToolKitv2')
+    // 结尾的点必须去掉：Windows 会静默把 `Foo.` 建成 `Foo`，
+    // 于是「目标已存在」的判断和实际落地的路径就对不上了
+    assert.equal(sanitizeFolder('Foo.'), 'Foo')
+    assert.equal(sanitizeFolder('Foo   '), 'Foo')
+    assert.equal(sanitizeFolder('  '), 'Unnamed', '洗成空串时要用兜底名')
+  })
+
+  await check('Windows 保留设备名被让开', () => {
+    // 叫 CON 的文件夹建不出来，而错误是「参数错误」，不查表根本猜不到原因
+    assert.equal(sanitizeFolder('con'), 'con_')
+    assert.equal(sanitizeFolder('NUL'), 'NUL_')
+    assert.equal(sanitizeFolder('COM1'), 'COM1_')
+    assert.equal(sanitizeFolder('Console'), 'Console', '只有完全相同才算保留名')
+  })
+
+  await check('默认文件夹名取英文正式名，没有才退回中文名和原目录名', () => {
+    assert.equal(
+      defaultFolder({ name_en: 'x64dbg', name_zh: '64位调试器', exe_path: 'D:\\a\\b\\x64dbg.exe' }),
+      'x64dbg'
+    )
+    assert.equal(
+      defaultFolder({ name_en: '', name_zh: '火绒剑', exe_path: 'D:\\a\\Sysdiag\\hrsword.exe' }),
+      '火绒剑'
+    )
+    assert.equal(
+      defaultFolder({ name_en: '', name_zh: '', exe_path: 'D:\\Tools\\AmazTool\\app.exe' }),
+      'AmazTool',
+      '两个名字都空时用它原来的目录名，不要凭空造一个'
+    )
+  })
+
+  await check('目标路径 = 根 / 分类 / 文件夹，分类名也要洗', () => {
+    assert.equal(targetDir('E:\\Toolkit', '逆向分析', 'x64dbg'), 'E:\\Toolkit\\逆向分析\\x64dbg')
+    // 用户可以把分类命名成「图像 / 视频」，那个斜杠会凭空多出一层目录
+    assert.equal(targetDir('E:\\Toolkit', '图像/视频', 'GIMP'), 'E:\\Toolkit\\图像视频\\GIMP')
+    assert.equal(targetDir('', '逆向分析', 'x64dbg'), '', '没配置整理根时不该拼出半个路径')
+  })
+
+  /* --------------------------- 整理：默认动作 --------------------------- */
+  console.log('\n整理 · 默认动作')
+
+  await check('绿色软件剪切，risky / unknown 只做链接', () => {
+    assert.equal(defaultAction(true, 'safe'), 'move')
+    assert.equal(defaultAction(true, 'unknown'), 'move', '绿色软件搬走没有副作用')
+    assert.equal(defaultAction(false, 'safe'), 'move', '安装版判定可安全移动的也剪切')
+    assert.equal(defaultAction(false, 'risky'), 'junction')
+    assert.equal(defaultAction(false, 'unknown'), 'junction')
+  })
+
+  await check('is_portable 为 null 时按风险判，绝不当成绿色软件', () => {
+    // null 是「还没判断过」，赌它没事的代价是把用户装好的软件搬坏
+    assert.equal(defaultAction(null, 'unknown'), 'junction')
+    assert.equal(defaultAction(null, 'risky'), 'junction')
+    assert.equal(defaultAction(null, 'safe'), 'move', 'safe 是明确的判断，可以信')
+  })
+
+  /* --------------------------- 整理：路径重映射 --------------------------- */
+  console.log('\n整理 · 路径重映射')
+
+  await check('目录搬走后，子路径跟着换前缀', () => {
+    const from = 'D:\\Software\\x64dbg_2024'
+    const to = 'E:\\Toolkit\\逆向分析\\x64dbg'
+    assert.equal(rebase(`${from}\\release\\x64\\x64dbg.exe`, from, to), `${to}\\release\\x64\\x64dbg.exe`)
+    assert.equal(rebase(from, from, to), to, '目录自身也要映射')
+  })
+
+  await check('不在源目录下的路径原样不动', () => {
+    const from = 'D:\\Software\\x64dbg'
+    const to = 'E:\\Toolkit\\逆向分析\\x64dbg'
+    // 一个条目的附属启动端完全可能在别的目录里，跟着改就把它指到不存在的地方了
+    assert.equal(rebase('D:\\Other\\tool.exe', from, to), 'D:\\Other\\tool.exe')
+    // 前缀相同但不是同一个目录：x64dbg 不该把 x64dbg_old 也算进去
+    assert.equal(rebase('D:\\Software\\x64dbg_old\\a.exe', from, to), 'D:\\Software\\x64dbg_old\\a.exe')
+  })
+
+  await check('大小写不同视为同一个目录', () => {
+    // 库里存的和 agent 当时看到的大小写未必一致，而 Windows 上它们是同一个目录
+    assert.equal(
+      rebase('d:\\software\\TOOLS\\a.exe', 'D:\\Software\\Tools', 'E:\\T\\A'),
+      'E:\\T\\A\\a.exe'
+    )
+  })
+
+  /* --------------------------- 整理：安全护栏 --------------------------- */
+  console.log('\n整理 · 安全护栏')
+
+  await check('同盘 / 跨盘判断', () => {
+    assert.equal(sameVolume('D:\\a', 'D:\\b\\c'), true)
+    assert.equal(sameVolume('D:\\a', 'E:\\a'), false)
+    assert.equal(sameVolume('d:\\a', 'D:\\b'), true, '盘符大小写不该影响判断')
+    // UNC 一律当跨盘，走复制校验那条更保守的路
+    assert.equal(sameVolume('\\\\server\\share\\a', 'D:\\b'), false)
+  })
+
+  await check('目标落在源目录内部时能被识破', () => {
+    // 整理根设成 D:\Software，而软件本来就在 D:\Software\x64dbg ——
+    // 复制会一边读一边往自己里面写，走到磁盘满为止
+    assert.equal(nestedInside('D:\\Software\\x64dbg', 'D:\\Software\\x64dbg\\sub'), true)
+    assert.equal(nestedInside('D:\\Software\\x64dbg', 'D:\\Software\\x64dbg'), true)
+    assert.equal(nestedInside('D:\\Software\\x64dbg', 'E:\\Toolkit\\x64dbg'), false)
+    assert.equal(
+      nestedInside('D:\\Software\\x64dbg', 'D:\\Software\\x64dbg_old'),
+      false,
+      '前缀相同但不是子目录'
+    )
+  })
+
+  /* --------------------------- 整理：真的动文件 --------------------------- */
+  console.log('\n整理 · 文件操作（真实磁盘）')
+
+  const orgRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-org-'))
+
+  await check('同盘移动：目录整体搬过去，内容一字不差', async () => {
+    const from = path.join(orgRoot, 'src', 'MyTool')
+    await fsp.mkdir(path.join(from, 'plugins'), { recursive: true })
+    await fsp.writeFile(path.join(from, 'tool.exe'), 'MZ-fake-binary')
+    await fsp.writeFile(path.join(from, 'plugins', 'p.dll'), 'dll-body')
+
+    const to = path.join(orgRoot, 'dst', '逆向分析', 'MyTool')
+    const outcome = await moveDir(from, to)
+    assert.ok(outcome.ok, `移动失败：${outcome.note}`)
+    assert.equal(fs.existsSync(from), false, '源目录该没了')
+    assert.equal(await fsp.readFile(path.join(to, 'tool.exe'), 'utf-8'), 'MZ-fake-binary')
+    assert.equal(await fsp.readFile(path.join(to, 'plugins', 'p.dll'), 'utf-8'), 'dll-body')
+  })
+
+  await check('目标已存在时拒绝执行，绝不覆盖', async () => {
+    const from = path.join(orgRoot, 'src2', 'Dup')
+    await fsp.mkdir(from, { recursive: true })
+    await fsp.writeFile(path.join(from, 'new.txt'), 'new')
+
+    const to = path.join(orgRoot, 'dst2', 'Dup')
+    await fsp.mkdir(to, { recursive: true })
+    await fsp.writeFile(path.join(to, 'precious.txt'), '用户已有的东西')
+
+    const outcome = await moveDir(from, to)
+    assert.equal(outcome.ok, false, '目标存在时必须失败')
+    assert.match(outcome.note, /已存在/)
+    // 这是最要紧的一条：原有文件必须还在，源也必须没被动过
+    assert.equal(await fsp.readFile(path.join(to, 'precious.txt'), 'utf-8'), '用户已有的东西')
+    assert.ok(fs.existsSync(path.join(from, 'new.txt')), '失败时源目录不该被清掉')
+  })
+
+  await check('目标嵌在源里面时被拦住', async () => {
+    const from = path.join(orgRoot, 'nest', 'Self')
+    await fsp.mkdir(from, { recursive: true })
+    await fsp.writeFile(path.join(from, 'a.txt'), 'a')
+    const outcome = await moveDir(from, path.join(from, 'inner', 'Self'))
+    assert.equal(outcome.ok, false)
+    assert.match(outcome.note, /内部/)
+    assert.ok(fs.existsSync(path.join(from, 'a.txt')), '源必须完好')
+  })
+
+  await check('源目录不存在时给出可读的原因，而不是抛异常', async () => {
+    const outcome = await moveDir(path.join(orgRoot, '并不存在'), path.join(orgRoot, 'x'))
+    assert.equal(outcome.ok, false)
+    assert.match(outcome.note, /不在了/)
+  })
+
+  await check('junction：建链接、能读到目标内容、能安全删掉', async () => {
+    const real = path.join(orgRoot, 'real', 'Installed')
+    await fsp.mkdir(real, { recursive: true })
+    await fsp.writeFile(path.join(real, 'app.exe'), 'installed-body')
+
+    const link = path.join(orgRoot, 'dst3', '系统调控', 'Installed')
+    const made = await makeJunction(link, real)
+    assert.ok(made.ok, `建链接失败：${made.note}`)
+    assert.ok(await isLink(link), '建出来的该被认成链接')
+    // junction 是透明的：从链接读到的就是真实目录的内容
+    assert.equal(await fsp.readFile(path.join(link, 'app.exe'), 'utf-8'), 'installed-body')
+
+    await writeLinkMark(real, { software: 'Installed', real_path: real, link_path: link })
+    assert.ok(fs.existsSync(path.join(real, LINK_MARK)), '标记文件该落在真实目录里')
+
+    const dropped = await removeJunction(link)
+    assert.ok(dropped.ok, `删链接失败：${dropped.note}`)
+    assert.equal(fs.existsSync(link), false, '链接该没了')
+    // 这一条是重点：删链接绝不能碰到真实文件
+    assert.equal(await fsp.readFile(path.join(real, 'app.exe'), 'utf-8'), 'installed-body')
+  })
+
+  await check('removeJunction 拒绝删实体目录', async () => {
+    // 传错了参数就会把用户的软件本体删掉，所以这道判断必须在
+    const solid = path.join(orgRoot, 'solid')
+    await fsp.mkdir(solid, { recursive: true })
+    await fsp.writeFile(path.join(solid, 'keep.txt'), 'keep')
+
+    const outcome = await removeJunction(solid)
+    assert.equal(outcome.ok, false, '实体目录必须被拒')
+    assert.match(outcome.note, /不是链接/)
+    assert.ok(fs.existsSync(path.join(solid, 'keep.txt')), '文件必须还在')
+  })
+
+  await fsp.rm(orgRoot, { recursive: true, force: true })
+
+  /* ------------------------ 接口地址与模型列表 ------------------------ */
+
+  await check('apiBase 归一用户填的接口地址', () => {
+    // 拼错的代价是 404，而报错信息只会说「HTTP 404」，排查起来很贵
+    assert.equal(apiBase('https://api.deepseek.com/v1'), 'https://api.deepseek.com/v1')
+    assert.equal(apiBase('https://api.deepseek.com/v1/'), 'https://api.deepseek.com/v1')
+    assert.equal(apiBase('  https://api.deepseek.com/v1///  '), 'https://api.deepseek.com/v1')
+    // 有人会把整条 chat 路径粘进来
+    assert.equal(
+      apiBase('https://api.deepseek.com/v1/chat/completions'),
+      'https://api.deepseek.com/v1'
+    )
+  })
+
+  await check('parseModelList 认得两种响应形状', () => {
+    // OpenAI 标准形状
+    assert.deepEqual(
+      parseModelList({ object: 'list', data: [{ id: 'gpt-4o-mini' }, { id: 'gpt-4o' }] }),
+      ['gpt-4o', 'gpt-4o-mini']
+    )
+    // 少数服务商直接给数组
+    assert.deepEqual(parseModelList(['qwen-plus', 'qwen-max']), ['qwen-max', 'qwen-plus'])
+    // 去重
+    assert.deepEqual(parseModelList({ data: [{ id: 'a' }, { id: 'a' }] }), ['a'])
+    // 垃圾数据不能抛，得让上层去说「手填模型名」
+    assert.deepEqual(parseModelList({ data: [{}, { id: '' }, null] }), [])
+    assert.deepEqual(parseModelList(null), [])
+    assert.deepEqual(parseModelList({ error: 'no such endpoint' }), [])
   })
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)

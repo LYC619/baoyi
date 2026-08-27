@@ -6,6 +6,7 @@ import type {
   BaoyiApi,
   Category,
   IdentifyLogQuery,
+  OrganizeCommand,
   PendingItem,
   SearchConfig,
   SoftwareItem,
@@ -21,12 +22,12 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
 }
 
 /**
- * 渲染进程递过来的对象、数组多半是 Vue 的 reactive 代理 —— 代理过不了
- * ipcRenderer.invoke 的结构化克隆，调用当场 reject。而 invoke 返回的是 Promise，
- * 上层 await 一下就成了一次静默失败，表现是「点了没反应」，极难定位。
+ * 抹掉 undefined 的键：patch 里没写的字段不该被主进程当成「清空」。
+ * updateSoftware 走的是 Object.entries(patch)，`{name_zh: undefined}` 会真的写进 NULL。
  *
- * 这里是唯一的进出口，统一在这一层拍平成普通值，调用方就不用逐个记得 spread。
- * 顺带把 undefined 的键抹掉，patch 里没写的字段不会被当成「清空」发过去。
+ * 注意这里**管不了** Vue 的 reactive 代理。代理过不了 contextBridge 的结构化克隆，
+ * 而且是在 contextBridge 那一层就同步抛「An object could not be cloned.」——
+ * 根本走不到这个函数体。拍平只能在渲染进程侧做，见 src/utils 的 plain()。
  */
 function plain<T>(value: T): T {
   return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T)
@@ -34,7 +35,8 @@ function plain<T>(value: T): T {
 
 const api: BaoyiApi = {
   app: {
-    info: () => ipcRenderer.invoke('app:info')
+    info: () => ipcRenderer.invoke('app:info'),
+    copyText: (text: string) => ipcRenderer.invoke('app:copy', String(text))
   },
   win: {
     minimize: () => ipcRenderer.send('win:minimize'),
@@ -97,6 +99,7 @@ const api: BaoyiApi = {
     complete: (ids?: string[]) => ipcRenderer.invoke('ai:complete', plain(ids)),
     cancel: () => ipcRenderer.send('ai:cancel'),
     test: (config: AIConfig) => ipcRenderer.invoke('ai:test', plain(config)),
+    models: (config: AIConfig) => ipcRenderer.invoke('ai:models', plain(config)),
     testSearch: (config: SearchConfig) => ipcRenderer.invoke('ai:test-search', plain(config)),
     onProgress: (cb) => subscribe('ai:progress', cb)
   },
@@ -110,7 +113,18 @@ const api: BaoyiApi = {
   },
   logs: {
     list: (query: IdentifyLogQuery = {}) => ipcRenderer.invoke('logs:list', plain(query)),
-    clear: () => ipcRenderer.invoke('logs:clear')
+    clear: () => ipcRenderer.invoke('logs:clear'),
+    reports: () => ipcRenderer.invoke('logs:reports')
+  },
+  organize: {
+    pickRoot: () => ipcRenderer.invoke('organize:pick-root'),
+    preview: (ids?: string[]) => ipcRenderer.invoke('organize:preview', plain(ids)),
+    run: (commands: OrganizeCommand[]) => ipcRenderer.invoke('organize:run', plain(commands)),
+    onProgress: (cb) => subscribe('organize:progress', cb),
+    plans: () => ipcRenderer.invoke('organize:plans'),
+    undo: (planId: string) => ipcRenderer.invoke('organize:undo', planId),
+    materialize: (id: string) => ipcRenderer.invoke('organize:materialize', id),
+    unlink: (id: string) => ipcRenderer.invoke('organize:unlink', id)
   }
 }
 

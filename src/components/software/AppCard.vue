@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onUnmounted } from 'vue'
-import { Play } from 'lucide-vue-next'
+import { Leaf, Play } from 'lucide-vue-next'
 import type { SoftwareItem } from '@/types'
-import AppIcon from './AppIcon.vue'
-import MasteryDots from './MasteryDots.vue'
-import TagBadge from './TagBadge.vue'
+import AppIcon from '@/components/ui/AppIcon.vue'
+import MasteryDots from '@/components/ui/MasteryDots.vue'
+import TagBadge from '@/components/ui/TagBadge.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { activityOf, daysSince, displayName, subtitleName } from '@/utils'
 
@@ -108,6 +108,12 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
     <button class="card__play" title="启动（或双击卡片）" @click="onLaunchClick">
       <Play :size="13" fill="currentColor" />
     </button>
+
+    <!--
+      绿色软件标识。和启动按钮占同一个角 —— 悬浮时让位给它：
+      鼠标已经在卡片上了，那一刻用户想的是「打开它」，不是「它是不是绿色的」。
+    -->
+    <Leaf v-if="item.is_portable === true" :size="13" class="card__leaf" title="绿色软件" />
   </article>
 </template>
 
@@ -286,5 +292,23 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
 .card:hover .card__play {
   opacity: 1;
   transform: scale(1);
+}
+
+.card__leaf {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  color: var(--success);
+  opacity: 0.75;
+  transition: opacity var(--t-fast) ease;
+}
+
+.card--list .card__leaf {
+  top: 50%;
+  margin-top: -6px;
+}
+
+.card:hover .card__leaf {
+  opacity: 0;
 }
 </style>

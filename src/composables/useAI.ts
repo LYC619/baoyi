@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { plain } from '@/utils'
 import type { AIProgress, AIResult, Unsubscribe } from '@/types'
 
 /* 模块级单例：设置页和引导页看到的是同一份进度 */
@@ -7,7 +8,7 @@ const running = ref(false)
 const lastResult = ref<AIResult | null>(null)
 let unsubscribe: Unsubscribe | null = null
 
-const EMPTY: AIResult = { processed: 0, registered: 0, skipped: 0, failed: 0, tokens: 0 }
+const EMPTY: AIResult = { processed: 0, registered: 0, skipped: 0, failed: 0, tokens: 0, report_id: '' }
 
 function ensureSubscribed(): void {
   if (unsubscribe) return
@@ -50,7 +51,7 @@ export function useAI() {
       log: ''
     }
     try {
-      const result = await window.baoyi.ai.complete(ids)
+      const result = await window.baoyi.ai.complete(plain(ids))
       lastResult.value = result
       return result
     } finally {

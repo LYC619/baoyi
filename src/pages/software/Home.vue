@@ -4,34 +4,53 @@ import { useRouter } from 'vue-router'
 import {
   ChevronRight,
   ClipboardCheck,
+  FileBarChart,
   FolderSearch,
+  FolderTree,
   LayoutGrid,
   List,
   Plus,
+  Rows3,
   Settings,
   Sparkles,
   Timer
 } from 'lucide-vue-next'
-import CardGrid from '@/components/CardGrid.vue'
-import SearchBar from '@/components/SearchBar.vue'
-import Sidebar from '@/components/Sidebar.vue'
-import type { SoftwareQuery } from '@/types'
+import CardGrid from '@/components/software/CardGrid.vue'
+import ReportDialog from '@/components/identify/ReportDialog.vue'
+import SearchBar from '@/components/software/SearchBar.vue'
+import Sidebar from '@/components/software/Sidebar.vue'
+import type { IdentifyReport, SoftwareQuery } from '@/types'
 import { useAI } from '@/composables/useAI'
 import { useFilter } from '@/composables/useFilter'
 import { useScan } from '@/composables/useScan'
 import { useToast } from '@/composables/useToast'
+import { useCategoriesStore } from '@/stores/categories'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
 
 const router = useRouter()
 const store = useSoftwareStore()
 const settings = useSettingsStore()
+const categories = useCategoriesStore()
 const { toast, success, error } = useToast()
-const { viewMode, setViewMode, setMastery, setSort, masteryOptions, sortOptions } = useFilter()
+const {
+  viewMode,
+  setViewMode,
+  groupByCategory,
+  toggleGroupByCategory,
+  setMastery,
+  setSort,
+  masteryOptions,
+  sortOptions
+} = useFilter()
 const ai = useAI()
 const scan = useScan()
 
 const addMenuOpen = ref(false)
+
+/** 刚跑完那一轮的汇总报告。识别结束后主页上那条入口就是它 */
+const report = ref<IdentifyReport | null>(null)
+const reportOpen = ref(false)
 
 const busy = computed(() => scan.running.value || ai.running.value)
 const busyText = computed(() => {
@@ -48,6 +67,8 @@ const busyPercent = computed(() =>
 
 onMounted(() => {
   void store.reload()
+  // 分组展示要按 categories.sort_order 排，还要拿每个分类的图标
+  void categories.load()
   document.addEventListener('click', closeAddMenu)
 })
 onBeforeUnmount(() => document.removeEventListener('click', closeAddMenu))
@@ -55,6 +76,32 @@ onBeforeUnmount(() => document.removeEventListener('click', closeAddMenu))
 function closeAddMenu(): void {
   addMenuOpen.value = false
 }
+
+/**
+ * 按分类切成区块。
+ *
+ * 排序照 categories.sort_order —— 侧边栏和这里是同一个顺序，用户建立起的
+ * 空间记忆才对得上。空分类不出现：一个「0」的标题只是噪音。
+ * 分类表里没有的分类名（老条目、AI 提过还没建的）兜在最后，不然它们会消失。
+ */
+const categoryBlocks = computed(() => {
+  const byName = new Map<string, typeof store.items>()
+  for (const item of store.items) {
+    const key = item.category || '其他'
+    if (!byName.has(key)) byName.set(key, [])
+    byName.get(key)!.push(item)
+  }
+
+  const blocks: Array<{ name: string; items: typeof store.items }> = []
+  for (const c of categories.list) {
+    const items = byName.get(c.name)
+    if (!items?.length) continue
+    blocks.push({ name: c.name, items })
+    byName.delete(c.name)
+  }
+  for (const [name, items] of byName) blocks.push({ name, items })
+  return blocks
+})
 
 function open(id: string): void {
   void router.push({ name: 'detail', params: { id } })
@@ -114,10 +161,10 @@ async function completeAi(ids?: string[]): Promise<void> {
     return
   }
   const result = await ai.complete(ids)
-  await store.reload()
+  await Promise.all([store.reload(), loadReport(result.report_id)])
 
   if (result.failed > 0) {
-    error(`识别完成：${result.registered} 个成功，${result.failed} 个失败（可重试）`)
+    error(`识别完成：${result.registered} 个成功，${result.failed} 个失败（可看报告）`)
     return
   }
   if (result.registered === 0) return
@@ -127,6 +174,16 @@ async function completeAi(ids?: string[]): Promise<void> {
   } else {
     success(`识别出 ${result.registered} 个软件，去确认面板过目后收录`)
   }
+}
+
+/**
+ * 报告入口做成页面上的一条提示，而不是 toast 里的链接 ——
+ * toast 2.6 秒就消失，而识别常常要跑好几分钟，用户很可能正好没在看屏幕。
+ */
+async function loadReport(id: string): Promise<void> {
+  report.value = id
+    ? (await window.baoyi.logs.reports()).find((r) => r.id === id) ?? null
+    : null
 }
 
 function onSortChange(e: Event): void {
@@ -193,6 +250,13 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
                   <Plus :size="15" />
                   手动添加路径
                 </button>
+                <button
+                  title="按分类把软件归置到整理目录下。会先出方案给你过目"
+                  @click="addMenuOpen = false; router.push({ name: 'organize' })"
+                >
+                  <FolderTree :size="15" />
+                  整理到目标目录
+                </button>
               </div>
             </Transition>
           </div>
@@ -227,6 +291,15 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
             识别 {{ store.todo }} 项
           </button>
 
+          <button
+            class="btn btn--subtle btn--toggle"
+            :class="{ on: groupByCategory }"
+            :title="groupByCategory ? '取消分类分组，回到平铺' : '按分类分组展示'"
+            @click="toggleGroupByCategory"
+          >
+            <Rows3 :size="15" />
+          </button>
+
           <select class="select" :value="store.sort" @change="onSortChange">
             <option v-for="o in sortOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
@@ -256,6 +329,16 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
         <ChevronRight :size="15" class="notice__go" />
       </button>
 
+      <!-- 刚跑完那一轮的整体情况。识别要跑好几分钟，用户很可能没盯着屏幕 -->
+      <button v-if="report" class="notice notice--action" @click="reportOpen = true">
+        <FileBarChart :size="15" />
+        <span>
+          本轮识别报告：处理 {{ report.processed }} 个目录，成功 {{ report.registered }}、
+          跳过 {{ report.skipped }}、失败 {{ report.failed }}。点这里看详情。
+        </span>
+        <ChevronRight :size="15" class="notice__go" />
+      </button>
+
       <div
         v-if="store.selection.value === 'unused' && store.items.length > 0"
         class="notice"
@@ -268,20 +351,42 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
       </div>
 
       <section class="home__content">
-        <CardGrid
-          v-if="store.items.length > 0"
-          :items="store.items"
-          :view="viewMode"
-          :unused-days="settings.settings.unused_days"
-          @open="open"
-          @launch="launch"
-        />
+        <template v-if="store.items.length > 0">
+          <!-- 分组模式：一个分类一个区块，区块内部照旧用当前的网格 / 列表排布 -->
+          <template v-if="groupByCategory">
+            <section v-for="block in categoryBlocks" :key="block.name" class="block">
+              <h2 class="block__head">
+                <component :is="categories.iconComponent(block.name)" :size="15" />
+                <span>{{ block.name }}</span>
+                <span class="block__n">{{ block.items.length }}</span>
+              </h2>
+              <CardGrid
+                :items="block.items"
+                :view="viewMode"
+                :unused-days="settings.settings.unused_days"
+                @open="open"
+                @launch="launch"
+              />
+            </section>
+          </template>
+
+          <CardGrid
+            v-else
+            :items="store.items"
+            :view="viewMode"
+            :unused-days="settings.settings.unused_days"
+            @open="open"
+            @launch="launch"
+          />
+        </template>
         <div v-else-if="!store.loading" class="empty">
           <h2>{{ emptyHint.title }}</h2>
           <p>{{ emptyHint.desc }}</p>
         </div>
       </section>
     </main>
+
+    <ReportDialog v-if="report && reportOpen" :report="report" @close="reportOpen = false" />
   </div>
 </template>
 
@@ -452,6 +557,41 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
   outline: none;
 }
 
+/* 分组开关：按下去要看得出来它是「开着的」，不然用户不知道当前是哪种排布 */
+.btn--toggle {
+  width: 28px;
+  height: 26px;
+  padding: 0;
+}
+.btn--toggle.on {
+  background: var(--active-surface);
+  color: var(--accent);
+}
+
+/* ------------------------------ 分类区块 ------------------------------ */
+.block {
+  margin-bottom: 22px;
+}
+
+.block__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--divider);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text-sub);
+}
+
+.block__n {
+  font-size: var(--fs-tag);
+  font-weight: 400;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ------------------------------ 进度 / 提示 ------------------------------ */
 .progress {
   flex: none;
@@ -541,7 +681,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
 }
 
 .empty h2 {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 17px;
   font-weight: 400;
   color: var(--text-sub);

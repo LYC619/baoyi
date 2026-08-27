@@ -44,7 +44,12 @@
   /* ---------------- 字体 ---------------- */
   --font-ui: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB',
     -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-serif: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', STSong, serif;
+  /*
+   * 氛围文字用的字体：品牌名、侧边栏那句箴言、空状态标题。
+   * 按用途命名而不是按形态（曾叫 --font-serif）—— 换成非衬线的氛围字体时，
+   * 形态命名就开始骗人，而引用它的十几处 scoped 样式一个都不用改。
+   */
+  --font-display: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', STSong, serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace;
 
   --fs-title: 18px;

@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRight, Check, FolderPlus, Loader2, SkipForward, Trash2 } from 'lucide-vue-next'
-import BaoyiLogo from '@/components/BaoyiLogo.vue'
+import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
 import { useAI } from '@/composables/useAI'
 import { useScan } from '@/composables/useScan'
 import { useSettingsStore } from '@/stores/settings'
@@ -22,7 +22,7 @@ const apiUrl = ref(settings.settings.ai.api_url)
 const apiKey = ref(settings.settings.ai.api_key)
 const model = ref(settings.settings.ai.model)
 
-const scanned = ref({ found: 0, added: 0, pending: 0, settled: 0 })
+const scanned = ref({ found: 0, added: 0, pending: 0, settled: 0, loose_files: [] as string[] })
 const aiDone = ref({ processed: 0, registered: 0, skipped: 0, failed: 0, tokens: 0 })
 
 const canScan = computed(() => dirs.value.length > 0)
@@ -268,7 +268,7 @@ async function finish(): Promise<void> {
 }
 
 .title {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 34px;
   font-weight: 400;
   letter-spacing: 8px;
@@ -277,14 +277,14 @@ async function finish(): Promise<void> {
 }
 
 .slogan {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 15px;
   letter-spacing: 3px;
   color: var(--accent);
 }
 
 .quote {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 12px;
   line-height: 2;
   color: var(--text-faint);
@@ -308,7 +308,7 @@ async function finish(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 22px;
   font-weight: 400;
   letter-spacing: 1px;

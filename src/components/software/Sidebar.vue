@@ -1,55 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import {
-  Archive,
-  Bot,
-  Box,
-  Bug,
-  ChevronDown,
-  Clapperboard,
-  Code2,
-  FileText,
-  Folder,
-  Globe,
-  Hash,
-  Image,
-  Layers,
-  Search,
-  Settings2,
-  Shield,
-  SlidersHorizontal,
-  Sparkles,
-  StickyNote,
-  Timer,
-  Zap
-} from 'lucide-vue-next'
-import type { Component } from 'vue'
+import { Archive, ChevronDown, Hash, Layers, Leaf, Sparkles, Timer } from 'lucide-vue-next'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSoftwareStore } from '@/stores/software'
 
 const store = useSoftwareStore()
 const categories = useCategoriesStore()
 
-/** 分类图标名 → 组件。旧名字留着，用户自建的分类可能还在用 */
-const ICONS: Record<string, Component> = {
-  bug: Bug,
-  bot: Bot,
-  search: Search,
-  'file-text': FileText,
-  'sliders-horizontal': SlidersHorizontal,
-  globe: Globe,
-  image: Image,
-  clapperboard: Clapperboard,
-  shield: Shield,
-  'sticky-note': StickyNote,
-  box: Box,
-  'code-2': Code2,
-  'settings-2': Settings2,
-  folder: Folder,
-  zap: Zap
-}
-
-const iconFor = (name: string) => ICONS[categories.iconOf(name)] ?? Box
+const iconFor = (name: string) => categories.iconComponent(name)
 
 /**
  * 左下角这句话是氛围，不是功能 —— 所以用衬线体、压小、压淡，并带上出处。
@@ -136,6 +94,17 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
         <Timer :size="15" />
         <span class="row__label">长期未用</span>
         <span class="row__count">{{ store.counts.unused }}</span>
+      </button>
+
+      <button
+        v-if="store.counts.portable > 0"
+        class="row"
+        :class="{ 'row--active': isActive('group', 'portable') }"
+        @click="store.select({ kind: 'group', value: 'portable' })"
+      >
+        <Leaf :size="15" />
+        <span class="row__label">绿色软件</span>
+        <span class="row__count">{{ store.counts.portable }}</span>
       </button>
 
       <button
@@ -262,7 +231,7 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
   flex: none;
   padding: 14px 18px 16px;
   border-top: 1px solid var(--divider);
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   color: var(--text-faint);
 }
 

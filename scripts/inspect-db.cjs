@@ -24,6 +24,29 @@ const fmt = (ms) => (ms ? new Date(ms).toLocaleString('sv') : '—')
 const count = (t) => db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c
 
 console.log(`数据库：${file}\n`)
+
+/* ------------------------------ 表结构自检 ------------------------------ */
+
+// 0.3 的三列是 migrate() 补出来的，而 migrate() 曾被 initSchema 里的建索引语句挡在
+// 门外（见 database.ts initSchema 的注释）。缺列的后果不是报错一次，而是每一条
+// register_software 都写不进去 —— agent 认得再对也白认。所以先把这件事说清楚。
+const colsOf = (t) => new Set(db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name))
+const missing = []
+for (const [t, need] of Object.entries({
+  software: ['is_portable', 'move_risk', 'link_target'],
+  pending_software: ['is_portable', 'move_risk']
+})) {
+  const have = colsOf(t)
+  for (const c of need) if (!have.has(c)) missing.push(`${t}.${c}`)
+}
+if (missing.length) {
+  console.log(`⚠ 表结构缺列：${missing.join('、')}`)
+  console.log('   迁移没跑完，识别会在注册那一步整批失败。启动一次修好版的抱一即可补上。\n')
+  process.exitCode = 1
+} else {
+  console.log('表结构：0.3 的列齐全\n')
+}
+
 console.log(
   `软件条目 ${count('software')} · 扫描目录 ${count('scan_units')} · 分类 ${count('categories')}\n`
 )

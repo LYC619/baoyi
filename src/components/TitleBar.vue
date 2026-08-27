@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { Copy, Minus, Square, X } from 'lucide-vue-next'
-import BaoyiLogo from './BaoyiLogo.vue'
+import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
 
 const maximized = ref(false)
 let unsubscribe: (() => void) | null = null
@@ -61,7 +61,7 @@ const close = () => window.baoyi.win.close()
 }
 
 .titlebar__name {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 15px;
   letter-spacing: 2px;
   color: var(--text-main);

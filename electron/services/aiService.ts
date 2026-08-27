@@ -13,11 +13,12 @@ import type {
   AIProgress,
   AIResult,
   IdentifyLogStatus,
+  IdentifyReportEntry,
   ScanUnit,
   SearchConfig,
   SoftwareItem
 } from '../../src/types'
-import { runAgent, probeToolCalling, type AgentEvent } from './agent/loop'
+import { runAgent, probeToolCalling, apiBase, parseModelList, type AgentEvent } from './agent/loop'
 import { fillIdentifySystem, itemPrompt, unitPrompt } from './agent/prompts'
 import { buildTools, type ToolContext } from './agent/tools'
 import {
@@ -28,6 +29,7 @@ import {
   listUnfinishedUnits,
   markScanUnit,
   saveIdentifyLog,
+  saveIdentifyReport,
   tagPool,
   updateSoftware
 } from './database'
@@ -35,8 +37,14 @@ import { searchAvailable } from './searchService'
 
 /** 同时跑几个目录。三个够把等待时间压下来，又不至于撞上模型的并发限流 */
 const CONCURRENCY = 3
-/** 单个目录允许的最大工具调用轮数，兜住模型原地打转的成本 */
-const MAX_TURNS_PER_UNIT = 14
+/**
+ * 单个目录允许的最大工具调用轮数，兜住模型原地打转的成本。
+ *
+ * 20 而不是 14：扫描器会看错，把一个「合集目录」当成软件目录交过来，那时 agent
+ * 要在同一次会话里注册出好几条（见 prompts.ts 的「目录结构判断」）。14 轮不够走完，
+ * 结果是注册一半就被掐断。单个软件的目录 3-5 轮就收尾，抬高上限不会让它们更贵。
+ */
+const MAX_TURNS_PER_UNIT = 20
 
 let controller: AbortController | null = null
 
@@ -55,6 +63,10 @@ interface Tally {
   tokens: number
   current: string
   log: string
+  /** 本轮共调了几次 web_search。报告要靠它回答「额度花在哪了」 */
+  searches: number
+  /** 逐条摘要，攒完一轮汇总成一份报告 */
+  entries: IdentifyReportEntry[]
 }
 
 function makeReporter(tally: Tally, onProgress: (p: AIProgress) => void) {
@@ -277,8 +289,10 @@ export async function completeWithAi(
   const searchConfig = settings.search
   const withSearch = searchAvailable(searchConfig)
 
-  // 分类和标签池现读现填。用户刚在设置里合并过两个标签，这一轮就该按合并后的来
-  const system = fillIdentifySystem(listCategories(), tagPool())
+  // 分类和标签池现读现填。用户刚在设置里合并过两个标签，这一轮就该按合并后的来。
+  // withSearch 同时决定「注册哪些工具」和「提示词怎么说」—— 两边必须是同一个值，
+  // 否则模型会照提示词去调一个没注册的工具，白烧一轮
+  const system = fillIdentifySystem(listCategories(), tagPool(), withSearch)
 
   // 指定了 ids 就只补这几条；否则跑完所有待识别目录 + 遗留的待补全条目
   const jobs: Job[] = ids?.length
@@ -296,9 +310,12 @@ export async function completeWithAi(
     failed: 0,
     tokens: 0,
     current: '',
-    log: ''
+    log: '',
+    searches: 0,
+    entries: []
   }
   const report = makeReporter(tally, onProgress)
+  const roundStartedAt = Date.now()
 
   const finish = (): AIResult => {
     onProgress({
@@ -311,12 +328,33 @@ export async function completeWithAi(
       log: ''
     })
     controller = null
+
+    // 一条都没跑就没有报告可写 —— 一份全零的报告只会让历史列表变噪音
+    let reportId = ''
+    if (tally.entries.length > 0) {
+      try {
+        reportId = saveIdentifyReport({
+          processed: tally.processed,
+          registered: tally.registered,
+          skipped: tally.skipped,
+          failed: tally.failed,
+          duration_ms: Date.now() - roundStartedAt,
+          tokens: tally.tokens,
+          searches: tally.searches,
+          entries: tally.entries
+        })
+      } catch {
+        /* 报告写不进去不该让识别结果跟着失败，它只是事后翻看用的 */
+      }
+    }
+
     return {
       processed: tally.processed,
       registered: tally.registered,
       skipped: tally.skipped,
       failed: tally.failed,
-      tokens: tally.tokens
+      tokens: tally.tokens,
+      report_id: reportId
     }
   }
 
@@ -381,10 +419,15 @@ export async function completeWithAi(
         : outcome.registered > 0
           ? 'success'
           : 'skipped'
+      const dir = job.kind === 'unit' ? job.unit.dir : path.dirname(job.item.exe_path)
+      const label =
+        job.kind === 'unit' ? path.basename(job.unit.dir) || job.unit.dir : job.item.file_name
+      const searches = trail.filter((e) => e.type === 'tool_call' && e.name === 'web_search').length
+
       try {
         saveIdentifyLog({
-          dir: job.kind === 'unit' ? job.unit.dir : path.dirname(job.item.exe_path),
-          label: job.kind === 'unit' ? path.basename(job.unit.dir) || job.unit.dir : job.item.file_name,
+          dir,
+          label,
           kind: job.kind,
           status,
           summary: outcome.note,
@@ -398,6 +441,17 @@ export async function completeWithAi(
       } catch {
         /* 日志写不进去也不该让识别结果跟着失败，它只是事后翻看用的 */
       }
+
+      tally.searches += searches
+      tally.entries.push({
+        dir,
+        label,
+        status,
+        rounds: outcome.turns,
+        tokens: outcome.tokens,
+        searches,
+        note: outcome.note
+      })
     }
 
     tally.tokens += outcome.tokens
@@ -418,5 +472,44 @@ export async function testConnection(config: AIConfig): Promise<{ ok: boolean; m
     return await probeToolCalling(config)
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * 拉服务商的模型列表，GET {base}/models —— OpenAI 兼容格式的既有约定。
+ * 不填模型名也能调（列表本来就是拿来选模型的），所以只要 Key。
+ */
+export async function listModels(
+  config: AIConfig
+): Promise<{ ok: boolean; message: string; models: string[] }> {
+  if (!config.api_key) return { ok: false, message: '请先填写 API Key', models: [] }
+
+  try {
+    const res = await fetch(`${apiBase(config.api_url)}/models`, {
+      headers: { Authorization: `Bearer ${config.api_key}` },
+      signal: AbortSignal.timeout(20_000)
+    })
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      return {
+        ok: false,
+        message: `HTTP ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ''}`,
+        models: []
+      }
+    }
+
+    const models = parseModelList(await res.json())
+    if (models.length === 0) {
+      return { ok: false, message: '接口通了，但没返回任何模型，请手动填模型名', models: [] }
+    }
+    return { ok: true, message: `拉到 ${models.length} 个模型`, models }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return {
+      ok: false,
+      // 不少中转站压根没实现 /models，这时候别让用户以为是 Key 错了
+      message: `拉取失败：${msg}。部分中转服务不提供模型列表，可以直接手填模型名。`,
+      models: []
+    }
   }
 }

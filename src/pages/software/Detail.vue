@@ -6,14 +6,17 @@ import {
   ArchiveRestore,
   ArrowLeft,
   ExternalLink,
+  FolderInput,
   FolderOpen,
+  Loader2,
   Play,
   Sparkles,
-  Trash2
+  Trash2,
+  Unlink
 } from 'lucide-vue-next'
-import AppIcon from '@/components/AppIcon.vue'
-import EditableField from '@/components/EditableField.vue'
-import TagBadge from '@/components/TagBadge.vue'
+import AppIcon from '@/components/ui/AppIcon.vue'
+import EditableField from '@/components/ui/EditableField.vue'
+import TagBadge from '@/components/ui/TagBadge.vue'
 import { useAI } from '@/composables/useAI'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
@@ -153,6 +156,51 @@ function setCategory(e: Event): void {
 function copyPath(target: string): void {
   void navigator.clipboard.writeText(target)
   toast('路径已复制')
+}
+
+/* ------------------------------ 位置与链接 ------------------------------ */
+
+/**
+ * 条目「所在的那个目录」。用 source_dir 而不是 exe 所在目录 ——
+ * 那是整理时真正被搬动/被链接的单位，exe 可能躺在它的 bin\ 里。
+ */
+const locationDir = computed(() => {
+  if (!item.value) return ''
+  return item.value.source_dir || item.value.exe_path.replace(/\\[^\\]*$/, '')
+})
+
+const linkBusy = ref(false)
+
+async function toEntity(): Promise<void> {
+  if (!item.value) return
+  const ok = window.confirm(
+    `把真实文件搬到链接所在的位置？\n\n${item.value.link_target}\n  →  ${locationDir.value}\n\n` +
+      '搬完原位置就空了，这一条从此是实体目录。确认继续？'
+  )
+  if (!ok) return
+
+  linkBusy.value = true
+  try {
+    const r = await window.baoyi.organize.materialize(item.value.id)
+    await load()
+    r.ok ? success(r.message) : error(r.message)
+  } finally {
+    linkBusy.value = false
+  }
+}
+
+async function dropLink(): Promise<void> {
+  if (!item.value) return
+  if (!window.confirm('只删除链接，不动真实文件。条目路径会退回实际位置。确认继续？')) return
+
+  linkBusy.value = true
+  try {
+    const r = await window.baoyi.organize.unlink(item.value.id)
+    await load()
+    r.ok ? success(r.message) : error(r.message)
+  } finally {
+    linkBusy.value = false
+  }
 }
 </script>
 
@@ -393,6 +441,69 @@ function copyPath(target: string): void {
                 </button>
               </li>
             </ul>
+          </section>
+
+          <section class="panel">
+            <h2 class="sec-title">位置信息</h2>
+            <dl class="kv">
+              <dt>当前位置</dt>
+              <dd>
+                <button class="link-btn mono" :title="locationDir" @click="copyPath(locationDir)">
+                  {{ locationDir }}
+                </button>
+              </dd>
+              <dt>位置类型</dt>
+              <dd>
+                <TagBadge
+                  :label="item.link_target ? 'junction 链接' : '实体目录'"
+                  :tone="item.link_target ? 'alt' : 'muted'"
+                />
+              </dd>
+              <template v-if="item.link_target">
+                <dt>实际指向</dt>
+                <dd>
+                  <button
+                    class="link-btn mono"
+                    :title="item.link_target"
+                    @click="copyPath(item.link_target)"
+                  >
+                    {{ item.link_target }}
+                  </button>
+                </dd>
+              </template>
+              <dt>绿色软件</dt>
+              <dd>
+                <TagBadge
+                  :label="item.is_portable === null ? '未判断' : item.is_portable ? '是' : '否'"
+                  :tone="item.is_portable === true ? 'success' : 'muted'"
+                />
+              </dd>
+              <dt>移动风险</dt>
+              <dd>
+                <TagBadge
+                  :label="{ safe: '可安全移动', risky: '有风险', unknown: '未知' }[item.move_risk]"
+                  :tone="item.move_risk === 'safe' ? 'success' : item.move_risk === 'risky' ? 'warning' : 'muted'"
+                />
+              </dd>
+            </dl>
+
+            <p v-if="item.link_target" class="sec-note sec-note--foot">
+              整理目录里放的是一个链接，软件本体还在原安装位置没有动过。
+              「转为实体」会把真实文件搬到链接这个位置来；「移除链接」只删链接，
+              条目路径退回实际位置。两者都不会删除你的软件。
+            </p>
+
+            <div v-if="item.link_target" class="row row--foot">
+              <button class="btn btn--ghost" :disabled="linkBusy" @click="toEntity">
+                <Loader2 v-if="linkBusy" :size="14" class="spin" />
+                <FolderInput v-else :size="14" />
+                转为实体
+              </button>
+              <button class="btn btn--subtle" :disabled="linkBusy" @click="dropLink">
+                <Unlink :size="14" />
+                移除链接
+              </button>
+            </div>
           </section>
 
           <section class="panel">
@@ -761,6 +872,39 @@ function copyPath(target: string): void {
 .link {
   display: block;
   color: var(--accent-2);
+}
+
+/* kv 表格里可点击复制的路径。它不是链接，所以不用 a 的样式 */
+.link-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: var(--text-sub);
+  word-break: break-all;
+  line-height: 1.6;
+  transition: color var(--t-fast) ease;
+}
+.link-btn:hover {
+  color: var(--accent);
+}
+
+/* 区块末尾的一排按钮 */
+.row--foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 1080px) {

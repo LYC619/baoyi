@@ -1,6 +1,28 @@
-import type { AgentEvent, MasteryLevel, SoftwareItem, TitleLang } from '@/types'
+import type {
+  AgentEvent,
+  IdentifyLog,
+  IdentifyLogStatus,
+  MasteryLevel,
+  SearchCallRecord,
+  SoftwareItem,
+  TitleLang
+} from '@/types'
 
 const DAY = 86_400_000
+
+/**
+ * 递给 window.baoyi.* 之前，把 Vue 的 reactive 代理拍平成普通值。
+ *
+ * 代理过不了 contextBridge 的结构化克隆，而且它是**同步**抛
+ * 「An object could not be cloned.」—— 抛在 contextBridge 那一层，
+ * preload 函数体根本没开始执行。所以这层拍平必须留在渲染进程侧：
+ * 放进 preload.ts 是够不着的，参数在进门之前就已经炸了。
+ *
+ * 抛出点在 async 函数里，于是表现成一次静默 reject —— 「点了没反应」。
+ */
+export function plain<T>(value: T): T {
+  return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T)
+}
 
 /** 图标走 baoyi:// 自定义协议，主进程只按文件名在图标目录里找 */
 export function iconUrl(iconPath: string): string {
@@ -170,4 +192,114 @@ export function groupRounds(events: AgentEvent[]): AgentRound[] {
     out[out.length - 1].events.push({ event, i })
   })
   return out.filter((r) => r.events.length > 0)
+}
+
+/* ------------------------------ 版本号比较 ------------------------------ */
+
+/**
+ * 从一段文字里抠出可比较的版本号。取**最后一个**像版本号的片段 ——
+ * 路径里常有别的数字（`D:\Software\1.system\CC Switch\v3.16.5`），
+ * 而版本号总在最靠近软件本身的那一段。
+ *
+ * 认不出来返回空数组，比较时排在所有能认出版本号的后面。
+ */
+export function parseVersion(text: string): number[] {
+  const hits = text.match(/\d+(?:\.\d+){1,3}/g)
+  if (!hits) return []
+  return hits[hits.length - 1].split('.').map((n) => Number(n) || 0)
+}
+
+/** 逐段比大小。a 比 b 新返回正数。段数不同时缺的那几段按 0 算（3.16 < 3.16.1） */
+export function compareVersions(a: number[], b: number[]): number {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const diff = (a[i] ?? 0) - (b[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+/**
+ * 一个条目「有多新」。
+ *
+ * 优先信路径里的版本号：多版本并存时目录名就是用来区分版本的
+ * （`CC Switch\v3.16.1` / `CC Switch\v3.16.5`），而 PE 版本号常常没跟着打包更新。
+ * 路径里认不出来才退回 PE 的 version 字段。
+ */
+export function versionOf(item: { source_dir: string; exe_path: string; version: string }): number[] {
+  const fromPath = parseVersion(item.source_dir || item.exe_path)
+  return fromPath.length > 0 ? fromPath : parseVersion(item.version)
+}
+
+/* ------------------------------ 日志导出 ------------------------------ */
+
+const LOG_STATUS_TEXT: Record<IdentifyLogStatus, string> = {
+  success: '识别完成',
+  skipped: '未注册任何条目',
+  failed: '识别失败'
+}
+
+/**
+ * 把一条识别日志摊成纯文本，用于复制到剪贴板。
+ *
+ * 页面上的折叠、截断、「展开全文」都是为了在一屏里放下几十条 —— 复制出去是要
+ * 贴进 issue 或者对着看的，所以这里一个字不省：每一轮的调用、完整返回、模型原话。
+ */
+export function logToText(log: IdentifyLog): string {
+  const seconds = (log.duration_ms / 1000).toFixed(1)
+  const out = [
+    `目录：${log.dir}`,
+    `状态：${LOG_STATUS_TEXT[log.status]}${log.summary ? ` —— ${log.summary}` : ''}`,
+    `轮次：${log.rounds} | 耗时：${seconds}s | Tokens：${log.tokens.toLocaleString()}`,
+    ''
+  ]
+  if (log.stop_reason === 'max_turns') out.push('（达到轮数上限被强制结束，当时还没下结论）', '')
+
+  for (const round of groupRounds(log.events)) {
+    for (const { event } of round.events) {
+      if (event.type === 'tool_call') {
+        out.push(`[轮次 ${round.index}] → ${event.name} ${JSON.stringify(event.args)}`)
+      } else if (event.type === 'tool_result') {
+        out.push(`返回${event.isError ? '（错误）' : ''}：${event.text}`)
+      } else if (event.type === 'text') {
+        out.push(`[轮次 ${round.index}] 模型推理：${event.text}`)
+      }
+    }
+  }
+  return out.join('\n')
+}
+
+/* ------------------------------ 搜索调用记录 ------------------------------ */
+
+/** webSearch 失败时不抛异常，而是把原因当正常返回喂回模型 —— 只能从文案上认 */
+function searchStatus(text: string, isError: boolean): SearchCallRecord['status'] {
+  if (/超时|timeout|timederror|aborted/i.test(text)) return 'timeout'
+  if (isError || /^搜索「.*」失败/.test(text)) return 'failed'
+  if (/没有搜到结果/.test(text)) return 'empty'
+  return 'ok'
+}
+
+/**
+ * 从识别日志里挖出 web_search 的调用流水。
+ *
+ * 刻意不为它单开一张表 —— 每一次搜索本来就已经完整记在 identify_logs 的事件流里，
+ * 再存一份就有了两个会不一致的真相。代价是时间只精确到「所属那次识别」这一级。
+ */
+export function searchCalls(logs: IdentifyLog[], limit = 20): SearchCallRecord[] {
+  const out: SearchCallRecord[] = []
+  for (const log of logs) {
+    log.events.forEach((event, i) => {
+      if (event.type !== 'tool_call' || event.name !== 'web_search') return
+      // 返回紧跟在调用后面。中间不会插进别的事件：loop 是一次调用一次返回
+      const result = log.events[i + 1]
+      const done = result?.type === 'tool_result' && result.name === 'web_search' ? result : null
+      out.push({
+        at: log.created_at,
+        query: String(event.args.query ?? ''),
+        status: done ? searchStatus(done.text, done.isError) : 'failed',
+        ms: done?.ms ?? 0,
+        label: log.label || log.dir
+      })
+    })
+  }
+  return out.sort((a, b) => b.at - a.at).slice(0, limit)
 }

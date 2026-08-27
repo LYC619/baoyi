@@ -8,7 +8,7 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import type { Launcher, RegisterPayload, SearchConfig } from '../../../src/types'
+import type { Launcher, MoveRisk, RegisterPayload, SearchConfig } from '../../../src/types'
 import { readExternalActiveAt } from '../activity'
 import { extractIcon } from '../iconExtractor'
 import { readPeArch, readPeInfo } from '../peReader'
@@ -227,6 +227,22 @@ function str(raw: unknown, max: number): string {
 }
 
 /**
+ * is_portable 是三态的，所以不能用 `=== true` 一刀切 —— 那会把「模型没填」
+ * 和「模型判断为不是」压成同一个值，而整理时这两者的处理方式相反。
+ * 只认真正的布尔（含模型爱输出的 "true"/"false" 字符串），其余一律 null。
+ */
+function triBool(raw: unknown): boolean | null {
+  if (typeof raw === 'boolean') return raw
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return null
+}
+
+function moveRisk(raw: unknown): MoveRisk {
+  return raw === 'safe' || raw === 'risky' ? raw : 'unknown'
+}
+
+/**
  * 收口到 prompts.ts 里那份实现 —— 它和「最多新增 1 个」那句提示词写在一起，
  * 是同一条规则的两半，分开放迟早会各改各的。这里只负责把模型给的原始参数洗干净。
  */
@@ -256,7 +272,9 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
     tags: limitTags(args?.tags, new Set(tagPool())),
     official_url: url,
     launchers,
-    source_dir: ctx.unitDir
+    source_dir: ctx.unitDir,
+    is_portable: triBool(args?.is_portable),
+    move_risk: moveRisk(args?.move_risk)
   }
 
   const primary = launchers.find((l) => l.is_default && l.kind === 'main')
@@ -272,7 +290,7 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
     if (!outcome) throw new Error('注册失败：没有可用的启动端')
     if (icon) updateSoftware(outcome.id, { icon_path: icon })
     ctx.onRegister?.({ name: nameZh, exe_path: outcome.exe_path, created: outcome.created })
-    return registerReply(nameZh, primary, launchers, outcome.created ? '已注册' : '已更新')
+    return registerReply(nameZh, primary, launchers, outcome.created ? '已注册' : '已更新', payload)
   }
 
   if (isSkipped(primary.path)) {
@@ -283,14 +301,25 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
   const outcome = stagePending(payload, facts, ctx.unitDir, icon)
   if (!outcome) throw new Error('暂存失败：没有可用的启动端')
   ctx.onRegister?.({ name: nameZh, exe_path: outcome.exe_path, created: outcome.created })
-  return registerReply(nameZh, primary, launchers, '已记录（待用户确认）')
+  return registerReply(nameZh, primary, launchers, '已记录（待用户确认）', payload)
 }
 
-function registerReply(name: string, primary: Launcher, launchers: Launcher[], verb: string): string {
+function registerReply(
+  name: string,
+  primary: Launcher,
+  launchers: Launcher[],
+  verb: string,
+  payload: RegisterPayload
+): string {
   const extras = launchers.filter((l) => l !== primary)
+  const portable =
+    payload.is_portable === null ? '未判断' : payload.is_portable ? '是' : '否'
   return [
     `${verb}「${name}」`,
     `默认启动端：${primary.path}`,
+    // 把这两个字段回读一遍：它们决定抱一敢不敢搬这个目录，
+    // 而识别日志是事后唯一能查「当时凭什么这么判断」的地方
+    `绿色软件：${portable}　移动风险：${payload.move_risk}`,
     extras.length
       ? `其余启动端 ${extras.length} 个：${extras.map((l) => `${path.basename(l.path)}${l.label ? `(${l.label})` : ''}`).join('、')}`
       : '无其他启动端',
@@ -395,6 +424,20 @@ export function buildTools(ctx: ToolContext, withSearch: boolean): AgentTool[] {
               : '1-3 个标签，描述类型特征或技术属性（便携、开源、CLI、GUI、单文件…），不要重复分类已经表达的用途。'
           },
           official_url: { type: 'string', description: '官网地址，不确定就留空字符串' },
+          is_portable: {
+            type: ['boolean', 'null'],
+            description:
+              '是不是绿色软件（解压即用、无安装器、配置在自身目录下、有 portable 标记）。' +
+              '判断不了就填 null —— 抱一会因此不去移动它的目录，这是安全的一侧。不要猜。'
+          },
+          move_risk: {
+            type: 'string',
+            enum: ['safe', 'risky', 'unknown'],
+            description:
+              '把它的目录挪到别处会不会出事。safe = 只是一堆文件，挪走照样跑；' +
+              'risky = 注册了服务/驱动/COM、装在系统保护目录、或被别的程序按固定路径依赖；' +
+              'unknown = 判断不了。risky 和 unknown 都只会做链接不做移动，但要分开填。'
+          },
           launchers: {
             type: 'array',
             description:
@@ -411,7 +454,7 @@ export function buildTools(ctx: ToolContext, withSearch: boolean): AgentTool[] {
             }
           }
         },
-        required: ['name_zh', 'summary', 'category', 'launchers']
+        required: ['name_zh', 'summary', 'category', 'launchers', 'move_risk']
       },
       execute: (args) => register(ctx, args)
     },

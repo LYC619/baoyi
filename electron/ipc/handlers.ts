@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type {
@@ -6,12 +6,13 @@ import type {
   AppSettings,
   Category,
   IdentifyLogQuery,
+  OrganizeCommand,
   PendingItem,
   SearchConfig,
   SoftwareItem,
   SoftwareQuery
 } from '../../src/types'
-import { cancelAi, completeWithAi, testConnection } from '../services/aiService'
+import { cancelAi, completeWithAi, listModels, testConnection } from '../services/aiService'
 import {
   clearIdentifyLogs,
   clearSkipped,
@@ -27,6 +28,8 @@ import {
   getSoftware,
   listCategories,
   listIdentifyLogs,
+  listIdentifyReports,
+  listOrganizePlans,
   listPending,
   listScanUnits,
   listSoftware,
@@ -46,6 +49,13 @@ import {
   upsertCategory
 } from '../services/database'
 import { launchSoftware, revealInFolder } from '../services/launcher'
+import {
+  materialize,
+  previewOrganize,
+  runOrganize,
+  undoOrganize,
+  unlink
+} from '../services/organize'
 import { addSingleExe, cancelScan, scanDirectories } from '../services/scanner'
 import { testSearch } from '../services/searchService'
 
@@ -62,6 +72,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     chrome: process.versions.chrome,
     node: process.versions.node
   }))
+
+  ipcMain.handle('app:copy', (_e, text: string) => {
+    clipboard.writeText(String(text ?? ''))
+  })
 
   /* ------------------------------ 窗口 ------------------------------ */
   ipcMain.on('win:minimize', () => getWindow()?.minimize())
@@ -158,11 +172,33 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   )
   ipcMain.on('ai:cancel', () => cancelAi())
   ipcMain.handle('ai:test', (_e, config: AIConfig) => testConnection(config))
+  ipcMain.handle('ai:models', (_e, config: AIConfig) => listModels(config))
   ipcMain.handle('ai:test-search', (_e, config: SearchConfig) => testSearch(config))
 
   /* ---------------------------- 识别日志 ---------------------------- */
   ipcMain.handle('logs:list', (_e, query: IdentifyLogQuery = {}) => listIdentifyLogs(query))
   ipcMain.handle('logs:clear', () => clearIdentifyLogs())
+  ipcMain.handle('logs:reports', () => listIdentifyReports())
+
+  /* ---------------------------- 目录整理 ---------------------------- */
+  ipcMain.handle('organize:pick-root', async () => {
+    const win = getWindow()
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择整理目标根目录',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    return result.canceled ? null : result.filePaths[0]
+  })
+
+  ipcMain.handle('organize:preview', (_e, ids?: string[]) => previewOrganize(ids))
+  ipcMain.handle('organize:run', (_e, commands: OrganizeCommand[]) =>
+    runOrganize(commands, (p) => send('organize:progress', p))
+  )
+  ipcMain.handle('organize:plans', () => listOrganizePlans())
+  ipcMain.handle('organize:undo', (_e, planId: string) => undoOrganize(planId))
+  ipcMain.handle('organize:materialize', (_e, id: string) => materialize(id))
+  ipcMain.handle('organize:unlink', (_e, id: string) => unlink(id))
 
   /* ------------------------------ 数据 ------------------------------ */
   ipcMain.handle('data:dir', () => app.getPath('userData'))

@@ -4,6 +4,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { readExternalActiveAt } from './activity'
+import { rebase } from './organize/plan'
+import {
+  BUILTIN_TAGS,
+  DEFAULT_CATEGORIES,
+  FALLBACK_CATEGORY,
+  mapCategory
+} from './taxonomy'
 import type {
   AgentEvent,
   AppSettings,
@@ -13,7 +20,12 @@ import type {
   IdentifyLog,
   IdentifyLogQuery,
   IdentifyLogStatus,
+  IdentifyReport,
+  IdentifyReportEntry,
   Launcher,
+  MoveRisk,
+  OrganizePlan,
+  OrganizeStep,
   PendingItem,
   RegisterPayload,
   ScannedFile,
@@ -30,35 +42,15 @@ type Row = Record<string, any>
 
 let db: Database.Database | null = null
 
-/** 归不进任何分类时的落脚点。它也是分类表里真实存在的一条，不是特殊值 */
-const FALLBACK_CATEGORY = '其他'
-
 /**
- * 按**用途**分，不按技术领域分。
+ * 库结构 / 内置数据的版本。
  *
- * 0.1.x 那套（开发工具 / 系统工具 / 效率工具…）是按软件「属于哪一行」划的，
- * 结果同一格里 x64dbg 和 VS Code 并排 —— 对「我现在要干这件事，该开哪个」
- * 毫无帮助。这套问的是「你打开它是要做什么」。
+ * 0.2 拿「categories 有没有 description 列」当版本标记，那招只能用一次 ——
+ * 0.4 要再换一次分类体系，没有列可以拿来当标记了。于是显式记一个数字，
+ * 存在 settings 表里（下划线开头的键不会出现在 AppSettings 里，见 getSettings）。
  */
-export const DEFAULT_CATEGORIES: Category[] = [
-  { id: 'reverse', name: '逆向分析', description: '逆向、调试、反编译', icon: 'bug', sort_order: 1 },
-  { id: 'ai-coding', name: 'AI 编程', description: 'AI 辅助开发、代码生成', icon: 'bot', sort_order: 2 },
-  { id: 'find', name: '文件搜索', description: '查找、定位、磁盘分析', icon: 'search', sort_order: 3 },
-  { id: 'edit', name: '编辑查看', description: '文本、十六进制、数据查看编辑', icon: 'file-text', sort_order: 4 },
-  { id: 'control', name: '系统调控', description: '进程、注册表、权限、启动项管理', icon: 'sliders-horizontal', sort_order: 5 },
-  { id: 'network', name: '网络调试', description: '抓包、代理、远程、下载', icon: 'globe', sort_order: 6 },
-  { id: 'image', name: '图像处理', description: '截图、编辑、格式转换', icon: 'image', sort_order: 7 },
-  { id: 'media', name: '媒体影音', description: '播放、转码、录制', icon: 'clapperboard', sort_order: 8 },
-  { id: 'security', name: '安全隐私', description: '加密、擦除、杀毒、沙盒', icon: 'shield', sort_order: 9 },
-  { id: 'office', name: '办公效率', description: '笔记、PDF、OCR、剪贴板', icon: 'sticky-note', sort_order: 10 },
-  { id: 'other', name: FALLBACK_CATEGORY, description: '无法归入以上分类', icon: 'box', sort_order: 11 }
-]
-
-/** 0.1.x 的默认分类。升级时整体退休，名下的条目退回「其他」 */
-const RETIRED_CATEGORY_NAMES = [
-  '开发工具', '图片处理', '网络工具', '系统工具',
-  '文件管理', '音视频', '效率工具', '安全工具', '未分类'
-]
+const SCHEMA_VERSION = 4
+const SCHEMA_KEY = '_schema'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   ai: {
@@ -67,6 +59,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     model: 'deepseek-chat',
     enabled: true
   },
+  ai_profiles: [],
+  ai_profile_id: '',
   search: {
     provider: 'model_builtin',
     api_key: '',
@@ -74,8 +68,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     enabled: false
   },
   scan_dirs: [],
+  organize_root: '',
   theme: 'dark',
   view_mode: 'grid',
+  group_by_category: false,
   unused_days: 60,
   title_lang: 'zh',
   onboarded: false
@@ -135,7 +131,14 @@ function initSchema(d: Database.Database): void {
       is_archived INTEGER DEFAULT 0,
 
       -- 软件目录里配置文件的最新 mtime，见 services/activity.ts
-      external_active_at INTEGER DEFAULT 0
+      external_active_at INTEGER DEFAULT 0,
+
+      -- 绿色软件？NULL = 还没判断过，和「判断为否」不是一回事
+      is_portable INTEGER DEFAULT NULL,
+      -- 挪位置的风险：safe / risky / unknown
+      move_risk TEXT DEFAULT 'unknown',
+      -- 整理成 junction 后链接的真实指向。空串 = 实体目录
+      link_target TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS scan_units (
@@ -194,7 +197,10 @@ function initSchema(d: Database.Database): void {
       source_dir TEXT DEFAULT '',
 
       new_category INTEGER DEFAULT 0,
-      new_tags TEXT DEFAULT '[]'
+      new_tags TEXT DEFAULT '[]',
+
+      is_portable INTEGER DEFAULT NULL,
+      move_risk TEXT DEFAULT 'unknown'
     );
 
     -- 用户明确说过「不注册」的程序。下次识别到同一个路径直接不再暂存，
@@ -231,25 +237,104 @@ function initSchema(d: Database.Database): void {
       created_at INTEGER NOT NULL
     );
 
+    -- 每次整理留一条，steps 是完整的动作流水。撤销就是把它逆着做一遍，
+    -- 所以这张表不是日志而是**依据** —— 它丢了，用户就再也找不回原来的目录结构了。
+    -- 因此它不像 identify_logs 那样按条数淘汰，也不参与「清空识别数据」。
+    CREATE TABLE IF NOT EXISTS organize_plans (
+      id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      root TEXT NOT NULL,
+      undone_at INTEGER DEFAULT 0,
+      steps TEXT DEFAULT '[]'
+    );
+
+    -- 每跑完一轮批量识别留一条。逐条日志说的是「这个目录为什么这样判断」，
+    -- 这张表说的是「这一轮整体怎么样」：哪些没成、共花了多少、搜索额度用掉几次。
+    -- 内容全部由 identify_logs 那些数据汇总而来，不额外消耗 token。
+    CREATE TABLE IF NOT EXISTS identification_reports (
+      id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      processed INTEGER DEFAULT 0,
+      registered INTEGER DEFAULT 0,
+      skipped INTEGER DEFAULT 0,
+      failed INTEGER DEFAULT 0,
+      duration_ms INTEGER DEFAULT 0,
+      tokens INTEGER DEFAULT 0,
+      searches INTEGER DEFAULT 0,
+      entries TEXT DEFAULT '[]'
+    );
+
+  `)
+
+  migrate(d)
+
+  // 建索引必须在 migrate 之后。
+  //
+  // CREATE TABLE IF NOT EXISTS 对老库是空操作 —— 表还是 0.1 那张表，没有 0.3 的列。
+  // 于是 `ON software(is_portable)` 在老库上直接报 no such column，而 exec 是一条条
+  // 顺着执行的：它一炸，后面的语句连同 migrate() 全都不会跑。结果就是 0.3 的三列
+  // 永远补不上，写 pending 时报「has no column named is_portable」，而 db 句柄在
+  // getDb 里早已赋值，第二次调用照常返回这个半迁移的库 —— 应用看着还能用。
+  // 索引只依赖 migrate 之后的表结构，所以它必须排在后面。
+  d.exec(`
     CREATE INDEX IF NOT EXISTS idx_software_category ON software(category);
     CREATE INDEX IF NOT EXISTS idx_software_mastery ON software(mastery_level);
     CREATE INDEX IF NOT EXISTS idx_software_archived ON software(is_archived);
     CREATE INDEX IF NOT EXISTS idx_software_last_used ON software(last_used_at);
     CREATE INDEX IF NOT EXISTS idx_software_ai_status ON software(ai_status);
+    CREATE INDEX IF NOT EXISTS idx_software_portable ON software(is_portable);
     CREATE INDEX IF NOT EXISTS idx_scan_units_status ON scan_units(status);
     CREATE INDEX IF NOT EXISTS idx_identify_logs_status ON identify_logs(status);
     CREATE INDEX IF NOT EXISTS idx_identify_logs_created ON identify_logs(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_organize_plans_created ON organize_plans(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_reports_created ON identification_reports(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_pending_dir ON pending_software(source_dir);
   `)
 
-  migrate(d)
   seedCategories(d)
 }
 
+/**
+ * 内置分类 + 内置标签 + 版本号，一次装齐。
+ *
+ * 只在恢复出厂之后调 —— 正常启动走 migrate() 里那个按版本号闸的分支。
+ * 差别要紧：这里的 seedBuiltinTags 是无条件跑的，放到每次启动就会让用户
+ * 删掉的内置标签第二天又长回来。
+ */
+function seedDefaults(d: Database.Database): void {
+  seedCategories(d)
+  seedBuiltinTags(d)
+  setSchemaVersion(d, SCHEMA_VERSION)
+}
+
+/** 分类表空了才装 —— 用户把 5 个全删了的话，总得有东西兜着 */
 function seedCategories(d: Database.Database): void {
   const seeded = d.prepare('SELECT COUNT(*) AS n FROM categories').get() as { n: number }
   if (seeded.n > 0) return
   insertCategories(d, DEFAULT_CATEGORIES)
+}
+
+/**
+ * 内置标签入池。已存在的一律不动 —— 用户可能已经把「便携」改成了别的意思，
+ * 或者把它并进了另一个标签，覆盖回去等于替他撤销一次决定。
+ */
+function seedBuiltinTags(d: Database.Database): void {
+  const tx = d.transaction(() => {
+    for (const name of BUILTIN_TAGS) insertTag(d, name, 'user')
+  })
+  tx()
+}
+
+function schemaVersion(d: Database.Database): number {
+  const row = d.prepare('SELECT value FROM settings WHERE key = ?').get(SCHEMA_KEY) as Row | undefined
+  return Number(row?.value) || 0
+}
+
+function setSchemaVersion(d: Database.Database, version: number): void {
+  d.prepare(
+    `INSERT INTO settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run(SCHEMA_KEY, String(version))
 }
 
 function insertCategories(d: Database.Database, rows: Category[]): void {
@@ -272,7 +357,12 @@ function migrate(d: Database.Database): void {
   const added: Array<[string, string]> = [
     ['source_dir', `TEXT DEFAULT ''`],
     ['launchers', `TEXT DEFAULT '[]'`],
-    ['external_active_at', 'INTEGER DEFAULT 0']
+    ['external_active_at', 'INTEGER DEFAULT 0'],
+    // 0.3 的三列。is_portable 刻意让存量条目留在 NULL：那才是事实
+    // ——「还没判断过」，而不是「判断为不是绿色软件」。整理时前者不会被当成可搬的
+    ['is_portable', 'INTEGER DEFAULT NULL'],
+    ['move_risk', `TEXT DEFAULT 'unknown'`],
+    ['link_target', `TEXT DEFAULT ''`]
   ]
   for (const [name, decl] of added) {
     if (!existing.has(name)) d.exec(`ALTER TABLE software ADD COLUMN ${name} ${decl}`)
@@ -282,34 +372,62 @@ function migrate(d: Database.Database): void {
   // 而那正是这个字段要治的毛病。补列的同一次启动就把它填上，只跑这一次。
   if (!existing.has('external_active_at')) backfillExternalActive(d)
 
-  migrateCategories(d)
+  const pendingCols = new Set(
+    (d.prepare('PRAGMA table_info(pending_software)').all() as Row[]).map((c) => c.name as string)
+  )
+  for (const [name, decl] of [
+    ['is_portable', 'INTEGER DEFAULT NULL'],
+    ['move_risk', `TEXT DEFAULT 'unknown'`]
+  ] as Array<[string, string]>) {
+    if (!pendingCols.has(name)) d.exec(`ALTER TABLE pending_software ADD COLUMN ${name} ${decl}`)
+  }
+
+  // 0.3.1 起扫描根那一层的散落 exe 只上报、不识别（见 scanPlan.ts 的 ScanPlan.loose），
+  // 所以 loose_only 的单元再也不会被生成。存量的那几行既不会被重扫刷新、也永远停在
+  // pending，只会让 agent 白跑一趟去认一个安装器。已经认出来的软件条目不受影响 ——
+  // scan_units 只是「还要识别哪些目录」的待办表。
+  d.prepare('DELETE FROM scan_units WHERE loose_only = 1').run()
+
+  // description 是 0.2 给 categories 加的一列，下面的重建要往里写，所以先保证它在
+  const catCols = new Set(
+    (d.prepare('PRAGMA table_info(categories)').all() as Row[]).map((c) => c.name as string)
+  )
+  if (!catCols.has('description')) {
+    d.exec(`ALTER TABLE categories ADD COLUMN description TEXT DEFAULT ''`)
+  }
+
+  if (schemaVersion(d) < SCHEMA_VERSION) {
+    rebuildCategories(d)
+    seedBuiltinTags(d)
+    setSchemaVersion(d, SCHEMA_VERSION)
+  }
 }
 
 /**
- * 0.2 把分类从「按技术领域」换成「按用途」。
+ * 0.4 换一套分类：清空分类表，装上 DEFAULT_CATEGORIES 那 5 条。
  *
- * 用 categories 表有没有 description 列当作版本标记 —— 这一列正是 0.2 加的，
- * 不用再单开一张 meta 表。判断只做一次：列补上以后就再也不会进来。
+ * 「清空」是有意的，包括用户自建的分类 —— 分类是靠**名字**挂在条目上的，
+ * 留着一个不在新体系里的分类，只会让侧边栏同时显示新旧两套格子。名下的条目按
+ * CATEGORY_MOVES 迁移，映射不到的退回「其他」：条目本身一条不少，只是要重归一次。
+ *
+ * 只跑一次，跑完写版本号。之后用户在设置里加的分类不会再被碰。
  */
-function migrateCategories(d: Database.Database): void {
-  const cols = new Set(
-    (d.prepare('PRAGMA table_info(categories)').all() as Row[]).map((c) => c.name as string)
-  )
-  if (cols.has('description')) return
-  d.exec(`ALTER TABLE categories ADD COLUMN description TEXT DEFAULT ''`)
-
+function rebuildCategories(d: Database.Database): void {
   const tx = d.transaction(() => {
-    // 旧的默认分类整体退休，用户自己加的那些留着
-    const retiredIds = ['dev', 'image', 'network', 'system', 'file', 'media', 'efficiency', 'security', 'other']
-    const del = d.prepare('DELETE FROM categories WHERE id = ?')
-    for (const id of retiredIds) del.run(id)
-
+    d.prepare('DELETE FROM categories').run()
     insertCategories(d, DEFAULT_CATEGORIES)
 
-    // 挂在退休分类下的条目退回「其他」。新分类是按用途分的，
-    // 旧的「开发工具」映射不到任何一个新分类 —— 与其猜，不如让用户重新归。
-    const reset = d.prepare(`UPDATE software SET category = ? WHERE category = ?`)
-    for (const name of RETIRED_CATEGORY_NAMES) reset.run(FALLBACK_CATEGORY, name)
+    // 暂存区也要迁 —— 升级前刚识别完还没确认的那批，分类同样是旧体系的
+    for (const table of ['software', 'pending_software']) {
+      const names = (
+        d.prepare(`SELECT DISTINCT category AS name FROM ${table}`).all() as Row[]
+      ).map((r) => (r.name ?? '') as string)
+      const move = d.prepare(`UPDATE ${table} SET category = ? WHERE category = ?`)
+      for (const from of names) {
+        const to = mapCategory(from)
+        if (to !== from) move.run(to, from)
+      }
+    }
   })
   tx()
 }
@@ -365,6 +483,19 @@ function safeLaunchers(raw: unknown, fallbackPath: string): Launcher[] {
   return list
 }
 
+/**
+ * SQLite 没有布尔类型，而这一列的三个状态（是 / 否 / 还没判断）都有意义，
+ * 所以 NULL 必须原样传上去，不能顺手 `?? false` 掉。
+ */
+function safeTriBool(raw: unknown): boolean | null {
+  if (raw === null || raw === undefined) return null
+  return raw === 1 || raw === true
+}
+
+function safeRisk(raw: unknown): MoveRisk {
+  return raw === 'safe' || raw === 'risky' ? raw : 'unknown'
+}
+
 function rowToItem(row: Row): SoftwareItem {
   return {
     id: row.id,
@@ -395,7 +526,10 @@ function rowToItem(row: Row): SoftwareItem {
     last_used_at: row.last_used_at ?? 0,
     use_count: row.use_count ?? 0,
     is_archived: row.is_archived === 1,
-    external_active_at: row.external_active_at ?? 0
+    external_active_at: row.external_active_at ?? 0,
+    is_portable: safeTriBool(row.is_portable),
+    move_risk: safeRisk(row.move_risk),
+    link_target: row.link_target ?? ''
   }
 }
 
@@ -405,15 +539,18 @@ const WRITABLE_COLUMNS = new Set([
   'source_dir', 'name_zh', 'name_en', 'summary', 'description', 'category', 'tags',
   'official_url', 'ai_status', 'launchers',
   'why_choose', 'use_cases', 'notes', 'alternatives', 'mastery_level',
-  'last_used_at', 'use_count', 'is_archived', 'external_active_at'
+  'last_used_at', 'use_count', 'is_archived', 'external_active_at',
+  'is_portable', 'move_risk', 'link_target'
 ])
 
 const JSON_COLUMNS = new Set(['tags', 'alternatives', 'launchers'])
 
-function toColumnValue(key: string, value: unknown): string | number {
+function toColumnValue(key: string, value: unknown): string | number | null {
   if (JSON_COLUMNS.has(key)) {
     return JSON.stringify(Array.isArray(value) ? value : [])
   }
+  // 三态列：null 要真的写成 NULL，不能被下面的 `value == null → ''` 压成空串
+  if (key === 'is_portable') return value === null || value === undefined ? null : value ? 1 : 0
   if (key === 'is_archived') return value ? 1 : 0
   if (typeof value === 'number') return value
   if (typeof value === 'boolean') return value ? 1 : 0
@@ -446,6 +583,8 @@ export function listSoftware(query: SoftwareQuery = {}): SoftwareItem[] {
       where.push(`${ACTIVE_AT} < @cutoff`)
     } else if (group === 'pending') {
       where.push(`ai_status IN ('pending', 'failed')`)
+    } else if (group === 'portable') {
+      where.push('is_portable = 1')
     }
   }
 
@@ -584,7 +723,9 @@ export function registerSoftware(
     tags: JSON.stringify(payload.tags),
     official_url: payload.official_url,
     launchers: JSON.stringify(launchers),
-    source_dir: payload.source_dir
+    source_dir: payload.source_dir,
+    is_portable: payload.is_portable === null ? null : payload.is_portable ? 1 : 0,
+    move_risk: payload.move_risk
   }
 
   const existing = d.prepare('SELECT id FROM software WHERE exe_path = ?').get(primary.path) as
@@ -597,6 +738,7 @@ export function registerSoftware(
          name_zh = @name_zh, name_en = @name_en, summary = @summary, description = @description,
          category = @category, tags = @tags, official_url = @official_url,
          launchers = @launchers, source_dir = @source_dir,
+         is_portable = @is_portable, move_risk = @move_risk,
          file_name = @file_name, file_description = @file_description,
          company = @company, version = @version, file_size = @file_size,
          external_active_at = @external_active_at,
@@ -611,11 +753,13 @@ export function registerSoftware(
     `INSERT INTO software
        (id, created_at, updated_at, exe_path, icon_path, file_name, file_description,
         company, version, file_size, source_dir, name_zh, name_en, summary, description,
-        category, tags, official_url, ai_status, launchers, external_active_at)
+        category, tags, official_url, ai_status, launchers, external_active_at,
+        is_portable, move_risk)
      VALUES
        (@id, @created_at, @updated_at, @exe_path, '', @file_name, @file_description,
         @company, @version, @file_size, @source_dir, @name_zh, @name_en, @summary, @description,
-        @category, @tags, @official_url, 'done', @launchers, @external_active_at)`
+        @category, @tags, @official_url, 'done', @launchers, @external_active_at,
+        @is_portable, @move_risk)`
   ).run({ ...aiFields, ...facts, id, created_at: now, updated_at: now, exe_path: primary.path })
 
   return { id, created: true, exe_path: primary.path }
@@ -674,6 +818,8 @@ function rowToPending(row: Row): PendingItem {
     official_url: row.official_url ?? '',
     launchers: safeLaunchers(row.launchers, row.exe_path),
     source_dir: row.source_dir ?? '',
+    is_portable: safeTriBool(row.is_portable),
+    move_risk: safeRisk(row.move_risk),
     new_category: row.new_category === 1,
     new_tags: safeJsonArray(row.new_tags)
   }
@@ -750,6 +896,8 @@ export function stagePending(
     official_url: payload.official_url,
     launchers: JSON.stringify(launchers),
     source_dir: payload.source_dir,
+    is_portable: payload.is_portable === null ? null : payload.is_portable ? 1 : 0,
+    move_risk: payload.move_risk,
     new_category: knownCategories.has(payload.category) ? 0 : 1,
     new_tags: JSON.stringify(newTags)
   }
@@ -765,6 +913,7 @@ export function stagePending(
            name_zh = @name_zh, name_en = @name_en, summary = @summary, description = @description,
            category = @category, tags = @tags, official_url = @official_url,
            launchers = @launchers, source_dir = @source_dir,
+           is_portable = @is_portable, move_risk = @move_risk,
            new_category = @new_category, new_tags = @new_tags
          WHERE id = @id`
       ).run({ ...values, created_at: undefined })
@@ -774,12 +923,12 @@ export function stagePending(
            (id, created_at, scan_unit_id, exe_path, icon_path, file_name, file_description,
             company, version, file_size, external_active_at, name_zh, name_en, summary,
             description, category, tags, official_url, launchers, source_dir,
-            new_category, new_tags)
+            is_portable, move_risk, new_category, new_tags)
          VALUES
            (@id, @created_at, @scan_unit_id, @exe_path, @icon_path, @file_name, @file_description,
             @company, @version, @file_size, @external_active_at, @name_zh, @name_en, @summary,
             @description, @category, @tags, @official_url, @launchers, @source_dir,
-            @new_category, @new_tags)`
+            @is_portable, @move_risk, @new_category, @new_tags)`
       ).run({ ...values, created_at: now })
     }
 
@@ -792,7 +941,8 @@ export function stagePending(
 }
 
 const PENDING_EDITABLE = new Set([
-  'name_zh', 'name_en', 'summary', 'description', 'category', 'tags', 'official_url'
+  'name_zh', 'name_en', 'summary', 'description', 'category', 'tags', 'official_url',
+  'is_portable', 'move_risk'
 ])
 
 /** 确认面板里改一个字段就存一次，不攒到最后 —— 中途关掉窗口不该丢改动 */
@@ -801,7 +951,18 @@ export function updatePending(id: string, patch: Partial<PendingItem>): PendingI
   const entries = Object.entries(patch).filter(([k]) => PENDING_EDITABLE.has(k))
   if (entries.length > 0) {
     const params: Row = { id }
-    for (const [k, v] of entries) params[k] = k === 'tags' ? JSON.stringify(v ?? []) : String(v ?? '')
+    for (const [k, v] of entries) {
+      params[k] =
+        k === 'tags'
+          ? JSON.stringify(v ?? [])
+          : k === 'is_portable'
+            ? v === null || v === undefined
+              ? null
+              : v
+                ? 1
+                : 0
+            : String(v ?? '')
+    }
 
     // 用户动过手的分类 / 标签就不再是「AI 提议」了，标记跟着撤掉
     const sets = entries.map(([k]) => `${k} = @${k}`)
@@ -857,7 +1018,9 @@ export function confirmPending(ids: string[]): ConfirmResult {
         tags: item.tags,
         official_url: item.official_url,
         launchers: item.launchers,
-        source_dir: item.source_dir
+        source_dir: item.source_dir,
+        is_portable: item.is_portable,
+        move_risk: item.move_risk
       },
       {
         file_name: item.file_name,
@@ -1170,7 +1333,179 @@ export function listIdentifyLogs(query: IdentifyLogQuery = {}): IdentifyLog[] {
 }
 
 export function clearIdentifyLogs(): number {
-  return getDb().prepare('DELETE FROM identify_logs').run().changes
+  const d = getDb()
+  // 报告只是这些日志的汇总视图，日志清了它就没有依据了 —— 一起清掉
+  const n = d.prepare('DELETE FROM identify_logs').run().changes
+  d.prepare('DELETE FROM identification_reports').run()
+  return n
+}
+
+/* ------------------------------ 汇总报告 ------------------------------ */
+
+/** 保留的报告条数。一轮识别一条，够翻回前几周 */
+const REPORT_KEEP = 50
+
+export function saveIdentifyReport(
+  report: Omit<IdentifyReport, 'id' | 'created_at'>
+): string {
+  const d = getDb()
+  const id = randomUUID()
+  const tx = d.transaction(() => {
+    d.prepare(
+      `INSERT INTO identification_reports
+         (id, created_at, processed, registered, skipped, failed,
+          duration_ms, tokens, searches, entries)
+       VALUES
+         (@id, @created_at, @processed, @registered, @skipped, @failed,
+          @duration_ms, @tokens, @searches, @entries)`
+    ).run({
+      id,
+      created_at: Date.now(),
+      processed: report.processed,
+      registered: report.registered,
+      skipped: report.skipped,
+      failed: report.failed,
+      duration_ms: report.duration_ms,
+      tokens: report.tokens,
+      searches: report.searches,
+      entries: JSON.stringify(report.entries)
+    })
+    d.prepare(
+      `DELETE FROM identification_reports WHERE id NOT IN (
+         SELECT id FROM identification_reports ORDER BY created_at DESC LIMIT ?
+       )`
+    ).run(REPORT_KEEP)
+  })
+  tx()
+  return id
+}
+
+export function listIdentifyReports(): IdentifyReport[] {
+  return (
+    getDb()
+      .prepare('SELECT * FROM identification_reports ORDER BY created_at DESC')
+      .all() as Row[]
+  ).map((row) => {
+    let entries: IdentifyReportEntry[] = []
+    try {
+      const parsed = JSON.parse(row.entries ?? '[]')
+      if (Array.isArray(parsed)) entries = parsed
+    } catch {
+      /* 解析不出来就只剩总览那几个数字，它们本身就是独立存的列 */
+    }
+    return {
+      id: row.id,
+      created_at: row.created_at,
+      processed: row.processed ?? 0,
+      registered: row.registered ?? 0,
+      skipped: row.skipped ?? 0,
+      failed: row.failed ?? 0,
+      duration_ms: row.duration_ms ?? 0,
+      tokens: row.tokens ?? 0,
+      searches: row.searches ?? 0,
+      entries
+    }
+  })
+}
+
+/* ------------------------------ 整理记录 ------------------------------ */
+
+function rowToPlan(row: Row): OrganizePlan {
+  let steps: OrganizeStep[] = []
+  try {
+    const parsed = JSON.parse(row.steps ?? '[]')
+    if (Array.isArray(parsed)) steps = parsed
+  } catch {
+    /* 解析不出来就当空，至少记录本身还在，用户能看到「那天整理过」 */
+  }
+  return {
+    id: row.id,
+    created_at: row.created_at,
+    root: row.root ?? '',
+    undone_at: row.undone_at ?? 0,
+    steps
+  }
+}
+
+export function saveOrganizePlan(root: string, steps: OrganizeStep[]): string {
+  const id = randomUUID()
+  getDb()
+    .prepare(
+      `INSERT INTO organize_plans (id, created_at, root, undone_at, steps)
+       VALUES (?, ?, ?, 0, ?)`
+    )
+    .run(id, Date.now(), root, JSON.stringify(steps))
+  return id
+}
+
+export function listOrganizePlans(): OrganizePlan[] {
+  return (
+    getDb().prepare('SELECT * FROM organize_plans ORDER BY created_at DESC').all() as Row[]
+  ).map(rowToPlan)
+}
+
+export function getOrganizePlan(id: string): OrganizePlan | null {
+  const row = getDb().prepare('SELECT * FROM organize_plans WHERE id = ?').get(id) as Row | undefined
+  return row ? rowToPlan(row) : null
+}
+
+/** 撤销完成后打标。已撤销的记录留着 —— 它回答的是「那天到底动了什么」 */
+export function markPlanUndone(id: string): void {
+  // 反引号不是随手写的：selfcheck 靠模板字符串的边界从构建产物里抠 SQL 原文出来
+  // 做 prepare 校验（见 scripts/agent-selfcheck.ts），单引号的语句它取不到
+  getDb().prepare(`UPDATE organize_plans SET undone_at = ? WHERE id = ?`).run(Date.now(), id)
+}
+
+/**
+ * 目录搬走之后，把库里所有指向旧位置的路径改到新位置。
+ *
+ * 要改的不止 exe_path —— launchers 里每个启动端、source_dir、以及 scan_units
+ * 的主键都带着旧前缀。漏掉任何一个都会表现成「整理完点启动就失败」，
+ * 而那时候用户已经不知道是整理干的了。
+ *
+ * fromDir / toDir 传目录，不带结尾分隔符。
+ */
+export function remapPaths(
+  id: string,
+  fromDir: string,
+  toDir: string,
+  linkTarget: string
+): SoftwareItem | null {
+  const d = getDb()
+  const item = getSoftware(id)
+  if (!item) return null
+
+  const launchers = item.launchers.map((l) => ({ ...l, path: rebase(l.path, fromDir, toDir) }))
+  const nextExe = rebase(item.exe_path, fromDir, toDir)
+
+  const tx = d.transaction(() => {
+    d.prepare(
+      `UPDATE software SET exe_path = @exe_path, launchers = @launchers, source_dir = @source_dir,
+         link_target = @link_target, updated_at = @updated_at
+       WHERE id = @id`
+    ).run({
+      id,
+      exe_path: nextExe,
+      launchers: JSON.stringify(launchers),
+      source_dir: rebase(item.source_dir, fromDir, toDir),
+      link_target: linkTarget,
+      updated_at: Date.now()
+    })
+
+    // scan_units.dir 是主键，改不了就删旧插新。整理过的目录已经不在扫描根下了，
+    // 留着那一行只会让下次「全部重新识别」去一个不存在的路径
+    const unit = d.prepare('SELECT * FROM scan_units WHERE dir = ?').get(fromDir) as Row | undefined
+    if (unit) {
+      d.prepare('DELETE FROM scan_units WHERE dir = ?').run(fromDir)
+      d.prepare(
+        `INSERT INTO scan_units (dir, root, exe_count, loose_only, status, note, registered, created_at, updated_at)
+         VALUES (@dir, @root, @exe_count, @loose_only, @status, @note, @registered, @created_at, @updated_at)
+         ON CONFLICT(dir) DO NOTHING`
+      ).run({ ...unit, dir: toDir, updated_at: Date.now() })
+    }
+  })
+  tx()
+  return getSoftware(id)
 }
 
 /* -------------------------------- 插入 -------------------------------- */
@@ -1285,6 +1620,7 @@ export function counts(unusedDays: number): SidebarCounts {
     pending: pendingItems,
     pending_units: pendingUnits,
     pending_confirm: one('SELECT COUNT(*) AS n FROM pending_software'),
+    portable: one('SELECT COUNT(*) AS n FROM software WHERE is_archived = 0 AND is_portable = 1'),
     categories,
     tags: [...tagMap.entries()]
       .map(([name, count]) => ({ name, count }))
@@ -1514,6 +1850,8 @@ export function getSettings(): AppSettings {
   }>
   const stored: Row = {}
   for (const r of rows) {
+    // 下划线开头的是内部记账（_schema），不属于用户设置，不该透给渲染进程
+    if (r.key.startsWith('_')) continue
     try {
       stored[r.key] = JSON.parse(r.value)
     } catch {
@@ -1557,7 +1895,8 @@ export function patchSettings(patch: Partial<AppSettings>): AppSettings {
 
 export function exportAll(): { version: number; exported_at: number; software: SoftwareItem[]; categories: Category[] } {
   return {
-    version: 2,
+    // 3：条目上多了 is_portable / move_risk / link_target
+    version: 3,
     exported_at: Date.now(),
     software: listSoftware({ group: 'all' }).concat(listSoftware({ group: 'archived' })),
     categories: listCategories()
@@ -1638,11 +1977,12 @@ function clearIcons(): number {
 /**
  * 重置识别数据。
  *
- * mode = 'library'：只清软件条目、待识别目录和图标缓存，
+ * mode = 'library'：只清软件条目、待识别目录、整理记录和图标缓存，
  *   保留 API Key、搜索配置、扫描目录和自定义分类 —— 反复调 prompt 重测时用这个。
  * mode = 'all'：连设置和分类一起清掉，等于恢复出厂，会重新走引导流程。
  *
- * 两种模式都只动抱一自己的数据库，绝不碰你磁盘上的任何实际软件文件。
+ * 两种模式都只动抱一自己的数据库，绝不碰你磁盘上的任何实际软件文件 ——
+ * 已经整理过的文件夹留在整理后的位置，只是抱一不再记得它们原来在哪。
  */
 export function resetData(mode: 'library' | 'all'): ResetSummary {
   const d = getDb()
@@ -1657,10 +1997,17 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
     d.prepare('DELETE FROM skip_list').run()
     // 没被认可过的 AI 标签跟着识别数据一起清；用户建的和确认过的是资产，留着
     d.prepare(`DELETE FROM tags WHERE source = 'ai'`).run()
+    // 整理记录跟着软件条目一起清。0.3 时这里刻意留着它（「文件夹还在磁盘上，
+    // 清掉记录等于让用户永远失去搬回去的办法」），但留下来的记录里 software_id
+    // 全都指向已经不存在的条目 —— 撤销时找不到关联软件，整理页也只能显示一串空条目。
+    // 一份读不懂的记录不比没有记录更有用，所以改成一起清。
+    // 代价是清空后无法再自动撤销整理，这一点已经写进了重置对话框的提示里。
+    d.prepare('DELETE FROM organize_plans').run()
     if (mode === 'all') {
       // 识别日志只在恢复出厂时清。反复调 prompt 时要的正是「改之前那次是怎么判断的」，
       // 清空识别数据后还能拿旧日志对照，这是它最主要的用途
       d.prepare('DELETE FROM identify_logs').run()
+      d.prepare('DELETE FROM identification_reports').run()
       d.prepare('DELETE FROM settings').run()
       d.prepare('DELETE FROM categories').run()
       d.prepare('DELETE FROM tags').run()
@@ -1668,7 +2015,9 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
   })
   tx()
 
-  if (mode === 'all') seedCategories(d)
+  // 恢复出厂把内置分类、内置标签和版本号一并装回去。少了最后一项，下次启动
+  // 会以为还没迁移过，白跑一遍重建
+  if (mode === 'all') seedDefaults(d)
 
   const icons = clearIcons()
 

@@ -4,7 +4,7 @@
  * 结构参考 pi 的 agent-loop（参考/pi-main/packages/agent/src/agent-loop.ts）：
  * 「请求 → 拿到 tool_calls → 本地执行 → 结果回灌 → 再请求」，直到模型不再要求调用工具。
  * pi 里的流式、压缩、steering、会话持久化在这里都不需要，所以只保留循环本体
- * 以及三条护栏：最大轮数、重复调用检测、可中断。
+ * 以及四条护栏：最大轮数、重复调用检测、同一个错误反复出现就终止、可中断。
  */
 
 import type { AgentEvent, AgentStopReason, AIConfig } from '../../../src/types'
@@ -46,6 +46,14 @@ const MAX_RETRY = 2
 const MAX_TOOL_OUTPUT = 6000
 /** 同一个工具 + 同一组参数连续命中这个次数就判定模型在原地打转 */
 const MAX_REPEAT = 3
+/**
+ * 同一个工具连续返回同样的错误到这个次数就终止整次运行。
+ *
+ * MAX_REPEAT 按「参数完全相同」判，模型换个措辞就能绕过去 —— 数据库缺列那次就是
+ * 这么白烧了 8 轮：错误从头到尾是同一句，但参数每次都差一点。错误内容不变说明
+ * 这事不是靠调参数能解决的，重试没有意义，直接把原始错误报上去。
+ */
+const MAX_SAME_ERROR = 3
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
@@ -60,9 +68,36 @@ interface RawToolCall {
   function: { name: string; arguments: string }
 }
 
+/**
+ * 用户填的 api_url 归一成「不带尾斜杠、不带具体路径」的基地址。
+ * 有人习惯连 /chat/completions 一起粘进来，把它切掉，别拼出
+ * /v1/chat/completions/chat/completions。
+ */
+export function apiBase(apiUrl: string): string {
+  return apiUrl.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '')
+}
+
 function endpoint(apiUrl: string): string {
-  const base = apiUrl.replace(/\/+$/, '')
-  return base.endsWith('/chat/completions') ? base : `${base}/chat/completions`
+  return `${apiBase(apiUrl)}/chat/completions`
+}
+
+/**
+ * 把 GET /models 的响应抠成一串模型名。
+ *
+ * OpenAI 是 {data:[{id}]}，少数服务商直接返回字符串数组，两种都收。
+ * 不按名字筛「支持不支持 function calling」—— 接口不提供这个信息，
+ * 靠名字猜只会把用户想用的模型藏起来。选完让「测试连接」去验。
+ */
+export function parseModelList(json: unknown): string[] {
+  const raw: unknown[] = Array.isArray(json)
+    ? json
+    : Array.isArray((json as any)?.data)
+      ? (json as any).data
+      : []
+  const names = raw
+    .map((m) => (typeof m === 'string' ? m : String((m as any)?.id ?? '')))
+    .filter((s) => s.length > 0)
+  return [...new Set(names)].sort()
 }
 
 function isRetryable(status: number): boolean {
@@ -180,6 +215,9 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   ]
 
   const repeats = new Map<string, number>()
+  // 连续同一个错误的计数。key 是「工具名 + 错误内容」，成功执行一次就清零
+  let lastError = ''
+  let sameError = 0
   let tokens = 0
   let text = ''
   let turns = 0
@@ -230,11 +268,30 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
           content: clip(content)
         })
 
+      /**
+       * 记一条工具错误并回灌给模型。返回非 null 表示同一个错误已经连续出现
+       * MAX_SAME_ERROR 次，该就此终止 —— 调用方直接把它 return 出去。
+       */
+      const fail = (msg: string, ms?: number): AgentRunResult | null => {
+        onEvent?.({ type: 'tool_result', name, text: msg, isError: true, ms })
+        push(msg)
+        const key = `${name}:${msg}`
+        sameError = key === lastError ? sameError + 1 : 1
+        lastError = key
+        if (sameError < MAX_SAME_ERROR) return null
+        return {
+          stopReason: 'error',
+          error: `${name} 连续 ${sameError} 次返回同一个错误，重试无意义：${msg}`,
+          turns,
+          tokens,
+          text
+        }
+      }
+
       const tool = byName.get(name)
       if (!tool) {
-        const msg = `错误：不存在名为 ${name} 的工具。可用工具：${[...byName.keys()].join('、')}`
-        onEvent?.({ type: 'tool_result', name, text: msg, isError: true })
-        push(msg)
+        const stop = fail(`错误：不存在名为 ${name} 的工具。可用工具：${[...byName.keys()].join('、')}`)
+        if (stop) return stop
         continue
       }
 
@@ -243,9 +300,10 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         args = rawArgs.trim() ? JSON.parse(rawArgs) : {}
       } catch {
         // 参数不是合法 JSON，把错误还给模型让它重发，而不是中断整轮
-        const msg = `错误：参数不是合法的 JSON，请重新调用 ${name}。收到的是：${rawArgs.slice(0, 200)}`
-        onEvent?.({ type: 'tool_result', name, text: msg, isError: true })
-        push(msg)
+        const stop = fail(
+          `错误：参数不是合法的 JSON，请重新调用 ${name}。收到的是：${rawArgs.slice(0, 200)}`
+        )
+        if (stop) return stop
         continue
       }
 
@@ -260,15 +318,18 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
       }
 
       onEvent?.({ type: 'tool_call', name, args })
+      const startedAt = Date.now()
       try {
         const result = await tool.execute(args, signal)
-        onEvent?.({ type: 'tool_result', name, text: result, isError: false })
+        onEvent?.({ type: 'tool_result', name, text: result, isError: false, ms: Date.now() - startedAt })
         push(result)
+        // 成功一次就把错误链断开，只有「连续」同错才算死路
+        lastError = ''
+        sameError = 0
       } catch (err) {
         if (signal?.aborted) return { stopReason: 'aborted', error: '', turns, tokens, text }
-        const msg = `错误：${err instanceof Error ? err.message : String(err)}`
-        onEvent?.({ type: 'tool_result', name, text: msg, isError: true })
-        push(msg)
+        const stop = fail(`错误：${err instanceof Error ? err.message : String(err)}`, Date.now() - startedAt)
+        if (stop) return stop
       }
     }
   }

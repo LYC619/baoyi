@@ -8,12 +8,12 @@ const router = createRouter({
     {
       path: '/',
       name: 'home',
-      component: () => import('@/pages/Home.vue')
+      component: () => import('@/pages/software/Home.vue')
     },
     {
       path: '/detail/:id',
       name: 'detail',
-      component: () => import('@/pages/Detail.vue'),
+      component: () => import('@/pages/software/Detail.vue'),
       props: true
     },
     {
@@ -24,7 +24,12 @@ const router = createRouter({
     {
       path: '/confirm',
       name: 'confirm',
-      component: () => import('@/pages/Confirm.vue')
+      component: () => import('@/pages/software/Confirm.vue')
+    },
+    {
+      path: '/organize',
+      name: 'organize',
+      component: () => import('@/pages/software/Organize.vue')
     },
     {
       path: '/onboarding',

@@ -9,6 +9,16 @@ export type MasteryLevel = 'proficient' | 'familiar' | 'learning' | 'new'
 export type AiStatus = 'pending' | 'done' | 'failed'
 
 /**
+ * 换个位置放它，会不会出事。
+ *
+ * safe    —— 只是一堆文件，挪走照样能跑
+ * risky   —— 注册了服务 / 驱动 / COM，或者装在系统保护目录里，挪走会坏
+ * unknown —— 没判断出来。和 risky 一样按「不敢动」处理，但要和「确认有风险」分开记，
+ *            否则没法回答「是它真有依赖，还是当时没看出来」
+ */
+export type MoveRisk = 'safe' | 'risky' | 'unknown'
+
+/**
  * 一个软件的启动端。
  * 同一软件的 32/64 位版本、GUI/命令行版本合并进同一条目，各自作为一个启动端。
  * kind = 'extra' 的是附属程序（加载器、配置工具等），默认折叠展示。
@@ -51,6 +61,19 @@ export interface SoftwareItem {
   /** 全部启动端。为空表示只有 exe_path 一个 */
   launchers: Launcher[]
 
+  /**
+   * 是不是绿色软件（解压即用、无安装器）。
+   * null 表示还没判断过 —— 和「判断为否」不是一回事，整理时前者不动、后者按安装版处理。
+   */
+  is_portable: boolean | null
+  /** 挪位置的风险，见 MoveRisk */
+  move_risk: MoveRisk
+  /**
+   * 整理成 junction 之后，链接真正指向哪里。空串表示这是个实体目录。
+   * exe_path 始终是「用户和抱一看到的那个路径」，实际位置记在这里。
+   */
+  link_target: string
+
   // 用户个人信息
   why_choose: string
   use_cases: string
@@ -91,6 +114,9 @@ export interface RegisterPayload {
   official_url: string
   launchers: Launcher[]
   source_dir: string
+  /** null = agent 没给出判断 */
+  is_portable: boolean | null
+  move_risk: MoveRisk
 }
 
 /**
@@ -123,6 +149,9 @@ export interface PendingItem {
   official_url: string
   launchers: Launcher[]
   source_dir: string
+
+  is_portable: boolean | null
+  move_risk: MoveRisk
 
   /** AI 给的分类不在现有分类表里 —— 确认面板要标出来 */
   new_category: boolean
@@ -193,6 +222,18 @@ export interface AIConfig {
   enabled: boolean
 }
 
+/**
+ * 一套存起来的接口配置。
+ *
+ * 刻意让它「是」一份 AIConfig 而不是包一层 config 字段：切换就是把它铺回
+ * settings.ai，主进程那边（aiService、agent/loop）读的还是 settings.ai，
+ * 一行都不用改。enabled 跟着一起存 —— 关掉 AI 是针对当前这套配置的意思。
+ */
+export interface AIProfile extends AIConfig {
+  id: string
+  name: string
+}
+
 export type SearchProvider =
   | 'model_builtin'
   | 'exa'
@@ -213,18 +254,32 @@ export interface SearchConfig {
 export type TitleLang = 'zh' | 'en'
 
 export interface AppSettings {
+  /** 当前生效的那份配置。切换配置就是把某个 profile 铺到这里 */
   ai: AIConfig
+  ai_profiles: AIProfile[]
+  /** 当前选中的 profile。空串表示「临时配置」——改了还没存成一套 */
+  ai_profile_id: string
   search: SearchConfig
   scan_dirs: string[]
+  /**
+   * 自动整理的目标根目录。和 scan_dirs 刻意分开 —— 扫描是「去哪里找」，
+   * 这里是「归到哪里去」，把整理目标也加进扫描列表只会让下一轮重扫再发现一遍。
+   */
+  organize_root: string
   theme: 'dark' | 'light'
   view_mode: 'grid' | 'list'
+  /**
+   * 卡片墙按分类分区块展示。和 view_mode 是两个维度 —— 分组之后每个区块内部
+   * 照样可以是网格或列表，所以不做成 view_mode 的第三个值。
+   */
+  group_by_category: boolean
   unused_days: number
   title_lang: TitleLang
   onboarded: boolean
 }
 
 /** 侧边栏虚拟分组标识 */
-export type VirtualGroup = 'all' | 'archived' | 'unused' | 'pending'
+export type VirtualGroup = 'all' | 'archived' | 'unused' | 'pending' | 'portable'
 
 export interface SoftwareQuery {
   keyword?: string
@@ -246,6 +301,8 @@ export interface SidebarCounts {
   pending_units: number
   /** 识别完、等用户确认的条目数 */
   pending_confirm: number
+  /** 绿色软件条目数。整理功能主要作用在它们身上，值得单独一个入口 */
+  portable: number
   categories: Array<{ name: string; count: number }>
   tags: Array<{ name: string; count: number }>
 }
@@ -272,15 +329,29 @@ export interface AIProgress {
   log: string
 }
 
+/** 整理执行时的进度。跨盘复制一个大目录要几十秒，不给反馈会被当成卡死 */
+export interface OrganizeProgress {
+  phase: 'running' | 'done'
+  /** 正在处理的软件名 */
+  current: string
+  processed: number
+  total: number
+  failed: number
+}
+
 export interface ScanResult {
   /** 发现的 exe 总数 */
-  found: number
-  /** 这次新发现的目录数 */
+  found: number  /** 这次新发现的目录数 */
   added: number
   /** 扫描后仍待识别的目录总数（含之前就待识别、以及上次识别失败的） */
   pending: number
   /** 之前已识别或已跳过、这次不再处理的目录数 */
   settled: number
+  /**
+   * 散落在扫描根那一层的 exe 和压缩包（.rar / .zip / .7z）。
+   * 它们不会被识别，只在摘要里提一句，让用户自己决定要不要归位。
+   */
+  loose_files: string[]
 }
 
 export interface AIResult {
@@ -292,6 +363,8 @@ export interface AIResult {
   failed: number
   /** 本次消耗的 token 总数，便于用户判断成本 */
   tokens: number
+  /** 本轮汇总报告的 id。空串表示这轮没跑任何任务，没有报告可看 */
+  report_id: string
 }
 
 /** 清空数据后回报清掉了些什么 */
@@ -313,6 +386,100 @@ export interface DataStats {
   iconBytes: number
 }
 
+/* ------------------------------ 目录整理 ------------------------------ */
+
+/**
+ * 一条软件该怎么归位。
+ *
+ * move     —— 把目录整体挪到目标分类下，并规范文件夹名（绿色软件、以及 move_risk=safe 的安装版）
+ * junction —— 目标位置只放一个链接，实际文件留在原地（安装版，动不了）
+ * skip     —— 这一条不处理
+ */
+export type OrganizeAction = 'move' | 'junction' | 'skip'
+
+/** 预览面板里的一行。用户可以翻转 action、改分类、改文件夹名 */
+export interface OrganizeEntry {
+  software_id: string
+  name: string
+  /** 要搬的那个目录（软件的安装/解压根，不是 exe 本身） */
+  from_dir: string
+  exe_path: string
+  is_portable: boolean | null
+  move_risk: MoveRisk
+  /** 已经是链接了：整理过一轮之后再进来会看到 */
+  link_target: string
+
+  action: OrganizeAction
+  category: string
+  /** 目标文件夹名，默认取软件英文正式名 */
+  folder: string
+  /** category + folder 拼出来的完整目标路径，只读预览 */
+  to_dir: string
+
+  /**
+   * 这一行需要用户注意的事：注册表/AppData 里发现了硬引用、目标已存在同名目录等。
+   * 有值就在行内亮一个黄色图标。
+   */
+  warning: string
+  /** true 表示目标路径已被占用，执行时会跳过而不是覆盖 */
+  conflict: boolean
+}
+
+export interface OrganizePreview {
+  /** 整理目标根目录。没配置时为空串，面板要提示先去设置 */
+  root: string
+  entries: OrganizeEntry[]
+}
+
+/** 用户在面板上改完、真正提交执行的那份指令。故意不回传 to_dir —— 主进程自己拼，不信渲染进程 */
+export interface OrganizeCommand {
+  software_id: string
+  action: OrganizeAction
+  category: string
+  folder: string
+}
+
+/** 落盘的一步操作。撤销就是把它逆着做一遍 */
+export interface OrganizeStep {
+  type: OrganizeAction
+  software_id: string
+  name: string
+  from: string
+  to: string
+  /** 原来的 exe_path，撤销时要还原回去 */
+  from_exe: string
+  /** 整理后的 exe_path */
+  to_exe: string
+  ok: boolean
+  /** 失败或跳过的原因 */
+  note: string
+}
+
+/** 一次整理的完整记录。既是执行结果，也是撤销依据 */
+export interface OrganizePlan {
+  id: string
+  created_at: number
+  root: string
+  /** 已撤销的不再提供撤销按钮 */
+  undone_at: number
+  steps: OrganizeStep[]
+}
+
+export interface OrganizeResult {
+  plan_id: string
+  moved: number
+  linked: number
+  skipped: number
+  failed: number
+  steps: OrganizeStep[]
+}
+
+export interface UndoResult {
+  restored: number
+  failed: number
+  notes: string[]
+}
+
 /** 「关于」页展示的版本与构建信息 */
 export interface AppInfo {
   /** 来自 package.json，打包后取自安装包元数据 */
@@ -332,7 +499,14 @@ export type AgentEvent =
   | { type: 'turn'; index: number }
   | { type: 'text'; text: string }
   | { type: 'tool_call'; name: string; args: Record<string, unknown> }
-  | { type: 'tool_result'; name: string; text: string; isError: boolean }
+  | {
+      type: 'tool_result'
+      name: string
+      text: string
+      isError: boolean
+      /** 这次工具执行花了多久。0.4 之前的日志没有这个字段，读出来是 undefined */
+      ms?: number
+    }
 
 export type AgentStopReason = 'done' | 'max_turns' | 'aborted' | 'error'
 
@@ -366,6 +540,57 @@ export interface IdentifyLogQuery {
   limit?: number
 }
 
+/* ------------------------------ 汇总报告 ------------------------------ */
+
+/** 汇总报告里的一行：一个目录的结果摘要 */
+export interface IdentifyReportEntry {
+  dir: string
+  label: string
+  status: IdentifyLogStatus
+  rounds: number
+  tokens: number
+  /** 这一条识别过程中调用了几次 web_search */
+  searches: number
+  /** 结论或失败 / 跳过原因 */
+  note: string
+}
+
+/**
+ * 一轮批量识别的汇总。
+ *
+ * 逐条日志回答「这个目录为什么这样判断」，这份回答「这一轮整体怎么样」——
+ * 哪些没成、共花了多少、搜索额度用掉多少。它是对已有数据的汇总，不额外消耗任何 token。
+ */
+export interface IdentifyReport {
+  id: string
+  created_at: number
+  processed: number
+  registered: number
+  skipped: number
+  failed: number
+  duration_ms: number
+  tokens: number
+  searches: number
+  entries: IdentifyReportEntry[]
+}
+
+/**
+ * 搜索服务的一次调用记录。
+ *
+ * 不新建表 —— 从 identify_logs 的 web_search 事件里现取。代价是时间只精确到
+ * 「所属那次识别」这一级（日志本身只有一个时间戳），够用来回答「今天搜了几次、通不通」。
+ */
+export interface SearchCallRecord {
+  /** 所属识别日志的时间。同一次识别里的多次搜索共用它 */
+  at: number
+  query: string
+  status: 'ok' | 'empty' | 'timeout' | 'failed'
+  /** 耗时毫秒。0 表示这条日志是 0.4 之前记的，当时没有计时 */
+  ms: number
+  /** 哪个目录触发的 */
+  label: string
+}
+
 export type Unsubscribe = () => void
 
 /** preload 暴露给渲染进程的完整 API */
@@ -373,6 +598,11 @@ export interface BaoyiApi {
   app: {
     /** 版本与构建信息，「关于」页用 */
     info(): Promise<AppInfo>
+    /**
+     * 写剪贴板。走主进程的 clipboard 而不是 navigator.clipboard ——
+     * 后者在打包后的 file:// 页面里要看权限处理器的脸色，而这个一定成。
+     */
+    copyText(text: string): Promise<void>
   }
   win: {
     minimize(): void
@@ -443,6 +673,8 @@ export interface BaoyiApi {
     complete(ids?: string[]): Promise<AIResult>
     cancel(): void
     test(config: AIConfig): Promise<{ ok: boolean; message: string }>
+    /** 拉服务商的模型列表（GET /models）。失败时返回 message，不抛 */
+    models(config: AIConfig): Promise<{ ok: boolean; message: string; models: string[] }>
     testSearch(config: SearchConfig): Promise<{ ok: boolean; message: string }>
     onProgress(cb: (p: AIProgress) => void): Unsubscribe
   }
@@ -464,5 +696,27 @@ export interface BaoyiApi {
   logs: {
     list(query?: IdentifyLogQuery): Promise<IdentifyLog[]>
     clear(): Promise<number>
+    /** 历史汇总报告，新的在前 */
+    reports(): Promise<IdentifyReport[]>
+  }
+  organize: {
+    /** 选整理目标根目录 */
+    pickRoot(): Promise<string | null>
+    /**
+     * 算出「每条软件该怎么归位」交给用户过目。不动任何文件。
+     * ids 为空表示对全部非归档条目出方案。
+     */
+    preview(ids?: string[]): Promise<OrganizePreview>
+    /** 按用户改过的指令真的动文件。每完成一条推一次进度 */
+    run(commands: OrganizeCommand[]): Promise<OrganizeResult>
+    onProgress(cb: (p: OrganizeProgress) => void): Unsubscribe
+    /** 历史整理记录，新的在前 */
+    plans(): Promise<OrganizePlan[]>
+    /** 按 plan 逆向执行：移回原位、删掉链接，并还原库里的路径字段 */
+    undo(planId: string): Promise<UndoResult>
+    /** 把 junction 换成真实文件的剪切副本 */
+    materialize(id: string): Promise<{ ok: boolean; message: string }>
+    /** 只删链接，不动源文件；条目路径退回实际位置 */
+    unlink(id: string): Promise<{ ok: boolean; message: string }>
   }
 }

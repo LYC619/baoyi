@@ -21,6 +21,7 @@ export function useFilter() {
   const settings = useSettingsStore()
 
   const viewMode = computed(() => settings.settings.view_mode)
+  const groupByCategory = computed(() => settings.settings.group_by_category)
 
   function setMastery(value: MasteryLevel | ''): void {
     store.mastery = store.mastery === value ? '' : value
@@ -36,6 +37,11 @@ export function useFilter() {
     await settings.patch({ view_mode: value })
   }
 
+  /** 分组只改排布，不改查询 —— 卡片还是那一批，不用重新 load */
+  async function toggleGroupByCategory(): Promise<void> {
+    await settings.patch({ group_by_category: !settings.settings.group_by_category })
+  }
+
   const hasActiveFilter = computed(
     () => Boolean(store.mastery) || Boolean(store.keyword.trim())
   )
@@ -49,6 +55,8 @@ export function useFilter() {
   return {
     viewMode,
     setViewMode,
+    groupByCategory,
+    toggleGroupByCategory,
     setMastery,
     setSort,
     resetFilters,

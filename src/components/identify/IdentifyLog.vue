@@ -10,15 +10,18 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
+  Clipboard,
   Eraser,
+  FileBarChart,
   Loader2,
   MinusCircle,
   RotateCcw,
   Search
 } from 'lucide-vue-next'
-import type { IdentifyLog, IdentifyLogStatus } from '@/types'
+import ReportDialog from '@/components/identify/ReportDialog.vue'
+import type { IdentifyLog, IdentifyLogStatus, IdentifyReport } from '@/types'
 import { useToast } from '@/composables/useToast'
-import { formatDate, groupRounds } from '@/utils'
+import { formatDate, groupRounds, logToText } from '@/utils'
 
 const emit = defineEmits<{ (e: 'retry', dir: string): void }>()
 
@@ -40,6 +43,8 @@ const STATUS_META: Record<IdentifyLogStatus, { label: string; icon: any; tone: s
 }
 
 const logs = ref<IdentifyLog[]>([])
+const reports = ref<IdentifyReport[]>([])
+const openReport = ref<IdentifyReport | null>(null)
 const loading = ref(false)
 const filter = ref<Filter>('all')
 const keyword = ref('')
@@ -60,7 +65,10 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  reports.value = await window.baoyi.logs.reports()
+})
 
 function pick(value: Filter): void {
   filter.value = value
@@ -79,10 +87,20 @@ function toggleFull(key: string): void {
   spread.value = next
 }
 
+/**
+ * 整条日志复制成纯文本。页面上的折叠和截断是为了在一屏里放下几十条 ——
+ * 复制出去是要贴进 issue 或者对着排查的，所以一个字不省，格式化在 logToText 里。
+ */
+async function copyLog(log: IdentifyLog): Promise<void> {
+  await window.baoyi.app.copyText(logToText(log))
+  success('已复制')
+}
+
 async function clearAll(): Promise<void> {
-  if (!window.confirm('清空所有识别日志？只删日志，软件条目和识别结果都不受影响。')) return
+  if (!window.confirm('清空所有识别日志和汇总报告？只删记录，软件条目和识别结果都不受影响。')) return
   const n = await window.baoyi.logs.clear()
   await load()
+  reports.value = await window.baoyi.logs.reports()
   success(`已清空 ${n} 条日志`)
 }
 
@@ -150,6 +168,12 @@ function cost(log: IdentifyLog): string {
   return `${turns}，${seconds}s，${log.tokens.toLocaleString()} tokens`
 }
 
+function stampShort(ts: number): string {
+  const d = new Date(ts)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${formatDate(ts)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 const empty = computed(() => !loading.value && logs.value.length === 0)
 </script>
 
@@ -167,6 +191,26 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
       识别结果不对时，翻这里比猜要快 —— 你能直接看到它是在哪一步走偏的。
       只保留最近 300 条。
     </p>
+
+    <!-- 历史汇总报告。逐条日志说细节，报告说整体，两个都要够得着 -->
+    <div v-if="reports.length > 0" class="reports">
+      <p class="reports__title">历史汇总报告</p>
+      <button
+        v-for="r in reports.slice(0, 8)"
+        :key="r.id"
+        class="reports__row"
+        @click="openReport = r"
+      >
+        <FileBarChart :size="13" />
+        <span class="reports__time mono">{{ stampShort(r.created_at) }}</span>
+        <span class="reports__sum">
+          {{ r.processed }} 个目录 · 成功 {{ r.registered }} · 跳过 {{ r.skipped }} · 失败
+          {{ r.failed }}
+        </span>
+        <span class="reports__cost mono">{{ r.tokens.toLocaleString() }} tk</span>
+        <ChevronRight :size="13" />
+      </button>
+    </div>
 
     <div class="toolbar">
       <div class="chips">
@@ -208,7 +252,13 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
         </div>
 
         <div v-if="opened.has(log.id)" class="trace">
-          <p class="trace__dir mono truncate" :title="log.dir">{{ log.dir }}</p>
+          <div class="trace__top">
+            <p class="trace__dir mono truncate" :title="log.dir">{{ log.dir }}</p>
+            <button class="btn btn--subtle" title="复制这条日志的完整内容" @click="copyLog(log)">
+              <Clipboard :size="13" />
+              复制
+            </button>
+          </div>
 
           <div v-for="round in groupRounds(log.events)" :key="round.index" class="round">
             <p class="round__no">轮次 {{ round.index }}</p>
@@ -257,6 +307,8 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
         </div>
       </li>
     </ul>
+
+    <ReportDialog v-if="openReport" :report="openReport" @close="openReport = null" />
   </section>
 </template>
 
@@ -442,10 +494,82 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
   background: var(--bg-side);
 }
 
+.trace__top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.trace__top .btn {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
 .trace__dir {
+  flex: 1;
+  min-width: 0;
   font-size: 11px;
   color: var(--text-faint);
-  margin-bottom: 10px;
+}
+
+/* ------------------------------ 历史报告 ------------------------------ */
+.reports {
+  margin-bottom: 16px;
+  padding: 10px;
+  border-radius: var(--radius-input);
+  background: var(--bg-main);
+  border: 1px solid var(--divider);
+}
+
+.reports__title {
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+  padding-left: 2px;
+}
+
+.reports__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-tag);
+  color: var(--text-sub);
+  font-size: var(--fs-tag);
+  text-align: left;
+  transition:
+    background var(--t-fast) ease,
+    color var(--t-fast) ease;
+}
+.reports__row:hover {
+  background: var(--hover-surface);
+  color: var(--text-main);
+}
+
+.reports__time {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.reports__sum {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reports__cost {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .round {

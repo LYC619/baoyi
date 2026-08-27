@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { plain } from '@/utils'
 import type { ScanProgress, ScanResult, Unsubscribe } from '@/types'
 
 /* 模块级单例，理由同 useAI */
@@ -32,12 +33,18 @@ export function useScan() {
     return '扫描完成'
   })
 
+  /**
+   * dirs 往往直接来自 settings store，那是一个 reactive 代理数组 ——
+   * 必须在这里拍平，contextBridge 收到代理会当场同步抛。见 utils 里的 plain()
+   */
   async function run(dirs: string[]): Promise<ScanResult> {
-    if (running.value || dirs.length === 0) return { found: 0, added: 0, pending: 0, settled: 0 }
+    if (running.value || dirs.length === 0) {
+      return { found: 0, added: 0, pending: 0, settled: 0, loose_files: [] }
+    }
     running.value = true
     progress.value = { phase: 'walking', current: '', found: 0, processed: 0, total: 0 }
     try {
-      const result = await window.baoyi.scan.run(dirs)
+      const result = await window.baoyi.scan.run(plain(dirs))
       lastResult.value = result
       return result
     } finally {

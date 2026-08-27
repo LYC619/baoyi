@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
 import type { MasteryLevel, SidebarCounts, SoftwareItem, SoftwareQuery, VirtualGroup } from '@/types'
+import { plain } from '@/utils'
 import { useSettingsStore } from './settings'
 
 export type Selection = { kind: 'group' | 'category' | 'tag'; value: string }
@@ -12,6 +13,7 @@ const EMPTY_COUNTS: SidebarCounts = {
   pending: 0,
   pending_units: 0,
   pending_confirm: 0,
+  portable: 0,
   categories: [],
   tags: []
 }
@@ -34,7 +36,7 @@ export const useSoftwareStore = defineStore('software', () => {
   const heading = computed(() => {
     if (selection.kind === 'category') return selection.value
     if (selection.kind === 'tag') return `# ${selection.value}`
-    return { all: '全部', archived: '已归档', unused: '长期未用', pending: '待识别' }[
+    return { all: '全部', archived: '已归档', unused: '长期未用', pending: '待识别', portable: '绿色软件' }[
       selection.value as VirtualGroup
     ]
   })
@@ -77,7 +79,7 @@ export const useSoftwareStore = defineStore('software', () => {
   }
 
   async function update(id: string, patch: Partial<SoftwareItem>): Promise<SoftwareItem | null> {
-    const updated = await window.baoyi.software.update(id, patch)
+    const updated = await window.baoyi.software.update(id, plain(patch))
     if (updated) {
       const i = items.value.findIndex((x) => x.id === id)
       if (i >= 0) items.value[i] = updated
