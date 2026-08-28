@@ -22,7 +22,15 @@ import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSoftwareStore } from '@/stores/software'
 import type { MasteryLevel, SoftwareItem } from '@/types'
-import { MASTERY_META, MASTERY_ORDER, activityOf, displayName, formatBytes, formatDate } from '@/utils'
+import {
+  MASTERY_META,
+  MASTERY_ORDER,
+  activityOf,
+  displayName,
+  errorMessage,
+  formatBytes,
+  formatDate
+} from '@/utils'
 
 const props = defineProps<{ id: string }>()
 
@@ -37,8 +45,14 @@ const loading = ref(true)
 
 async function load(): Promise<void> {
   loading.value = true
-  item.value = await window.baoyi.software.get(props.id)
-  loading.value = false
+  try {
+    item.value = await window.baoyi.software.get(props.id)
+  } catch (err) {
+    error(`读取条目失败：${errorMessage(err)}`)
+    item.value = null
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(load)
@@ -61,10 +75,20 @@ const categoryOptions = computed(() => {
   return names
 })
 
-async function save(patch: Partial<SoftwareItem>): Promise<void> {
-  if (!item.value) return
-  const updated = await store.update(item.value.id, patch)
-  if (updated) item.value = updated
+/**
+ * 所有保存路径的唯一收口。失焦即存的调用点散在模板各处，逐个包 try/catch 必漏，
+ * 错误在这里统一接住 —— 保存失败返回 null，调用方靠它决定要不要报成功。
+ */
+async function save(patch: Partial<SoftwareItem>): Promise<SoftwareItem | null> {
+  if (!item.value) return null
+  try {
+    const updated = await store.update(item.value.id, patch)
+    if (updated) item.value = updated
+    return updated
+  } catch (err) {
+    error(`保存失败：${errorMessage(err)}`)
+    return null
+  }
 }
 
 function commitList(field: 'tags' | 'alternatives', raw: string): void {
@@ -75,27 +99,27 @@ function commitList(field: 'tags' | 'alternatives', raw: string): void {
   void save(field === 'tags' ? { tags: list } : { alternatives: list })
 }
 
-async function launch(): Promise<void> {
-  if (!item.value) return
-  const ok = await store.launch(item.value.id)
-  if (ok) {
-    item.value.last_used_at = Date.now()
-    item.value.use_count += 1
-  } else {
-    error('启动失败，文件可能已被移动或删除')
-  }
-}
-
 /** 从启动端列表里点某一个启动，不改默认端 */
 async function launchWith(launcherPath: string): Promise<void> {
   if (!item.value) return
-  const ok = await store.launch(item.value.id, launcherPath)
-  if (ok) {
-    item.value.last_used_at = Date.now()
-    item.value.use_count += 1
-  } else {
-    error('启动失败，文件可能已被移动或删除')
+  try {
+    const ok = await store.launch(item.value.id, launcherPath)
+    if (ok) {
+      item.value.last_used_at = Date.now()
+      item.value.use_count += 1
+    } else {
+      error('启动失败，文件可能已被移动或删除')
+    }
+  } catch (err) {
+    error(`启动失败：${errorMessage(err)}`)
   }
+}
+
+async function launch(): Promise<void> {
+  if (!item.value) return
+  // 默认启动端的路径就是 exe_path（设为默认时两者一起改），主进程按
+  // launchers 白名单匹配，等价于不带参数
+  await launchWith(item.value.exe_path)
 }
 
 /** 默认启动端同时也是这条记录的唯一键，所以要和 exe_path 一起改 */
@@ -106,8 +130,11 @@ async function setDefaultLauncher(launcherPath: string): Promise<void> {
     is_default: l.path === launcherPath
   }))
   try {
-    await save({ launchers, exe_path: launcherPath })
-    success('已切换默认启动端')
+    const updated = await store.update(item.value.id, { launchers, exe_path: launcherPath })
+    if (updated) {
+      item.value = updated
+      success('已切换默认启动端')
+    }
   } catch {
     error('切换失败：这个程序已经被登记在另一个条目下了')
   }
@@ -116,25 +143,35 @@ async function setDefaultLauncher(launcherPath: string): Promise<void> {
 async function toggleArchive(): Promise<void> {
   if (!item.value) return
   const next = !item.value.is_archived
-  await save({ is_archived: next })
-  success(next ? '已归档，卡片墙不再显示' : '已取消归档')
+  const updated = await save({ is_archived: next })
+  // 保存失败时 save 已经报过错，这里不能再喊「已归档」
+  if (updated) success(next ? '已归档，卡片墙不再显示' : '已取消归档')
 }
 
 async function removeItem(): Promise<void> {
   if (!item.value) return
   const ok = window.confirm(`确认从抱一移除「${name.value}」？\n只删除记录，不会删除实际文件。`)
   if (!ok) return
-  await store.remove(item.value.id)
+  try {
+    await store.remove(item.value.id)
+  } catch (err) {
+    error(`移除失败：${errorMessage(err)}`)
+    return
+  }
   success('已移除记录')
   void router.push({ name: 'home' })
 }
 
 async function reidentify(): Promise<void> {
   if (!item.value) return
-  const result = await ai.complete([item.value.id])
-  await load()
-  if (result.registered > 0) success('已重新识别')
-  else error('识别失败，检查设置里的 API 配置')
+  try {
+    const result = await ai.complete([item.value.id])
+    await load()
+    if (result.registered > 0) success('已重新识别')
+    else error('识别失败，检查设置里的 API 配置')
+  } catch (err) {
+    error(`识别失败：${errorMessage(err)}`)
+  }
 }
 
 function openOfficial(): void {
@@ -154,7 +191,8 @@ function setCategory(e: Event): void {
 }
 
 function copyPath(target: string): void {
-  void navigator.clipboard.writeText(target)
+  // navigator.clipboard 在打包后的 file:// 页面里不可靠（见 types 的 app.copyText 注释）
+  void window.baoyi.app.copyText(target)
   toast('路径已复制')
 }
 
@@ -184,6 +222,8 @@ async function toEntity(): Promise<void> {
     const r = await window.baoyi.organize.materialize(item.value.id)
     await load()
     r.ok ? success(r.message) : error(r.message)
+  } catch (err) {
+    error(`转换失败：${errorMessage(err)}`)
   } finally {
     linkBusy.value = false
   }
@@ -198,6 +238,8 @@ async function dropLink(): Promise<void> {
     const r = await window.baoyi.organize.unlink(item.value.id)
     await load()
     r.ok ? success(r.message) : error(r.message)
+  } catch (err) {
+    error(`移除失败：${errorMessage(err)}`)
   } finally {
     linkBusy.value = false
   }

@@ -14,7 +14,8 @@ import { useOrganize } from '@/composables/useOrganize'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSoftwareStore } from '@/stores/software'
-import type { OrganizeAction, OrganizeEntry } from '@/types'
+import type { OrganizeAction, OrganizeEntry, OrganizeResult } from '@/types'
+import { errorMessage } from '@/utils'
 
 const router = useRouter()
 const categories = useCategoriesStore()
@@ -76,8 +77,10 @@ function setAll(value: OrganizeAction): void {
 
 /** 把有警告的一律改成跳过 —— 最常用的一次性避险动作 */
 function skipWarned(): void {
+  // warn 带着「还没被跳过」的过滤，必须在循环改掉 action 之前读
+  const n = tally.value.warn
   for (const e of entries.value) if (e.warning) e.action = 'skip'
-  toast(`已把 ${tally.value.skip} 条带提示的改为跳过`)
+  toast(`已把 ${n} 条带提示的改为跳过`)
 }
 
 async function execute(): Promise<void> {
@@ -97,16 +100,24 @@ async function execute(): Promise<void> {
   ].filter(Boolean)
   if (!window.confirm(lines.join('\n'))) return
 
-  const result = await organize.run(
-    entries.value.map((e) => ({
-      software_id: e.software_id,
-      action: e.action,
-      category: e.category,
-      folder: e.folder
-    }))
-  )
+  let result: OrganizeResult | null = null
+  try {
+    result = await organize.run(
+      entries.value.map((e) => ({
+        software_id: e.software_id,
+        action: e.action,
+        category: e.category,
+        folder: e.folder
+      }))
+    )
+  } catch (err) {
+    error(`整理执行失败：${errorMessage(err)}`)
+  }
 
-  await Promise.all([load(), store.reload()])
+  // 就算 run 抛了错也要刷新：主进程可能已经执行完前几条命令，
+  // 让预览和卡片墙停在过期状态比弹一次错更糟。store.reload 自己接错，不会再抛
+  await Promise.all([load().catch(() => {}), store.reload()])
+  if (!result) return
 
   const parts = [`移动 ${result.moved} 条`, `链接 ${result.linked} 条`]
   if (result.failed > 0) {

@@ -5,17 +5,25 @@ import { ArrowRight, Check, FolderPlus, Loader2, SkipForward, Trash2 } from 'luc
 import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
 import { useAI } from '@/composables/useAI'
 import { useScan } from '@/composables/useScan'
+import { useToast } from '@/composables/useToast'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
+import { errorMessage } from '@/utils'
 
 const router = useRouter()
 const settings = useSettingsStore()
 const store = useSoftwareStore()
 const scan = useScan()
 const ai = useAI()
+const toast = useToast()
 
 /** 0 欢迎 · 1 选目录 · 2 扫描 · 3 配置 AI · 4 AI 补全 · 5 完成 */
 const step = ref(0)
+/**
+ * 当前步骤的失败原因。路由守卫在 onboarded 之前把一切重定向回这一页，
+ * 所以每一步都必须自带失败出口：看到原因、能重试、能绕过去。
+ */
+const stepError = ref('')
 const dirs = ref<string[]>([...settings.settings.scan_dirs])
 
 const apiUrl = ref(settings.settings.ai.api_url)
@@ -37,35 +45,64 @@ function removeDir(dir: string): void {
 }
 
 async function startScan(): Promise<void> {
-  await settings.patch({ scan_dirs: [...dirs.value] })
+  stepError.value = ''
+  try {
+    await settings.patch({ scan_dirs: [...dirs.value] })
+  } catch (err) {
+    toast.error(`保存扫描目录失败：${errorMessage(err)}`)
+    return
+  }
   step.value = 2
-  scanned.value = await scan.run([...dirs.value])
-  await store.reload()
+  try {
+    scanned.value = await scan.run([...dirs.value])
+    await store.reload()
+  } catch (err) {
+    stepError.value = errorMessage(err)
+  }
 }
 
 async function startAi(): Promise<void> {
-  await settings.patch({
-    ai: {
-      api_url: apiUrl.value.trim(),
-      api_key: apiKey.value.trim(),
-      model: model.value.trim(),
-      enabled: true
-    }
-  })
+  stepError.value = ''
+  try {
+    await settings.patch({
+      ai: {
+        api_url: apiUrl.value.trim(),
+        api_key: apiKey.value.trim(),
+        model: model.value.trim(),
+        enabled: true
+      }
+    })
+  } catch (err) {
+    toast.error(`保存 AI 配置失败：${errorMessage(err)}`)
+    return
+  }
   step.value = 4
-  aiDone.value = await ai.complete()
-  await store.reload()
-  step.value = 5
+  try {
+    aiDone.value = await ai.complete()
+    await store.reload()
+    step.value = 5
+  } catch (err) {
+    stepError.value = errorMessage(err)
+  }
 }
 
 async function skipAi(): Promise<void> {
-  await settings.patch({ ai: { ...settings.settings.ai, enabled: false } })
-  step.value = 5
+  try {
+    await settings.patch({ ai: { ...settings.settings.ai, enabled: false } })
+    step.value = 5
+  } catch (err) {
+    toast.error(`保存失败：${errorMessage(err)}`)
+  }
 }
 
 async function finish(): Promise<void> {
-  await settings.patch({ onboarded: true })
-  await store.reload()
+  try {
+    await settings.patch({ onboarded: true })
+    await store.reload()
+  } catch (err) {
+    toast.error(`保存失败：${errorMessage(err)}`)
+    return
+  }
   // 识别结果停在暂存区等确认，这时候直接进卡片墙只会看到一片空白
   void router.push({ name: aiDone.value.registered > 0 ? 'confirm' : 'home' })
 }
@@ -124,31 +161,45 @@ async function finish(): Promise<void> {
       <!-- ---------------------------- 2 扫描进度 ---------------------------- -->
       <section v-else-if="step === 2" class="step">
         <p class="eyebrow">第二步</p>
-        <h2 class="head">
-          <Loader2 v-if="scan.running.value" :size="18" class="spin" />
-          {{ scan.running.value ? '正在扫描' : '扫描完成' }}
-        </h2>
-        <p class="desc mono truncate">{{ scan.progress.value?.current || '—' }}</p>
-
-        <div class="bar"><i :style="{ width: `${scan.percent.value}%` }" /></div>
-        <p class="stat">{{ scan.phaseLabel.value }}</p>
-
-        <template v-if="!scan.running.value">
-          <div class="summary">
-            <div><b>{{ scanned.found }}</b><span>个程序</span></div>
-            <div><b>{{ scanned.pending }}</b><span>个目录待识别</span></div>
-            <div><b>{{ scanned.settled }}</b><span>个已识别过</span></div>
-          </div>
+        <!-- 失败也要有出口：原因摆出来，能重试，也能先去把 AI 配好 -->
+        <template v-if="stepError">
+          <h2 class="head">扫描没有完成</h2>
+          <p class="err">{{ stepError }}</p>
           <div class="actions">
-            <button class="btn btn--primary btn--lg" @click="step = 3">
-              下一步
+            <button class="btn btn--primary btn--lg" @click="startScan">
+              重试
               <ArrowRight :size="15" />
             </button>
+            <button class="btn btn--subtle" @click="step = 3">先去配置 AI</button>
           </div>
         </template>
-        <div v-else class="actions">
-          <button class="btn btn--ghost" @click="scan.cancel()">中止扫描</button>
-        </div>
+        <template v-else>
+          <h2 class="head">
+            <Loader2 v-if="scan.running.value" :size="18" class="spin" />
+            {{ scan.running.value ? '正在扫描' : '扫描完成' }}
+          </h2>
+          <p class="desc mono truncate">{{ scan.progress.value?.current || '—' }}</p>
+
+          <div class="bar"><i :style="{ width: `${scan.percent.value}%` }" /></div>
+          <p class="stat">{{ scan.phaseLabel.value }}</p>
+
+          <template v-if="!scan.running.value">
+            <div class="summary">
+              <div><b>{{ scanned.found }}</b><span>个程序</span></div>
+              <div><b>{{ scanned.pending }}</b><span>个目录待识别</span></div>
+              <div><b>{{ scanned.settled }}</b><span>个已识别过</span></div>
+            </div>
+            <div class="actions">
+              <button class="btn btn--primary btn--lg" @click="step = 3">
+                下一步
+                <ArrowRight :size="15" />
+              </button>
+            </div>
+          </template>
+          <div v-else class="actions">
+            <button class="btn btn--ghost" @click="scan.cancel()">中止扫描</button>
+          </div>
+        </template>
       </section>
 
       <!-- ---------------------------- 3 配置 AI ---------------------------- -->
@@ -191,22 +242,39 @@ async function finish(): Promise<void> {
       <!-- ---------------------------- 4 AI 识别 ---------------------------- -->
       <section v-else-if="step === 4" class="step">
         <p class="eyebrow">第四步</p>
-        <h2 class="head">
-          <Loader2 :size="18" class="spin" />
-          AI 正在识别
-        </h2>
-        <p class="desc mono truncate">{{ ai.progress.value?.current || '—' }}</p>
+        <!-- 识别失败不能停在这个转圈上：给原因、给重试、也给跳过的出路 -->
+        <template v-if="stepError">
+          <h2 class="head">识别没有跑完</h2>
+          <p class="err">{{ stepError }}</p>
+          <div class="actions">
+            <button class="btn btn--primary btn--lg" @click="startAi">
+              重试
+              <ArrowRight :size="15" />
+            </button>
+            <button class="btn btn--subtle" @click="skipAi">
+              <SkipForward :size="14" />
+              暂时跳过
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <h2 class="head">
+            <Loader2 :size="18" class="spin" />
+            AI 正在识别
+          </h2>
+          <p class="desc mono truncate">{{ ai.progress.value?.current || '—' }}</p>
 
-        <div class="bar"><i :style="{ width: `${ai.percent.value}%` }" /></div>
-        <p class="stat">
-          {{ ai.progress.value?.processed ?? 0 }} / {{ ai.progress.value?.total ?? 0 }} 个目录 ·
-          已认出 {{ ai.progress.value?.registered ?? 0 }} 个软件
-        </p>
-        <p class="stat truncate">{{ ai.activity.value || '正在启动…' }}</p>
+          <div class="bar"><i :style="{ width: `${ai.percent.value}%` }" /></div>
+          <p class="stat">
+            {{ ai.progress.value?.processed ?? 0 }} / {{ ai.progress.value?.total ?? 0 }} 个目录 ·
+            已认出 {{ ai.progress.value?.registered ?? 0 }} 个软件
+          </p>
+          <p class="stat truncate">{{ ai.activity.value || '正在启动…' }}</p>
 
-        <div class="actions">
-          <button class="btn btn--ghost" @click="ai.cancel()">中止</button>
-        </div>
+          <div class="actions">
+            <button class="btn btn--ghost" @click="ai.cancel()">中止</button>
+          </div>
+        </template>
       </section>
 
       <!-- ------------------------------ 5 完成 ------------------------------ -->
@@ -322,6 +390,16 @@ async function finish(): Promise<void> {
   font-size: var(--fs-body);
   line-height: 1.9;
   color: var(--text-sub);
+}
+
+.err {
+  font-size: var(--fs-body);
+  line-height: 1.8;
+  color: var(--danger);
+  padding: 10px 14px;
+  border-radius: var(--radius-input);
+  background: var(--danger-bg);
+  word-break: break-word;
 }
 
 .form {

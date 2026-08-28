@@ -59,6 +59,7 @@ import {
 import {
   activityOf,
   compareVersions,
+  createLatestGuard,
   displayName,
   groupRounds,
   logToText,
@@ -73,6 +74,8 @@ const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake',
 
 let passed = 0
 let failed = 0
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 async function check(name: string, fn: () => Promise<void> | void): Promise<void> {
   try {
@@ -1431,6 +1434,67 @@ async function main(): Promise<void> {
     assert.deepEqual(parseModelList({ data: [{}, { id: '' }, null] }), [])
     assert.deepEqual(parseModelList(null), [])
     assert.deepEqual(parseModelList({ error: 'no such endpoint' }), [])
+  })
+
+  /* ------------------------- 并发收尾：latest-wins 令牌 ------------------------- */
+
+  console.log('\n并发收尾 · latest-wins 令牌')
+
+  // 可取消任务的场景（useAI / useScan）：cancel 不再同步清 running，旧轮的 IPC
+  // 返回晚于新轮的 begin() 才到。收尾只有 isCurrent 才许清状态 —— 这一条守的
+  // 就是「cancel 之后立刻点第二轮」那个最容易踩的时刻。
+  await check('过期轮次的 finally 不清掉还在跑的新一轮', async () => {
+    const rounds = createLatestGuard()
+    let running = false
+    // complete 的骨架：begin 领号，收尾只在当值时清 running（与 composable 相同）
+    const complete = (ms: number): Promise<void> =>
+      new Promise((resolve) => {
+        running = true
+        const round = rounds.begin()
+        setTimeout(() => {
+          if (rounds.isCurrent(round)) running = false
+          resolve()
+        }, ms)
+      })
+
+    const stale = complete(30) // 第一轮，收尾慢
+    await sleep(10)
+    void complete(60) // cancel 之后用户立刻点出的第二轮
+    await stale // 第一轮此刻才收尾
+    assert.ok(running, '第一轮已过期，不许把第二轮的 running 清掉')
+    await sleep(70)
+    assert.ok(!running, '第二轮自己收尾时该正常清掉 running')
+  })
+
+  // 列表查询的场景（software store 的 load）：先点一个响应快的，又点了一个慢的，
+  // 旧响应先回来时新查询还在路上 —— 过期收尾必须两样都不碰。
+  await check('晚到的旧响应不覆盖新结果，也不清掉新一轮的 loading', async () => {
+    const rounds = createLatestGuard()
+    let items: string | null = null
+    let loading = false
+    const load = (ms: number, group: string): Promise<void> =>
+      new Promise((resolve) => {
+        loading = true
+        const round = rounds.begin()
+        setTimeout(() => {
+          // 与 store.load 相同的收尾：只在当值时写结果、清 loading
+          if (rounds.isCurrent(round)) {
+            items = group
+            loading = false
+          }
+          resolve()
+        }, ms)
+      })
+
+    const stale = load(30, '旧分组') // 先点了一个响应快的
+    await sleep(10)
+    void load(50, '新分组') // 又点了一个慢的，此刻还在路上
+    await stale // 旧响应在新一轮开始之后才回来
+    assert.equal(items, null, '过期响应不许覆盖状态')
+    assert.ok(loading, '第二个查询还在跑，loading 必须还挂着')
+    await sleep(55)
+    assert.equal(items, '新分组', '当值的响应正常落地')
+    assert.ok(!loading, '新轮自己的收尾清掉 loading')
   })
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)

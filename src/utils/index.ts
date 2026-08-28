@@ -24,6 +24,14 @@ export function plain<T>(value: T): T {
   return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T)
 }
 
+/**
+ * IPC 报错的原文。参数侧有 plain() 挡着，返回侧的失败散落在各个 catch 里 ——
+ * 拼这句话的格式统一放这里，别每处各写各的。
+ */
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
 /** 图标走 baoyi:// 自定义协议，主进程只按文件名在图标目录里找 */
 export function iconUrl(iconPath: string): string {
   if (!iconPath) return ''
@@ -77,6 +85,13 @@ export function formatDate(ts: number): string {
   const d = new Date(ts)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** 日期 + 时分。识别日志的时间戳精确到分就够用 */
+export function formatDateTime(ts: number): string {
+  const d = new Date(ts)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${formatDate(ts)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 /** 相对时间。0 表示从未启动过 */
@@ -157,6 +172,34 @@ export function debounce<A extends unknown[]>(fn: (...args: A) => void, wait = 2
   return (...args: A) => {
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => fn(...args), wait)
+  }
+}
+
+/* ------------------------------ 并发收尾令牌 ------------------------------ */
+
+export interface LatestGuard {
+  /** 每次调用开始时领一个号 */
+  begin(): number
+  /** 这个号还是不是最新的一次调用。过期的调用在收尾处一律安静退出 */
+  isCurrent(n: number): boolean
+}
+
+/**
+ * 「只认最新一次调用」的令牌，管的是同一类竞态：旧调用的收尾代码，
+ * 执行时新调用已经开始。收尾想动共享状态前先 isCurrent() 问一句。
+ *
+ *   · 列表查询（software store 的 load）：先点慢分组再点快分组，
+ *     慢的那个晚 resolve 会把列表覆盖回旧分组的数据。
+ *   · 可取消的任务（useAI / useScan 的 complete）：cancel 之后立刻点出
+ *     第二轮，旧轮的 finally 会把新轮的 running 清掉。
+ *
+ * 两个场景共用一个实现，因为规矩是同一条：过期者不写状态。
+ */
+export function createLatestGuard(): LatestGuard {
+  let latest = 0
+  return {
+    begin: () => ++latest,
+    isCurrent: (n) => n === latest
   }
 }
 

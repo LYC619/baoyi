@@ -21,7 +21,7 @@ import {
 import ReportDialog from '@/components/identify/ReportDialog.vue'
 import type { IdentifyLog, IdentifyLogStatus, IdentifyReport } from '@/types'
 import { useToast } from '@/composables/useToast'
-import { formatDate, groupRounds, logToText } from '@/utils'
+import { formatDateTime, groupRounds, logToText } from '@/utils'
 
 const emit = defineEmits<{ (e: 'retry', dir: string): void }>()
 
@@ -53,16 +53,25 @@ const opened = ref(new Set<string>())
 /** 展开了全文的工具返回，键是「日志 id : 事件下标」 */
 const spread = ref(new Set<string>())
 
+/** 上次真正发起过查询的关键词。blur 在单纯移开焦点时也会触发，没改动就不该重打 IPC */
+let queriedKeyword = ''
+
 async function load(): Promise<void> {
+  const kw = keyword.value.trim()
+  queriedKeyword = kw
   loading.value = true
   try {
     logs.value = await window.baoyi.logs.list({
       status: filter.value === 'all' ? undefined : filter.value,
-      keyword: keyword.value.trim() || undefined
+      keyword: kw || undefined
     })
   } finally {
     loading.value = false
   }
+}
+
+function blurSearch(): void {
+  if (keyword.value.trim() !== queriedKeyword) void load()
 }
 
 onMounted(async () => {
@@ -156,22 +165,10 @@ function isLong(text: string): boolean {
   return text.split('\n').length > PREVIEW_LINES
 }
 
-function stamp(ts: number): string {
-  const d = new Date(ts)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${formatDate(ts)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
 function cost(log: IdentifyLog): string {
   const seconds = (log.duration_ms / 1000).toFixed(1)
   const turns = log.stop_reason === 'max_turns' ? `${log.rounds} 轮（达到上限）` : `${log.rounds} 轮`
   return `${turns}，${seconds}s，${log.tokens.toLocaleString()} tokens`
-}
-
-function stampShort(ts: number): string {
-  const d = new Date(ts)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${formatDate(ts)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 const empty = computed(() => !loading.value && logs.value.length === 0)
@@ -202,7 +199,7 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
         @click="openReport = r"
       >
         <FileBarChart :size="13" />
-        <span class="reports__time mono">{{ stampShort(r.created_at) }}</span>
+        <span class="reports__time mono">{{ formatDateTime(r.created_at) }}</span>
         <span class="reports__sum">
           {{ r.processed }} 个目录 · 成功 {{ r.registered }} · 跳过 {{ r.skipped }} · 失败
           {{ r.failed }}
@@ -225,7 +222,7 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
       </div>
       <label class="finder">
         <Search :size="14" />
-        <input v-model="keyword" placeholder="搜索目录名" @keyup.enter="load" @blur="load" />
+        <input v-model="keyword" placeholder="搜索目录名" @keyup.enter="load" @blur="blurSearch" />
       </label>
     </div>
 
@@ -243,7 +240,7 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
           <ChevronRight :size="14" class="log__caret" :class="{ on: opened.has(log.id) }" />
           <component :is="STATUS_META[log.status].icon" :size="14" class="log__icon" />
           <span class="log__label truncate" :title="log.dir">{{ log.label }}</span>
-          <span class="log__time mono">{{ stamp(log.created_at) }}</span>
+          <span class="log__time mono">{{ formatDateTime(log.created_at) }}</span>
         </button>
 
         <div class="log__meta">

@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import { plain } from '@/utils'
+import { createLatestGuard, plain } from '@/utils'
 import type { AIProgress, AIResult, Unsubscribe } from '@/types'
 
 /* 模块级单例：设置页和引导页看到的是同一份进度 */
@@ -7,6 +7,9 @@ const progress = ref<AIProgress | null>(null)
 const running = ref(false)
 const lastResult = ref<AIResult | null>(null)
 let unsubscribe: Unsubscribe | null = null
+
+/** 收尾令牌：cancel 后旧轮的 IPC 返回晚于新轮的 begin 才到，过期者不许清状态 */
+const rounds = createLatestGuard()
 
 const EMPTY: AIResult = { processed: 0, registered: 0, skipped: 0, failed: 0, tokens: 0, report_id: '' }
 
@@ -41,6 +44,7 @@ export function useAI() {
   async function complete(ids?: string[]): Promise<AIResult> {
     if (running.value) return { ...EMPTY }
     running.value = true
+    const round = rounds.begin()
     progress.value = {
       phase: 'running',
       current: '',
@@ -55,13 +59,15 @@ export function useAI() {
       lastResult.value = result
       return result
     } finally {
-      running.value = false
+      if (rounds.isCurrent(round)) running.value = false
     }
   }
 
   function cancel(): void {
+    // 不能在这里把 running 置回 false：abort 要等主进程走到下一个轮次边界才生效，
+    // 此刻放开按钮，用户就能在旧轮还在收尾时点出第二轮。running 交给两个
+    // 「旧轮真的结束了」的时刻去清 —— complete 的 finally 和进度里的 done 事件
     window.baoyi.ai.cancel()
-    running.value = false
   }
 
   function reset(): void {

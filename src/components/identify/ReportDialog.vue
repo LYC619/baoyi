@@ -9,7 +9,7 @@
 import { computed } from 'vue'
 import { AlertTriangle, CheckCircle2, Globe, MinusCircle, X } from 'lucide-vue-next'
 import type { IdentifyLogStatus, IdentifyReport } from '@/types'
-import { formatDate } from '@/utils'
+import { formatDateTime } from '@/utils'
 
 const props = defineProps<{ report: IdentifyReport }>()
 defineEmits<{ (e: 'close'): void }>()
@@ -18,12 +18,6 @@ const STATUS_META: Record<IdentifyLogStatus, { label: string; icon: any; tone: s
   success: { label: '成功', icon: CheckCircle2, tone: 'ok' },
   skipped: { label: '跳过', icon: MinusCircle, tone: 'warn' },
   failed: { label: '失败', icon: AlertTriangle, tone: 'bad' }
-}
-
-function stamp(ts: number): string {
-  const d = new Date(ts)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${formatDate(ts)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 const seconds = computed(() => (props.report.duration_ms / 1000).toFixed(1))
@@ -39,7 +33,7 @@ const troubles = computed(() =>
     <section class="dialog">
       <header class="dialog__head">
         <h2>识别汇总报告</h2>
-        <span class="dialog__time mono">{{ stamp(report.created_at) }}</span>
+        <span class="dialog__time mono">{{ formatDateTime(report.created_at) }}</span>
         <button class="btn btn--subtle" title="关闭" @click="$emit('close')">
           <X :size="16" />
         </button>

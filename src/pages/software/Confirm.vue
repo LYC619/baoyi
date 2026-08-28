@@ -14,7 +14,7 @@ import TagBadge from '@/components/ui/TagBadge.vue'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSoftwareStore } from '@/stores/software'
-import { compareVersions, plain, versionOf } from '@/utils'
+import { compareVersions, errorMessage, plain, versionOf } from '@/utils'
 import type { MoveRisk, PendingItem } from '@/types'
 
 const router = useRouter()
@@ -138,10 +138,15 @@ function categoryOptions(item: PendingItem): string[] {
 }
 
 async function patch(item: PendingItem, p: Partial<PendingItem>): Promise<void> {
-  const updated = await window.baoyi.pending.update(item.id, plain(p))
-  if (!updated) return
-  const i = items.value.findIndex((x) => x.id === item.id)
-  if (i >= 0) items.value[i] = updated
+  try {
+    const updated = await window.baoyi.pending.update(item.id, plain(p))
+    if (!updated) return
+    const i = items.value.findIndex((x) => x.id === item.id)
+    if (i >= 0) items.value[i] = updated
+  } catch (err) {
+    // 失焦即存的调用点太多，逐个包 try/catch 不现实，错误统一在这里接住
+    error(`改动没有存上：${errorMessage(err)}`)
+  }
 }
 
 function editText(item: PendingItem, field: 'name_zh' | 'name_en' | 'summary', e: Event): void {
@@ -220,6 +225,8 @@ async function skip(ids: string[], ask: boolean): Promise<void> {
     await Promise.all([load(), store.refreshCounts()])
     toast(`已标记 ${n} 个为不注册`)
     if (items.value.length === 0) void router.push({ name: 'home' })
+  } catch (err) {
+    error(`标记失败：${errorMessage(err)}`)
   } finally {
     busy.value = false
   }

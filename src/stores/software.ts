@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
 import type { MasteryLevel, SidebarCounts, SoftwareItem, SoftwareQuery, VirtualGroup } from '@/types'
-import { plain } from '@/utils'
+import { useToast } from '@/composables/useToast'
+import { createLatestGuard, errorMessage, plain } from '@/utils'
 import { useSettingsStore } from './settings'
 
 export type Selection = { kind: 'group' | 'category' | 'tag'; value: string }
@@ -22,6 +23,11 @@ export const useSoftwareStore = defineStore('software', () => {
   const items = ref<SoftwareItem[]>([])
   const counts = ref<SidebarCounts>({ ...EMPTY_COUNTS })
   const loading = ref(false)
+
+  /** load 的请求序号：快慢两个查询并发时，晚到的旧响应不许覆盖新结果 */
+  const loadRounds = createLatestGuard()
+  const countsRounds = createLatestGuard()
+  const { error: toastError } = useToast()
 
   const keyword = ref('')
   const mastery = ref<MasteryLevel | ''>('')
@@ -56,17 +62,27 @@ export const useSoftwareStore = defineStore('software', () => {
   }
 
   async function load(): Promise<void> {
+    const round = loadRounds.begin()
     loading.value = true
     try {
-      items.value = await window.baoyi.software.list(buildQuery())
+      const next = await window.baoyi.software.list(buildQuery())
+      if (loadRounds.isCurrent(round)) items.value = next
+    } catch (err) {
+      // 失败时保留旧列表，比清成空列表再显示「还没有收录任何软件」诚实
+      if (loadRounds.isCurrent(round)) toastError(`读取列表失败：${errorMessage(err)}`)
     } finally {
-      loading.value = false
+      if (loadRounds.isCurrent(round)) loading.value = false
     }
   }
 
   async function refreshCounts(): Promise<void> {
-    const settings = useSettingsStore()
-    counts.value = await window.baoyi.software.counts(settings.settings.unused_days)
+    const round = countsRounds.begin()
+    try {
+      const next = await window.baoyi.software.counts(useSettingsStore().settings.unused_days)
+      if (countsRounds.isCurrent(round)) counts.value = next
+    } catch (err) {
+      if (countsRounds.isCurrent(round)) toastError(`读取统计失败：${errorMessage(err)}`)
+    }
   }
 
   async function reload(): Promise<void> {

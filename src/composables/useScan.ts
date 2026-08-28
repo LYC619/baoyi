@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import { plain } from '@/utils'
+import { createLatestGuard, plain } from '@/utils'
 import type { ScanProgress, ScanResult, Unsubscribe } from '@/types'
 
 /* 模块级单例，理由同 useAI */
@@ -7,6 +7,9 @@ const progress = ref<ScanProgress | null>(null)
 const running = ref(false)
 const lastResult = ref<ScanResult | null>(null)
 let unsubscribe: Unsubscribe | null = null
+
+/** 收尾令牌：cancel 后旧轮的 IPC 返回晚于新轮的 begin 才到，过期者不许清状态 */
+const rounds = createLatestGuard()
 
 function ensureSubscribed(): void {
   if (unsubscribe) return
@@ -42,19 +45,22 @@ export function useScan() {
       return { found: 0, added: 0, pending: 0, settled: 0, loose_files: [] }
     }
     running.value = true
+    const round = rounds.begin()
     progress.value = { phase: 'walking', current: '', found: 0, processed: 0, total: 0 }
     try {
       const result = await window.baoyi.scan.run(plain(dirs))
       lastResult.value = result
       return result
     } finally {
-      running.value = false
+      if (rounds.isCurrent(round)) running.value = false
     }
   }
 
   function cancel(): void {
+    // 不能在这里把 running 置回 false：主进程那一轮未必已经停，此刻放开按钮，
+    // 用户就能在旧轮还在收尾时点出第二轮。清 running 交给 run 的 finally
+    // 和进度里的 done 事件 —— 那两个时刻旧轮是真的结束了
     window.baoyi.scan.cancel()
-    running.value = false
   }
 
   async function pickDirectory(): Promise<string | null> {

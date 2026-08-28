@@ -514,8 +514,9 @@ async function runScan(): Promise<void> {
 }
 
 async function runAi(): Promise<void> {
-  if (!settings.settings.ai.api_key) {
-    error('请先到「AI 配置」填写并保存 API Key')
+  // 和 Home 页的判定保持一致：总开关关着时同样进不去，别空跑一轮
+  if (!settings.settings.ai.enabled || !settings.settings.ai.api_key) {
+    error('AI 未启用：请先到「AI 配置」填写 API Key 并打开启用开关')
     go('ai')
     return
   }
