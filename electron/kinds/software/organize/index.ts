@@ -22,7 +22,7 @@ import type {
   OrganizeStep,
   SoftwareItem,
   UndoResult
-} from '../../../src/types'
+} from '../../../../src/types'
 import {
   getOrganizePlan,
   getSettings,
@@ -32,7 +32,7 @@ import {
   remapPaths,
   saveOrganizePlan,
   updateSoftware
-} from '../database'
+} from '../../../services/database'
 import { defaultAction, defaultFolder, nestedInside, rebase, targetDir } from './plan'
 import {
   exists,

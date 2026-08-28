@@ -12,7 +12,7 @@ import type {
   SoftwareItem,
   SoftwareQuery
 } from '../../src/types'
-import { cancelAi, completeWithAi, listModels, testConnection } from '../services/aiService'
+import { cancelAi, completeWithAi, listModels, testConnection } from '../kinds/software/aiService'
 import {
   clearIdentifyLogs,
   clearSkipped,
@@ -48,15 +48,15 @@ import {
   updateSoftware,
   upsertCategory
 } from '../services/database'
-import { launchSoftware, revealInFolder } from '../services/launcher'
+import { launchSoftware, revealInFolder } from '../kinds/software/launcher'
 import {
   materialize,
   previewOrganize,
   runOrganize,
   undoOrganize,
   unlink
-} from '../services/organize'
-import { addSingleExe, cancelScan, scanDirectories } from '../services/scanner'
+} from '../kinds/software/organize'
+import { addSingleExe, cancelScan, scanDirectories } from '../kinds/software/scanner'
 import { testSearch } from '../services/searchService'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {

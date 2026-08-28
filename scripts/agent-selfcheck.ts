@@ -31,14 +31,14 @@ import {
   readTextFile
 } from '../electron/services/agent/files.ts'
 import { readExternalActiveAt } from '../electron/services/activity.ts'
-import { fillIdentifySystem, limitTags } from '../electron/services/agent/prompts.ts'
+import { fillIdentifySystem, limitTags } from '../electron/kinds/software/prompts.ts'
 import {
   BUILTIN_TAGS,
   DEFAULT_CATEGORIES,
   FALLBACK_CATEGORY,
   mapCategory
 } from '../electron/services/taxonomy.ts'
-import { planRoot, skippable } from '../electron/services/scanPlan.ts'
+import { planRoot, skippable } from '../electron/kinds/software/scanPlan.ts'
 import {
   defaultAction,
   defaultFolder,
@@ -47,7 +47,7 @@ import {
   sameVolume,
   sanitizeFolder,
   targetDir
-} from '../electron/services/organize/plan.ts'
+} from '../electron/kinds/software/organize/plan.ts'
 import {
   isLink,
   LINK_MARK,
@@ -55,7 +55,7 @@ import {
   moveDir,
   removeJunction,
   writeLinkMark
-} from '../electron/services/organize/fsops.ts'
+} from '../electron/kinds/software/organize/fsops.ts'
 import {
   activityOf,
   compareVersions,
@@ -69,6 +69,16 @@ import {
   subtitleName,
   versionOf
 } from '../src/utils/index.ts'
+import { DatabaseSync } from 'node:sqlite'
+import {
+  SCHEMA_VERSION,
+  TABLES_SQL,
+  initSchema,
+  objectType,
+  schemaVersion
+} from '../electron/services/schema.ts'
+import { KINDS } from '../electron/kinds/index.ts'
+import { softwareKind } from '../electron/kinds/software/index.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -674,7 +684,9 @@ async function main(): Promise<void> {
 
     const { DatabaseSync } = await import('node:sqlite')
     const db = new DatabaseSync(':memory:')
-    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS software'))
+    // 0.5 起公共表在 services/schema.ts 的 TABLES_SQL 里，锚点从 resource 起
+    // （写 software 会先撞上 kinds/software 那段只含 software_meta 的模板）
+    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS resource'))
 
     const cols = db.prepare('PRAGMA table_info(identify_logs)').all() as Array<{ name: string }>
     assert.ok(cols.length > 0, 'identify_logs 表没建出来')
@@ -732,7 +744,12 @@ async function main(): Promise<void> {
 
     const { DatabaseSync } = await import('node:sqlite')
     const db = new DatabaseSync(':memory:')
-    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS software'))
+    // 0.5 起表分散在公共层和品类模块两处，构建产物里是几段独立的模板，
+    // 锚点要分开写。software 本身是 resource + software_meta 拼出来的视图
+    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS resource'))
+    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS scan_units'))
+    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS software_meta'))
+    db.exec(sqlAround('CREATE VIEW IF NOT EXISTS software'))
 
     for (const anchor of [
       'INSERT INTO pending_software',
@@ -745,8 +762,13 @@ async function main(): Promise<void> {
       // 用户已经不知道是整理干的了
       'INSERT INTO organize_plans',
       'UPDATE organize_plans SET undone_at',
-      'UPDATE software SET exe_path = @exe_path',
-      'INSERT INTO software\n       (id, created_at, updated_at, exe_path',
+      // 0.5 拆表之后，同一件事要落到两张表上，所以两条都得核
+      'UPDATE resource SET path = @exe_path',
+      'UPDATE software_meta SET launchers = @launchers',
+      'INSERT INTO resource\n         (id, kind, created_at',
+      'INSERT INTO software_meta\n         (resource_id',
+      'INSERT OR IGNORE INTO resource',
+      'INSERT OR IGNORE INTO software_meta',
       // 0.4 新增的汇总报告。列名写错的表现是「识别跑完了但报告永远打不开」
       'INSERT INTO identification_reports',
       'DELETE FROM identification_reports WHERE id NOT IN'
@@ -754,16 +776,30 @@ async function main(): Promise<void> {
       assert.doesNotThrow(() => db.prepare(sqlAround(anchor)), `${anchor} 这条语句和表结构对不上`)
     }
 
+    /** 视图是只读的，造数据要往两张基表上写 */
+    const seed = (
+      id: string,
+      lastUsed: number,
+      externalActive: number,
+      portable: number | null,
+      risk: string
+    ): void => {
+      db.prepare(
+        `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name,
+           last_used_at, external_active_at)
+         VALUES (?, 'software', 0, 0, ?, ?, ?, ?)`
+      ).run(id, `C:\\${id}.exe`, `${id}.exe`, lastUsed, externalActive)
+      db.prepare(
+        `INSERT INTO software_meta (resource_id, is_portable, move_risk) VALUES (?, ?, ?)`
+      ).run(id, portable, risk)
+    }
+
     // 三态的 is_portable：NULL 必须能和 0 区分开。压成同一个值的后果是
     // 「还没判断过」的条目被当成「判断为不是绿色软件」，整理时按安装版处理。
     // 时间字段一律给足，免得这几行落进下面那个「长期未用」的判定里
-    db.prepare(
-      `INSERT INTO software (id, created_at, updated_at, exe_path, file_name,
-         last_used_at, external_active_at, is_portable, move_risk)
-       VALUES ('p1', 0, 0, 'C:\\p1.exe', 'p1.exe', 9000, 9000, 1, 'safe'),
-              ('p2', 0, 0, 'C:\\p2.exe', 'p2.exe', 9000, 9000, 0, 'risky'),
-              ('p3', 0, 0, 'C:\\p3.exe', 'p3.exe', 9000, 9000, NULL, 'unknown')`
-    ).run()
+    seed('p1', 9000, 9000, 1, 'safe')
+    seed('p2', 9000, 9000, 0, 'risky')
+    seed('p3', 9000, 9000, null, 'unknown')
     const portable = db
       .prepare('SELECT id FROM software WHERE is_portable = 1')
       .all() as Array<{ id: string }>
@@ -774,14 +810,13 @@ async function main(): Promise<void> {
     assert.deepEqual(unjudged.map((r) => r.id), ['p3'], 'NULL 和 0 被压成了同一个值')
 
     // 「长期未用」的判据换成了两个时间取晚的那个，写错这里等于整个分组失效
-    db.prepare(
-      `INSERT INTO software (id, created_at, updated_at, exe_path, file_name, last_used_at, external_active_at)
-       VALUES ('a', 0, 0, 'C:\\a.exe', 'a.exe', 0, 9000),
-              ('b', 0, 0, 'C:\\b.exe', 'b.exe', 9000, 0),
-              ('c', 0, 0, 'C:\\c.exe', 'c.exe', 0, 0)`
-    ).run()
+    seed('a', 0, 9000, null, 'unknown')
+    seed('b', 9000, 0, null, 'unknown')
+    seed('c', 0, 0, null, 'unknown')
     const stale = db
-      .prepare('SELECT id FROM software WHERE MAX(last_used_at, external_active_at) < 5000')
+      .prepare(
+        `SELECT id FROM software WHERE MAX(last_used_at, external_active_at) < 5000 ORDER BY id`
+      )
       .all() as Array<{ id: string }>
     assert.deepEqual(
       stale.map((r) => r.id),
@@ -1500,6 +1535,205 @@ async function main(): Promise<void> {
     await sleep(55)
     assert.equal(items, '新分组', '当值的响应正常落地')
     assert.ok(!loading, '新轮自己的收尾清掉 loading')
+  })
+
+  /* --------------------------- 库迁移：0.4 -> 0.5 --------------------------- */
+
+  console.log('\n库迁移 · 0.4 -> 0.5 拆总表')
+
+  // 用 node:sqlite 驱动 electron/services/schema.ts —— 和应用跑的是同一份代码。
+  // better-sqlite3 按 Electron ABI 编译，纯 node 载不进来，所以这里换个驱动。
+  // 迁移是全项目唯一会改写用户几个月真实数据的一段，没有用例兜着不敢动。
+
+  /** 造一张 0.4 形状的 software 宽表，外加分类、暂存区和版本号 */
+  function makeV4Db(): InstanceType<typeof DatabaseSync> {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    d.exec(`
+      CREATE TABLE software (
+        id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        exe_path TEXT NOT NULL UNIQUE, icon_path TEXT, file_name TEXT NOT NULL,
+        file_description TEXT DEFAULT '', company TEXT DEFAULT '', version TEXT DEFAULT '',
+        file_size INTEGER DEFAULT 0, source_dir TEXT DEFAULT '',
+        name_zh TEXT DEFAULT '', name_en TEXT DEFAULT '', summary TEXT DEFAULT '',
+        description TEXT DEFAULT '', category TEXT DEFAULT '其他', tags TEXT DEFAULT '[]',
+        official_url TEXT DEFAULT '', ai_status TEXT DEFAULT 'pending', launchers TEXT DEFAULT '[]',
+        why_choose TEXT DEFAULT '', use_cases TEXT DEFAULT '', notes TEXT DEFAULT '',
+        alternatives TEXT DEFAULT '[]', mastery_level TEXT DEFAULT 'new',
+        last_used_at INTEGER DEFAULT 0, use_count INTEGER DEFAULT 0, is_archived INTEGER DEFAULT 0,
+        external_active_at INTEGER DEFAULT 0,
+        is_portable INTEGER DEFAULT NULL, move_risk TEXT DEFAULT 'unknown', link_target TEXT DEFAULT ''
+      );
+      CREATE TABLE categories (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '',
+        icon TEXT DEFAULT '', sort_order INTEGER DEFAULT 0
+      );
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    `)
+    const ins = d.prepare(
+      `INSERT INTO software (id, created_at, updated_at, exe_path, file_name, name_zh,
+         category, tags, notes, use_count, mastery_level, is_portable, move_risk, link_target,
+         company, version, file_description, launchers)
+       VALUES (?, 1, 2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    // 三态各来一条：判定为绿色 / 判定为不是 / 还没判断过
+    ins.run('a', 'C:\\T\\a.exe', 'a.exe', '甲', '开发', '["x"]', '我的备注', 7, 'expert',
+      1, 'safe', '', 'AcmeCo', '1.2', 'A 工具', '[{"path":"C:\\\\T\\\\a.exe","is_default":true}]')
+    ins.run('b', 'C:\\T\\b.exe', 'b.exe', '乙', '我的自建分类', '[]', '', 0, 'new',
+      0, 'risky', 'D:\\real\\b', '', '', '', '[]')
+    ins.run('c', 'C:\\T\\c.exe', 'c.exe', '丙', '其他', '[]', '', 0, 'new',
+      null, 'unknown', '', '', '', '', '[]')
+    // 用户自建分类 + 内置的一条，版本号停在 4
+    d.prepare('INSERT INTO categories (id, name, sort_order) VALUES (?, ?, ?)').run('u1', '我的自建分类', 9)
+    d.prepare('INSERT INTO categories (id, name, sort_order) VALUES (?, ?, ?)').run('b1', '开发', 1)
+    d.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('_schema', '4')
+    return d
+  }
+
+  await check('4 -> 5 迁完，用户自建的分类必须还在', () => {
+    const d = makeV4Db()
+    initSchema(d as any, KINDS)
+    const names = (d.prepare('SELECT name FROM categories').all() as any[]).map((r) => r.name)
+    // 这一条就是 rebuildCategories 那颗雷：闸门写成「版本号小于当前」的话，
+    // 4 -> 5 会再跑一次 DELETE FROM categories，自建分类当场没
+    assert.ok(names.includes('我的自建分类'), `自建分类被清了，现有：${names.join(',')}`)
+    assert.equal(schemaVersion(d as any), SCHEMA_VERSION)
+    d.close()
+  })
+
+  await check('4 -> 5 迁完，条目一条不少且能从 software 视图读回来', () => {
+    const d = makeV4Db()
+    initSchema(d as any, KINDS)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM resource').get() as any).n, 3)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM software_meta').get() as any).n, 3)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM software').get() as any).n, 3)
+    assert.equal(objectType(d as any, 'software'), 'view', 'software 该变成视图')
+    assert.equal(objectType(d as any, 'software_legacy_v4'), 'table', '老表该改名留着')
+    d.close()
+  })
+
+  await check('is_portable 的三态穿过迁移不变形', () => {
+    const d = makeV4Db()
+    initSchema(d as any, KINDS)
+    const rows = d.prepare('SELECT id, is_portable FROM software ORDER BY id').all() as any[]
+    assert.equal(rows[0].is_portable, 1, '判定为绿色的该是 1')
+    assert.equal(rows[1].is_portable, 0, '判定为不是的该是 0')
+    // 这一条是整段迁移最要命的地方：null 被压成 0，整理时就会把「还没判断过」
+    // 当成「判断为不可搬」，或者反过来 —— 见 schema.ts 里 software_meta 的注释
+    assert.equal(rows[2].is_portable, null, '还没判断过的必须仍是 NULL')
+    d.close()
+  })
+
+  await check('视图把两张表拼回原来的字段，用户数据一个不丢', () => {
+    const d = makeV4Db()
+    initSchema(d as any, KINDS)
+    const a = d.prepare('SELECT * FROM software WHERE id = ?').get('a') as any
+    assert.equal(a.exe_path, 'C:\\T\\a.exe', 'path 要以 exe_path 的名字露出来')
+    assert.equal(a.notes, '我的备注')
+    assert.equal(a.use_count, 7)
+    assert.equal(a.mastery_level, 'expert')
+    assert.equal(a.company, 'AcmeCo')
+    assert.equal(a.version, '1.2')
+    assert.equal(a.file_description, 'A 工具')
+    assert.equal(a.move_risk, 'safe')
+    assert.equal(JSON.parse(a.tags)[0], 'x')
+    const b = d.prepare('SELECT * FROM software WHERE id = ?').get('b') as any
+    assert.equal(b.link_target, 'D:\\real\\b', 'junction 的指向不能丢，丢了就撤销不回去')
+    d.close()
+  })
+
+  await check('迁移是幂等的：再跑一遍不出错也不重复搬', () => {
+    const d = makeV4Db()
+    initSchema(d as any, KINDS)
+    initSchema(d as any, KINDS)
+    initSchema(d as any, KINDS)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM resource').get() as any).n, 3)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM software_meta').get() as any).n, 3)
+    d.close()
+  })
+
+  await check('0.1 的老库（缺后来那些列）能一路迁到 5', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    // 0.1 只有这些列：没有 source_dir / launchers / external_active_at / 0.3 的三列
+    d.exec(`
+      CREATE TABLE software (
+        id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        exe_path TEXT NOT NULL UNIQUE, icon_path TEXT, file_name TEXT NOT NULL,
+        file_description TEXT DEFAULT '', company TEXT DEFAULT '', version TEXT DEFAULT '',
+        file_size INTEGER DEFAULT 0, name_zh TEXT DEFAULT '', name_en TEXT DEFAULT '',
+        summary TEXT DEFAULT '', description TEXT DEFAULT '', category TEXT DEFAULT '效率工具',
+        tags TEXT DEFAULT '[]', official_url TEXT DEFAULT '', ai_status TEXT DEFAULT 'pending',
+        why_choose TEXT DEFAULT '', use_cases TEXT DEFAULT '', notes TEXT DEFAULT '',
+        alternatives TEXT DEFAULT '[]', mastery_level TEXT DEFAULT 'new',
+        last_used_at INTEGER DEFAULT 0, use_count INTEGER DEFAULT 0, is_archived INTEGER DEFAULT 0
+      );
+      CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT NOT NULL, icon TEXT DEFAULT '', sort_order INTEGER DEFAULT 0);
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    `)
+    d.prepare(
+      `INSERT INTO software (id, created_at, updated_at, exe_path, file_name, name_zh, notes)
+       VALUES (?, 1, 2, ?, ?, ?, ?)`
+    ).run('old', 'C:\\T\\old.exe', 'old.exe', '老条目', '五年前写的备注')
+    initSchema(d as any, KINDS)
+    const row = d.prepare('SELECT * FROM software WHERE id = ?').get('old') as any
+    assert.equal(row.notes, '五年前写的备注', '老用户的备注一个字都不能丢')
+    assert.equal(row.is_portable, null, '没判断过就该是 NULL')
+    assert.equal(row.move_risk, 'unknown')
+    assert.equal(schemaVersion(d as any), SCHEMA_VERSION)
+    d.close()
+  })
+
+  await check('总表的路径全局唯一：两个 kind 抢同一个目录会被挡下', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    const ins = d.prepare(
+      `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name)
+       VALUES (?, ?, 1, 2, ?, ?)`
+    )
+    ins.run('r1', 'software', 'D:\\Games\\X', 'X')
+    // 磁盘只有一块：同一个目录被软件模块和游戏模块各认领一次，
+    // 整理模块搬动它的时候另一边的记录会当场失效
+    assert.throws(() => ins.run('r2', 'game', 'D:\\Games\\X', 'X'), /UNIQUE|constraint/i)
+    d.close()
+  })
+
+  await check('删条目时 software_meta 跟着走，不留孤儿', () => {
+    const d = makeV4Db()
+    initSchema(d as any, KINDS)
+    d.prepare('DELETE FROM resource WHERE id = ?').run('a')
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM software_meta').get() as any).n, 2)
+    d.close()
+  })
+
+  await check('全新的空库能一次建起来 —— 首次启动走的就是这条路', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    // 空库里连 settings 表都没有。initSchema 如果在建表之前去读版本号，
+    // 这里会抛 no such table: settings —— 表现是新用户第一次打开就崩在建库
+    initSchema(d as any, KINDS)
+    assert.equal(schemaVersion(d as any), SCHEMA_VERSION)
+    assert.equal(objectType(d as any, 'software'), 'view')
+    // 分类来自品类模块交上来的那份，公共层没写死
+    const n = (d.prepare('SELECT COUNT(*) AS n FROM categories').get() as any).n
+    assert.ok(n > 0, '内置分类该被装上')
+    d.close()
+  })
+
+  await check('公共层不认识软件：TABLES_SQL 里没有任何软件私有的东西', () => {
+    // 这一条守的是分层本身。软件的表和视图归 kinds/software/schema.ts，
+    // 谁哪天图省事把它们挪回公共层，这里就会红 —— 那正是要拦的那一步。
+    // 只看真正的 DDL，注释里提一句「那张表归软件模块管」是说明不是耦合
+    const ddl = TABLES_SQL.replace(/--[^\n]*/g, '')
+    for (const leak of ['software_meta', 'is_portable', 'move_risk', 'link_target']) {
+      assert.ok(!ddl.includes(leak), `公共层的 TABLES_SQL 里出现了软件私有的 ${leak}`)
+    }
+    // 反过来，品类模块必须自己带齐
+    assert.ok(softwareKind.schema.tables.includes('software_meta'))
+    assert.ok(softwareKind.schema.view?.includes('is_portable'))
+    assert.equal(softwareKind.kind, 'software')
+    assert.ok(softwareKind.defaultCategories.length > 0, '分类要由模块自己提供')
   })
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)

@@ -13,7 +13,7 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import type { ScanUnit } from '../../src/types'
+import type { ScanUnit } from '../../../src/types'
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', '.svn', '.hg', '$recycle.bin', 'system volume information',

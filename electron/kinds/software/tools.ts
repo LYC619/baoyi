@@ -9,10 +9,10 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { Launcher, MoveRisk, RegisterPayload, SearchConfig } from '../../../src/types'
-import { readExternalActiveAt } from '../activity'
-import { extractIcon } from '../iconExtractor'
-import { readPeArch, readPeInfo } from '../peReader'
-import { formatHits, search } from '../searchService'
+import { readExternalActiveAt } from '../../services/activity'
+import { extractIcon } from '../../services/iconExtractor'
+import { readPeArch, readPeInfo } from './peReader'
+import { formatHits, search } from '../../services/searchService'
 import {
   isSkipped,
   listCategories,
@@ -21,11 +21,11 @@ import {
   tagPool,
   updateSoftware,
   type RegisterFileFacts
-} from '../database'
-import type { AgentTool } from './loop'
-import { formatSize, isReadableName, readTextFile } from './files'
+} from '../../services/database'
+import type { AgentTool } from '../../services/agent/loop'
+import { formatSize, isReadableName, readTextFile } from '../../services/agent/files'
 import { limitTags as limitTagsTo } from './prompts'
-import { resolveInside as resolveInsideRoots } from './paths'
+import { resolveInside as resolveInsideRoots } from '../../services/agent/paths'
 
 /** 统计子目录里的 exe 时的护栏，避免在 node_modules 之类的目录里空转 */
 const COUNT_MAX_DEPTH = 3

@@ -4,13 +4,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { readExternalActiveAt } from './activity'
-import { rebase } from './organize/plan'
-import {
-  BUILTIN_TAGS,
-  DEFAULT_CATEGORIES,
-  FALLBACK_CATEGORY,
-  mapCategory
-} from './taxonomy'
+import { rebase } from '../kinds/software/organize/plan'
+import { KINDS } from '../kinds'
+import { initSchema, insertCategories, insertTag, seedDefaults } from './schema'
+import { FALLBACK_CATEGORY } from './taxonomy'
 import type {
   AgentEvent,
   AppSettings,
@@ -42,15 +39,6 @@ type Row = Record<string, any>
 
 let db: Database.Database | null = null
 
-/**
- * 库结构 / 内置数据的版本。
- *
- * 0.2 拿「categories 有没有 description 列」当版本标记，那招只能用一次 ——
- * 0.4 要再换一次分类体系，没有列可以拿来当标记了。于是显式记一个数字，
- * 存在 settings 表里（下划线开头的键不会出现在 AppSettings 里，见 getSettings）。
- */
-const SCHEMA_VERSION = 4
-const SCHEMA_KEY = '_schema'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   ai: {
@@ -90,358 +78,12 @@ export function getDb(): Database.Database {
   db = new Database(file)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  initSchema(db)
+  // 品类模块从注册表来：公共层不认识 software_meta，也不认识「开发工具」
+  // 这些分类名，它只负责把每个品类交上来的那几段 SQL 按顺序执行一遍
+  initSchema(db, KINDS)
   return db
 }
 
-function initSchema(d: Database.Database): void {
-  d.exec(`
-    CREATE TABLE IF NOT EXISTS software (
-      id TEXT PRIMARY KEY,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-
-      exe_path TEXT NOT NULL UNIQUE,
-      icon_path TEXT,
-      file_name TEXT NOT NULL,
-      file_description TEXT DEFAULT '',
-      company TEXT DEFAULT '',
-      version TEXT DEFAULT '',
-      file_size INTEGER DEFAULT 0,
-      source_dir TEXT DEFAULT '',
-
-      name_zh TEXT DEFAULT '',
-      name_en TEXT DEFAULT '',
-      summary TEXT DEFAULT '',
-      description TEXT DEFAULT '',
-      category TEXT DEFAULT '其他',
-      tags TEXT DEFAULT '[]',
-      official_url TEXT DEFAULT '',
-      ai_status TEXT DEFAULT 'pending',
-      launchers TEXT DEFAULT '[]',
-
-      why_choose TEXT DEFAULT '',
-      use_cases TEXT DEFAULT '',
-      notes TEXT DEFAULT '',
-      alternatives TEXT DEFAULT '[]',
-      mastery_level TEXT DEFAULT 'new',
-
-      last_used_at INTEGER DEFAULT 0,
-      use_count INTEGER DEFAULT 0,
-      is_archived INTEGER DEFAULT 0,
-
-      -- 软件目录里配置文件的最新 mtime，见 services/activity.ts
-      external_active_at INTEGER DEFAULT 0,
-
-      -- 绿色软件？NULL = 还没判断过，和「判断为否」不是一回事
-      is_portable INTEGER DEFAULT NULL,
-      -- 挪位置的风险：safe / risky / unknown
-      move_risk TEXT DEFAULT 'unknown',
-      -- 整理成 junction 后链接的真实指向。空串 = 实体目录
-      link_target TEXT DEFAULT ''
-    );
-
-    CREATE TABLE IF NOT EXISTS scan_units (
-      dir TEXT PRIMARY KEY,
-      root TEXT NOT NULL,
-      exe_count INTEGER DEFAULT 0,
-      loose_only INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'pending',
-      note TEXT DEFAULT '',
-      registered INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      icon TEXT DEFAULT '',
-      sort_order INTEGER DEFAULT 0
-    );
-
-    -- 标签池。只有 source 为 user / confirmed 的会注入 prompt，
-    -- agent 新造的先记成 ai，等用户在确认面板里点头才转正。
-    CREATE TABLE IF NOT EXISTS tags (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT UNIQUE NOT NULL,
-      source TEXT DEFAULT 'ai',
-      created_at INTEGER NOT NULL
-    );
-
-    -- 识别结果的暂存区：agent 认完先落在这里，用户确认后才进 software。
-    -- exe_path 唯一，同一个程序反复识别只会占一行。
-    CREATE TABLE IF NOT EXISTS pending_software (
-      id TEXT PRIMARY KEY,
-      created_at INTEGER NOT NULL,
-      scan_unit_id TEXT DEFAULT '',
-
-      exe_path TEXT NOT NULL UNIQUE,
-      icon_path TEXT DEFAULT '',
-      file_name TEXT NOT NULL,
-      file_description TEXT DEFAULT '',
-      company TEXT DEFAULT '',
-      version TEXT DEFAULT '',
-      file_size INTEGER DEFAULT 0,
-      external_active_at INTEGER DEFAULT 0,
-
-      name_zh TEXT DEFAULT '',
-      name_en TEXT DEFAULT '',
-      summary TEXT DEFAULT '',
-      description TEXT DEFAULT '',
-      category TEXT DEFAULT '其他',
-      tags TEXT DEFAULT '[]',
-      official_url TEXT DEFAULT '',
-      launchers TEXT DEFAULT '[]',
-      source_dir TEXT DEFAULT '',
-
-      new_category INTEGER DEFAULT 0,
-      new_tags TEXT DEFAULT '[]',
-
-      is_portable INTEGER DEFAULT NULL,
-      move_risk TEXT DEFAULT 'unknown'
-    );
-
-    -- 用户明确说过「不注册」的程序。下次识别到同一个路径直接不再暂存，
-    -- 否则每次重扫都要把同一批东西再否决一遍。
-    CREATE TABLE IF NOT EXISTS skip_list (
-      exe_path TEXT PRIMARY KEY,
-      label TEXT DEFAULT '',
-      source_dir TEXT DEFAULT '',
-      created_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
-    -- 每跑一次识别留一条，存完整的 agent 过程，用来回答「它当时为什么这么判断」。
-    -- ponytail: 刻意不给 dir 建外键。scan_units 的主键就是 dir，而移除扫描目录会
-    -- 直接 DELETE 那些行；带外键要么阻塞删除，要么级联把日志一起带走 —— 而日志的
-    -- 价值恰恰在于目录已经不在了还能回头看。它是一份只增不改的流水，按条数自行淘汰。
-    CREATE TABLE IF NOT EXISTS identify_logs (
-      id TEXT PRIMARY KEY,
-      dir TEXT NOT NULL,
-      label TEXT DEFAULT '',
-      kind TEXT DEFAULT 'unit',
-      status TEXT NOT NULL,
-      summary TEXT DEFAULT '',
-      registered INTEGER DEFAULT 0,
-      rounds INTEGER DEFAULT 0,
-      duration_ms INTEGER DEFAULT 0,
-      tokens INTEGER DEFAULT 0,
-      stop_reason TEXT DEFAULT '',
-      events TEXT DEFAULT '[]',
-      created_at INTEGER NOT NULL
-    );
-
-    -- 每次整理留一条，steps 是完整的动作流水。撤销就是把它逆着做一遍，
-    -- 所以这张表不是日志而是**依据** —— 它丢了，用户就再也找不回原来的目录结构了。
-    -- 因此它不像 identify_logs 那样按条数淘汰，也不参与「清空识别数据」。
-    CREATE TABLE IF NOT EXISTS organize_plans (
-      id TEXT PRIMARY KEY,
-      created_at INTEGER NOT NULL,
-      root TEXT NOT NULL,
-      undone_at INTEGER DEFAULT 0,
-      steps TEXT DEFAULT '[]'
-    );
-
-    -- 每跑完一轮批量识别留一条。逐条日志说的是「这个目录为什么这样判断」，
-    -- 这张表说的是「这一轮整体怎么样」：哪些没成、共花了多少、搜索额度用掉几次。
-    -- 内容全部由 identify_logs 那些数据汇总而来，不额外消耗 token。
-    CREATE TABLE IF NOT EXISTS identification_reports (
-      id TEXT PRIMARY KEY,
-      created_at INTEGER NOT NULL,
-      processed INTEGER DEFAULT 0,
-      registered INTEGER DEFAULT 0,
-      skipped INTEGER DEFAULT 0,
-      failed INTEGER DEFAULT 0,
-      duration_ms INTEGER DEFAULT 0,
-      tokens INTEGER DEFAULT 0,
-      searches INTEGER DEFAULT 0,
-      entries TEXT DEFAULT '[]'
-    );
-
-  `)
-
-  migrate(d)
-
-  // 建索引必须在 migrate 之后。
-  //
-  // CREATE TABLE IF NOT EXISTS 对老库是空操作 —— 表还是 0.1 那张表，没有 0.3 的列。
-  // 于是 `ON software(is_portable)` 在老库上直接报 no such column，而 exec 是一条条
-  // 顺着执行的：它一炸，后面的语句连同 migrate() 全都不会跑。结果就是 0.3 的三列
-  // 永远补不上，写 pending 时报「has no column named is_portable」，而 db 句柄在
-  // getDb 里早已赋值，第二次调用照常返回这个半迁移的库 —— 应用看着还能用。
-  // 索引只依赖 migrate 之后的表结构，所以它必须排在后面。
-  d.exec(`
-    CREATE INDEX IF NOT EXISTS idx_software_category ON software(category);
-    CREATE INDEX IF NOT EXISTS idx_software_mastery ON software(mastery_level);
-    CREATE INDEX IF NOT EXISTS idx_software_archived ON software(is_archived);
-    CREATE INDEX IF NOT EXISTS idx_software_last_used ON software(last_used_at);
-    CREATE INDEX IF NOT EXISTS idx_software_ai_status ON software(ai_status);
-    CREATE INDEX IF NOT EXISTS idx_software_portable ON software(is_portable);
-    CREATE INDEX IF NOT EXISTS idx_scan_units_status ON scan_units(status);
-    CREATE INDEX IF NOT EXISTS idx_identify_logs_status ON identify_logs(status);
-    CREATE INDEX IF NOT EXISTS idx_identify_logs_created ON identify_logs(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_organize_plans_created ON organize_plans(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_reports_created ON identification_reports(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_pending_dir ON pending_software(source_dir);
-  `)
-
-  seedCategories(d)
-}
-
-/**
- * 内置分类 + 内置标签 + 版本号，一次装齐。
- *
- * 只在恢复出厂之后调 —— 正常启动走 migrate() 里那个按版本号闸的分支。
- * 差别要紧：这里的 seedBuiltinTags 是无条件跑的，放到每次启动就会让用户
- * 删掉的内置标签第二天又长回来。
- */
-function seedDefaults(d: Database.Database): void {
-  seedCategories(d)
-  seedBuiltinTags(d)
-  setSchemaVersion(d, SCHEMA_VERSION)
-}
-
-/** 分类表空了才装 —— 用户把 5 个全删了的话，总得有东西兜着 */
-function seedCategories(d: Database.Database): void {
-  const seeded = d.prepare('SELECT COUNT(*) AS n FROM categories').get() as { n: number }
-  if (seeded.n > 0) return
-  insertCategories(d, DEFAULT_CATEGORIES)
-}
-
-/**
- * 内置标签入池。已存在的一律不动 —— 用户可能已经把「便携」改成了别的意思，
- * 或者把它并进了另一个标签，覆盖回去等于替他撤销一次决定。
- */
-function seedBuiltinTags(d: Database.Database): void {
-  const tx = d.transaction(() => {
-    for (const name of BUILTIN_TAGS) insertTag(d, name, 'user')
-  })
-  tx()
-}
-
-function schemaVersion(d: Database.Database): number {
-  const row = d.prepare('SELECT value FROM settings WHERE key = ?').get(SCHEMA_KEY) as Row | undefined
-  return Number(row?.value) || 0
-}
-
-function setSchemaVersion(d: Database.Database, version: number): void {
-  d.prepare(
-    `INSERT INTO settings (key, value) VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-  ).run(SCHEMA_KEY, String(version))
-}
-
-function insertCategories(d: Database.Database, rows: Category[]): void {
-  const stmt = d.prepare(
-    `INSERT OR REPLACE INTO categories (id, name, description, icon, sort_order)
-     VALUES (@id, @name, @description, @icon, @sort_order)`
-  )
-  const tx = d.transaction(() => rows.forEach((r) => stmt.run(r)))
-  tx()
-}
-
-/**
- * 0.1.0 的库里没有 launchers / source_dir，补列而不是重建表，
- * 保证老用户的备注、熟练度、使用统计不丢。
- */
-function migrate(d: Database.Database): void {
-  const existing = new Set(
-    (d.prepare('PRAGMA table_info(software)').all() as Row[]).map((c) => c.name as string)
-  )
-  const added: Array<[string, string]> = [
-    ['source_dir', `TEXT DEFAULT ''`],
-    ['launchers', `TEXT DEFAULT '[]'`],
-    ['external_active_at', 'INTEGER DEFAULT 0'],
-    // 0.3 的三列。is_portable 刻意让存量条目留在 NULL：那才是事实
-    // ——「还没判断过」，而不是「判断为不是绿色软件」。整理时前者不会被当成可搬的
-    ['is_portable', 'INTEGER DEFAULT NULL'],
-    ['move_risk', `TEXT DEFAULT 'unknown'`],
-    ['link_target', `TEXT DEFAULT ''`]
-  ]
-  for (const [name, decl] of added) {
-    if (!existing.has(name)) d.exec(`ALTER TABLE software ADD COLUMN ${name} ${decl}`)
-  }
-
-  // 刚补出来的 external_active_at 全是 0，等于让存量条目继续显示「从未使用」——
-  // 而那正是这个字段要治的毛病。补列的同一次启动就把它填上，只跑这一次。
-  if (!existing.has('external_active_at')) backfillExternalActive(d)
-
-  const pendingCols = new Set(
-    (d.prepare('PRAGMA table_info(pending_software)').all() as Row[]).map((c) => c.name as string)
-  )
-  for (const [name, decl] of [
-    ['is_portable', 'INTEGER DEFAULT NULL'],
-    ['move_risk', `TEXT DEFAULT 'unknown'`]
-  ] as Array<[string, string]>) {
-    if (!pendingCols.has(name)) d.exec(`ALTER TABLE pending_software ADD COLUMN ${name} ${decl}`)
-  }
-
-  // 0.3.1 起扫描根那一层的散落 exe 只上报、不识别（见 scanPlan.ts 的 ScanPlan.loose），
-  // 所以 loose_only 的单元再也不会被生成。存量的那几行既不会被重扫刷新、也永远停在
-  // pending，只会让 agent 白跑一趟去认一个安装器。已经认出来的软件条目不受影响 ——
-  // scan_units 只是「还要识别哪些目录」的待办表。
-  d.prepare('DELETE FROM scan_units WHERE loose_only = 1').run()
-
-  // description 是 0.2 给 categories 加的一列，下面的重建要往里写，所以先保证它在
-  const catCols = new Set(
-    (d.prepare('PRAGMA table_info(categories)').all() as Row[]).map((c) => c.name as string)
-  )
-  if (!catCols.has('description')) {
-    d.exec(`ALTER TABLE categories ADD COLUMN description TEXT DEFAULT ''`)
-  }
-
-  if (schemaVersion(d) < SCHEMA_VERSION) {
-    rebuildCategories(d)
-    seedBuiltinTags(d)
-    setSchemaVersion(d, SCHEMA_VERSION)
-  }
-}
-
-/**
- * 0.4 换一套分类：清空分类表，装上 DEFAULT_CATEGORIES 那 5 条。
- *
- * 「清空」是有意的，包括用户自建的分类 —— 分类是靠**名字**挂在条目上的，
- * 留着一个不在新体系里的分类，只会让侧边栏同时显示新旧两套格子。名下的条目按
- * CATEGORY_MOVES 迁移，映射不到的退回「其他」：条目本身一条不少，只是要重归一次。
- *
- * 只跑一次，跑完写版本号。之后用户在设置里加的分类不会再被碰。
- */
-function rebuildCategories(d: Database.Database): void {
-  const tx = d.transaction(() => {
-    d.prepare('DELETE FROM categories').run()
-    insertCategories(d, DEFAULT_CATEGORIES)
-
-    // 暂存区也要迁 —— 升级前刚识别完还没确认的那批，分类同样是旧体系的
-    for (const table of ['software', 'pending_software']) {
-      const names = (
-        d.prepare(`SELECT DISTINCT category AS name FROM ${table}`).all() as Row[]
-      ).map((r) => (r.name ?? '') as string)
-      const move = d.prepare(`UPDATE ${table} SET category = ? WHERE category = ?`)
-      for (const from of names) {
-        const to = mapCategory(from)
-        if (to !== from) move.run(to, from)
-      }
-    }
-  })
-  tx()
-}
-
-/** 逐条读磁盘补 external_active_at。软件条目是千级，一次几百毫秒，只在升级时发生 */
-function backfillExternalActive(d: Database.Database): void {
-  const rows = d.prepare('SELECT id, exe_path FROM software').all() as Row[]
-  if (rows.length === 0) return
-  const stmt = d.prepare('UPDATE software SET external_active_at = ? WHERE id = ?')
-  const tx = d.transaction(() => {
-    for (const r of rows) stmt.run(readExternalActiveAt(r.exe_path), r.id)
-  })
-  tx()
-}
 
 /* ------------------------------ 行 <-> 对象 ------------------------------ */
 
@@ -533,15 +175,47 @@ function rowToItem(row: Row): SoftwareItem {
   }
 }
 
-/** 只有 SoftwareItem 里存在的列才允许写入，避免把任意字段透传进 SQL */
-const WRITABLE_COLUMNS = new Set([
-  'exe_path', 'icon_path', 'file_name', 'file_description', 'company', 'version', 'file_size',
-  'source_dir', 'name_zh', 'name_en', 'summary', 'description', 'category', 'tags',
-  'official_url', 'ai_status', 'launchers',
-  'why_choose', 'use_cases', 'notes', 'alternatives', 'mastery_level',
-  'last_used_at', 'use_count', 'is_archived', 'external_active_at',
-  'is_portable', 'move_risk', 'link_target'
+/**
+ * 只有 SoftwareItem 里存在的列才允许写入，避免把任意字段透传进 SQL。
+ * 拆表之后还多一层作用：这个映射同时决定每一列该落到哪张表。
+ * exe_path 在总表里叫 path —— 对视频、游戏同样要成立的列名不该带 exe。
+ */
+const RESOURCE_COLUMNS = new Map<string, string>([
+  ['exe_path', 'path'],
+  ['icon_path', 'icon_path'],
+  ['file_name', 'file_name'],
+  ['file_size', 'file_size'],
+  ['source_dir', 'source_dir'],
+  ['name_zh', 'name_zh'],
+  ['name_en', 'name_en'],
+  ['summary', 'summary'],
+  ['description', 'description'],
+  ['category', 'category'],
+  ['tags', 'tags'],
+  ['official_url', 'official_url'],
+  ['ai_status', 'ai_status'],
+  ['why_choose', 'why_choose'],
+  ['use_cases', 'use_cases'],
+  ['notes', 'notes'],
+  ['alternatives', 'alternatives'],
+  ['mastery_level', 'mastery_level'],
+  ['last_used_at', 'last_used_at'],
+  ['use_count', 'use_count'],
+  ['is_archived', 'is_archived'],
+  ['external_active_at', 'external_active_at']
 ])
+
+const META_COLUMNS = new Map<string, string>([
+  ['file_description', 'file_description'],
+  ['company', 'company'],
+  ['version', 'version'],
+  ['launchers', 'launchers'],
+  ['is_portable', 'is_portable'],
+  ['move_risk', 'move_risk'],
+  ['link_target', 'link_target']
+])
+
+const WRITABLE_COLUMNS = new Set([...RESOURCE_COLUMNS.keys(), ...META_COLUMNS.keys()])
 
 const JSON_COLUMNS = new Set(['tags', 'alternatives', 'launchers'])
 
@@ -642,16 +316,28 @@ export function updateSoftware(id: string, patch: Partial<SoftwareItem>): Softwa
   const entries = Object.entries(patch).filter(([k]) => WRITABLE_COLUMNS.has(k))
   if (entries.length === 0) return getSoftware(id)
 
-  const sets = entries.map(([k]) => `${k} = @${k}`).join(', ')
-  const params: Row = { id, updated_at: Date.now() }
-  for (const [k, v] of entries) params[k] = toColumnValue(k, v)
-
-  d.prepare(`UPDATE software SET ${sets}, updated_at = @updated_at WHERE id = @id`).run(params)
+  const tx = d.transaction(() => {
+    for (const [table, cols, key] of [
+      ['resource', RESOURCE_COLUMNS, 'id'],
+      ['software_meta', META_COLUMNS, 'resource_id']
+    ] as Array<[string, Map<string, string>, string]>) {
+      const mine = entries.filter(([k]) => cols.has(k))
+      if (mine.length === 0) continue
+      const sets = mine.map(([k]) => `${cols.get(k)} = @${k}`).join(', ')
+      const params: Row = { id }
+      for (const [k, v] of mine) params[k] = toColumnValue(k, v)
+      d.prepare(`UPDATE ${table} SET ${sets} WHERE ${key} = @id`).run(params)
+    }
+    // updated_at 只在总表上，改哪张表都要动它
+    d.prepare('UPDATE resource SET updated_at = ? WHERE id = ?').run(Date.now(), id)
+  })
+  tx()
   return getSoftware(id)
 }
 
 export function deleteSoftware(id: string): void {
-  getDb().prepare('DELETE FROM software WHERE id = ?').run(id)
+  // software_meta 靠 ON DELETE CASCADE 跟着走（foreign_keys 在 getDb 里已打开）
+  getDb().prepare('DELETE FROM resource WHERE id = ?').run(id)
 }
 
 /* ------------------------------ agent 注册 ------------------------------ */
@@ -733,34 +419,47 @@ export function registerSoftware(
     | undefined
 
   if (existing) {
-    d.prepare(
-      `UPDATE software SET
-         name_zh = @name_zh, name_en = @name_en, summary = @summary, description = @description,
-         category = @category, tags = @tags, official_url = @official_url,
-         launchers = @launchers, source_dir = @source_dir,
-         is_portable = @is_portable, move_risk = @move_risk,
-         file_name = @file_name, file_description = @file_description,
-         company = @company, version = @version, file_size = @file_size,
-         external_active_at = @external_active_at,
-         ai_status = 'done', updated_at = @updated_at
-       WHERE id = @id`
-    ).run({ ...aiFields, ...facts, id: existing.id, updated_at: now })
+    const tx = d.transaction(() => {
+      d.prepare(
+        `UPDATE resource SET
+           name_zh = @name_zh, name_en = @name_en, summary = @summary, description = @description,
+           category = @category, tags = @tags, official_url = @official_url,
+           source_dir = @source_dir, file_name = @file_name, file_size = @file_size,
+           external_active_at = @external_active_at,
+           ai_status = 'done', updated_at = @updated_at
+         WHERE id = @id`
+      ).run({ ...aiFields, ...facts, id: existing.id, updated_at: now })
+      d.prepare(
+        `UPDATE software_meta SET
+           launchers = @launchers, is_portable = @is_portable, move_risk = @move_risk,
+           file_description = @file_description, company = @company, version = @version
+         WHERE resource_id = @id`
+      ).run({ ...aiFields, ...facts, id: existing.id })
+    })
+    tx()
     return { id: existing.id, created: false, exe_path: primary.path }
   }
 
   const id = randomUUID()
-  d.prepare(
-    `INSERT INTO software
-       (id, created_at, updated_at, exe_path, icon_path, file_name, file_description,
-        company, version, file_size, source_dir, name_zh, name_en, summary, description,
-        category, tags, official_url, ai_status, launchers, external_active_at,
-        is_portable, move_risk)
-     VALUES
-       (@id, @created_at, @updated_at, @exe_path, '', @file_name, @file_description,
-        @company, @version, @file_size, @source_dir, @name_zh, @name_en, @summary, @description,
-        @category, @tags, @official_url, 'done', @launchers, @external_active_at,
-        @is_portable, @move_risk)`
-  ).run({ ...aiFields, ...facts, id, created_at: now, updated_at: now, exe_path: primary.path })
+  const tx = d.transaction(() => {
+    d.prepare(
+      `INSERT INTO resource
+         (id, kind, created_at, updated_at, path, icon_path, file_name, file_size, source_dir,
+          name_zh, name_en, summary, description, category, tags, official_url, ai_status,
+          external_active_at)
+       VALUES
+         (@id, 'software', @created_at, @updated_at, @exe_path, '', @file_name, @file_size, @source_dir,
+          @name_zh, @name_en, @summary, @description, @category, @tags, @official_url, 'done',
+          @external_active_at)`
+    ).run({ ...aiFields, ...facts, id, created_at: now, updated_at: now, exe_path: primary.path })
+    d.prepare(
+      `INSERT INTO software_meta
+         (resource_id, file_description, company, version, launchers, is_portable, move_risk)
+       VALUES
+         (@id, @file_description, @company, @version, @launchers, @is_portable, @move_risk)`
+    ).run({ ...aiFields, ...facts, id })
+  })
+  tx()
 
   return { id, created: true, exe_path: primary.path }
 }
@@ -774,10 +473,12 @@ export function registerSoftware(
  * 要更严谨得给表加一个 user_touched 标记位，在 updateSoftware 里置位。
  */
 export function pruneStaleBySourceDir(dir: string, olderThan: number): number {
+  // 条件里有 software_meta 才有的列吗？没有 —— 全在总表上。但 DELETE 仍然要打在
+  // resource 上（software 是视图），meta 行靠 CASCADE 跟着走。
   const info = getDb()
     .prepare(
-      `DELETE FROM software
-       WHERE source_dir = ? AND updated_at < ?
+      `DELETE FROM resource
+       WHERE kind = 'software' AND source_dir = ? AND updated_at < ?
          AND use_count = 0 AND last_used_at = 0 AND is_archived = 0
          AND why_choose = '' AND use_cases = '' AND notes = '' AND alternatives IN ('[]', '')
          AND mastery_level = 'new'`
@@ -1480,17 +1181,19 @@ export function remapPaths(
 
   const tx = d.transaction(() => {
     d.prepare(
-      `UPDATE software SET exe_path = @exe_path, launchers = @launchers, source_dir = @source_dir,
-         link_target = @link_target, updated_at = @updated_at
+      `UPDATE resource SET path = @exe_path, source_dir = @source_dir, updated_at = @updated_at
        WHERE id = @id`
     ).run({
       id,
       exe_path: nextExe,
-      launchers: JSON.stringify(launchers),
       source_dir: rebase(item.source_dir, fromDir, toDir),
-      link_target: linkTarget,
       updated_at: Date.now()
     })
+    // launchers 和 link_target 是软件私有的，在 meta 表上
+    d.prepare(
+      `UPDATE software_meta SET launchers = @launchers, link_target = @link_target
+       WHERE resource_id = @id`
+    ).run({ id, launchers: JSON.stringify(launchers), link_target: linkTarget })
 
     // scan_units.dir 是主键，改不了就删旧插新。整理过的目录已经不在扫描根下了，
     // 留着那一行只会让下次「全部重新识别」去一个不存在的路径
@@ -1510,26 +1213,31 @@ export function remapPaths(
 
 /* -------------------------------- 插入 -------------------------------- */
 
-/** 插入扫描结果，已存在的 exe_path 直接跳过。返回新插入的条目。 */
+/** 插入扫描结果，已存在的路径直接跳过。返回新插入的条目。 */
 export function insertScanned(files: ScannedFile[]): SoftwareItem[] {
   const d = getDb()
   const now = Date.now()
-  const stmt = d.prepare(`
-    INSERT OR IGNORE INTO software
-      (id, created_at, updated_at, exe_path, icon_path, file_name,
-       file_description, company, version, file_size, name_zh, ai_status, source_dir, launchers,
-       external_active_at)
+  // OR IGNORE 靠的是 resource.path 上的 UNIQUE：同一个 exe 反复扫只会占一行
+  const insResource = d.prepare(`
+    INSERT OR IGNORE INTO resource
+      (id, kind, created_at, updated_at, path, icon_path, file_name, file_size,
+       name_zh, ai_status, source_dir, external_active_at)
     VALUES
-      (@id, @created_at, @updated_at, @exe_path, '', @file_name,
-       @file_description, @company, @version, @file_size, @name_zh, 'pending', @source_dir, @launchers,
-       @external_active_at)
+      (@id, 'software', @created_at, @updated_at, @exe_path, '', @file_name, @file_size,
+       @name_zh, 'pending', @source_dir, @external_active_at)
+  `)
+  const insMeta = d.prepare(`
+    INSERT OR IGNORE INTO software_meta
+      (resource_id, file_description, company, version, launchers)
+    VALUES
+      (@id, @file_description, @company, @version, @launchers)
   `)
 
   const inserted: string[] = []
   const tx = d.transaction((rows: ScannedFile[]) => {
     for (const f of rows) {
       const id = randomUUID()
-      const info = stmt.run({
+      const params = {
         id,
         created_at: now,
         updated_at: now,
@@ -1546,8 +1254,12 @@ export function insertScanned(files: ScannedFile[]): SoftwareItem[] {
         ]),
         // 先用文件描述或文件名占位，AI 补全后覆盖
         name_zh: f.file_description || path.basename(f.file_name, path.extname(f.file_name))
-      })
-      if (info.changes > 0) inserted.push(id)
+      }
+      const info = insResource.run(params)
+      // 总表那行被 IGNORE 掉了就别再插 meta，否则会给别人的 resource_id 挂一行
+      if (info.changes === 0) continue
+      insMeta.run(params)
+      inserted.push(id)
     }
   })
   tx(files)
@@ -1577,7 +1289,7 @@ export function listForAi(ids?: string[]): SoftwareItem[] {
 
 export function recordLaunch(id: string): void {
   getDb()
-    .prepare('UPDATE software SET last_used_at = ?, use_count = use_count + 1 WHERE id = ?')
+    .prepare('UPDATE resource SET last_used_at = ?, use_count = use_count + 1 WHERE id = ?')
     .run(Date.now(), id)
 }
 
@@ -1651,7 +1363,7 @@ export function upsertCategory(c: Category): Category[] {
 
     // 分类是靠名字挂在条目上的，改名必须把引用一起改，否则一改名条目全掉进「其他」
     if (previous && previous.name !== c.name) {
-      d.prepare('UPDATE software SET category = ? WHERE category = ?').run(c.name, previous.name)
+      d.prepare('UPDATE resource SET category = ? WHERE category = ?').run(c.name, previous.name)
       d.prepare('UPDATE pending_software SET category = ? WHERE category = ?').run(c.name, previous.name)
     }
   })
@@ -1665,7 +1377,7 @@ export function removeCategory(id: string): Category[] {
   if (row) {
     // 分类是虚拟的，删除时把归属条目退回「其他」，不动实际文件
     const tx = d.transaction(() => {
-      d.prepare('UPDATE software SET category = ? WHERE category = ?').run(FALLBACK_CATEGORY, row.name)
+      d.prepare('UPDATE resource SET category = ? WHERE category = ?').run(FALLBACK_CATEGORY, row.name)
       d.prepare('UPDATE pending_software SET category = ? WHERE category = ?').run(FALLBACK_CATEGORY, row.name)
       d.prepare('DELETE FROM categories WHERE id = ?').run(id)
     })
@@ -1742,13 +1454,6 @@ export function tagPool(): string[] {
   ).map((r) => r.name as string)
 }
 
-function insertTag(d: Database.Database, name: string, source: TagSource): void {
-  d.prepare(
-    `INSERT INTO tags (name, source, created_at) VALUES (?, ?, ?)
-     ON CONFLICT(name) DO NOTHING`
-  ).run(name, source, Date.now())
-}
-
 export function createTag(name: string): Tag[] {
   const clean = name.trim().slice(0, 12)
   if (clean) insertTag(getDb(), clean, 'user')
@@ -1814,7 +1519,8 @@ export function removeTag(id: number): Tag[] {
  */
 function replaceTagInEntries(d: Database.Database, from: string[], to: string): void {
   const drop = new Set(from)
-  for (const table of ['software', 'pending_software']) {
+  // 条目侧写 resource（software 是只读视图），暂存区还是自己那张表
+  for (const table of ['resource', 'pending_software']) {
     const rows = d.prepare(`SELECT id, tags FROM ${table}`).all() as Row[]
     const stmt = d.prepare(`UPDATE ${table} SET tags = ? WHERE id = ?`)
     for (const r of rows) {
@@ -1991,7 +1697,9 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
   const units = (d.prepare('SELECT COUNT(*) AS n FROM scan_units').get() as { n: number }).n
 
   const tx = d.transaction(() => {
-    d.prepare('DELETE FROM software').run()
+    // 打在 resource 上，software_meta 靠 CASCADE 跟着走。这里刻意只清 software
+    // 那一类 —— 以后有了游戏、视频，「清空软件库」不该顺手把它们也清了。
+    d.prepare(`DELETE FROM resource WHERE kind = 'software'`).run()
     d.prepare('DELETE FROM scan_units').run()
     d.prepare('DELETE FROM pending_software').run()
     d.prepare('DELETE FROM skip_list').run()
@@ -2016,8 +1724,8 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
   tx()
 
   // 恢复出厂把内置分类、内置标签和版本号一并装回去。少了最后一项，下次启动
-  // 会以为还没迁移过，白跑一遍重建
-  if (mode === 'all') seedDefaults(d)
+  // 会以为还没迁移过，白跑一遍重建。分类同样来自品类注册表，不是写死的
+  if (mode === 'all') seedDefaults(d, KINDS.flatMap((k) => k.defaultCategories))
 
   const icons = clearIcons()
 

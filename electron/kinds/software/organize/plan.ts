@@ -7,7 +7,7 @@
  */
 
 import path from 'node:path'
-import type { MoveRisk, OrganizeAction, SoftwareItem } from '../../../src/types'
+import type { MoveRisk, OrganizeAction, SoftwareItem } from '../../../../src/types'
 
 /** Windows 文件名里不能出现的字符，外加控制字符 */
 // eslint-disable-next-line no-control-regex

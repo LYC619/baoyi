@@ -2,8 +2,8 @@ import { shell } from 'electron'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { getSoftware, recordLaunch } from './database'
-import type { SoftwareItem } from '../../src/types'
+import { getSoftware, recordLaunch } from '../../services/database'
+import type { SoftwareItem } from '../../../src/types'
 
 /**
  * 把渲染进程传来的启动端路径核对回条目自己的 launchers 列表。

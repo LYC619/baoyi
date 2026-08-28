@@ -1,8 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { ScanProgress, ScanResult, SoftwareItem } from '../../src/types'
-import { insertScanned, updateSoftware, upsertScanUnits } from './database'
-import { extractIcon } from './iconExtractor'
+import type { ScanProgress, ScanResult, SoftwareItem } from '../../../src/types'
+import { insertScanned, updateSoftware, upsertScanUnits } from '../../services/database'
+import { extractIcon } from '../../services/iconExtractor'
 import { readPeInfo } from './peReader'
 import { planRoot, type PlannedUnit } from './scanPlan'
 

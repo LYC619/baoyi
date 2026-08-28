@@ -17,10 +17,10 @@ import type {
   ScanUnit,
   SearchConfig,
   SoftwareItem
-} from '../../src/types'
-import { runAgent, probeToolCalling, apiBase, parseModelList, type AgentEvent } from './agent/loop'
-import { fillIdentifySystem, itemPrompt, unitPrompt } from './agent/prompts'
-import { buildTools, type ToolContext } from './agent/tools'
+} from '../../../src/types'
+import { runAgent, probeToolCalling, apiBase, parseModelList, type AgentEvent } from '../../services/agent/loop'
+import { fillIdentifySystem, itemPrompt, unitPrompt } from './prompts'
+import { buildTools, type ToolContext } from './tools'
 import {
   getSettings,
   listBySourceDir,
@@ -32,8 +32,8 @@ import {
   saveIdentifyReport,
   tagPool,
   updateSoftware
-} from './database'
-import { searchAvailable } from './searchService'
+} from '../../services/database'
+import { searchAvailable } from '../../services/searchService'
 
 /** 同时跑几个目录。三个够把等待时间压下来，又不至于撞上模型的并发限流 */
 const CONCURRENCY = 3
