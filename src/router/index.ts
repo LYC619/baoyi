@@ -1,20 +1,25 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
+import { trackRoute } from '@/composables/useModules'
 
 const router = createRouter({
   // 生产环境走 file:// 加载，必须用 hash 路由
   history: createWebHashHistory(),
   routes: [
+    // meta.module 决定顶栏哪个 Tab 亮着，也是「切回来回到原位」的记账依据。
+    // 设置页和引导页刻意不标：它们不属于任何模块，进去时 Tab 应该保持原样。
     {
       path: '/',
       name: 'home',
-      component: () => import('@/pages/software/Home.vue')
+      component: () => import('@/pages/software/Home.vue'),
+      meta: { module: 'software' }
     },
     {
       path: '/detail/:id',
       name: 'detail',
       component: () => import('@/pages/software/Detail.vue'),
-      props: true
+      props: true,
+      meta: { module: 'software' }
     },
     {
       path: '/settings',
@@ -24,12 +29,20 @@ const router = createRouter({
     {
       path: '/confirm',
       name: 'confirm',
-      component: () => import('@/pages/software/Confirm.vue')
+      component: () => import('@/pages/software/Confirm.vue'),
+      meta: { module: 'software' }
     },
     {
       path: '/organize',
       name: 'organize',
-      component: () => import('@/pages/software/Organize.vue')
+      component: () => import('@/pages/software/Organize.vue'),
+      meta: { module: 'software' }
+    },
+    {
+      path: '/game',
+      name: 'game-home',
+      component: () => import('@/pages/game/Home.vue'),
+      meta: { module: 'game' }
     },
     {
       path: '/onboarding',
@@ -49,5 +62,8 @@ router.beforeEach((to) => {
   if (onboarded && to.name === 'onboarding') return { name: 'home' }
   return true
 })
+
+// 记在 afterEach 而不是 beforeEach：被 onboarding 拦下来的那次跳转不算「去过」
+router.afterEach((to) => trackRoute(to))
 
 export default router

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ChevronRight,
@@ -22,6 +22,7 @@ import Sidebar from '@/components/software/Sidebar.vue'
 import type { AIResult, IdentifyReport, SoftwareQuery } from '@/types'
 import { useAI } from '@/composables/useAI'
 import { useFilter } from '@/composables/useFilter'
+import { recallScroll, rememberScroll } from '@/composables/useModules'
 import { useScan } from '@/composables/useScan'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
@@ -49,6 +50,9 @@ const scan = useScan()
 
 const addMenuOpen = ref(false)
 
+/** 卡片墙的滚动容器。切到游戏库再切回来时，要回到当时那一屏 */
+const content = ref<HTMLElement | null>(null)
+
 /** 刚跑完那一轮的汇总报告。识别结束后主页上那条入口就是它 */
 const report = ref<IdentifyReport | null>(null)
 const reportOpen = ref(false)
@@ -67,12 +71,25 @@ const busyPercent = computed(() =>
 )
 
 onMounted(() => {
-  void store.reload()
+  void restoreList()
   // 分组展示要按 categories.sort_order 排，还要拿每个分类的图标
   void categories.load()
   document.addEventListener('click', closeAddMenu)
 })
-onBeforeUnmount(() => document.removeEventListener('click', closeAddMenu))
+onBeforeUnmount(() => {
+  if (content.value) rememberScroll('software', content.value.scrollTop)
+  document.removeEventListener('click', closeAddMenu)
+})
+
+/**
+ * 先把列表读回来再回到上次那一屏 —— 内容还没渲染时容器高度是 0，
+ * 这时候设 scrollTop 会被浏览器直接吞掉，表现成「记忆没生效」。
+ */
+async function restoreList(): Promise<void> {
+  await store.reload()
+  await nextTick()
+  if (content.value) content.value.scrollTop = recallScroll('software')
+}
 
 function closeAddMenu(): void {
   addMenuOpen.value = false
@@ -358,7 +375,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
         </span>
       </div>
 
-      <section class="home__content">
+      <section ref="content" class="home__content">
         <template v-if="store.items.length > 0">
           <!-- 分组模式：一个分类一个区块，区块内部照旧用当前的网格 / 列表排布 -->
           <template v-if="groupByCategory">
