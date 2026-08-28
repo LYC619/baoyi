@@ -1440,6 +1440,11 @@ async function main(): Promise<void> {
 
   console.log('\n并发收尾 · latest-wins 令牌')
 
+  // ponytail: 这两条验的是 createLatestGuard 本身，加一段与 composable 同构的手写骨架。
+  // 天花板：谁把 useAI / software store 里的 isCurrent 判断删掉，这两条照样绿 ——
+  // composable 依赖 window.baoyi，在 Node 里跑不起来。要真正盯住调用点，
+  // 得给 window.baoyi 做一层假实现再 import 那几个模块，代价比现在这条大得多。
+
   // 可取消任务的场景（useAI / useScan）：cancel 不再同步清 running，旧轮的 IPC
   // 返回晚于新轮的 begin() 才到。收尾只有 isCurrent 才许清状态 —— 这一条守的
   // 就是「cancel 之后立刻点第二轮」那个最容易踩的时刻。

@@ -190,10 +190,15 @@ function setCategory(e: Event): void {
   void save({ category: (e.target as HTMLSelectElement).value })
 }
 
-function copyPath(target: string): void {
+async function copyPath(target: string): Promise<void> {
   // navigator.clipboard 在打包后的 file:// 页面里不可靠（见 types 的 app.copyText 注释）
-  void window.baoyi.app.copyText(target)
-  toast('路径已复制')
+  try {
+    await window.baoyi.app.copyText(target)
+    toast('路径已复制')
+  } catch (err) {
+    // 不接错的话失败也会弹「已复制」，用户拿着空剪贴板去粘贴才发现
+    error(`复制失败：${errorMessage(err)}`)
+  }
 }
 
 /* ------------------------------ 位置与链接 ------------------------------ */

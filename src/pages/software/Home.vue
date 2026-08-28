@@ -19,7 +19,7 @@ import CardGrid from '@/components/software/CardGrid.vue'
 import ReportDialog from '@/components/identify/ReportDialog.vue'
 import SearchBar from '@/components/software/SearchBar.vue'
 import Sidebar from '@/components/software/Sidebar.vue'
-import type { IdentifyReport, SoftwareQuery } from '@/types'
+import type { AIResult, IdentifyReport, SoftwareQuery } from '@/types'
 import { useAI } from '@/composables/useAI'
 import { useFilter } from '@/composables/useFilter'
 import { useScan } from '@/composables/useScan'
@@ -27,6 +27,7 @@ import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
+import { errorMessage } from '@/utils'
 
 const router = useRouter()
 const store = useSoftwareStore()
@@ -160,7 +161,14 @@ async function completeAi(ids?: string[]): Promise<void> {
     toast('未配置 AI，可在设置里填写 API Key 后手动识别')
     return
   }
-  const result = await ai.complete(ids)
+  let result: AIResult
+  try {
+    result = await ai.complete(ids)
+  } catch (err) {
+    // 卡片墙上这个按钮是识别的主入口，抛错时不说话等同于「点了没反应」
+    error(`识别没能跑起来：${errorMessage(err)}`)
+    return
+  }
   await Promise.all([store.reload(), loadReport(result.report_id)])
 
   if (result.failed > 0) {

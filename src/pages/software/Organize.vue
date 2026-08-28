@@ -33,19 +33,30 @@ const ACTIONS: Array<{ value: OrganizeAction; label: string }> = [
   { value: 'skip', label: '跳过' }
 ]
 
+/** 进不来预览时的原因。空串 = 正常 */
+const loadError = ref('')
+
 async function load(): Promise<void> {
   const preview = await organize.preview()
   root.value = preview.root
   entries.value = preview.entries
 }
 
-onMounted(async () => {
+async function initialLoad(): Promise<void> {
+  loading.value = true
   try {
     await Promise.all([categories.load(), load()])
+    loadError.value = ''
+  } catch (err) {
+    // 不接错的话预览失败就是一个空页面，还会因为 root 是空串而显示
+    // 「还没有设置整理目标目录」—— 把加载失败说成了配置没做
+    loadError.value = errorMessage(err)
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(initialLoad)
 
 /**
  * 目标完整路径。这里算的只是**给用户看的预览** —— 真正落盘用的路径由主进程
@@ -141,6 +152,12 @@ async function execute(): Promise<void> {
 
     <div class="body">
       <p v-if="loading" class="state">正在生成方案…（安装版会顺带查一遍注册表引用，稍慢）</p>
+
+      <div v-else-if="loadError" class="state">
+        <h2>没能生成整理方案</h2>
+        <p class="err">{{ loadError }}</p>
+        <button class="btn btn--primary" @click="initialLoad">重试</button>
+      </div>
 
       <div v-else-if="!root" class="state">
         <h2>还没有设置整理目标目录</h2>
@@ -342,6 +359,18 @@ async function execute(): Promise<void> {
   min-height: 300px;
   color: var(--text-sub);
   text-align: center;
+}
+
+/* 与 Onboarding 的失败提示同一套观感（scoped 样式没法共用，只能各写一份） */
+.err {
+  font-size: var(--fs-body);
+  line-height: 1.8;
+  color: var(--danger);
+  padding: 10px 14px;
+  border-radius: var(--radius-input);
+  background: var(--danger-bg);
+  word-break: break-word;
+  max-width: 560px;
 }
 
 .state h2 {
