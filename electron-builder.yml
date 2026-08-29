@@ -21,11 +21,12 @@ extraResources:
   - from: resources/save-manifest.json
     to: save-manifest.json
 
-# 应用图标：resources/icon.svg 是矢量源文件。
-# 打包前请导出 resources/icon.ico（Windows，含 256px）与 resources/icon.png（512x512），
-# 再把下面各平台的 icon 字段取消注释。缺省时 electron-builder 会使用 Electron 默认图标。
+# 应用图标：resources/icon.svg 是矢量源文件，icon.ico / icon.png 由
+# `npx electron scripts/make-icons.cjs` 从它生成（Electron 自己的 Chromium 渲染，
+# 跟应用里看到的是同一个结果）。改了 svg 就重跑一次，不要手工描图 ——
+# 手工描等于维护两份图标，改了一份忘了另一份时没人会发现。
 win:
-  # icon: resources/icon.ico
+  icon: resources/icon.ico
   target:
     - target: nsis
       arch: [x64]
@@ -39,11 +40,11 @@ nsis:
   shortcutName: 抱一
 
 mac:
-  # icon: resources/icon.png
+  icon: resources/icon.png
   target: [dmg]
   category: public.app-category.utilities
 
 linux:
-  # icon: resources/icon.png
+  icon: resources/icon.png
   target: [AppImage]
   category: Utility
