@@ -88,7 +88,16 @@ import {
   saveRoots,
   scanGameRoot
 } from '../electron/kinds/game/scanner.ts'
-import { gamesUnder, insertGame, type GamePayload } from '../electron/kinds/game/db.ts'
+import {
+  deleteGame,
+  gameCounts,
+  gamesUnder,
+  getGame,
+  insertGame,
+  listGames,
+  updateGame,
+  type GamePayload
+} from '../electron/kinds/game/db.ts'
 import { acceptSavePaths, limitGameTags } from '../electron/kinds/game/tools.ts'
 import { candidatePrompt, fillGameSystem } from '../electron/kinds/game/prompts.ts'
 
@@ -2256,8 +2265,7 @@ async function gameIdentifySection(): Promise<void> {
     d.close()
   })
 
-  await check('游戏 prompt 用的是游戏的分类和标签，没有把软件那套灌进去', () => {
-    const filled = fillGameSystem(gameKind.defaultCategories, gameKind.defaultTags, true)
+  await check('游戏 prompt 用的是游戏的分类和标签，没有把软件那套灌进去', () => {    const filled = fillGameSystem(gameKind.defaultCategories, gameKind.defaultTags, true)
     assert.ok(filled.includes('RPG'), '游戏分类没填进去')
     assert.ok(filled.includes('魂系'), '游戏标签没填进去')
     assert.ok(!filled.includes('{{'), '还有插槽没填')
@@ -2279,6 +2287,195 @@ async function gameIdentifySection(): Promise<void> {
     const blind = candidatePrompt(inspectDir(path.join(base, '库/老游戏'), base)!)
     assert.ok(blind.includes('没有命中任何引擎特征'), '没线索时要明说，不能只给个空列表')
     assert.ok(!blind.includes('疑似主程序'), '没有硬判据时不该出现主程序小节')
+  })
+
+  /* ==================== 游戏库的读写（Step 4 的界面吃的就是这些） ==================== */
+  console.log('\n游戏库 · 列表与统计')
+
+  /** 铺一个小库：两个动作、一个 RPG、一个归档的，状态各不相同 */
+  const stocked = (): InstanceType<typeof DatabaseSync> => {
+    const d = freshDb()
+    insertGame(d as any, payload())
+    insertGame(
+      d as any,
+      payload({
+        exe_path: 'D:\\Games\\Celeste\\Celeste.exe',
+        name_zh: '蔚蓝',
+        name_en: 'Celeste',
+        category: '动作',
+        tags: ['像素', '高难度'],
+        source_dir: 'D:\\Games\\Celeste'
+      })
+    )
+    const rpg = insertGame(
+      d as any,
+      payload({
+        exe_path: 'D:\\Games\\Sultan\\Sultan.exe',
+        name_zh: '苏丹的游戏',
+        name_en: "Sultan's Game",
+        category: 'RPG',
+        tags: ['剧情向'],
+        source_dir: 'D:\\Games\\Sultan',
+        save_paths: []
+      })
+    )
+    const archived = insertGame(
+      d as any,
+      payload({
+        exe_path: 'D:\\Games\\Old\\old.exe',
+        name_zh: '某老游戏',
+        category: '其他',
+        tags: [],
+        source_dir: 'D:\\Games\\Old'
+      })
+    )
+    updateGame(d as any, rpg.id, { play_status: 'playing', total_playtime_sec: 7200 })
+    updateGame(d as any, archived.id, { is_archived: true })
+    return d
+  }
+
+  await check('列表默认排在最近游玩的那个前面，归档的不混进来', () => {
+    const d = stocked()
+    const list = listGames(d as any)
+    assert.equal(list.length, 3, '归档的那条不该出现在默认列表里')
+    // 只有「苏丹的游戏」被 updateGame 动过 last_played_at 之外的字段，
+    // 但它的 play_status 是 playing —— 排序看的是 last_played_at，都为 0 时按加入时间
+    assert.ok(!list.some((g) => g.name_zh === '某老游戏'))
+
+    const archived = listGames(d as any, { group: 'archived' })
+    assert.deepEqual(archived.map((g) => g.name_zh), ['某老游戏'])
+    d.close()
+  })
+
+  await check('按分类 / 状态 / 标签 / 关键词筛，各筛各的', () => {
+    const d = stocked()
+    assert.equal(listGames(d as any, { category: '动作' }).length, 2)
+    assert.deepEqual(
+      listGames(d as any, { status: 'playing' }).map((g) => g.name_zh),
+      ['苏丹的游戏']
+    )
+    assert.deepEqual(
+      listGames(d as any, { tag: '高难度' }).map((g) => g.name_zh),
+      ['蔚蓝']
+    )
+    // 关键词要能命中英文名
+    assert.deepEqual(
+      listGames(d as any, { keyword: 'Celeste' }).map((g) => g.name_zh),
+      ['蔚蓝']
+    )
+    d.close()
+  })
+
+  await check('标签筛选带引号匹配：「像素」不会把「像素风」也捞进来', () => {
+    const d = freshDb()
+    insertGame(d as any, payload({ tags: ['像素风'] }))
+    assert.equal(listGames(d as any, { tag: '像素' }).length, 0)
+    assert.equal(listGames(d as any, { tag: '像素风' }).length, 1)
+    d.close()
+  })
+
+  await check('按时长排序把玩得最多的排在最前', () => {
+    const d = stocked()
+    assert.equal(listGames(d as any, { sort: 'playtime' })[0].name_zh, '苏丹的游戏')
+    d.close()
+  })
+
+  await check('统计：四个状态是闭集，一个都不能缺；归档的不进分类和标签', () => {
+    const d = stocked()
+    const c = gameCounts(d as any)
+    assert.equal(c.all, 3)
+    assert.equal(c.archived, 1)
+    assert.deepEqual(Object.keys(c.status).sort(), ['completed', 'playing', 'shelved', 'unplayed'])
+    assert.equal(c.status.playing, 1)
+    assert.equal(c.status.unplayed, 2)
+    assert.equal(c.status.completed, 0, '一个都没有的状态也要报 0，不能缺这个键')
+
+    // 归档的那条分类是「其他」，不该出现在侧边栏
+    assert.ok(!c.categories.some((x) => x.name === '其他'), '归档的条目混进分类统计了')
+    assert.deepEqual(
+      c.categories.find((x) => x.name === '动作'),
+      { name: '动作', count: 2 }
+    )
+    assert.equal(c.tags.find((t) => t.name === '像素')?.count, 2)
+    d.close()
+  })
+
+  await check('updateGame 分得清哪些字段落在总表、哪些落在 game_meta', () => {
+    const d = freshDb()
+    const { id } = insertGame(d as any, payload())
+    const out = updateGame(d as any, id, {
+      name_zh: '改过的名字',
+      tags: ['魂系', '高难度'],
+      play_status: 'completed',
+      total_playtime_sec: 3600
+    })!
+    assert.equal(out.name_zh, '改过的名字')
+    assert.deepEqual(out.tags, ['魂系', '高难度'])
+    assert.equal(out.play_status, 'completed')
+    assert.equal(out.total_playtime_sec, 3600)
+    d.close()
+  })
+
+  await check('updateGame 只认白名单里的列，patch 里的野键不会拼进 SQL', () => {
+    const d = freshDb()
+    const { id } = insertGame(d as any, payload())
+    // 渲染进程递过来的键名直接进 SQL 就是一条注入口子，白名单挡的就是这个
+    const out = updateGame(d as any, id, {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...({ 'name_zh = 1, path': 'X' } as any),
+      summary: '改了简介'
+    })!
+    assert.equal(out.summary, '改了简介')
+    assert.equal(out.path, 'D:\\Games\\HK\\hollow_knight.exe', '路径被野键改掉了')
+    d.close()
+  })
+
+  await check('is_archived 在库里是 0/1，读出来是布尔', () => {
+    const d = freshDb()
+    const { id } = insertGame(d as any, payload())
+    assert.equal(getGame(d as any, id)!.is_archived, false)
+    assert.equal(updateGame(d as any, id, { is_archived: true })!.is_archived, true)
+    assert.equal(
+      (d.prepare('SELECT is_archived FROM resource WHERE id = ?').get(id) as any).is_archived,
+      1,
+      '布尔要落成 0/1，不能落成 "true"'
+    )
+    d.close()
+  })
+
+  await check('库里的 JSON 列坏掉时退回空数组，不让一行坏数据打不开整个游戏库', () => {
+    const d = freshDb()
+    const { id } = insertGame(d as any, payload())
+    d.prepare('UPDATE resource SET tags = ? WHERE id = ?').run('{不是数组', id)
+    d.prepare('UPDATE game_meta SET save_paths = ? WHERE resource_id = ?').run('null', id)
+    const g = getGame(d as any, id)!
+    assert.deepEqual(g.tags, [])
+    assert.deepEqual(g.save_paths, [])
+    d.close()
+  })
+
+  await check('移除一个游戏会带走 game_meta，但不碰存档备份记录', () => {
+    const d = freshDb()
+    const { id } = insertGame(d as any, payload())
+    d.prepare(
+      `INSERT INTO save_backups (id, resource_id, save_path, backup_dir, created_at)
+       VALUES ('b1', ?, 'C:\\x\\save', 'C:\\备份\\hk-2026', 1)`
+    ).run(id)
+
+    deleteGame(d as any, id)
+    assert.equal(getGame(d as any, id), null)
+    assert.equal(
+      (d.prepare('SELECT COUNT(*) AS n FROM game_meta').get() as any).n,
+      0,
+      'game_meta 没跟着删'
+    )
+    // 备份记录指向磁盘上真实存在的一份拷贝，删记录只会让用户再也找不到它们
+    assert.equal(
+      (d.prepare('SELECT COUNT(*) AS n FROM save_backups').get() as any).n,
+      1,
+      '把用户的存档备份记录一起删了'
+    )
+    d.close()
   })
 
   await fsp.rm(base, { recursive: true, force: true })

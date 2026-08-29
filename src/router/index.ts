@@ -45,6 +45,13 @@ const router = createRouter({
       meta: { module: 'game' }
     },
     {
+      path: '/game/:id',
+      name: 'game-detail',
+      component: () => import('@/pages/game/Detail.vue'),
+      props: true,
+      meta: { module: 'game' }
+    },
+    {
       path: '/onboarding',
       name: 'onboarding',
       component: () => import('@/pages/Onboarding.vue')

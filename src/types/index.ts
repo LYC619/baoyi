@@ -259,6 +259,77 @@ export interface SaveBackup {
   created_at: number
 }
 
+/**
+ * 游戏视图（GAME_VIEW_SQL）的一行。
+ *
+ * 刻意不复用 SoftwareItem —— 两者在总表上共享一半字段，但差的那一半是彼此的
+ * 噪音：软件那边的 launchers / is_portable / mastery_level 在游戏详情页上没有
+ * 位置，游戏这边的 play_status / total_playtime_sec 在软件卡片上同理。
+ * 合成一个「资源」类型的代价是每处都要判「这是哪一类」再决定字段有没有意义。
+ */
+export interface GameItem extends GameMeta {
+  id: string
+  created_at: number
+  updated_at: number
+  /** 主程序绝对路径，同时是全局唯一键 */
+  path: string
+  file_name: string
+  file_size: number
+  /** 游戏所在目录 */
+  source_dir: string
+  name_zh: string
+  name_en: string
+  summary: string
+  description: string
+  category: string
+  tags: string[]
+  official_url: string
+  notes: string
+  is_archived: boolean
+}
+
+export interface GameQuery {
+  keyword?: string
+  category?: string
+  tag?: string
+  status?: PlayStatus
+  /** 归档区和正常区互斥，和软件那边同一个约定 */
+  group?: 'all' | 'archived'
+  sort?: 'played' | 'name' | 'playtime' | 'added'
+}
+
+export interface GameCounts {
+  all: number
+  archived: number
+  /** 四个游玩状态各有几个。闭集，缺的那个是 0 不是不存在 */
+  status: Record<PlayStatus, number>
+  categories: Array<{ name: string; count: number }>
+  tags: Array<{ name: string; count: number }>
+}
+
+/** 游戏扫描 + 识别是一条链路上的两截，进度也就用同一个形状报 */
+export interface GameScanProgress {
+  phase: 'scanning' | 'identifying' | 'done'
+  /** 正在扫的目录 / 正在识别的游戏目录 */
+  current: string
+  /** identifying 阶段才有意义；scanning 阶段 total 未知，恒为 0 */
+  processed: number
+  total: number
+  registered: number
+  failed: number
+  /** agent 最近一步动作的人话翻译 */
+  log: string
+}
+
+export interface GameScanResult {
+  /** 扫出来的候选目录数 */
+  candidates: number
+  registered: number
+  skipped: number
+  failed: number
+  tokens: number
+}
+
 export interface AIConfig {
   api_url: string
   api_key: string
@@ -665,6 +736,22 @@ export interface BaoyiApi {
     launch(id: string, launcherPath?: string): Promise<boolean>
     revealInFolder(id: string, launcherPath?: string): Promise<void>
     addManual(): Promise<SoftwareItem[]>
+  }
+  game: {
+    list(query?: GameQuery): Promise<GameItem[]>
+    get(id: string): Promise<GameItem | null>
+    update(id: string, patch: Partial<GameItem>): Promise<GameItem | null>
+    /** 只从库里移除，不动磁盘上的游戏文件，也不删已有的存档备份 */
+    remove(id: string): Promise<void>
+    counts(): Promise<GameCounts>
+    /** 在资源管理器里选中主程序 */
+    revealInFolder(id: string): Promise<void>
+    /** 选游戏目录，可多选。取消返回空数组 */
+    pickDirectories(): Promise<string[]>
+    /** 扫描 + 识别一条龙，结果直接落库（游戏不走确认面板） */
+    scan(dirs: string[]): Promise<GameScanResult>
+    cancel(): void
+    onProgress(cb: (p: GameScanProgress) => void): Unsubscribe
   }
   categories: {
     list(): Promise<Category[]>

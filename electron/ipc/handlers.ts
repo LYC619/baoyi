@@ -5,6 +5,8 @@ import type {
   AIConfig,
   AppSettings,
   Category,
+  GameItem,
+  GameQuery,
   IdentifyLogQuery,
   OrganizeCommand,
   PendingItem,
@@ -49,6 +51,15 @@ import {
   upsertCategory
 } from '../services/database'
 import { launchSoftware, revealInFolder } from '../kinds/software/launcher'
+import {
+  cancelGameScan,
+  gameCountsOf,
+  getGameItem,
+  listGameItems,
+  removeGame,
+  scanGames,
+  updateGameItem
+} from '../kinds/game/service'
 import {
   materialize,
   previewOrganize,
@@ -117,6 +128,38 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       added.push(...(await addSingleExe(file)))
     }
     return added
+  })
+
+  /* ------------------------------ 游戏 ------------------------------ */
+  ipcMain.handle('game:list', (_e, query: GameQuery = {}) => listGameItems(query))
+  ipcMain.handle('game:get', (_e, id: string) => getGameItem(id))
+  ipcMain.handle('game:update', (_e, id: string, patch: Partial<GameItem>) =>
+    updateGameItem(id, patch)
+  )
+  ipcMain.handle('game:remove', (_e, id: string) => removeGame(id))
+  ipcMain.handle('game:counts', () => gameCountsOf())
+  ipcMain.handle('game:scan', (_e, dirs: string[]) =>
+    scanGames(dirs, (p) => send('game:progress', p))
+  )
+  ipcMain.on('game:cancel', () => cancelGameScan())
+
+  // 在资源管理器里选中主程序。Step 6 才做「启动并计时」，在那之前
+  // 用户至少得有一条路走到游戏本体，否则详情页上那个路径只是一行不能用的字
+  ipcMain.handle('game:reveal', (_e, id: string) => {
+    const game = getGameItem(id)
+    if (game?.path) shell.showItemInFolder(game.path)
+  })
+
+  // 游戏目录是用户一个个指的，不像软件那样配一批扫描根反复扫 ——
+  // 一次装一个游戏，多选省下的是几次点击，不值得为它再加一处设置项
+  ipcMain.handle('game:pick-dirs', async () => {
+    const win = getWindow()
+    if (!win) return []
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择游戏目录（可多选）',
+      properties: ['openDirectory', 'multiSelections']
+    })
+    return result.canceled ? [] : result.filePaths
   })
 
   /* ------------------------------ 分类 ------------------------------ */

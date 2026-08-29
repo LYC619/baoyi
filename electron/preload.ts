@@ -5,6 +5,8 @@ import type {
   AppSettings,
   BaoyiApi,
   Category,
+  GameItem,
+  GameQuery,
   IdentifyLogQuery,
   OrganizeCommand,
   PendingItem,
@@ -57,6 +59,19 @@ const api: BaoyiApi = {
     revealInFolder: (id: string, launcherPath?: string) =>
       ipcRenderer.invoke('software:reveal', id, launcherPath),
     addManual: () => ipcRenderer.invoke('software:add-manual')
+  },
+  game: {
+    list: (query: GameQuery = {}) => ipcRenderer.invoke('game:list', plain(query)),
+    get: (id: string) => ipcRenderer.invoke('game:get', id),
+    update: (id: string, patch: Partial<GameItem>) =>
+      ipcRenderer.invoke('game:update', id, plain(patch)),
+    remove: (id: string) => ipcRenderer.invoke('game:remove', id),
+    counts: () => ipcRenderer.invoke('game:counts'),
+    revealInFolder: (id: string) => ipcRenderer.invoke('game:reveal', id),
+    pickDirectories: () => ipcRenderer.invoke('game:pick-dirs'),
+    scan: (dirs: string[]) => ipcRenderer.invoke('game:scan', plain(dirs)),
+    cancel: () => ipcRenderer.send('game:cancel'),
+    onProgress: (cb) => subscribe('game:progress', cb)
   },
   categories: {
     list: () => ipcRenderer.invoke('categories:list'),

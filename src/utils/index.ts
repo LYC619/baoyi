@@ -112,6 +112,22 @@ export function daysSince(ts: number): number {
   return Math.floor((Date.now() - ts) / DAY)
 }
 
+/**
+ * 游玩时长。0 秒说的是「还没在抱一里玩过」，不是「玩了 0 小时」——
+ * Step 6 才开始计时，在那之前所有游戏都是 0，说成「0 小时」是在撒谎。
+ */
+export function formatPlaytime(sec: number): string {
+  if (!sec) return '未记录'
+  if (sec < 3600) return `${Math.max(1, Math.round(sec / 60))} 分钟`
+  const hours = sec / 3600
+  return hours < 10 ? `${hours.toFixed(1)} 小时` : `${Math.round(hours)} 小时`
+}
+
+/** 游戏卡片 / 详情页打头的名字。中文名优先，都没有就退回主程序文件名 */
+export function gameTitle(g: { name_zh: string; name_en: string; file_name: string }): string {
+  return g.name_zh || g.name_en || g.file_name.replace(/\.exe$/i, '')
+}
+
 /** 这条「上次活跃」是抱一自己记的，还是从磁盘上推出来的 */
 export type ActivitySource = 'baoyi' | 'external' | 'none'
 
