@@ -248,7 +248,13 @@ export interface GameMeta {
   linked_files: LinkedFile[]
 }
 
-/** 一次存档备份的记录。backup_dir 指向磁盘上真实存在的一份拷贝 */
+/**
+ * 一次存档备份的记录。
+ *
+ * backup_dir 指向磁盘上真实存在的一份拷贝，目录里是 `save/`（存档内容）
+ * 和 `backup.json`（说明文件）。说明文件刻意在载荷之外 —— 在里面的话，
+ * 还原时它会跟着被复制回用户的存档目录。
+ */
 export interface SaveBackup {
   id: string
   resource_id: string
@@ -257,6 +263,42 @@ export interface SaveBackup {
   size_bytes: number
   file_count: number
   created_at: number
+}
+
+/** 备份一次的结果。失败时 backup 为 null，磁盘上不会留下半成品 */
+export interface SaveBackupResult {
+  ok: boolean
+  message: string
+  backup: SaveBackup | null
+}
+
+/**
+ * 还原一次的结果。
+ *
+ * safety 是「还原前自动备份的那一份」。它可能在 ok=false 时也不为 null ——
+ * 自动备份成功了、后面的复制或改名失败了。那份备份是真实存在的，得让用户知道。
+ */
+export interface SaveRestoreResult {
+  ok: boolean
+  message: string
+  safety: SaveBackup | null
+}
+
+/**
+ * 一个候选存档目录的探测结果，给「选目录并当场验证」用。
+ *
+ * exists 和 files 分开报：存在但空的目录是一个有意义的中间状态 ——
+ * 游戏还没存过档，路径本身可能是对的。界面据此问一句而不是直接拒绝。
+ */
+export interface SavePathCheck {
+  path: string
+  exists: boolean
+  files: number
+  bytes: number
+  /** 最新的 mtime，0 表示读不出来 */
+  newest: number
+  /** 抽几个文件名，存档文件的扩展名往往一眼能认 */
+  sample: string[]
 }
 
 /**
@@ -381,6 +423,15 @@ export interface AppSettings {
    * 这里是「归到哪里去」，把整理目标也加进扫描列表只会让下一轮重扫再发现一遍。
    */
   organize_root: string
+  /**
+   * 存档备份放哪儿。空串表示还没设过，主进程退回 `<用户数据>\save-backups`。
+   *
+   * 不直接把默认值写死在这里：默认值要拼 app.getPath('userData')，那是主进程
+   * 才有的东西，而这个类型渲染进程也在用。空串 = 「用默认」是两边都读得懂的约定。
+   * 之所以还留一个设置项 —— RPG Maker 带截图的存档、模拟器的即时存档都能到几个 GB，
+   * 而用户数据目录在 C 盘。
+   */
+  save_backup_root: string
   theme: 'dark' | 'light'
   view_mode: 'grid' | 'list'
   /**
@@ -752,6 +803,28 @@ export interface BaoyiApi {
     scan(dirs: string[]): Promise<GameScanResult>
     cancel(): void
     onProgress(cb: (p: GameScanProgress) => void): Unsubscribe
+
+    /**
+     * 选一个存档目录并当场探测。取消返回 null。
+     *
+     * 只探测、不写库 —— 目录是空的时候界面要先问一句，问完了再走 update() 存。
+     */
+    pickSavePath(): Promise<SavePathCheck | null>
+    /**
+     * 重新验一条已记下的存档路径。验过了就把这条路径的 verified_at 往前推，
+     * 所以要带上游戏 id。空目录不算验过 —— 备份那一层也拒绝空目录。
+     */
+    verifySavePath(id: string, path: string): Promise<SavePathCheck>
+    /** 备份一条存档路径。失败时磁盘上不留半成品，也不写记录 */
+    backupSave(id: string, savePath: string): Promise<SaveBackupResult>
+    /** 一个游戏的备份，新的在前 */
+    backups(id: string): Promise<SaveBackup[]>
+    /** 还原一份备份。会先把当前存档自动备份一份 */
+    restoreBackup(backupId: string): Promise<SaveRestoreResult>
+    /** 删一份备份：磁盘上的拷贝和库里的记录一起删 */
+    deleteBackup(backupId: string): Promise<{ ok: boolean; message: string }>
+    /** 在资源管理器里打开一份备份 */
+    openBackup(backupId: string): Promise<void>
   }
   categories: {
     list(): Promise<Category[]>
@@ -817,6 +890,11 @@ export interface BaoyiApi {
     dir(): Promise<string>
     openDir(): Promise<string>
     stats(): Promise<DataStats>
+    /** 存档备份根目录当前实际生效的位置（设置为空时是默认那个） */
+    saveBackupRoot(): Promise<string>
+    /** 选存档备份根目录。取消返回 null */
+    pickSaveBackupRoot(): Promise<string | null>
+    openSaveBackupRoot(): Promise<string>
     /**
      * library：清软件条目 + 待识别目录 + 图标缓存，保留设置与自定义分类。
      * all：连设置和分类一起清，等于恢复出厂。

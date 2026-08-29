@@ -10,6 +10,7 @@ const FALLBACK: AppSettings = {
   search: { provider: 'model_builtin', api_key: '', endpoint: '', enabled: false },
   scan_dirs: [],
   organize_root: '',
+  save_backup_root: '',
   theme: 'dark',
   view_mode: 'grid',
   group_by_category: false,

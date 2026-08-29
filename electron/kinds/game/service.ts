@@ -13,11 +13,30 @@ import type {
   GameItem,
   GameQuery,
   GameScanProgress,
-  GameScanResult
+  GameScanResult,
+  SaveBackup,
+  SaveBackupResult,
+  SavePath,
+  SavePathCheck,
+  SaveRestoreResult
 } from '../../../src/types'
 import { runAgent, type AgentEvent } from '../../services/agent/loop'
-import { getDb, getSettings, listCategories, tagPool } from '../../services/database'
+import {
+  getDb,
+  getSettings,
+  listCategories,
+  saveBackupRoot,
+  tagPool
+} from '../../services/database'
 import { searchAvailable } from '../../services/searchService'
+import {
+  createBackup,
+  deleteBackup,
+  getBackup,
+  listBackups,
+  restoreBackup,
+  type GameLike
+} from './backup'
 import {
   deleteGame,
   gameCounts,
@@ -27,7 +46,7 @@ import {
   updateGame
 } from './db'
 import { candidatePrompt, fillGameSystem } from './prompts'
-import { inspectDir, scanGameRoot, type GameCandidate } from './scanner'
+import { inspectDir, probeSave, scanGameRoot, type GameCandidate } from './scanner'
 import { buildGameTools, type GameToolContext } from './tools'
 
 /**
@@ -53,6 +72,105 @@ export const removeGame = (id: string): void => deleteGame(getDb(), id)
 
 export function updateGameItem(id: string, patch: Partial<GameItem>): GameItem | null {
   return updateGame(getDb(), id, patch)
+}
+
+/* ------------------------------ 存档与备份 ------------------------------ */
+
+/**
+ * 探测一个候选存档目录。
+ *
+ * 和识别时的 detect_save_path 是同一个 probeSave，但**不过白名单** ——
+ * 那道墙拦的是模型编出来的路径，而这里的路径是用户在系统对话框里亲手指的。
+ * 用户指着自己的桌面说「存档在这儿」是他的权利，不是越界。
+ */
+export function checkSavePath(target: string): SavePathCheck {
+  const resolved = path.resolve(target)
+  const probe = probeSave(resolved)
+  return {
+    path: resolved,
+    exists: probe.exists,
+    files: probe.files,
+    bytes: probe.bytes,
+    newest: probe.newest,
+    sample: probe.sample
+  }
+}
+
+/** 备份记录里要用到的那几个字段。找不到条目时返回 null，由上层决定怎么办 */
+function gameLike(id: string): GameLike | null {
+  const g = getGame(getDb(), id)
+  return g ? { id: g.id, name_zh: g.name_zh, name_en: g.name_en, file_name: g.file_name } : null
+}
+
+/**
+ * 备份一条存档路径。
+ *
+ * savePath 来自渲染进程，但必须是这条游戏**已经记下**的存档路径之一 ——
+ * 否则这就成了一个「让页面指定往哪儿读、往备份根写」的口子。
+ * 详情页上那些路径本身是经过验证才存进去的，这里只核对它在不在名单里。
+ */
+export async function backupSavePath(id: string, savePath: string): Promise<SaveBackupResult> {
+  const game = getGame(getDb(), id)
+  if (!game) return { ok: false, message: '找不到这个游戏', backup: null }
+
+  const known = game.save_paths.some(
+    (s) => path.resolve(s.path).toLowerCase() === path.resolve(savePath).toLowerCase()
+  )
+  if (!known) {
+    return { ok: false, message: '这条存档路径不在这个游戏名下，已拒绝', backup: null }
+  }
+
+  return createBackup(
+    getDb(),
+    { id: game.id, name_zh: game.name_zh, name_en: game.name_en, file_name: game.file_name },
+    savePath,
+    { backupRoot: saveBackupRoot() }
+  )
+}
+
+export const listSaveBackups = (id: string): SaveBackup[] => listBackups(getDb(), id)
+export const getSaveBackup = (backupId: string): SaveBackup | null => getBackup(getDb(), backupId)
+
+/**
+ * 还原一份备份。
+ *
+ * 游戏条目可能已经被移除了（save_backups 刻意没有外键，见 schema.ts），
+ * 那种情况下还原依然要能走通 —— 用户要的是他的存档，不是库里那一行。
+ */
+export async function restoreSaveBackup(backupId: string): Promise<SaveRestoreResult> {
+  const backup = getBackup(getDb(), backupId)
+  if (!backup) return { ok: false, message: '找不到这条备份记录', safety: null }
+  return restoreBackup(getDb(), backupId, gameLike(backup.resource_id), {
+    backupRoot: saveBackupRoot()
+  })
+}
+
+export const deleteSaveBackup = (backupId: string): Promise<{ ok: boolean; message: string }> =>
+  deleteBackup(getDb(), backupId)
+
+/**
+ * 重新验一条已记下的存档路径，验过了就把 verified_at 往前推。
+ *
+ * 存在但空的目录**不**更新时间戳：那个时间戳的含义是「这一刻它确实有存档」，
+ * 备份那一层也是照这个标准拒绝空目录的，两边得说同一句话。
+ */
+export function reverifySavePath(id: string, target: string): SavePathCheck {
+  const check = checkSavePath(target)
+  const game = getGame(getDb(), id)
+  if (!game) return check
+
+  const hit = game.save_paths.find(
+    (s) => path.resolve(s.path).toLowerCase() === check.path.toLowerCase()
+  )
+  if (!hit) return check
+
+  if (check.exists && check.files > 0) {
+    const next: SavePath[] = game.save_paths.map((s) =>
+      s === hit ? { ...s, verified_at: Date.now() } : s
+    )
+    updateGame(getDb(), id, { save_paths: next })
+  }
+  return check
 }
 
 /* ------------------------------ 扫描识别 ------------------------------ */

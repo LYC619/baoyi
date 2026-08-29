@@ -45,6 +45,7 @@ import {
   resetData,
   resetScanUnit,
   resetScanUnits,
+  saveBackupRoot,
   skipPending,
   updatePending,
   updateSoftware,
@@ -52,11 +53,18 @@ import {
 } from '../services/database'
 import { launchSoftware, revealInFolder } from '../kinds/software/launcher'
 import {
+  backupSavePath,
   cancelGameScan,
+  checkSavePath,
+  deleteSaveBackup,
   gameCountsOf,
   getGameItem,
+  getSaveBackup,
   listGameItems,
+  listSaveBackups,
   removeGame,
+  restoreSaveBackup,
+  reverifySavePath,
   scanGames,
   updateGameItem
 } from '../kinds/game/service'
@@ -162,6 +170,36 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return result.canceled ? [] : result.filePaths
   })
 
+  /* -------------------------- 存档与备份 -------------------------- */
+
+  // 只选和探测，不写库：目录是空的时候界面要先问一句，问完了才走 game:update。
+  // 这就是识别时刻意留下的那个缺口 —— 详情页原先只能删存档路径，不能加
+  ipcMain.handle('game:pick-save-dir', async () => {
+    const win = getWindow()
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择这个游戏的存档目录',
+      properties: ['openDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return checkSavePath(result.filePaths[0])
+  })
+
+  ipcMain.handle('game:verify-save', (_e, id: string, target: string) =>
+    reverifySavePath(id, target)
+  )
+  ipcMain.handle('game:backup-save', (_e, id: string, savePath: string) =>
+    backupSavePath(id, savePath)
+  )
+  ipcMain.handle('game:backups', (_e, id: string) => listSaveBackups(id))
+  ipcMain.handle('game:restore-backup', (_e, backupId: string) => restoreSaveBackup(backupId))
+  ipcMain.handle('game:delete-backup', (_e, backupId: string) => deleteSaveBackup(backupId))
+
+  ipcMain.handle('game:open-backup', async (_e, backupId: string) => {
+    const backup = getSaveBackup(backupId)
+    if (backup?.backup_dir) await shell.openPath(backup.backup_dir)
+  })
+
   /* ------------------------------ 分类 ------------------------------ */
   ipcMain.handle('categories:list', () => listCategories())
   ipcMain.handle('categories:upsert', (_e, category: Category) => upsertCategory(category))
@@ -247,6 +285,20 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('data:dir', () => app.getPath('userData'))
   ipcMain.handle('data:open-dir', () => shell.openPath(app.getPath('userData')))
   ipcMain.handle('data:stats', () => dataStats())
+
+  // 备份根是「设置里那个值，空就退回默认」，渲染进程不该自己拼这个默认值
+  ipcMain.handle('data:save-backup-root', () => saveBackupRoot())
+  ipcMain.handle('data:open-save-backup-root', () => shell.openPath(saveBackupRoot()))
+
+  ipcMain.handle('data:pick-save-backup-root', async () => {
+    const win = getWindow()
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择存档备份存放目录',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    return result.canceled ? null : result.filePaths[0]
+  })
 
   ipcMain.handle('data:reset', (_e, mode: 'library' | 'all') => {
     const summary = resetData(mode === 'all' ? 'all' : 'library')

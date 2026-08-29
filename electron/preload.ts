@@ -71,7 +71,15 @@ const api: BaoyiApi = {
     pickDirectories: () => ipcRenderer.invoke('game:pick-dirs'),
     scan: (dirs: string[]) => ipcRenderer.invoke('game:scan', plain(dirs)),
     cancel: () => ipcRenderer.send('game:cancel'),
-    onProgress: (cb) => subscribe('game:progress', cb)
+    onProgress: (cb) => subscribe('game:progress', cb),
+    pickSavePath: () => ipcRenderer.invoke('game:pick-save-dir'),
+    verifySavePath: (id: string, path: string) => ipcRenderer.invoke('game:verify-save', id, path),
+    backupSave: (id: string, savePath: string) =>
+      ipcRenderer.invoke('game:backup-save', id, savePath),
+    backups: (id: string) => ipcRenderer.invoke('game:backups', id),
+    restoreBackup: (backupId: string) => ipcRenderer.invoke('game:restore-backup', backupId),
+    deleteBackup: (backupId: string) => ipcRenderer.invoke('game:delete-backup', backupId),
+    openBackup: (backupId: string) => ipcRenderer.invoke('game:open-backup', backupId)
   },
   categories: {
     list: () => ipcRenderer.invoke('categories:list'),
@@ -124,6 +132,9 @@ const api: BaoyiApi = {
     dir: () => ipcRenderer.invoke('data:dir'),
     openDir: () => ipcRenderer.invoke('data:open-dir'),
     stats: () => ipcRenderer.invoke('data:stats'),
+    saveBackupRoot: () => ipcRenderer.invoke('data:save-backup-root'),
+    pickSaveBackupRoot: () => ipcRenderer.invoke('data:pick-save-backup-root'),
+    openSaveBackupRoot: () => ipcRenderer.invoke('data:open-save-backup-root'),
     reset: (mode: 'library' | 'all') => ipcRenderer.invoke('data:reset', mode)
   },
   logs: {

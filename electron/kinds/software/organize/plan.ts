@@ -8,38 +8,14 @@
 
 import path from 'node:path'
 import type { MoveRisk, OrganizeAction, SoftwareItem } from '../../../../src/types'
-
-/** Windows 文件名里不能出现的字符，外加控制字符 */
-// eslint-disable-next-line no-control-regex
-const ILLEGAL = /[<>:"/\\|?*\u0000-\u001f]/g
+import { nestedInside, sanitizeFolder } from '../../../services/fstree.ts'
 
 /**
- * Windows 保留的设备名。叫 CON 或 NUL 的文件夹建不出来，
- * 而失败信息是「参数错误」，不看这张表根本猜不到原因。
+ * 文件夹名规范和路径包含判断都搬到了公共层（services/fstree.ts）——
+ * 游戏存档备份也要用它们，而「一个文件夹名能不能建出来」跟品类无关。
+ * 这里原样转出去，整理模块内部和自检的引用都不必知道它们搬过家了。
  */
-const RESERVED = new Set([
-  'con', 'prn', 'aux', 'nul',
-  'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9',
-  'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9'
-])
-
-/**
- * 把用户输入或软件名洗成一个能真的建出来的文件夹名。
- *
- * 结尾的点和空格必须去掉：Windows 允许你请求 `Foo.`，但建出来的是 `Foo`，
- * 于是「目标已存在」的判断和实际落地的路径就对不上了。
- */
-export function sanitizeFolder(raw: string, fallback = 'Unnamed'): string {
-  const cleaned = raw
-    .replace(ILLEGAL, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[. ]+$/, '')
-    .slice(0, 64)
-  if (!cleaned) return fallback
-  if (RESERVED.has(cleaned.toLowerCase())) return `${cleaned}_`
-  return cleaned
-}
+export { nestedInside, sanitizeFolder }
 
 /**
  * 默认目标文件夹名：软件的英文正式名优先。
@@ -103,17 +79,4 @@ export function sameVolume(a: string, b: string): boolean {
   const va = of(a)
   const vb = of(b)
   return va !== '' && va === vb
-}
-
-/**
- * 目标路径落在源目录里面吗。
- *
- * 这是必须拦的一种情形：把整理根设成 `D:\Software`，而某个软件本来就在
- * `D:\Software\x64dbg` —— 复制会一边读一边往自己里面写，走到磁盘满为止。
- * rename 那条路也会直接报 EINVAL。
- */
-export function nestedInside(from: string, to: string): boolean {
-  const f = path.resolve(from).replace(/[\\/]+$/, '').toLowerCase()
-  const t = path.resolve(to).replace(/[\\/]+$/, '').toLowerCase()
-  return t === f || t.startsWith(`${f}\\`)
 }

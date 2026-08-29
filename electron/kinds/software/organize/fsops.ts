@@ -1,7 +1,8 @@
 /**
- * 真正动文件的那一层。
+ * 整理模块里真正动文件的那一层。
  *
- * 这是整个抱一里唯一会**改变用户磁盘内容**的代码，所以它的规矩比别处严：
+ * 会改写用户磁盘的地方总共两处 —— 这里，和游戏的存档备份（kinds/game/backup.ts）。
+ * 两处的规矩相同，共用 services/fstree.ts 的复制校验：
  *   · 绝不覆盖。目标存在就报错退出，让上层记成冲突跳过。
  *   · 跨盘搬运必须「复制 → 逐文件校验 → 才删源」。顺序反了就是数据丢失，
  *     而不是一次失败的操作。
@@ -9,9 +10,16 @@
  */
 
 import fsp from 'node:fs/promises'
-import fs from 'node:fs'
 import path from 'node:path'
+import { dirSize, exists, verifyCopy } from '../../../services/fstree.ts'
 import { nestedInside, sameVolume } from './plan.ts'
+
+/**
+ * 目录树的遍历、复制校验、体量统计都在公共层（services/fstree.ts）——
+ * 「怎么确认这份拷贝是完整的」跟「为什么要复制」无关，游戏存档备份用的是同一套。
+ * 这里转出去，整理模块内部的引用不必知道它们搬过家了。
+ */
+export { dirSize, exists }
 
 /** 目录是不是一个 junction / 符号链接（而不是实体目录） */
 export async function isLink(dir: string): Promise<boolean> {
@@ -20,62 +28,6 @@ export async function isLink(dir: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-export async function exists(p: string): Promise<boolean> {
-  try {
-    // lstat 而不是 stat：指向已失效目标的链接自身仍然存在，那种情况也算占用
-    await fsp.lstat(p)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * 递归比对两棵目录树的文件清单和字节数。
- *
- * 跨盘搬运删源之前必须过这一关。刻意**不**做哈希：几个 GB 的目录逐字节校验
- * 要花掉和复制本身相当的时间，而「文件数一致 + 每个文件大小一致」已经能挡住
- * 真正会发生的那类故障（中途断电、磁盘满、权限拒绝导致的部分复制）。
- *
- * ponytail: 大小相同但内容损坏的情形查不出来。要那种保证得逐文件算哈希，
- * 代价是整理一个 5GB 目录从 30 秒变成 2 分钟。
- */
-async function verifyCopy(from: string, to: string): Promise<string> {
-  const walk = async (root: string): Promise<Map<string, number>> => {
-    const out = new Map<string, number>()
-    const stack = [root]
-    while (stack.length > 0) {
-      const dir = stack.pop()!
-      const entries = await fsp.readdir(dir, { withFileTypes: true })
-      for (const e of entries) {
-        const full = path.join(dir, e.name)
-        const rel = path.relative(root, full).toLowerCase()
-        if (e.isDirectory()) {
-          stack.push(full)
-          continue
-        }
-        if (e.isSymbolicLink()) {
-          // 链接不比大小，只记它存在 —— lstat 的 size 是链接自身，两边不可比
-          out.set(rel, -1)
-          continue
-        }
-        out.set(rel, (await fsp.stat(full)).size)
-      }
-    }
-    return out
-  }
-
-  const [src, dst] = await Promise.all([walk(from), walk(to)])
-  if (src.size !== dst.size) {
-    return `复制校验失败：源 ${src.size} 个文件，目标 ${dst.size} 个`
-  }
-  for (const [rel, size] of src) {
-    if (!dst.has(rel)) return `复制校验失败：目标缺少 ${rel}`
-    if (dst.get(rel) !== size) return `复制校验失败：${rel} 大小不一致`
-  }
-  return ''
 }
 
 export interface MoveOutcome {
@@ -204,35 +156,4 @@ export async function removeJunction(at: string): Promise<MoveOutcome> {
     }
   }
   return { ok: true, note: '' }
-}
-
-/** 一个目录里有多少字节，用来给进度条和确认文案提供体量感 */
-export function dirSize(dir: string): number {
-  let total = 0
-  const stack = [dir]
-  let visited = 0
-  while (stack.length > 0) {
-    const current = stack.pop()!
-    let entries: fs.Dirent[]
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const e of entries) {
-      if (++visited > 20_000) return total
-      const full = path.join(current, e.name)
-      if (e.isSymbolicLink()) continue
-      if (e.isDirectory()) {
-        stack.push(full)
-        continue
-      }
-      try {
-        total += fs.statSync(full).size
-      } catch {
-        /* 读不到就不计 */
-      }
-    }
-  }
-  return total
 }

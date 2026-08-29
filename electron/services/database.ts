@@ -57,6 +57,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   scan_dirs: [],
   organize_root: '',
+  save_backup_root: '',
   theme: 'dark',
   view_mode: 'grid',
   group_by_category: false,
@@ -68,6 +69,25 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export function iconsDir(): string {
   const dir = path.join(app.getPath('userData'), 'icons')
   fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/**
+ * 存档备份根目录，并保证它存在。
+ *
+ * 设置为空时退回用户数据目录下的 save-backups —— 和 icons 同一个套路：
+ * 「不设置也能用」比「先去设置里指一个」少一道门槛，而想换位置的人随时能换。
+ * 目录建不出来（盘拔了、没权限）时原样返回路径，让备份那一层去报真实的错误 ——
+ * 在这里抛会让设置页整个打不开。
+ */
+export function saveBackupRoot(): string {
+  const configured = getSettings().save_backup_root.trim()
+  const dir = configured || path.join(app.getPath('userData'), 'save-backups')
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+  } catch {
+    /* 交给上层报错 */
+  }
   return dir
 }
 

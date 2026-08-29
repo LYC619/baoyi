@@ -100,6 +100,20 @@ import {
 } from '../electron/kinds/game/db.ts'
 import { acceptSavePaths, limitGameTags } from '../electron/kinds/game/tools.ts'
 import { candidatePrompt, fillGameSystem } from '../electron/kinds/game/prompts.ts'
+import {
+  backupFolder,
+  createBackup,
+  deleteBackup,
+  gameFolder,
+  listBackups,
+  MANIFEST,
+  PAYLOAD,
+  restoreBackup,
+  restoreBlocked,
+  stamp,
+  type GameLike
+} from '../electron/kinds/game/backup.ts'
+import { isDriveRoot, nestedInside as nestedInsideShared } from '../electron/services/fstree.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -1970,6 +1984,7 @@ async function main(): Promise<void> {
   })
 
   await gameIdentifySection()
+  await saveBackupSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -2475,6 +2490,452 @@ async function gameIdentifySection(): Promise<void> {
       1,
       '把用户的存档备份记录一起删了'
     )
+    d.close()
+  })
+
+  await fsp.rm(base, { recursive: true, force: true })
+}
+
+/* ==================== 存档备份 · Step 5 ==================== */
+
+/**
+ * 备份和还原是游戏模块里唯一会改写用户磁盘的一段，所以这一节全部跑**真实临时目录**。
+ * 用 fs mock 验它等于在验 mock 自己 —— 而这里要防的恰恰是真实文件系统的行为：
+ * 目标被占用、改名失败、复制到一半断掉。
+ */
+async function saveBackupSection(): Promise<void> {
+  console.log('\n存档备份 · 命名与护栏')
+
+  const HK: GameLike = {
+    id: 'aabbccddeeff',
+    name_zh: '空洞骑士',
+    name_en: 'Hollow Knight',
+    file_name: 'hollow_knight.exe'
+  }
+
+  await check('时间戳用本地时间，不是 UTC —— 用户在资源管理器里看的是这个', () => {
+    // 本地时间构造，所以断言也用本地取值，不写死时区
+    const at = new Date(2026, 7, 29, 14, 30, 12).getTime()
+    assert.equal(stamp(at), '20260829-143012')
+    // 个位数月份日期要补零，否则字典序排出来是乱的
+    assert.equal(stamp(new Date(2026, 0, 5, 9, 8, 7).getTime()), '20260105-090807')
+  })
+
+  await check('游戏文件夹名带 id 尾巴 —— 改名之后旧备份不会变成孤儿目录', () => {
+    assert.equal(gameFolder(HK), '空洞骑士_aabbcc')
+    // 改了名，尾巴不变，所以新备份还落在同一个文件夹里
+    assert.equal(gameFolder({ ...HK, name_zh: '空洞骑士（重制）' }), '空洞骑士（重制）_aabbcc')
+    // 名字里的非法字符要洗掉，否则目录根本建不出来
+    assert.equal(gameFolder({ ...HK, name_zh: 'A/B:C?' }), 'ABC_aabbcc')
+    // 一个名字都没有时退回主程序名，再退回兜底
+    assert.equal(
+      gameFolder({ id: '123456', name_zh: '', name_en: '', file_name: 'game.exe' }),
+      'game_123456'
+    )
+  })
+
+  await check('备份目录名带存档目录名 —— 一个游戏有好几条存档路径时才分得清', () => {
+    const at = new Date(2026, 7, 29, 14, 30, 12).getTime()
+    assert.equal(backupFolder('C:\\Users\\x\\AppData\\LocalLow\\TC\\HK', at), '20260829-143012_HK')
+    assert.equal(backupFolder('D:\\Games\\HK\\save\\', at), '20260829-143012_save')
+    assert.equal(backupFolder('D:\\', at), '20260829-143012_save', '盘根没有 basename，要有兜底')
+  })
+
+  await check('还原护栏：盘根、系统目录、包着备份根的路径一律拒绝', () => {
+    const root = 'D:\\备份'
+    const win = process.env.SystemRoot || 'C:\\Windows'
+
+    assert.equal(restoreBlocked('D:\\Games\\HK\\save', root), '', '正常路径不该被拦')
+
+    assert.match(restoreBlocked('', root), /没有记下存档路径/)
+    assert.match(restoreBlocked('   ', root), /没有记下存档路径/)
+    assert.match(restoreBlocked('save\\HK', root), /不是绝对路径/)
+    assert.match(restoreBlocked('D:\\', root), /盘根/)
+    assert.match(restoreBlocked('\\\\server\\share', root), /盘根/, '整个网络共享和整个盘一样坏')
+    // 裸盘符是「D 盘上的当前目录」而不是盘根 —— 含义取决于进程 cwd，
+    // 所以按「不是绝对路径」拒掉才对，猜它指哪儿本身就是错的
+    assert.match(restoreBlocked('D:', root), /不是绝对路径/)
+    assert.match(restoreBlocked(path.join(win, 'System32'), root), /系统目录/)
+    assert.match(restoreBlocked(win, root), /系统目录/)
+    assert.match(
+      restoreBlocked(process.env.ProgramData || 'C:\\ProgramData', root),
+      /系统目录/
+    )
+
+    // 这一条是最要紧的：备份根在还原目标里面，还原第一步就会删掉备份自己
+    assert.match(restoreBlocked('D:\\', 'D:\\备份'), /盘根/)
+    assert.match(restoreBlocked('D:\\资料', 'D:\\资料\\备份'), /备份本身/)
+    // 反过来不拦：存档在备份根里面是奇怪但不致命的，备份那一层会单独拒它
+    assert.equal(restoreBlocked('D:\\备份\\某游戏存档', 'D:\\备份'), '')
+  })
+
+  await check('盘根判断：两种分隔符和 UNC 共享根都认，裸盘符刻意不认', () => {
+    assert.equal(isDriveRoot('D:\\'), true)
+    assert.equal(isDriveRoot('d:/'), true)
+    assert.equal(isDriveRoot('\\\\server\\share'), true, 'UNC 共享根也是「一整个」')
+    assert.equal(isDriveRoot('D:\\Games'), false)
+    assert.equal(isDriveRoot('D:\\Games\\'), false)
+    // 裸盘符是 cwd 相对的，resolve 出来是个普通目录。这里返回 false 是诚实的 ——
+    // 拦它是 restoreBlocked 里「不是绝对路径」那一条的职责
+    assert.equal(isDriveRoot('D:'), false)
+  })
+
+  await check('路径包含判断把正斜杠也算上 —— 库里的路径两种分隔符都有', () => {
+    // 原来只比 `\`，于是 D:/备份 这种写法整个漏过去，护栏形同不存在
+    assert.equal(nestedInsideShared('D:\\备份', 'D:/备份/游戏'), true)
+    assert.equal(nestedInsideShared('D:/备份', 'D:\\备份\\游戏'), true)
+    assert.equal(nestedInsideShared('D:\\备份', 'D:\\备份2\\游戏'), false, '同前缀的兄弟目录不算')
+  })
+
+  /* ==================== 真实磁盘 ==================== */
+  console.log('\n存档备份 · 备份与还原（真实磁盘）')
+
+  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-bk-'))
+  const backupRoot = path.join(base, '备份根')
+  await fsp.mkdir(backupRoot, { recursive: true })
+
+  const freshDb = (): InstanceType<typeof DatabaseSync> => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    return d
+  }
+
+  /** 铺一个存档目录：两个文件 + 一层子目录 */
+  const makeSave = async (name: string, body = 'save-v1'): Promise<string> => {
+    const dir = path.join(base, name)
+    await fsp.mkdir(path.join(dir, 'slots'), { recursive: true })
+    await fsp.writeFile(path.join(dir, 'user1.dat'), body)
+    await fsp.writeFile(path.join(dir, 'slots', 'slot1.sav'), `${body}-slot`)
+    return dir
+  }
+
+  await check('备份一次：拷贝完整、说明文件在载荷之外、库里记一行', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档A')
+    const r = await createBackup(d as any, HK, save, { backupRoot })
+    assert.ok(r.ok, `备份失败：${r.message}`)
+    const b = r.backup!
+
+    // 拷贝在 save/ 子目录里，一个文件不少
+    assert.equal(await fsp.readFile(path.join(b.backup_dir, PAYLOAD, 'user1.dat'), 'utf-8'), 'save-v1')
+    assert.equal(
+      await fsp.readFile(path.join(b.backup_dir, PAYLOAD, 'slots', 'slot1.sav'), 'utf-8'),
+      'save-v1-slot'
+    )
+    // 说明文件必须在载荷**之外** —— 在里面的话还原时会被复制进用户的存档目录
+    assert.ok(fs.existsSync(path.join(b.backup_dir, MANIFEST)), '说明文件没写出来')
+    assert.equal(
+      fs.existsSync(path.join(b.backup_dir, PAYLOAD, MANIFEST)),
+      false,
+      '说明文件写进载荷了，还原时会污染用户的存档目录'
+    )
+
+    // 体量按拷贝算
+    assert.equal(b.file_count, 2)
+    assert.equal(b.size_bytes, 'save-v1'.length + 'save-v1-slot'.length)
+    // 目录落在「游戏名_id / 时间戳_存档名」下
+    assert.equal(path.basename(path.dirname(b.backup_dir)), '空洞骑士_aabbcc')
+
+    assert.deepEqual(listBackups(d as any, HK.id).map((x) => x.id), [b.id])
+    d.close()
+  })
+
+  await check('同一秒备两次不合并，第二份让位到 -2', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档B')
+    const now = Date.now()
+    const first = await createBackup(d as any, HK, save, { backupRoot, now })
+    const second = await createBackup(d as any, HK, save, { backupRoot, now })
+    assert.ok(first.ok && second.ok, '两次都该成功')
+    assert.notEqual(first.backup!.backup_dir, second.backup!.backup_dir, '第二份覆盖了第一份')
+    assert.match(second.backup!.backup_dir, /-2$/)
+    // 两份都是完整的，不是一份被合并进另一份
+    assert.equal(listBackups(d as any, HK.id).length, 2)
+    d.close()
+  })
+
+  await check('空存档目录不备份 —— 备一份空的等于让用户以为自己有备份', async () => {
+    const d = freshDb()
+    const empty = path.join(base, '空存档')
+    await fsp.mkdir(empty, { recursive: true })
+    const r = await createBackup(d as any, HK, empty, { backupRoot })
+    assert.equal(r.ok, false)
+    assert.match(r.message, /一个文件都没有/)
+    assert.equal(listBackups(d as any, HK.id).length, 0, '失败了却记了一行')
+    d.close()
+  })
+
+  await check('存档目录不存在时给出可读的原因，不抛异常也不记账', async () => {
+    const d = freshDb()
+    const r = await createBackup(d as any, HK, path.join(base, '并不存在'), { backupRoot })
+    assert.equal(r.ok, false)
+    assert.match(r.message, /不在了/)
+    assert.equal(listBackups(d as any, HK.id).length, 0)
+    d.close()
+  })
+
+  await check('没设备份根时明说去哪儿设，而不是往当前目录乱写', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档C')
+    const r = await createBackup(d as any, HK, save, { backupRoot: '' })
+    assert.equal(r.ok, false)
+    assert.match(r.message, /备份目录/)
+    d.close()
+  })
+
+  await check('存档目录和备份根互相嵌套时拒绝 —— 否则一边读一边往自己里面写', async () => {
+    const d = freshDb()
+    // 存档在备份根里面
+    const inside = path.join(backupRoot, '某游戏存档')
+    await fsp.mkdir(inside, { recursive: true })
+    await fsp.writeFile(path.join(inside, 'a.sav'), 'x')
+    const r1 = await createBackup(d as any, HK, inside, { backupRoot })
+    assert.equal(r1.ok, false)
+    assert.match(r1.message, /自我嵌套/)
+
+    // 备份根在存档里面
+    const outer = await makeSave('存档D')
+    const r2 = await createBackup(d as any, HK, outer, { backupRoot: path.join(outer, '备份') })
+    assert.equal(r2.ok, false)
+    assert.match(r2.message, /自我嵌套/)
+    d.close()
+  })
+
+  await check('还原：先自动备份当前存档，再把旧内容换回来', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档E', 'save-v1')
+    const made = await createBackup(d as any, HK, save, { backupRoot })
+    assert.ok(made.ok)
+
+    // 玩了一会儿，存档变了，还多了一个文件
+    await fsp.writeFile(path.join(save, 'user1.dat'), 'save-v2')
+    await fsp.writeFile(path.join(save, 'user2.dat'), 'new-slot')
+
+    const r = await restoreBackup(d as any, made.backup!.id, HK, { backupRoot })
+    assert.ok(r.ok, `还原失败：${r.message}`)
+
+    // 旧内容回来了
+    assert.equal(await fsp.readFile(path.join(save, 'user1.dat'), 'utf-8'), 'save-v1')
+    // 还原是**替换**而不是合并：备份里没有的文件不该留下来
+    assert.equal(fs.existsSync(path.join(save, 'user2.dat')), false, '还原成了合并，不是替换')
+    assert.equal(
+      await fsp.readFile(path.join(save, 'slots', 'slot1.sav'), 'utf-8'),
+      'save-v1-slot'
+    )
+
+    // 这是还原敢做的全部理由：还原前那一刻的存档必须留了一份
+    assert.ok(r.safety, '没有自动备份当前存档')
+    assert.equal(
+      await fsp.readFile(path.join(r.safety!.backup_dir, PAYLOAD, 'user1.dat'), 'utf-8'),
+      'save-v2',
+      '自动备份里不是还原前的内容'
+    )
+    assert.ok(
+      fs.existsSync(path.join(r.safety!.backup_dir, PAYLOAD, 'user2.dat')),
+      '还原前多出来的那个文件没被备份下来'
+    )
+    // 自动备份也进列表：用户得看得见它，才能再还原回来
+    assert.equal(listBackups(d as any, HK.id).length, 2)
+
+    // 临时目录不许留下来
+    for (const suffix of ['.baoyi_restore_tmp', '.baoyi_replaced_tmp']) {
+      assert.equal(fs.existsSync(`${save}${suffix}`), false, `${suffix} 没清掉`)
+    }
+    d.close()
+  })
+
+  await check('存档目录已被删掉时，还原直接建出来，不需要先有个空目录', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档F')
+    const made = await createBackup(d as any, HK, save, { backupRoot })
+    await fsp.rm(save, { recursive: true, force: true })
+
+    const r = await restoreBackup(d as any, made.backup!.id, HK, { backupRoot })
+    assert.ok(r.ok, `还原失败：${r.message}`)
+    assert.equal(await fsp.readFile(path.join(save, 'user1.dat'), 'utf-8'), 'save-v1')
+    // 没有当前存档可备，safety 就该是 null，而不是一份空备份
+    assert.equal(r.safety, null, '给一个不存在的存档做了「还原前备份」')
+    d.close()
+  })
+
+  await check('备份内容被手工删掉时，还原拒绝执行且不碰当前存档', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档G', 'live')
+    const made = await createBackup(d as any, HK, save, { backupRoot })
+    await fsp.rm(made.backup!.backup_dir, { recursive: true, force: true })
+
+    const r = await restoreBackup(d as any, made.backup!.id, HK, { backupRoot })
+    assert.equal(r.ok, false)
+    assert.match(r.message, /已经不在磁盘上/)
+    // 当前存档必须完好 —— 这一条挡的是「还原到一个空目录」
+    assert.equal(await fsp.readFile(path.join(save, 'user1.dat'), 'utf-8'), 'live')
+    assert.equal(r.safety, null, '备份都没了还去动当前存档')
+    d.close()
+  })
+
+  await check('游戏条目已被移除，备份照样能还原 —— 用户要的是存档，不是库里那一行', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档H', 'orphan-v1')
+    const made = await createBackup(d as any, HK, save, { backupRoot })
+    await fsp.writeFile(path.join(save, 'user1.dat'), 'orphan-v2')
+
+    // game 传 null：模拟条目已从库里移除（save_backups 刻意没有外键）
+    const r = await restoreBackup(d as any, made.backup!.id, null, { backupRoot })
+    assert.ok(r.ok, `还原失败：${r.message}`)
+    assert.equal(await fsp.readFile(path.join(save, 'user1.dat'), 'utf-8'), 'orphan-v1')
+    // 自动备份也得落下来，只是名字退回存档目录名
+    assert.ok(r.safety, '孤儿备份还原时没有自动备份当前存档')
+    assert.match(path.dirname(r.safety!.backup_dir), /存档H_orphan$/)
+    d.close()
+  })
+
+  await check('上一次还原留下的临时目录会挡住这一次，并说清该清理哪个', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档I', 'keep')
+    const made = await createBackup(d as any, HK, save, { backupRoot })
+
+    const stale = `${save}.baoyi_restore_tmp`
+    await fsp.mkdir(stale, { recursive: true })
+
+    const r = await restoreBackup(d as any, made.backup!.id, HK, { backupRoot })
+    assert.equal(r.ok, false)
+    assert.match(r.message, /已存在/)
+    assert.match(r.message, /手工清理/)
+    // 当前存档不能被动
+    assert.equal(await fsp.readFile(path.join(save, 'user1.dat'), 'utf-8'), 'keep')
+    await fsp.rm(stale, { recursive: true, force: true })
+    d.close()
+  })
+
+  await check('删一份备份：磁盘上的拷贝和库里的记录一起走', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档J')
+    const made = await createBackup(d as any, HK, save, { backupRoot })
+    const dir = made.backup!.backup_dir
+
+    const r = await deleteBackup(d as any, made.backup!.id)
+    assert.ok(r.ok, r.message)
+    assert.equal(fs.existsSync(dir), false, '磁盘上的拷贝没删掉')
+    assert.equal(listBackups(d as any, HK.id).length, 0, '记录没删掉')
+    // 删备份不该碰源存档
+    assert.ok(fs.existsSync(path.join(save, 'user1.dat')), '把用户的存档删了')
+    d.close()
+  })
+
+  await check('备份目录已经不在时，删记录照样成功 —— 否则那一行永远删不掉', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档K')
+    const made = await createBackup(d as any, HK, save, { backupRoot })
+    await fsp.rm(made.backup!.backup_dir, { recursive: true, force: true })
+
+    const r = await deleteBackup(d as any, made.backup!.id)
+    assert.ok(r.ok, r.message)
+    assert.equal(listBackups(d as any, HK.id).length, 0)
+    d.close()
+  })
+
+  /* ---------------- 单文件存档：老游戏 / RPG Maker / 模拟器 ---------------- */
+
+  await check('单个文件的存档也备得下来 —— 老游戏常常就是一个 .sav', async () => {
+    const d = freshDb()
+    const file = path.join(base, '单文件', 'user1.sav')
+    await fsp.mkdir(path.dirname(file), { recursive: true })
+    await fsp.writeFile(file, 'single-v1')
+
+    const r = await createBackup(d as any, HK, file, { backupRoot })
+    assert.ok(r.ok, `单文件存档没能备份：${r.message}`)
+    // 载荷永远是个目录，单文件放在里面 —— 于是还原、删除、算体量只有一种形状
+    assert.equal(
+      await fsp.readFile(path.join(r.backup!.backup_dir, PAYLOAD, 'user1.sav'), 'utf-8'),
+      'single-v1'
+    )
+    assert.equal(r.backup!.file_count, 1)
+    assert.equal(r.backup!.size_bytes, 'single-v1'.length)
+    d.close()
+  })
+
+  await check('空文件不备份，理由和空目录同一条', async () => {
+    const d = freshDb()
+    const file = path.join(base, '空文件', 'empty.sav')
+    await fsp.mkdir(path.dirname(file), { recursive: true })
+    await fsp.writeFile(file, '')
+    const r = await createBackup(d as any, HK, file, { backupRoot })
+    assert.equal(r.ok, false)
+    assert.match(r.message, /空的/)
+    d.close()
+  })
+
+  await check('还原单文件存档：写回的是文件本身，不是一个同名目录', async () => {
+    const d = freshDb()
+    const file = path.join(base, '单文件还原', 'save.dat')
+    await fsp.mkdir(path.dirname(file), { recursive: true })
+    await fsp.writeFile(file, 'v1')
+
+    const made = await createBackup(d as any, HK, file, { backupRoot })
+    assert.ok(made.ok, made.message)
+    await fsp.writeFile(file, 'v2-played-further')
+
+    const r = await restoreBackup(d as any, made.backup!.id, HK, { backupRoot })
+    assert.ok(r.ok, `还原失败：${r.message}`)
+    // 最要紧的一条：它必须还是一个文件。写成目录的话游戏当场读不到存档
+    assert.ok((await fsp.stat(file)).isFile(), '单文件存档被还原成了一个目录')
+    assert.equal(await fsp.readFile(file, 'utf-8'), 'v1')
+    d.close()
+  })
+
+  await check('单文件存档还原前也要自动备份 —— 否则覆盖了就再也回不去', async () => {
+    const d = freshDb()
+    const file = path.join(base, '单文件退路', 'slot.sav')
+    await fsp.mkdir(path.dirname(file), { recursive: true })
+    await fsp.writeFile(file, 'old')
+
+    const made = await createBackup(d as any, HK, file, { backupRoot })
+    await fsp.writeFile(file, 'current-progress')
+
+    const r = await restoreBackup(d as any, made.backup!.id, HK, { backupRoot })
+    assert.ok(r.ok, `还原失败：${r.message}`)
+    // 这一条是回归测试：判断「当前存档有没有东西」原先只用 walkTree，
+    // 而 walkTree 对着一个文件会抛，异常被吞掉后结论是「不用备份」——
+    // 单文件存档于是被直接覆盖，还原这一步的退路整个消失
+    assert.ok(r.safety, '单文件存档还原前没有自动备份，覆盖之后回不去了')
+    assert.equal(
+      await fsp.readFile(path.join(r.safety!.backup_dir, PAYLOAD, 'slot.sav'), 'utf-8'),
+      'current-progress',
+      '自动备份里不是还原前那一刻的内容'
+    )
+    // 还原回来的是备份里那份
+    assert.equal(await fsp.readFile(file, 'utf-8'), 'old')
+    d.close()
+  })
+
+  await check('说明文件被删掉时，靠载荷形状也能认出这是单文件存档', async () => {
+    const d = freshDb()
+    const file = path.join(base, '无说明文件', 'q.sav')
+    await fsp.mkdir(path.dirname(file), { recursive: true })
+    await fsp.writeFile(file, 'q1')
+
+    const made = await createBackup(d as any, HK, file, { backupRoot })
+    // 手工删掉说明文件，模拟用户清理过备份目录
+    await fsp.rm(path.join(made.backup!.backup_dir, MANIFEST), { force: true })
+    await fsp.writeFile(file, 'q2')
+
+    const r = await restoreBackup(d as any, made.backup!.id, HK, { backupRoot })
+    assert.ok(r.ok, `还原失败：${r.message}`)
+    assert.ok((await fsp.stat(file)).isFile(), '没有说明文件时把单文件存档还原成了目录')
+    assert.equal(await fsp.readFile(file, 'utf-8'), 'q1')
+    d.close()
+  })
+
+  await check('备份列表新的在前', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档L')
+    const now = Date.now()
+    await createBackup(d as any, HK, save, { backupRoot, now: now - 86_400_000 })
+    await createBackup(d as any, HK, save, { backupRoot, now })
+    const list = listBackups(d as any, HK.id)
+    assert.equal(list.length, 2)
+    assert.ok(list[0].created_at > list[1].created_at, '旧的排在前面了')
     d.close()
   })
 
