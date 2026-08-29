@@ -12,6 +12,7 @@ import fs, { existsSync } from 'node:fs'
 import path from 'node:path'
 import type {
   GameCounts,
+  GameCoverSearchResult,
   GameItem,
   GameQuery,
   GameScanProgress,
@@ -24,7 +25,7 @@ import type {
   SavePathCheck,
   SaveRestoreResult
 } from '../../../src/types'
-import { app, shell } from 'electron'
+import { app, net, shell } from 'electron'
 import { runAgent, type AgentEvent } from '../../services/agent/loop'
 import {
   coversDir,
@@ -34,7 +35,24 @@ import {
   saveBackupRoot,
   tagPool
 } from '../../services/database'
-import { searchAvailable } from '../../services/searchService'
+import {
+  imageSearchAvailable,
+  imageSearchWhyNot,
+  searchAvailable,
+  searchImages
+} from '../../services/searchService'
+import {
+  acceptImageUrl,
+  candidatesFromSearch,
+  coverQueries,
+  extFromContentType,
+  finalizeCandidates,
+  pickSteamApps,
+  steamCoverCandidates,
+  steamSearchUrl,
+  MAX_COVER_BYTES,
+  type CoverCandidate
+} from './covers'
 import {
   createBackup,
   deleteBackup,
@@ -240,6 +258,220 @@ export function setGameCover(id: string, source: string): { ok: boolean; message
 export function clearGameCover(id: string): GameItem | null {
   dropCoverFiles(id)
   return updateGame(getDb(), id, { cover_path: '' })
+}
+
+/* ---------------------------- 封面联网搜索 ---------------------------- */
+
+const NET_TIMEOUT = 20_000
+
+/**
+ * 封面相关的网络请求一律走 `net.fetch`（Chromium 的网络栈），不用全局 `fetch`。
+ *
+ * 两个理由，第二个是决定性的：
+ *
+ * 1. **它认系统代理。** 全局 fetch 是 Node 的 undici，不读系统代理也不读
+ *    HTTP_PROXY。这台机器上实测：同一个商店接口 `net.fetch` 965ms 拿到 200，
+ *    全局 fetch 10.7 秒后 `fetch failed`。配了代理的用户正是最需要这个功能的人
+ *    （直连不稳），走 undici 等于对他们直接失效。
+ * 2. **它和渲染进程加载 `<img>` 走的是同一条路。** 候选图要先在界面上预览，
+ *    那张预览是 Chromium 发起的。用 undici 去「验证」一个地址可用，
+ *    再让 Chromium 去加载，两条路的代理、证书、UA 策略都不同 ——
+ *    可能验过了却显示不出来，那种不一致比验不过更难查。
+ *
+ * `net.fetch` 只在主进程可用，而这个文件本来就是那道 Electron 接缝。
+ */
+async function netFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  return net.fetch(url, { ...init, signal: AbortSignal.timeout(NET_TIMEOUT) })
+}
+
+/**
+ * 探一个候选图是否真的存在。
+ *
+ * 用 `Range: bytes=0-1023` 的 GET 而不是 HEAD：HEAD 在部分 CDN 上会被拒或不返回
+ * content-type。只拉 1 KB，十几个候选探一遍的代价可以忽略。
+ *
+ * 判据是 content-type 而不只是状态码。实测 Steam 对缺图的地址回的是规规矩矩的
+ * 404 + text/html（老游戏没有 library_600x900、DLC 和原声带条目四种图全缺），
+ * 状态码这一关就能挡住；但 content-type 这一关同时也挡住了「200 却不是图片」
+ * 那一类（图搜返回的地址里有这种），两道一起卡的成本是零。
+ */
+async function probeImage(url: string): Promise<{ ok: boolean; ext: string }> {
+  try {
+    const res = await netFetch(url, { headers: { Range: 'bytes=0-1023' } })
+    if (!res.ok && res.status !== 206) return { ok: false, ext: '' }
+    const ext = extFromContentType(res.headers.get('content-type') ?? '')
+    // 读掉这一小段，别让连接挂着
+    await res.arrayBuffer().catch(() => undefined)
+    return { ok: ext !== '', ext }
+  } catch {
+    return { ok: false, ext: '' }
+  }
+}
+
+/** 分批并发，别一次把十几个请求全甩出去 */
+async function inBatches<T, R>(items: T[], size: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = []
+  for (let i = 0; i < items.length; i += size) {
+    out.push(...(await Promise.all(items.slice(i, i + size).map(fn))))
+  }
+  return out
+}
+
+/** 查一次 Steam 商店搜索，返回它认得的几个 app */
+async function steamApps(query: string): Promise<Array<{ id: number; name: string }>> {
+  const res = await netFetch(steamSearchUrl(query))
+  if (!res.ok) throw new Error(`Steam 搜索返回 HTTP ${res.status}`)
+  const json: any = await res.json()
+  const items: any[] = Array.isArray(json?.items) ? json.items : []
+  return pickSteamApps(items, query)
+}
+
+/**
+ * 搜封面：Steam 为主，配置了图搜的话再补一轮。
+ *
+ * 空结果**一定带原因**（`message`），不静默返回空数组 —— 用户按了按钮什么都没发生
+ * 是最难排查的一种失败，而原因基本只有三类：网络不通、这个游戏不在 Steam 上、
+ * 服务商不支持图搜。三类的下一步动作完全不同，必须说清是哪一类。
+ */
+export async function searchGameCovers(id: string): Promise<GameCoverSearchResult> {
+  const game = getGame(getDb(), id)
+  if (!game) return { ok: false, message: '找不到这个游戏', candidates: [], query: '' }
+
+  const queries = coverQueries(game)
+  if (queries.length === 0) {
+    return { ok: false, message: '这个游戏没有可用的名字，先在详情页填一个再搜', candidates: [], query: '' }
+  }
+
+  const cfg = getSettings().search
+  const notes: string[] = []
+  const found: CoverCandidate[] = []
+  let usedQuery = queries[0]
+  let steamFailed = ''
+
+  for (const q of queries) {
+    usedQuery = q
+    let apps: Array<{ id: number; name: string }> = []
+    try {
+      apps = await steamApps(q)
+    } catch (err: any) {
+      // 网络层的失败要跟「查到了但没有」分开报：前者重试有用，后者重试没用
+      steamFailed = err?.message ?? '网络请求失败'
+      break
+    }
+    if (apps.length === 0) continue
+
+    const probed = await inBatches(
+      apps.flatMap((a) => steamCoverCandidates(a.id, a.name)),
+      5,
+      async (c) => ({ c, hit: await probeImage(c.url) })
+    )
+    found.push(...probed.filter((p) => p.hit.ok).map((p) => p.c))
+    if (found.length > 0) break // 第一个查到东西的名字就够了，不必把三个名字都烧一遍
+  }
+
+  // 图搜补一轮：Steam 上没有的小作品、模拟器 ROM、国产单机全靠这一层
+  if (imageSearchAvailable(cfg)) {
+    try {
+      const hits = await searchImages(`${usedQuery} game cover art`, cfg)
+      found.push(...candidatesFromSearch(hits))
+    } catch (err: any) {
+      notes.push(`图片搜索失败：${err?.message ?? '未知错误'}`)
+    }
+  } else {
+    const why = imageSearchWhyNot(cfg)
+    if (why) notes.push(`${why}，这次只查了 Steam`)
+  }
+
+  const candidates = finalizeCandidates(found)
+  if (candidates.length > 0) {
+    return {
+      ok: true,
+      message: notes.join('；'),
+      candidates,
+      query: usedQuery
+    }
+  }
+
+  // 一张都没有：把已知的原因拼齐，最后一定落到「手动选一张」这个可行动作上
+  const reasons = [
+    steamFailed ? `连不上 Steam（${steamFailed}）` : `Steam 上没找到「${usedQuery}」`,
+    ...notes
+  ]
+  return {
+    ok: false,
+    message: `${reasons.join('；')}。可以改一下游戏名再搜，或者直接手动选一张图。`,
+    candidates: [],
+    query: usedQuery
+  }
+}
+
+/**
+ * 下载一个候选封面并设成封面。
+ *
+ * 下完落到临时文件，再交给 `setGameCover` —— 拷进 covers/、清孤儿、写 cover_path
+ * 那一整套已经在那儿了，重写一遍迟早会漂。
+ *
+ * 三道卡：URL 必须过白名单（`acceptImageUrl`，挡的是「远端决定我们连哪台机器」）、
+ * content-type 必须是图片（扩展名以它为准，不信 URL 上写的）、
+ * 体积边下边数超了就断（content-length 可以撒谎，也可以干脆不给）。
+ */
+export async function setGameCoverFromUrl(
+  id: string,
+  url: string
+): Promise<{ ok: boolean; message: string }> {
+  if (!getGame(getDb(), id)) return { ok: false, message: '找不到这个游戏' }
+  if (!acceptImageUrl(url)) return { ok: false, message: '这个图片地址不在允许的来源里' }
+
+  let tmp = ''
+  try {
+    const res = await netFetch(url)
+    if (!res.ok) return { ok: false, message: `下载失败：HTTP ${res.status}` }
+
+    const ext = extFromContentType(res.headers.get('content-type') ?? '')
+    if (!ext) return { ok: false, message: '这个地址返回的不是图片' }
+
+    const declared = Number(res.headers.get('content-length') ?? 0)
+    if (declared > MAX_COVER_BYTES) {
+      return { ok: false, message: `图太大了（${(declared / 1024 / 1024).toFixed(1)} MB）` }
+    }
+    if (!res.body) return { ok: false, message: '下载失败：没有响应内容' }
+
+    // 用显式 reader 而不是 for-await：net.fetch 回的是 web ReadableStream，
+    // 它的异步迭代支持跟运行时版本有关，reader 在哪儿都成立
+    const reader = res.body.getReader()
+    const chunks: Buffer[] = []
+    let total = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      total += value.byteLength
+      // 边下边数：content-length 可以撒谎，也可以干脆不给
+      if (total > MAX_COVER_BYTES) {
+        await reader.cancel().catch(() => undefined)
+        return { ok: false, message: '图太大了，已中止下载' }
+      }
+      chunks.push(Buffer.from(value))
+    }
+    if (total === 0) return { ok: false, message: '下载到的是空文件' }
+
+    tmp = path.join(app.getPath('temp'), `baoyi-cover-${id}${ext}`)
+    fs.writeFileSync(tmp, Buffer.concat(chunks))
+
+    const r = setGameCover(id, tmp)
+    return r.ok ? { ok: true, message: '封面已设置' } : r
+  } catch (err: any) {
+    const msg = err?.name === 'TimeoutError' ? '下载超时' : (err?.message ?? '未知错误')
+    return { ok: false, message: `下载失败：${msg}` }
+  } finally {
+    if (tmp) {
+      try {
+        fs.rmSync(tmp, { force: true })
+      } catch {
+        /* 临时文件删不掉不影响封面已经设好这件事，系统会自己清 temp */
+      }
+    }
+  }
 }
 
 /** 关联文件的条数上限，给界面上那句提示用 —— 不让渲染进程自己写一个 20 */

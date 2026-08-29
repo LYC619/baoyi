@@ -73,7 +73,9 @@ import {
   restoreSaveBackup,
   reverifySavePath,
   scanGames,
+  searchGameCovers,
   setGameCover,
+  setGameCoverFromUrl,
   updateGameItem
 } from '../kinds/game/service'
 import { COVER_EXTS } from '../kinds/game/links'
@@ -259,6 +261,13 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   })
 
   ipcMain.handle('game:clear-cover', (_e, id: string) => clearGameCover(id))
+
+  ipcMain.handle('game:search-covers', (_e, id: string) => searchGameCovers(id))
+
+  ipcMain.handle('game:set-cover-url', async (_e, id: string, url: string) => {
+    const outcome = await setGameCoverFromUrl(id, url)
+    return { ...outcome, item: outcome.ok ? getGameItem(id) : null }
+  })
 
   /* ------------------------------ 分类 ------------------------------ */
   ipcMain.handle('categories:list', () => listCategories())

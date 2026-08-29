@@ -459,6 +459,35 @@ export interface SearchConfig {
   enabled: boolean
 }
 
+/**
+ * 一个候选封面图。
+ *
+ * `source` 只影响界面上那行来源说明；`portrait` 决定排序 —— 封面墙的框是 2:3 的，
+ * 横版图塞进去要裁掉两边，只能当兜底。
+ */
+export interface CoverCandidate {
+  url: string
+  label: string
+  source: 'steam' | 'search'
+  portrait: boolean
+  rank: number
+}
+
+/**
+ * 封面搜索的结果。
+ *
+ * `message` 在 `ok=false` 时**必须**有内容，且要说清是哪一类失败（网络不通 /
+ * 这个游戏查不到 / 服务商不支持图搜）—— 三类的下一步动作完全不同。
+ * `ok=true` 时它可能仍有内容，用来带一句「这次只查了 Steam」这样的补充说明。
+ */
+export interface GameCoverSearchResult {
+  ok: boolean
+  message: string
+  candidates: CoverCandidate[]
+  /** 实际用来搜的那个名字，界面上要显示出来，用户才知道该怎么改 */
+  query: string
+}
+
 /** 卡片标题用哪个名字打头，另一个降为副标题 */
 export type TitleLang = 'zh' | 'en'
 
@@ -931,6 +960,16 @@ export interface BaoyiApi {
     pickCover(id: string): Promise<{ ok: boolean; message: string; item: GameItem | null } | null>
     /** 撤掉封面，退回首字占位。磁盘上那份拷贝一起删 */
     clearCover(id: string): Promise<GameItem | null>
+    /**
+     * 联网搜候选封面（英文名优先）。主源是 Steam（不要 key），配了 Bing/SearXNG
+     * 图搜的话再补一轮。搜不到时 ok 为 false 且 message 说清原因，不静默返回空。
+     */
+    searchCovers(id: string): Promise<GameCoverSearchResult>
+    /** 下载某个候选封面并设成封面。走的是和手动选图同一套存储逻辑 */
+    setCoverFromUrl(
+      id: string,
+      url: string
+    ): Promise<{ ok: boolean; message: string; item: GameItem | null }>
   }
   categories: {
     list(): Promise<Category[]>

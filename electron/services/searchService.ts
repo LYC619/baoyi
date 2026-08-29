@@ -194,6 +194,72 @@ export async function testSearch(cfg: SearchConfig): Promise<{ ok: boolean; mess
   }
 }
 
+/* ------------------------------ 图片搜索 ------------------------------ */
+
+/**
+ * 图片搜索。返回的是**图片本身的地址**，不是承载图片的网页。
+ *
+ * 只有两家做得到：Bing 有独立的 `/images/search` 端点，SearXNG 支持
+ * `categories=images`。Tavily / Exa / Firecrawl 的接口只回网页，
+ * 拿网页地址当封面塞进 `<img>` 只会得到一张破图，所以它们直接报「不支持」
+ * 而不是勉强返回点什么 —— 让调用方能把这件事**说给用户听**。
+ */
+export function imageSearchAvailable(cfg: SearchConfig): boolean {
+  if (!searchAvailable(cfg)) return false
+  return cfg.provider === 'bing' || cfg.provider === 'searxng'
+}
+
+/** 当前配置为什么搜不了图 —— 这句话是要显示给用户的，所以分情况说清 */
+export function imageSearchWhyNot(cfg: SearchConfig): string {
+  if (!cfg.enabled) return '联网搜索没有开启'
+  if (cfg.provider === 'model_builtin') return '当前是「不额外联网」，没有可用的图片搜索'
+  if (cfg.provider === 'searxng' && !cfg.endpoint.trim()) return 'SearXNG 还没填实例地址'
+  if (!imageSearchAvailable(cfg)) {
+    return `${PROVIDER_LABELS[cfg.provider]} 的接口只返回网页、不返回图片地址，帮不上封面搜索`
+  }
+  return ''
+}
+
+export interface ImageHit {
+  url: string
+  title: string
+}
+
+export async function searchImages(query: string, cfg: SearchConfig): Promise<ImageHit[]> {
+  const q = query.trim()
+  if (!q || !imageSearchAvailable(cfg)) return []
+
+  if (cfg.provider === 'bing') {
+    const base = (cfg.endpoint || 'https://api.bing.microsoft.com/v7.0/images/search').replace(
+      /\/+$/,
+      ''
+    )
+    // endpoint 填的是网页搜索地址时，换成图片端点；否则原样用
+    const url = base.includes('/images/') ? base : base.replace(/\/search$/, '/images/search')
+    const json = await get(
+      `${url}?q=${encodeURIComponent(q)}&count=${MAX_HITS}&mkt=zh-CN`,
+      { 'Ocp-Apim-Subscription-Key': cfg.api_key }
+    )
+    const results: any[] = Array.isArray(json?.value) ? json.value : []
+    return results
+      .map((r) => ({ url: String(r?.contentUrl ?? ''), title: trimSnippet(r?.name) }))
+      .filter((r) => r.url)
+  }
+
+  const base = cfg.endpoint.replace(/\/+$/, '')
+  const json = await get(
+    `${base}/search?q=${encodeURIComponent(q)}&format=json&categories=images`
+  )
+  const results: any[] = Array.isArray(json?.results) ? json.results : []
+  return results
+    .slice(0, MAX_HITS)
+    .map((r) => ({
+      url: String(r?.img_src ?? r?.thumbnail_src ?? ''),
+      title: trimSnippet(r?.title)
+    }))
+    .filter((r) => r.url)
+}
+
 /** 把搜索结果转成回灌给模型的纯文本 */
 export function formatHits(query: string, hits: SearchHit[]): string {
   if (hits.length === 0) return `「${query}」没有搜到结果。请依据本地信息判断。`

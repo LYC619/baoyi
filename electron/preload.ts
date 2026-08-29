@@ -89,7 +89,10 @@ const api: BaoyiApi = {
     openLink: (id: string, target: string) => ipcRenderer.invoke('game:open-link', id, target),
     revealLink: (id: string, target: string) => ipcRenderer.invoke('game:reveal-link', id, target),
     pickCover: (id: string) => ipcRenderer.invoke('game:pick-cover', id),
-    clearCover: (id: string) => ipcRenderer.invoke('game:clear-cover', id)
+    clearCover: (id: string) => ipcRenderer.invoke('game:clear-cover', id),
+    searchCovers: (id: string) => ipcRenderer.invoke('game:search-covers', id),
+    setCoverFromUrl: (id: string, url: string) =>
+      ipcRenderer.invoke('game:set-cover-url', id, url)
   },
   categories: {
     list: () => ipcRenderer.invoke('categories:list'),

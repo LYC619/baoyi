@@ -27,15 +27,24 @@ import {
   Play,
   RotateCcw,
   Save,
+  Search,
   Trash2,
-  Unlink
+  Unlink,
+  X
 } from 'lucide-vue-next'
 import EditableField from '@/components/ui/EditableField.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import { useToast } from '@/composables/useToast'
 import { PLAY_STATUS_LABEL, useGameStore } from '@/stores/game'
 import { useSettingsStore } from '@/stores/settings'
-import type { GameItem, LinkedFile, PlayStatus, SaveBackup, SavePath } from '@/types'
+import type {
+  CoverCandidate,
+  GameItem,
+  LinkedFile,
+  PlayStatus,
+  SaveBackup,
+  SavePath
+} from '@/types'
 import {
   coverUrl,
   errorMessage,
@@ -100,8 +109,8 @@ const cover = computed(() =>
  * 换封面。主进程把图拷进 userData 再落库，所以这里拿回来的条目是最终形态，
  * 不用自己再 load 一次。
  *
- * 不做自动找封面（规划书里是 P2，仍然没做），所以这一条是**唯一**的上封面途径 ——
- * 界面上得让人找得到：占位封面本身就是那个按钮，鼠标移上去出现「换封面」。
+ * 和「搜封面」并列：搜不到、连不上、或者搜出来的都不满意时，这条路一定走得通。
+ * 所以搜索失败的提示里总是指回这里，不让用户卡在一个只会失败的按钮上。
  */
 async function pickCover(): Promise<void> {
   if (!item.value) return
@@ -125,6 +134,62 @@ async function clearCover(): Promise<void> {
   const updated = await window.baoyi.game.clearCover(item.value.id)
   if (updated) item.value = updated
   void store.load()
+}
+
+/* ---------------------------- 搜封面 ---------------------------- */
+
+const coverSearching = ref(false)
+const coverPicking = ref('')
+const coverHits = ref<CoverCandidate[]>([])
+const coverQuery = ref('')
+/** 搜过一轮但一张都没有时显示的那句话。跟 toast 分开 —— 面板里要一直看得见 */
+const coverMiss = ref('')
+
+async function searchCovers(): Promise<void> {
+  if (!item.value || coverSearching.value) return
+  coverSearching.value = true
+  coverMiss.value = ''
+  coverHits.value = []
+  try {
+    const r = await window.baoyi.game.searchCovers(item.value.id)
+    coverQuery.value = r.query
+    coverHits.value = r.candidates
+    if (!r.ok) {
+      // 搜不到不是异常，是一个要说清原因的正常结果 —— 面板里留着，
+      // 用户才看得到「改个名字再搜」或者「手动选一张」这两条下一步
+      coverMiss.value = r.message
+      return
+    }
+    if (r.message) toast(r.message)
+  } catch (err: any) {
+    coverMiss.value = `搜索出错：${err?.message ?? '未知错误'}`
+  } finally {
+    coverSearching.value = false
+  }
+}
+
+async function useCover(url: string): Promise<void> {
+  if (!item.value || coverPicking.value) return
+  coverPicking.value = url
+  try {
+    const r = await window.baoyi.game.setCoverFromUrl(item.value.id, url)
+    if (!r.ok) {
+      error(r.message)
+      return
+    }
+    if (r.item) item.value = r.item
+    void store.load()
+    coverHits.value = []
+    coverMiss.value = ''
+    success(r.message)
+  } finally {
+    coverPicking.value = ''
+  }
+}
+
+function closeCoverHits(): void {
+  coverHits.value = []
+  coverMiss.value = ''
 }
 
 /** 走 store 而不是直接调 IPC：卡片墙和侧边栏计数要跟着一起更新 */
@@ -552,14 +617,25 @@ function copyPath(path: string): void {
         <div class="col col--main">
           <section class="hero panel">
             <!--
-              封面本身就是「换封面」那个按钮：自动找封面没做，这是唯一的入口，
-              藏在别处等于没有。悬停才显形，不占静态视觉重量
+              封面本身就是那几个按钮的入口，藏在别处等于没有。
+              悬停才显形，不占静态视觉重量。「搜封面」排在最前 —— 它是不用离开
+              应用就能完成的那条路，手动选图要开系统对话框
             -->
             <div class="hero__cover" :style="{ '--hue': hue }">
               <img v-if="cover" :src="cover" :alt="title" class="hero__img" />
               <span v-else class="hero__initial">{{ initial }}</span>
 
               <div class="hero__coverActs">
+                <button
+                  class="hero__coverBtn"
+                  :disabled="coverSearching"
+                  title="按游戏名联网找封面（英文名优先）"
+                  @click="searchCovers"
+                >
+                  <Loader2 v-if="coverSearching" :size="13" class="spin" />
+                  <Search v-else :size="13" />
+                  {{ coverSearching ? '搜索中' : '搜封面' }}
+                </button>
                 <button class="hero__coverBtn" :title="item.cover_path ? '换一张封面' : '选一张封面图'" @click="pickCover">
                   <Image :size="13" />
                   {{ item.cover_path ? '换封面' : '加封面' }}
@@ -601,6 +677,47 @@ function copyPath(path: string): void {
                   {{ PLAY_STATUS_LABEL[s] }}
                 </button>
               </div>
+            </div>
+          </section>
+
+          <!--
+            搜到的候选封面。只在搜过之后出现，不是常驻区块 ——
+            平时它是空的，占着一块地方只会让详情页更长。
+            搜不到时这里显示原因和下一步，而不是一句「没有结果」就没了
+          -->
+          <section v-if="coverHits.length > 0 || coverMiss" class="panel">
+            <h2 class="sec-title">
+              <Image :size="14" />
+              候选封面
+              <span v-if="coverQuery" class="sec-title__note">按「{{ coverQuery }}」搜的</span>
+              <button class="sec-title__act" title="收起" @click="closeCoverHits">
+                <X :size="13" />
+                收起
+              </button>
+            </h2>
+
+            <p v-if="coverMiss" class="hint">
+              {{ coverMiss }}
+            </p>
+
+            <div v-if="coverHits.length > 0" class="covers">
+              <button
+                v-for="c in coverHits"
+                :key="c.url"
+                class="coverPick"
+                :class="{ 'coverPick--busy': coverPicking === c.url }"
+                :disabled="!!coverPicking"
+                :title="`${c.label}\n${c.url}`"
+                @click="useCover(c.url)"
+              >
+                <!-- referrerpolicy：部分图床对带 referer 的请求回 403。
+                     这里加载的是候选预览图，正式采用之后走的是本地 baoyi:// -->
+                <img :src="c.url" :alt="c.label" class="coverPick__img" referrerpolicy="no-referrer" />
+                <span class="coverPick__label truncate">{{ c.label }}</span>
+                <span v-if="coverPicking === c.url" class="coverPick__busy">
+                  <Loader2 :size="18" class="spin" />
+                </span>
+              </button>
             </div>
           </section>
 
@@ -943,6 +1060,72 @@ function copyPath(path: string): void {
   font-weight: 400;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+}
+
+/* 标题里的补充说明（「按 xxx 搜的」）—— 用户得知道搜的是哪个名字才知道怎么改 */
+.sec-title__note {
+  font-size: var(--fs-tag);
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+/* ------------------------------- 候选封面 ------------------------------- */
+
+/*
+  2:3 的格子，和封面墙一致 —— 用户在这儿看到的比例就是采用之后看到的比例。
+  auto-fill + minmax 让它跟着面板宽度自己决定一行放几个
+*/
+.covers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+}
+
+.coverPick {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.coverPick:hover:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+.coverPick:disabled {
+  cursor: default;
+}
+
+.coverPick__img {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  display: block;
+  /* 加载失败的候选留一块空位而不是破图icon —— 破图比空位更像是应用坏了 */
+  background: var(--bg-raised);
+}
+
+.coverPick__label {
+  padding: 0 6px 6px;
+  font-size: var(--fs-tag);
+  color: var(--text-faint);
+  text-align: left;
+}
+
+.coverPick__busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 45%);
+  color: #fff;
 }
 
 /* ------------------------------- 头部卡片 ------------------------------- */

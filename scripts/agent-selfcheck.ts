@@ -122,6 +122,22 @@ import {
   removeLink
 } from '../electron/kinds/game/links.ts'
 import {
+  acceptImageUrl,
+  candidatesFromSearch,
+  cleanQuery,
+  coverQueries,
+  extFromContentType,
+  finalizeCandidates,
+  MAX_CANDIDATES,
+  MAX_COVER_BYTES,
+  pickSteamApps,
+  steamCoverCandidates
+} from '../electron/kinds/game/covers.ts'
+import {
+  imageSearchAvailable,
+  imageSearchWhyNot
+} from '../electron/services/searchService.ts'
+import {
   backupFolder,
   createBackup,
   deleteBackup,
@@ -3487,6 +3503,200 @@ async function linksAndCoverSection(): Promise<void> {
     const a = coverUrlOf('D:\\covers\\id1.png', 1000)
     const b = coverUrlOf('D:\\covers\\id1.png', 2000)
     assert.notEqual(a, b, '换封面之后 URL 必须变，否则 Chromium 继续用缓存里那张旧图')
+  })
+
+  console.log('\n封面 · 联网搜索')
+
+  await check('查询词英文名优先 —— 商店和图床都以英文原名建索引', () => {
+    // 「艾尔登法环」在 Steam 商店搜索里查不到，Elden Ring 一发就中。
+    // 这不是偏好，是命中率决定的
+    const qs = coverQueries({ name_zh: '艾尔登法环', name_en: 'Elden Ring' })
+    assert.equal(qs[0], 'Elden Ring')
+    assert.equal(qs[1], '艾尔登法环', '中文名要留着当第二顺位，不是丢掉')
+  })
+
+  await check('没有英文名时退到中文名，两个都没有时退到目录名', () => {
+    assert.deepEqual(coverQueries({ name_zh: '中华三国志' }), ['中华三国志'])
+    const only = coverQueries({ source_dir: 'E:\\游戏\\洛克王国：世界(2002304)' })
+    assert.equal(only.length, 1)
+    assert.ok(!only[0].includes('2002304'), 'appid 尾巴该被剥掉')
+    assert.ok(!only[0].includes('E:\\'), '要的是目录名，不是整条路径')
+  })
+
+  await check('查询词去重，不拿同一个名字白烧两次请求', () => {
+    // 中英文名填了同一个词很常见（识别时只认出一个）。
+    // 大小写不同也算同一条，留下的是英文名那个（它先入列）
+    const qs = coverQueries({ name_zh: 'Hades', name_en: 'hades' })
+    assert.equal(qs.length, 1)
+    assert.equal(qs[0].toLowerCase(), 'hades')
+  })
+
+  await check('清词只删有把握的噪声，不动游戏名本身', () => {
+    assert.equal(cleanQuery('Elden Ring v1.12 [中文汉化]'), 'Elden Ring')
+    assert.equal(cleanQuery('Hades_Deluxe Edition'), 'Hades')
+    assert.equal(cleanQuery('The Witcher 3 REPACK'), 'The Witcher 3')
+    // 罗马数字和数字编号是名字的一部分，删过头比不删更糟
+    assert.equal(cleanQuery('Final Fantasy VII'), 'Final Fantasy VII')
+    assert.equal(cleanQuery('Portal 2'), 'Portal 2')
+  })
+
+  await check('Steam 候选竖版排前面 —— 封面墙的框是 2:3 的', () => {
+    const list = steamCoverCandidates(367520, 'Hollow Knight')
+    assert.ok(list.length >= 3)
+    assert.ok(list[0].portrait, '第一个必须是竖版')
+    assert.ok(list[0].url.includes('367520'), 'appid 要拼进地址')
+    // 横版图塞进 2:3 会被裁掉两边，只能当兜底
+    const lastPortrait = list.findLastIndex((c) => c.portrait)
+    const firstLandscape = list.findIndex((c) => !c.portrait)
+    assert.ok(lastPortrait < firstLandscape, '竖版和横版不该交错')
+  })
+
+  await check('appid 不是纯数字时一个候选都不给，不拼出畸形地址', () => {
+    assert.equal(steamCoverCandidates('abc').length, 0)
+    assert.equal(steamCoverCandidates('').length, 0)
+    assert.equal(steamCoverCandidates('12; rm -rf').length, 0)
+  })
+
+  await check('Steam 选 app 只做相等和包含两级，不做模糊距离', () => {
+    // 模糊匹配会把 Portal 匹到 Portal 2 上，而封面错了比没封面更糟
+    const items = [
+      { id: 620, name: 'Portal 2' },
+      { id: 400, name: 'Portal' },
+      { id: 1, name: '完全不相关的游戏' }
+    ]
+    const picked = pickSteamApps(items, 'Portal')
+    assert.equal(picked[0].id, 400, '完全相等的必须排第一')
+    assert.ok(picked.some((p) => p.id === 620), '包含关系的留作候选让用户在图上选')
+  })
+
+  await check('Steam 结果里 id 不合法的条目直接丢掉', () => {
+    const picked = pickSteamApps(
+      [{ id: 'x', name: 'A' }, { id: 0, name: 'B' }, { id: 400, name: 'Portal' }] as any,
+      'Portal'
+    )
+    assert.equal(picked.length, 1)
+    assert.equal(picked[0].id, 400)
+  })
+
+  await check('DLC 和原声带滤掉 —— 实测它们四种封面图全都不存在', () => {
+    // 真机验过：「ELDEN RING Tarnished Pack」「Sultan's Game - Original Soundtrack」
+    // 这类条目跟本体一起从商店搜索回来，但 library_600x900 / portrait / header 全 404。
+    // 不滤掉就是每条白烧 4 次探测请求换回一个空
+    const picked = pickSteamApps(
+      [
+        { id: 1245620, name: 'ELDEN RING', type: 'app' },
+        { id: 3655690, name: 'ELDEN RING Tarnished Pack', type: 'dlc' },
+        { id: 999, name: 'ELDEN RING Bundle', type: 'bundle' }
+      ],
+      'Elden Ring'
+    )
+    assert.deepEqual(picked.map((p) => p.id), [1245620])
+  })
+
+  await check('没有 type 字段时当本体处理，不因为接口改字段就一个都不给', () => {
+    // 商店接口是外部依赖，字段随时可能变。宁可多探几次，不要整个功能静默失效
+    const picked = pickSteamApps([{ id: 400, name: 'Portal' }], 'Portal')
+    assert.equal(picked.length, 1)
+  })
+
+  await check('URL 白名单挡的是「远端决定我们连哪台机器」，不是防御性代码', () => {
+    // 候选 URL 一半来自搜索服务商的返回，等于外部输入。不设白名单，
+    // 一个被污染的搜索结果就能让抱一去访问任意地址
+    assert.ok(acceptImageUrl('https://cdn.cloudflare.steamstatic.com/steam/apps/400/x.jpg'))
+    assert.ok(!acceptImageUrl('https://evil.example.com/x.jpg'), '白名单外的主机必须拒')
+    assert.ok(!acceptImageUrl('http://cdn.cloudflare.steamstatic.com/x.jpg'), 'http 必须拒')
+    assert.ok(!acceptImageUrl('file:///C:/Windows/System32/x.png'), 'file:// 必须拒')
+    assert.ok(!acceptImageUrl('not a url'))
+    assert.ok(!acceptImageUrl(''))
+  })
+
+  await check('看起来不是图片的地址不进候选', () => {
+    assert.ok(!acceptImageUrl('https://cdn.cloudflare.steamstatic.com/steam/apps/400/'))
+    assert.ok(!acceptImageUrl('https://cdn.cloudflare.steamstatic.com/a.exe'), '.exe 不该当封面')
+    assert.ok(!acceptImageUrl('https://cdn.cloudflare.steamstatic.com/a.html'))
+  })
+
+  await check('扩展名以 content-type 为准，不信 URL 上写的那个', () => {
+    // 远端完全可以在 .png 地址上回一张 jpeg，而扩展名写错的文件
+    // 在 <img> 里未必渲染得出来
+    assert.equal(extFromContentType('image/jpeg'), '.jpg')
+    assert.equal(extFromContentType('image/png; charset=binary'), '.png')
+    assert.equal(extFromContentType('image/webp'), '.webp')
+    assert.equal(extFromContentType('text/html'), '', '非图片必须返回空串让调用方拒掉')
+    assert.equal(extFromContentType(''), '')
+  })
+
+  await check('content-type 推出来的扩展名一定在封面白名单里', () => {
+    // 这两份名单分开写迟早会漂：推出一个 .svg 来，setGameCover 那头会拒，
+    // 用户看到的是「下载成功但封面没变」
+    for (const ct of ['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/gif', 'image/bmp']) {
+      const ext = extFromContentType(ct)
+      assert.ok(COVER_EXTS.includes(ext), `${ct} 推出的 ${ext} 不在 COVER_EXTS 里`)
+    }
+  })
+
+  await check('候选定型：过白名单、去重、竖版优先、封顶', () => {
+    const dup = 'https://cdn.cloudflare.steamstatic.com/steam/apps/400/a.jpg'
+    const out = finalizeCandidates([
+      { url: 'https://cdn.cloudflare.steamstatic.com/b.jpg', label: '横', source: 'steam', portrait: false, rank: 0 },
+      { url: dup, label: '竖', source: 'steam', portrait: true, rank: 1 },
+      { url: dup.toUpperCase().replace('HTTPS', 'https').replace('CDN.CLOUDFLARE.STEAMSTATIC.COM', 'cdn.cloudflare.steamstatic.com'), label: '重复', source: 'steam', portrait: true, rank: 2 },
+      { url: 'https://evil.example.com/x.jpg', label: '越界', source: 'search', portrait: true, rank: 0 }
+    ])
+    assert.ok(out[0].portrait, '竖版必须排前面')
+    assert.ok(!out.some((c) => c.url.includes('evil')), '白名单外的必须被过掉')
+    assert.equal(new Set(out.map((c) => c.url.toLowerCase())).size, out.length, '不该有重复 URL')
+  })
+
+  await check('候选数量封顶 —— 再多就不是挑一张而是翻图库', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      url: `https://cdn.cloudflare.steamstatic.com/steam/apps/400/x${i}.jpg`,
+      label: `图${i}`,
+      source: 'steam' as const,
+      portrait: true,
+      rank: i
+    }))
+    assert.equal(finalizeCandidates(many).length, MAX_CANDIDATES)
+  })
+
+  await check('图搜结果认不出图片地址的整条丢掉，不把网页地址塞进 img', () => {
+    const out = candidatesFromSearch([
+      { url: 'https://zh.wikipedia.org/wiki/某游戏', title: '维基条目' },
+      { imageUrl: 'https://upload.wikimedia.org/x/cover.png', title: '封面' },
+      { url: 'https://static.wikia.nocookie.net/y/box.jpg', title: '盒绘' }
+    ])
+    assert.equal(out.length, 2, '网页地址那条必须丢掉')
+    assert.ok(out.every((c) => c.source === 'search'))
+  })
+
+  await check('体积上限是个真数字，不是 0 或 Infinity', () => {
+    // 边下边数超了就断 —— content-length 可以撒谎，也可以干脆不给
+    assert.ok(MAX_COVER_BYTES > 1024 * 1024, '太小会把正常封面拒掉')
+    assert.ok(Number.isFinite(MAX_COVER_BYTES))
+  })
+
+  await check('图搜只有 Bing 和 SearXNG 支持，其余服务商要说清而不是静默返回空', () => {
+    const base = { api_key: 'k', endpoint: '', enabled: true }
+    assert.ok(imageSearchAvailable({ ...base, provider: 'bing' }))
+    assert.ok(imageSearchAvailable({ ...base, provider: 'searxng', endpoint: 'https://s.example.com' }))
+    // 这三家的接口只回网页，拿网页地址当封面只会得到破图
+    for (const p of ['tavily', 'exa', 'firecrawl'] as const) {
+      assert.ok(!imageSearchAvailable({ ...base, provider: p }), `${p} 不该被当成能搜图`)
+      const why = imageSearchWhyNot({ ...base, provider: p })
+      assert.ok(why.length > 0, `${p} 必须给出一句能显示给用户的原因`)
+      assert.ok(why.includes('网页'), '原因要说清是「只回网页」这一类，用户才知道换哪个服务商')
+    }
+  })
+
+  await check('没开联网、选了「不额外联网」时给的原因各不相同', () => {
+    // 三类失败的下一步动作完全不同：开开关 / 换服务商 / 填地址
+    const off = imageSearchWhyNot({ provider: 'bing', api_key: 'k', endpoint: '', enabled: false })
+    const builtin = imageSearchWhyNot({ provider: 'model_builtin', api_key: '', endpoint: '', enabled: true })
+    const noEndpoint = imageSearchWhyNot({ provider: 'searxng', api_key: '', endpoint: '  ', enabled: true })
+    assert.ok(off.includes('没有开启'))
+    assert.ok(builtin.includes('不额外联网'))
+    assert.ok(noEndpoint.includes('实例地址'))
+    assert.equal(new Set([off, builtin, noEndpoint]).size, 3, '三类原因不该混成同一句')
   })
 }
 
