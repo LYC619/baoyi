@@ -80,6 +80,17 @@ import {
 import { KINDS } from '../electron/kinds/index.ts'
 import { softwareKind } from '../electron/kinds/software/index.ts'
 import { gameKind } from '../electron/kinds/game/index.ts'
+import {
+  expandSavePath,
+  inspectDir,
+  probeSave,
+  saveRootOf,
+  saveRoots,
+  scanGameRoot
+} from '../electron/kinds/game/scanner.ts'
+import { gamesUnder, insertGame, type GamePayload } from '../electron/kinds/game/db.ts'
+import { acceptSavePaths, limitGameTags } from '../electron/kinds/game/tools.ts'
+import { candidatePrompt, fillGameSystem } from '../electron/kinds/game/prompts.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -1949,8 +1960,329 @@ async function main(): Promise<void> {
     assert.equal(new Set(ids).size, ids.length, `分类 id 撞了：${ids.join(',')}`)
   })
 
+  await gameIdentifySection()
+
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
 }
+
+/* ==================== 游戏识别 · Step 3 ==================== */
+
+/**
+ * 造一棵真实的临时目录树来跑 scanner —— 这一段全是「读磁盘之后怎么判断」，
+ * 用假的 fs mock 验它等于在验 mock 自己。
+ */
+async function gameIdentifySection(): Promise<void> {
+  console.log('\n游戏识别 · 目录判断')
+
+  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-game-'))
+  const mk = async (rel: string, bytes = 16): Promise<string> => {
+    const full = path.join(base, rel)
+    await fsp.mkdir(path.dirname(full), { recursive: true })
+    await fsp.writeFile(full, Buffer.alloc(bytes))
+    return full
+  }
+  const mkdir = (rel: string): Promise<string | undefined> =>
+    fsp.mkdir(path.join(base, rel), { recursive: true })
+
+  // Unity 游戏：主程序 600KB，崩溃上报程序 1MB —— 按体积挑正好挑错
+  await mk('库/空洞骑士/hollow_knight.exe', 600_000)
+  await mk('库/空洞骑士/UnityCrashHandler64.exe', 1_000_000)
+  await mk('库/空洞骑士/UnityPlayer.dll', 8000)
+  await mk('库/空洞骑士/hollow_knight_Data/globalgamemanagers', 400)
+  await fsp.writeFile(
+    path.join(base, '库/空洞骑士/hollow_knight_Data/app.info'),
+    'Team Cherry\nHollow Knight\n',
+    'utf8'
+  )
+  await mk('库/空洞骑士/readme.txt', 60)
+
+  // RPG Maker MV + 就地存档
+  await mk('库/某国产RPG/Game.exe', 200_000)
+  await mk('库/某国产RPG/nw.dll', 5000)
+  await mk('库/某国产RPG/www/index.html', 100)
+  await mk('库/某国产RPG/save/file1.rpgsave', 900)
+
+  // Unreal：证据藏在第二层
+  await mk('库/某UE游戏/某UE游戏.exe', 150_000)
+  await mkdir('库/某UE游戏/ProjectX/Binaries/Win64')
+  await mkdir('库/某UE游戏/ProjectX/Content/Paks')
+
+  // WeGame 装的游戏：一个引擎特征都不留，目录名还带着 appid 尾巴
+  await mk('库/洛克王国：世界(2002304)/洛克王国：世界.exe', 300_000)
+  await mk('库/洛克王国：世界(2002304)/洛克王国：世界卸载.exe', 900_000)
+  await mkdir('库/洛克王国：世界(2002304)/rail_files')
+  await mkdir('库/洛克王国：世界(2002304)/TCLS')
+
+  // 有 exe 但认不出引擎
+  await mk('库/老游戏/PLAY.EXE', 40_000)
+  await mk('库/老游戏/data.dat', 999)
+
+  // 没有 exe：不该成为候选
+  await mk('库/攻略合集/攻略.pdf', 2000)
+
+  await check('Unity 游戏：认出引擎，主程序挑的是本体不是崩溃上报程序', () => {
+    const c = inspectDir(path.join(base, '库/空洞骑士'), base)
+    assert.ok(c, '应该是一个候选')
+    assert.ok(
+      c!.evidence.some((e) => e.includes('Unity')),
+      `没认出 Unity：${c!.evidence.join(' | ')}`
+    )
+    assert.equal(
+      path.basename(c!.likely_main),
+      'hollow_knight.exe',
+      `主程序挑错了：${c!.likely_main}`
+    )
+    // 这一条守的就是「不要按体积挑」：崩溃上报程序排在体积第一位
+    assert.equal(path.basename(c!.exes[0].path), 'UnityCrashHandler64.exe')
+  })
+
+  await check('Unity 的 app.info 被读出来，存档路径直接拼好交给 agent', () => {
+    // 真机上模型把发行商猜成 2P Games（实际 DoubleCross），六次探测全打空，
+    // 而答案就在 82 字节的 app.info 里。这一条守的是「能读到的别让它猜」
+    const c = inspectDir(path.join(base, '库/空洞骑士'), base)!
+    assert.ok(
+      c.evidence.some((e) => e.includes('Team Cherry') && e.includes('Hollow Knight')),
+      `app.info 没读出来：${c.evidence.join(' | ')}`
+    )
+    assert.ok(
+      c.evidence.some((e) => e.includes('%LOCALAPPDATA%Low\\Team Cherry\\Hollow Knight')),
+      `没把存档路径拼出来：${c.evidence.join(' | ')}`
+    )
+  })
+
+  await check('RPG Maker MV：认出引擎，并把就地存档目录报成线索', () => {
+    const c = inspectDir(path.join(base, '库/某国产RPG'), base)!
+    assert.ok(c.evidence.some((e) => e.includes('RPG Maker')), c.evidence.join(' | '))
+    assert.ok(c.evidence.some((e) => e.includes('save')), `没报出就地存档：${c.evidence.join(' | ')}`)
+  })
+
+  await check('Unreal：证据在第二层，也要能捞出来', () => {
+    const c = inspectDir(path.join(base, '库/某UE游戏'), base)!
+    assert.ok(c.evidence.some((e) => e.includes('Unreal')), c.evidence.join(' | '))
+    // 与目录同名的 exe，这条判据够硬
+    assert.equal(path.basename(c.likely_main), '某UE游戏.exe')
+  })
+
+  await check('认不出引擎时，evidence 为空但仍然是候选 —— 交给 agent 看，不在这里下结论', () => {
+    const c = inspectDir(path.join(base, '库/老游戏'), base)
+    assert.ok(c, '有 exe 就该是候选')
+    assert.deepEqual(c!.evidence, [])
+    // 没有硬判据就不给猜测。给错提示比不给更糟，模型会照单全收
+    assert.equal(c!.likely_main, '')
+  })
+
+  await check('没有 exe 的目录不成为候选', () => {
+    assert.equal(inspectDir(path.join(base, '库/攻略合集'), base), null)
+  })
+
+  await check('收纳目录直接喂给 inspectDir 也不能被当成一个游戏', () => {
+    // 真机上撞到的：E:\游戏 这一层清一色是文件夹，递归数得到 33 个 exe，
+    // 不拦就会把六个游戏合并成「一个有 33 个 exe 的游戏」交给 agent
+    assert.equal(inspectDir(path.join(base, '库'), base), null)
+  })
+
+  await check('WeGame 游戏：认出平台，目录名带 appid 尾巴也能对上主程序而不是卸载器', () => {
+    const c = inspectDir(path.join(base, '库/洛克王国：世界(2002304)'), base)!
+    assert.ok(c.evidence.some((e) => e.includes('WeGame')), c.evidence.join(' | '))
+    // 卸载器体积是本体的三倍，按体积挑必错；去掉 (2002304) 之后是精确同名匹配
+    assert.equal(path.basename(c.likely_main), '洛克王国：世界.exe', `挑成了 ${c.likely_main}`)
+  })
+
+  await check('收纳目录会往下钻，五个游戏目录一个不漏、攻略目录不混进来', async () => {
+    const found = await scanGameRoot(base)
+    const names = found.map((c) => path.basename(c.dir)).sort()
+    assert.deepEqual(
+      names,
+      ['某UE游戏', '某国产RPG', '老游戏', '空洞骑士', '洛克王国：世界(2002304)'].sort(),
+      `扫出来的候选不对：${names.join('、')}`
+    )
+    // 大小写必须原样保留：下钻时拿小写名拼路径，在 Windows 上照样读得到，
+    // 但那个走样的路径会原样落进 resource.path 和 source_dir
+    const ue = found.find((c) => path.basename(c.dir).toLowerCase() === '某ue游戏')!
+    assert.equal(path.basename(ue.dir), '某UE游戏', `目录名大小写被改了：${ue.dir}`)
+    assert.ok(fs.existsSync(ue.exes[0].path), 'exe 路径必须真实可读')
+  })
+
+  console.log('\n游戏识别 · 存档路径边界')
+
+  const home = os.homedir()
+
+  await check('%APPDATA% 之类的变量能展开，认不出的变量原样留着', () => {
+    assert.equal(
+      expandSavePath('%USERPROFILE%\\Saved Games\\Foo', home),
+      path.resolve(path.join(home, 'Saved Games', 'Foo'))
+    )
+    // 认不出来的不能悄悄换成空串 —— 那会把 %NOPE%\x 变成一个 \x 的合法路径
+    assert.ok(expandSavePath('%NOPE%\\x', home).includes('%NOPE%'))
+  })
+
+  await check('存档白名单只放存档可能在的地方，桌面和 System32 一律拒', () => {
+    const roots = saveRoots(home)
+    assert.ok(saveRootOf(path.join(home, 'Documents', 'My Games', 'X'), roots))
+    assert.ok(saveRootOf(path.join(home, 'AppData', 'LocalLow', 'Team', 'X'), roots))
+    assert.equal(saveRootOf('C:\\Windows\\System32', roots), null)
+    assert.equal(saveRootOf(path.join(home, 'Desktop', '工作'), roots), null)
+    // 按分隔符边界比，别让 Documents2 蹭进 Documents
+    assert.equal(saveRootOf(`${path.join(home, 'Documents')}2`, roots), null)
+  })
+
+  await check('probeSave 分得清「不存在」「存在但是空的」「有存档」', () => {
+    const empty = path.join(base, '空目录')
+    fs.mkdirSync(empty, { recursive: true })
+    assert.equal(probeSave(path.join(base, '并不存在')).exists, false)
+
+    const e = probeSave(empty)
+    assert.equal(e.exists, true)
+    // 存在但一个文件都没有 —— 这个区分是「别把空文件夹当存档备份」的依据
+    assert.equal(e.files, 0)
+
+    const real = probeSave(path.join(base, '库/某国产RPG/save'))
+    assert.equal(real.exists, true)
+    assert.equal(real.files, 1)
+    assert.ok(real.bytes > 0 && real.newest > 0)
+    assert.deepEqual(real.sample, ['file1.rpgsave'])
+  })
+
+  await check('没验证过的存档路径一律丢弃 —— 编一个不存在的路径比留空更糟', () => {
+    const ledger = new Map<string, number>([
+      [expandSavePath('%APPDATA%\\Real', home).toLowerCase(), 1_700_000_000_000]
+    ])
+    const { kept, rejected } = acceptSavePaths(
+      ['%APPDATA%\\Real', '%APPDATA%\\编的', 'C:\\Windows'],
+      ledger
+    )
+    assert.equal(kept.length, 1)
+    assert.equal(kept[0].verified_at, 1_700_000_000_000)
+    assert.equal(rejected.length, 2, `应该丢掉两条：${rejected.join('、')}`)
+  })
+
+  await check('标签收敛：池内的全收，池外的只留一个，总数封顶 3', () => {
+    const pool = new Set(['魂系', '像素', '汉化'])
+    assert.deepEqual(limitGameTags(['魂系', '像素', '汉化', '新词A', '新词B'], pool), [
+      '魂系',
+      '像素',
+      '汉化'
+    ])
+    assert.deepEqual(limitGameTags(['新词A', '新词B', '新词C'], pool), ['新词A'])
+    assert.deepEqual(limitGameTags(['魂系', 42, '', '  '], pool), ['魂系'])
+  })
+
+  console.log('\n游戏识别 · 落库')
+
+  const freshDb = (): InstanceType<typeof DatabaseSync> => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    return d
+  }
+  const payload = (over: Partial<GamePayload> = {}): GamePayload => ({
+    exe_path: 'D:\\Games\\HK\\hollow_knight.exe',
+    name_zh: '空洞骑士',
+    name_en: 'Hollow Knight',
+    summary: '手绘风格的横版探索动作游戏',
+    description: '在一座地下虫国里探索、战斗、拾取能力。',
+    category: '动作',
+    tags: ['像素'],
+    official_url: 'https://example.com',
+    source_dir: 'D:\\Games\\HK',
+    file_size: 600_000,
+    save_paths: [{ path: 'C:\\x\\save', verified_at: 111 }],
+    linked_files: [],
+    ...over
+  })
+
+  await check('注册一个游戏：resource + game_meta 各一行，能从 game 视图读回来', () => {
+    const d = freshDb()
+    const out = insertGame(d as any, payload())
+    assert.equal(out.created, true)
+
+    const row = d.prepare('SELECT * FROM game WHERE id = ?').get(out.id) as any
+    assert.equal(row.name_zh, '空洞骑士')
+    assert.equal(row.category, '动作')
+    assert.equal(row.ai_status, 'done')
+    assert.equal(row.play_status, 'unplayed')
+    assert.deepEqual(JSON.parse(row.save_paths), [{ path: 'C:\\x\\save', verified_at: 111 }])
+    // file_name 由 exe_path 推出来，不该要调用方额外填一遍
+    assert.equal(row.file_name, 'hollow_knight.exe')
+
+    // 它是游戏，不该出现在软件那一侧 —— 两个视图各管各的
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM software').get() as any).n, 0)
+    d.close()
+  })
+
+  await check('重复识别同一个路径是更新，不是再开一条', () => {
+    const d = freshDb()
+    const first = insertGame(d as any, payload())
+    const again = insertGame(d as any, payload({ name_zh: '空洞骑士（重识别）' }))
+    assert.equal(again.created, false)
+    assert.equal(again.id, first.id)
+    assert.equal((d.prepare(`SELECT COUNT(*) AS n FROM resource`).get() as any).n, 1)
+    d.close()
+  })
+
+  await check('重新识别不会清掉用户玩出来的账：时长、状态、封面、已有存档路径都留着', () => {
+    const d = freshDb()
+    const { id } = insertGame(d as any, payload())
+    d.prepare(
+      `UPDATE game_meta SET total_playtime_sec = 7200, play_status = 'playing',
+         cover_path = 'C:\\covers\\hk.png', save_paths = ?
+       WHERE resource_id = ?`
+    ).run(JSON.stringify([{ path: 'C:\\用户自己改的', verified_at: 999 }]), id)
+
+    insertGame(d as any, payload({ save_paths: [{ path: 'C:\\模型这次猜的', verified_at: 222 }] }))
+
+    const row = d.prepare('SELECT * FROM game WHERE id = ?').get(id) as any
+    assert.equal(row.total_playtime_sec, 7200, '游玩时长被清了')
+    assert.equal(row.play_status, 'playing', '游玩状态被重置了')
+    assert.equal(row.cover_path, 'C:\\covers\\hk.png', '封面被清了')
+    assert.equal(
+      JSON.parse(row.save_paths)[0].path,
+      'C:\\用户自己改的',
+      '用户手工改过的存档路径被模型的猜测盖掉了'
+    )
+    d.close()
+  })
+
+  await check('gamesUnder 只报同目录下的游戏，不把软件条目也算进来', () => {
+    const d = freshDb()
+    insertGame(d as any, payload())
+    d.prepare(
+      `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name, source_dir, name_zh)
+       VALUES ('s1', 'software', 1, 1, 'D:\\Games\\HK\\tool.exe', 'tool.exe', 'D:\\Games\\HK', '某工具')`
+    ).run()
+    const list = gamesUnder(d as any, 'D:\\Games\\HK')
+    assert.deepEqual(list.map((g) => g.name), ['空洞骑士'])
+    d.close()
+  })
+
+  await check('游戏 prompt 用的是游戏的分类和标签，没有把软件那套灌进去', () => {
+    const filled = fillGameSystem(gameKind.defaultCategories, gameKind.defaultTags, true)
+    assert.ok(filled.includes('RPG'), '游戏分类没填进去')
+    assert.ok(filled.includes('魂系'), '游戏标签没填进去')
+    assert.ok(!filled.includes('{{'), '还有插槽没填')
+    for (const word of ['开发工具', '系统管理', '便携', '单文件']) {
+      assert.ok(!filled.includes(word), `软件那套串进游戏 prompt 了：${word}`)
+    }
+    // 关掉搜索时必须明说没有这个工具，否则模型会去调一个没注册的工具，白烧一轮
+    const off = fillGameSystem(gameKind.defaultCategories, gameKind.defaultTags, false)
+    assert.ok(off.includes('没有 web_search 工具'))
+  })
+
+  await check('候选目录的线索原样进 prompt，没有线索时也说清楚', () => {
+    const c = inspectDir(path.join(base, '库/空洞骑士'), base)!
+    const text = candidatePrompt(c, [{ name: '旧条目', path: 'X.exe' }])
+    assert.ok(text.includes('Unity'), '引擎线索没进 prompt')
+    assert.ok(text.includes('疑似主程序'), '主程序猜测没进 prompt')
+    assert.ok(text.includes('旧条目'), '已注册条目没进 prompt')
+
+    const blind = candidatePrompt(inspectDir(path.join(base, '库/老游戏'), base)!)
+    assert.ok(blind.includes('没有命中任何引擎特征'), '没线索时要明说，不能只给个空列表')
+    assert.ok(!blind.includes('疑似主程序'), '没有硬判据时不该出现主程序小节')
+  })
+
+  await fsp.rm(base, { recursive: true, force: true })
+}
+
 
 void main()

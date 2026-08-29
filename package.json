@@ -13,6 +13,7 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "selfcheck": "node --experimental-strip-types --no-warnings scripts/agent-selfcheck.ts",
     "check-modules": "node --experimental-strip-types --no-warnings scripts/check-module-memory.ts",
+    "try-game": "node --experimental-strip-types --no-warnings scripts/try-game-identify.ts",
     "verify-migration": "node --experimental-strip-types --no-warnings scripts/verify-migration.ts",
     "rollback-v5": "node --experimental-strip-types --no-warnings scripts/rollback-v5.ts",
     "rollback-v6": "node --experimental-strip-types --no-warnings scripts/rollback-v6.ts",
