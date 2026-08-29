@@ -37,7 +37,8 @@ const showTabs = computed(() => route.name !== 'onboarding')
  * 和 0（「一个都没有」）分开：游戏模块的库表 Step 2 才建，
  * 现在报 0 是在替一个不存在的表撒谎。
  *
- * ponytail: 游戏那一行等 Step 2 接上 game 品类的 counts 就能去掉硬编码。
+ * ponytail: Step 2 已经把 game_meta 建起来了，但要等 Step 3 游戏能被扫进来
+ * 之后这个数字才有意义 —— 现在接一条永远返回 0 的 IPC 只是空转。
  */
 const stats = computed<Record<ModuleKey, { total: number | null; pending: number }>>(() => ({
   software: { total: software.counts.all, pending: software.counts.pending_confirm },

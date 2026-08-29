@@ -40,5 +40,10 @@ export interface ResourceKindModule {
    * 这些具体的名字是软件才有的 —— 视频库的分类不该长这样。所以由模块自己提供。
    */
   defaultCategories: Category[]
+  /**
+   * 这个品类的内置标签池。同样是模块自己的事 —— 「魂系」「开放世界」
+   * 不该出现在软件的识别 prompt 里，「便携」「单文件」也不该出现在游戏的。
+   */
+  defaultTags: string[]
   schema: KindSchema
 }

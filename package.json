@@ -15,6 +15,7 @@
     "check-modules": "node --experimental-strip-types --no-warnings scripts/check-module-memory.ts",
     "verify-migration": "node --experimental-strip-types --no-warnings scripts/verify-migration.ts",
     "rollback-v5": "node --experimental-strip-types --no-warnings scripts/rollback-v5.ts",
+    "rollback-v6": "node --experimental-strip-types --no-warnings scripts/rollback-v6.ts",
     "inspect": "set ELECTRON_RUN_AS_NODE=1&& electron scripts/inspect-db.cjs",
     "preview": "vite preview",
     "rebuild": "electron-builder install-app-deps",

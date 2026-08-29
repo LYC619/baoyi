@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { readExternalActiveAt } from './activity'
 import { rebase } from '../kinds/software/organize/plan'
 import { KINDS } from '../kinds'
-import { initSchema, insertCategories, insertTag, seedDefaults } from './schema'
+import { initSchema, insertCategories, insertTag, schemaVersion, seedDefaults, SCHEMA_VERSION } from './schema'
 import { FALLBACK_CATEGORY } from './taxonomy'
 import type {
   AgentEvent,
@@ -71,10 +71,57 @@ export function iconsDir(): string {
   return dir
 }
 
+/**
+ * 迁移前留一份原样的副本。
+ *
+ * 迁移是全项目唯一会改写用户几个月真实数据的一段。自检和 verify-migration 都跑过了，
+ * 但它们跑的是合成数据和副本 —— 真库上出的那一次意外，代价是数据没了。
+ *
+ * 命名沿用 0.1 / 0.3 / 0.4 那几份手工备份的形状：baoyi.db.v{旧版本}.bak。
+ * 同一个旧版本只备一次：升级失败、用户重开应用再试一次时，第二次备份的会是
+ * 一个已经被改坏的库，正好把唯一那份好的盖掉。
+ *
+ * 备份失败不拦启动，但要在主进程日志里喊一声 —— 一次静默失败的备份
+ * 和没有备份是一回事，而用户会以为自己有。
+ */
+function backupBeforeMigrate(file: string): void {
+  let from = 0
+  try {
+    const probe = new Database(file, { readonly: true, fileMustExist: true })
+    try {
+      from = schemaVersion(probe)
+    } finally {
+      probe.close()
+    }
+  } catch {
+    // 库还不存在（首次启动），或者连版本号都读不出来。前者没什么可备份的，
+    // 后者交给 initSchema 去报错，这里不越权
+    return
+  }
+  if (from <= 0 || from >= SCHEMA_VERSION) return
+
+  const target = `${file}.v0.${from}.0.bak`
+  if (fs.existsSync(target)) return
+  try {
+    // WAL 里可能还压着没落盘的事务，直接 copyFile 会拿到一个缺尾巴的库。
+    // better-sqlite3 的 backup 走的是 SQLite 自己的备份 API，拿到的是完整快照
+    const src = new Database(file, { readonly: true, fileMustExist: true })
+    try {
+      src.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`)
+    } finally {
+      src.close()
+    }
+    console.log(`[抱一] 迁移前备份：${target}`)
+  } catch (err) {
+    console.error(`[抱一] 迁移前备份失败（${from} -> ${SCHEMA_VERSION}）：`, err)
+  }
+}
+
 export function getDb(): Database.Database {
   if (db) return db
   const file = path.join(app.getPath('userData'), 'baoyi.db')
   fs.mkdirSync(path.dirname(file), { recursive: true })
+  backupBeforeMigrate(file)
   db = new Database(file)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
@@ -634,7 +681,7 @@ export function stagePending(
     }
 
     // AI 造的新词先记成 ai，不进池 —— 用户确认那一步才转正
-    for (const t of newTags) insertTag(d, t, 'ai')
+    for (const t of newTags) insertTag(d, t, 'ai', 'software')
   })
   tx()
 
@@ -701,10 +748,12 @@ export function confirmPending(ids: string[]): ConfirmResult {
     const item = rowToPending(row)
 
     if (item.category && !knownCategories.has(item.category)) {
-      const next = (d.prepare('SELECT MAX(sort_order) AS n FROM categories').get() as { n: number | null }).n ?? 0
-      insertCategories(d, [
-        { id: randomUUID(), name: item.category, description: 'AI 识别时提议，已确认', icon: 'box', sort_order: next + 1 }
-      ])
+      const next = (d.prepare('SELECT MAX(sort_order) AS n FROM categories WHERE kind = ?').get('software') as { n: number | null }).n ?? 0
+      insertCategories(
+        d,
+        [{ id: randomUUID(), name: item.category, description: 'AI 识别时提议，已确认', icon: 'box', sort_order: next + 1 }],
+        'software'
+      )
       knownCategories.add(item.category)
       createdCategories.push(item.category)
     }
@@ -739,9 +788,9 @@ export function confirmPending(ids: string[]): ConfirmResult {
 
     // 确认时条目上挂着的 AI 标签就此转正入池；用户自己敲进去的新词直接算 user
     for (const name of item.tags) {
-      const tag = d.prepare('SELECT id, source FROM tags WHERE name = ?').get(name) as Row | undefined
+      const tag = d.prepare('SELECT id, source FROM tags WHERE kind = ? AND name = ?').get('software', name) as Row | undefined
       if (!tag) {
-        insertTag(d, name, 'user')
+        insertTag(d, name, 'user', 'software')
         promotedTags.push(name)
       } else if (tag.source === 'ai') {
         d.prepare(`UPDATE tags SET source = 'confirmed' WHERE id = ?`).run(tag.id)
@@ -1342,48 +1391,87 @@ export function counts(unusedDays: number): SidebarCounts {
 
 /* ------------------------------- 分类 ------------------------------- */
 
-export function listCategories(): Category[] {
+/**
+ * 分类 / 标签一律按 kind 收口。
+ *
+ * 0.6 之前 categories 和 tags 是全局单表，加游戏模块时才发现这条缝：
+ * listCategories() 和 tagPool() 直接喂给软件的识别 prompt（见 aiService.ts），
+ * 游戏的「RPG」「魂系」一旦进表，agent 就会拿它们去归类一个调试器。
+ *
+ * 默认值定成 'software' 是有意的：软件模块那几十处调用和整条 IPC / 渲染进程
+ * 链路因此一个字都不用改，加 kind 的改动全压在游戏这一侧。
+ */
+const DEFAULT_KIND = 'software'
+
+export function listCategories(kind: string = DEFAULT_KIND): Category[] {
   return getDb()
-    .prepare('SELECT * FROM categories ORDER BY sort_order, name')
-    .all() as Category[]
+    .prepare(
+      `SELECT id, name, description, icon, sort_order FROM categories
+       WHERE kind = ? ORDER BY sort_order, name`
+    )
+    .all(kind) as Category[]
 }
 
-export function upsertCategory(c: Category): Category[] {
+/** 一条分类属于哪个品类。改名 / 删除时要按它把影响范围圈住 */
+function categoryKind(d: Database.Database, id: string): string {
+  const row = d.prepare('SELECT kind FROM categories WHERE id = ?').get(id) as Row | undefined
+  return (row?.kind as string) ?? DEFAULT_KIND
+}
+
+export function upsertCategory(c: Category, kind: string = DEFAULT_KIND): Category[] {
   const d = getDb()
   const id = c.id || randomUUID()
-  const previous = d.prepare('SELECT name FROM categories WHERE id = ?').get(id) as Row | undefined
+  const previous = d.prepare('SELECT name, kind FROM categories WHERE id = ?').get(id) as
+    | Row
+    | undefined
+  const target = (previous?.kind as string) ?? kind
 
   const tx = d.transaction(() => {
     d.prepare(
-      `INSERT INTO categories (id, name, description, icon, sort_order)
-       VALUES (@id, @name, @description, @icon, @sort_order)
+      `INSERT INTO categories (id, kind, name, description, icon, sort_order)
+       VALUES (@id, @kind, @name, @description, @icon, @sort_order)
        ON CONFLICT(id) DO UPDATE SET
          name = @name, description = @description, icon = @icon, sort_order = @sort_order`
-    ).run({ ...c, id, description: c.description ?? '', icon: c.icon ?? '' })
+    ).run({ ...c, id, kind: target, description: c.description ?? '', icon: c.icon ?? '' })
 
-    // 分类是靠名字挂在条目上的，改名必须把引用一起改，否则一改名条目全掉进「其他」
+    // 分类是靠名字挂在条目上的，改名必须把引用一起改，否则一改名条目全掉进「其他」。
+    // 限定 kind：软件和游戏可以各有一个叫「其他」的格子，改一边不该动到另一边
     if (previous && previous.name !== c.name) {
-      d.prepare('UPDATE resource SET category = ? WHERE category = ?').run(c.name, previous.name)
-      d.prepare('UPDATE pending_software SET category = ? WHERE category = ?').run(c.name, previous.name)
+      d.prepare('UPDATE resource SET category = ? WHERE kind = ? AND category = ?').run(
+        c.name,
+        target,
+        previous.name
+      )
+      if (target === DEFAULT_KIND) {
+        d.prepare('UPDATE pending_software SET category = ? WHERE category = ?').run(c.name, previous.name)
+      }
     }
   })
   tx()
-  return listCategories()
+  return listCategories(target)
 }
 
 export function removeCategory(id: string): Category[] {
   const d = getDb()
-  const row = d.prepare('SELECT name FROM categories WHERE id = ?').get(id) as Row | undefined
+  const row = d.prepare('SELECT name, kind FROM categories WHERE id = ?').get(id) as Row | undefined
+  const kind = (row?.kind as string) ?? DEFAULT_KIND
   if (row) {
-    // 分类是虚拟的，删除时把归属条目退回「其他」，不动实际文件
+    // 分类是虚拟的，删除时把归属条目退回「其他」，不动实际文件。
+    // 同样限定 kind —— 两个品类各有一个「其他」，别把对方的条目也扫进来
     const tx = d.transaction(() => {
-      d.prepare('UPDATE resource SET category = ? WHERE category = ?').run(FALLBACK_CATEGORY, row.name)
-      d.prepare('UPDATE pending_software SET category = ? WHERE category = ?').run(FALLBACK_CATEGORY, row.name)
+      d.prepare('UPDATE resource SET category = ? WHERE kind = ? AND category = ?').run(
+        FALLBACK_CATEGORY,
+        kind,
+        row.name
+      )
+      if (kind === DEFAULT_KIND) {
+        d.prepare('UPDATE pending_software SET category = ? WHERE category = ?').run(FALLBACK_CATEGORY, row.name)
+      }
       d.prepare('DELETE FROM categories WHERE id = ?').run(id)
     })
     tx()
   }
-  return listCategories()
+  return listCategories(kind)
 }
 
 /**
@@ -1391,7 +1479,8 @@ export function removeCategory(id: string): Category[] {
  * 这个按钮能到达完全一样的顺序，还能用键盘操作。
  */
 export function moveCategory(id: string, delta: number): Category[] {
-  const list = listCategories()
+  const kind = categoryKind(getDb(), id)
+  const list = listCategories(kind)
   const from = list.findIndex((c) => c.id === id)
   const to = from + (delta < 0 ? -1 : 1)
   if (from < 0 || to < 0 || to >= list.length) return list
@@ -1404,7 +1493,7 @@ export function moveCategory(id: string, delta: number): Category[] {
   // 整体重排一遍，顺便把历史上重复 / 空缺的 sort_order 抹平
   const tx = d.transaction(() => reordered.forEach((c, i) => stmt.run(i + 1, c.id)))
   tx()
-  return listCategories()
+  return listCategories(kind)
 }
 
 /* ------------------------------- 标签 ------------------------------- */
@@ -1417,19 +1506,21 @@ export function moveCategory(id: string, delta: number): Category[] {
  * 而这个数字的唯一用途恰恰是「找出只挂着一个条目的碎片标签」—— 失真就没意义了。
  * 数据量在千级，一次全表扫描的代价可以忽略。
  */
-function tagUsage(d: Database.Database): Map<string, number> {
+function tagUsage(d: Database.Database, kind: string): Map<string, number> {
   const map = new Map<string, number>()
-  const rows = d.prepare('SELECT tags FROM software WHERE is_archived = 0').all() as Row[]
+  const rows = d
+    .prepare('SELECT tags FROM resource WHERE kind = ? AND is_archived = 0')
+    .all(kind) as Row[]
   for (const r of rows) {
     for (const t of safeJsonArray(r.tags)) map.set(t, (map.get(t) ?? 0) + 1)
   }
   return map
 }
 
-export function listTags(): Tag[] {
+export function listTags(kind: string = DEFAULT_KIND): Tag[] {
   const d = getDb()
-  const usage = tagUsage(d)
-  const rows = d.prepare('SELECT * FROM tags ORDER BY name').all() as Row[]
+  const usage = tagUsage(d, kind)
+  const rows = d.prepare('SELECT * FROM tags WHERE kind = ? ORDER BY name').all(kind) as Row[]
   return rows
     .map((r) => ({
       id: r.id as number,
@@ -1446,93 +1537,129 @@ export function listTags(): Tag[] {
  * agent 自己造的（source='ai'）不进池 —— 否则它造一个新词，下一轮就当成既成事实
  * 继续沿用，标签只会越长越碎，而这正是标签池要防的事。
  */
-export function tagPool(): string[] {
+export function tagPool(kind: string = DEFAULT_KIND): string[] {
   return (
     getDb()
-      .prepare(`SELECT name FROM tags WHERE source IN ('user','confirmed') ORDER BY name`)
-      .all() as Row[]
+      .prepare(
+        `SELECT name FROM tags WHERE kind = ? AND source IN ('user','confirmed') ORDER BY name`
+      )
+      .all(kind) as Row[]
   ).map((r) => r.name as string)
 }
 
-export function createTag(name: string): Tag[] {
+/** 一条标签属于哪个品类。改名 / 合并 / 删除都要按它把影响范围圈住 */
+function tagKind(d: Database.Database, id: number): string {
+  const row = d.prepare('SELECT kind FROM tags WHERE id = ?').get(id) as Row | undefined
+  return (row?.kind as string) ?? DEFAULT_KIND
+}
+
+export function createTag(name: string, kind: string = DEFAULT_KIND): Tag[] {
   const clean = name.trim().slice(0, 12)
-  if (clean) insertTag(getDb(), clean, 'user')
-  return listTags()
+  if (clean) insertTag(getDb(), clean, 'user', kind)
+  return listTags(kind)
 }
 
 export function renameTag(id: number, name: string): Tag[] {
   const d = getDb()
+  const kind = tagKind(d, id)
   const clean = name.trim().slice(0, 12)
   const row = d.prepare('SELECT name FROM tags WHERE id = ?').get(id) as Row | undefined
-  if (!clean || !row || row.name === clean) return listTags()
+  if (!clean || !row || row.name === clean) return listTags(kind)
 
-  // 改成一个已存在的名字，等同于合并
-  const collide = d.prepare('SELECT id FROM tags WHERE name = ?').get(clean) as Row | undefined
+  // 改成一个已存在的名字，等同于合并。只在同品类里找同名 ——
+  // 游戏的「开源」和软件的「开源」是两个词，跨品类合并会把两边的条目搅在一起
+  const collide = d.prepare('SELECT id FROM tags WHERE kind = ? AND name = ?').get(kind, clean) as
+    | Row
+    | undefined
   if (collide) return mergeTags([id], collide.id as number)
 
   const tx = d.transaction(() => {
     d.prepare('UPDATE tags SET name = ? WHERE id = ?').run(clean, id)
-    replaceTagInEntries(d, [row.name as string], clean)
+    replaceTagInEntries(d, [row.name as string], clean, kind)
   })
   tx()
-  return listTags()
+  return listTags(kind)
 }
 
 /** 把 fromIds 这些标签并进 intoId，条目上的引用一并替换并去重 */
 export function mergeTags(fromIds: number[], intoId: number): Tag[] {
   const d = getDb()
+  const kind = tagKind(d, intoId)
   const target = d.prepare('SELECT name FROM tags WHERE id = ?').get(intoId) as Row | undefined
-  if (!target) return listTags()
+  if (!target) return listTags(kind)
 
   const sources = fromIds
     .filter((id) => id !== intoId)
-    .map((id) => d.prepare('SELECT id, name FROM tags WHERE id = ?').get(id) as Row | undefined)
+    .map((id) => d.prepare('SELECT id, name, kind FROM tags WHERE id = ?').get(id) as Row | undefined)
     .filter((r): r is Row => !!r)
-  if (sources.length === 0) return listTags()
+    // 跨品类合并没有意义，静默跳过比把游戏标签并进软件池好
+    .filter((r) => (r.kind as string) === kind)
+  if (sources.length === 0) return listTags(kind)
 
   const tx = d.transaction(() => {
-    replaceTagInEntries(d, sources.map((s) => s.name as string), target.name as string)
+    replaceTagInEntries(d, sources.map((s) => s.name as string), target.name as string, kind)
     const del = d.prepare('DELETE FROM tags WHERE id = ?')
     for (const s of sources) del.run(s.id)
     // 并过之后目标标签就是用户的意思了，顺手转正
     d.prepare(`UPDATE tags SET source = 'confirmed' WHERE id = ? AND source = 'ai'`).run(intoId)
   })
   tx()
-  return listTags()
+  return listTags(kind)
 }
 
 export function removeTag(id: number): Tag[] {
   const d = getDb()
+  const kind = tagKind(d, id)
   const row = d.prepare('SELECT name FROM tags WHERE id = ?').get(id) as Row | undefined
-  if (!row) return listTags()
+  if (!row) return listTags(kind)
   const tx = d.transaction(() => {
-    replaceTagInEntries(d, [row.name as string], '')
+    replaceTagInEntries(d, [row.name as string], '', kind)
     d.prepare('DELETE FROM tags WHERE id = ?').run(id)
   })
   tx()
-  return listTags()
+  return listTags(kind)
 }
 
 /**
  * 把条目（含暂存）标签数组里的 from 换成 to，to 为空串表示删除。
  * 标签存的是 JSON 数组，只能读出来改完写回去 —— SQL 里没法原地改。
+ *
+ * 限定 kind：两个品类可以各有一个同名标签，删掉游戏的「单机」
+ * 不该把软件条目上的「单机」一起抹掉。
  */
-function replaceTagInEntries(d: Database.Database, from: string[], to: string): void {
+function replaceTagInEntries(
+  d: Database.Database,
+  from: string[],
+  to: string,
+  kind: string
+): void {
   const drop = new Set(from)
-  // 条目侧写 resource（software 是只读视图），暂存区还是自己那张表
-  for (const table of ['resource', 'pending_software']) {
-    const rows = d.prepare(`SELECT id, tags FROM ${table}`).all() as Row[]
-    const stmt = d.prepare(`UPDATE ${table} SET tags = ? WHERE id = ?`)
-    for (const r of rows) {
+  const rows = d.prepare('SELECT id, tags FROM resource WHERE kind = ?').all(kind) as Row[]
+  const stmt = d.prepare('UPDATE resource SET tags = ? WHERE id = ?')
+  const rewrite = (list: Row[], update: Database.Statement): void => {
+    for (const r of list) {
       const tags = safeJsonArray(r.tags)
       if (!tags.some((t) => drop.has(t))) continue
       const next = tags.map((t) => (drop.has(t) ? to : t)).filter(Boolean)
-      stmt.run(JSON.stringify([...new Set(next)]), r.id)
+      update.run(JSON.stringify([...new Set(next)]), r.id)
     }
+  }
+  rewrite(rows, stmt)
+
+  // 暂存区是软件模块自己的表，只有软件标签能落在里面
+  if (kind === DEFAULT_KIND) {
+    rewrite(
+      d.prepare('SELECT id, tags FROM pending_software').all() as Row[],
+      d.prepare('UPDATE pending_software SET tags = ? WHERE id = ?')
+    )
   }
 }
 
-/** 清掉没有任何条目（含暂存区）在用的 AI 待确认标签，别让否决过的词一直留在管理页 */
+/**
+ * 清掉没有任何条目（含暂存区）在用的 AI 待确认标签，别让否决过的词一直留在管理页。
+ * 只清软件那一侧 —— 这是确认面板走完之后调的，游戏的 AI 标签不在它的视野里，
+ * 不限定 kind 的话会把游戏刚识别出来、还没确认的标签一起删掉。
+ */
 function pruneOrphanAiTags(d: Database.Database): void {
   const used = new Set<string>()
   for (const table of ['software', 'pending_software']) {
@@ -1540,9 +1667,9 @@ function pruneOrphanAiTags(d: Database.Database): void {
       for (const t of safeJsonArray(r.tags)) used.add(t)
     }
   }
-  const stale = (d.prepare(`SELECT id, name FROM tags WHERE source = 'ai'`).all() as Row[]).filter(
-    (t) => !used.has(t.name as string)
-  )
+  const stale = (
+    d.prepare(`SELECT id, name FROM tags WHERE source = 'ai' AND kind = ?`).all(DEFAULT_KIND) as Row[]
+  ).filter((t) => !used.has(t.name as string))
   const del = d.prepare('DELETE FROM tags WHERE id = ?')
   for (const t of stale) del.run(t.id)
 }
@@ -1703,8 +1830,9 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
     d.prepare('DELETE FROM scan_units').run()
     d.prepare('DELETE FROM pending_software').run()
     d.prepare('DELETE FROM skip_list').run()
-    // 没被认可过的 AI 标签跟着识别数据一起清；用户建的和确认过的是资产，留着
-    d.prepare(`DELETE FROM tags WHERE source = 'ai'`).run()
+    // 没被认可过的 AI 标签跟着识别数据一起清；用户建的和确认过的是资产，留着。
+    // 限定 kind 的理由和上面那句 DELETE FROM resource 一样：这是「清空软件库」
+    d.prepare(`DELETE FROM tags WHERE source = 'ai' AND kind = 'software'`).run()
     // 整理记录跟着软件条目一起清。0.3 时这里刻意留着它（「文件夹还在磁盘上，
     // 清掉记录等于让用户永远失去搬回去的办法」），但留下来的记录里 software_id
     // 全都指向已经不存在的条目 —— 撤销时找不到关联软件，整理页也只能显示一串空条目。
@@ -1725,7 +1853,7 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
 
   // 恢复出厂把内置分类、内置标签和版本号一并装回去。少了最后一项，下次启动
   // 会以为还没迁移过，白跑一遍重建。分类同样来自品类注册表，不是写死的
-  if (mode === 'all') seedDefaults(d, KINDS.flatMap((k) => k.defaultCategories))
+  if (mode === 'all') seedDefaults(d, KINDS)
 
   const icons = clearIcons()
 

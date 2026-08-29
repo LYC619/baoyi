@@ -12,7 +12,7 @@
  */
 
 import { readExternalActiveAt } from './activity.ts'
-import { BUILTIN_TAGS, mapCategory } from './taxonomy.ts'
+import { mapCategory } from './taxonomy.ts'
 import type { Category, TagSource } from '../../src/types'
 
 /**
@@ -22,7 +22,7 @@ import type { Category, TagSource } from '../../src/types'
  * 0.4 要再换一次分类体系，没有列可以拿来当标记了。于是显式记一个数字，
  * 存在 settings 表里（下划线开头的键不会出现在 AppSettings 里，见 getSettings）。
  */
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 export const SCHEMA_KEY = '_schema'
 
 /* --------------------------- 最小 SQL 接口 --------------------------- */
@@ -96,8 +96,12 @@ export const TABLES_SQL = `
     external_active_at INTEGER DEFAULT 0
   );
 
+  -- 分类。kind 把每个品类的分类体系隔开 —— 「开发工具」是软件的格子，
+  -- 「RPG」是游戏的格子，两边都靠 resource.category 按名字挂载，但不该
+  -- 出现在对方的侧边栏里，更不该出现在对方识别 prompt 的分类菜单里。
   CREATE TABLE IF NOT EXISTS categories (
     id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL DEFAULT 'software',
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     icon TEXT DEFAULT '',
@@ -106,11 +110,16 @@ export const TABLES_SQL = `
 
   -- 标签池。只有 source 为 user / confirmed 的会注入 prompt，
   -- agent 新造的先记成 ai，等用户在确认面板里点头才转正。
+  --
+  -- 唯一键是 (kind, name) 而不是 name：「单机」「开源」这类词两个品类都用得上，
+  -- 全局唯一会让先到的那个品类把词占死，另一个品类再也建不出同名标签。
   CREATE TABLE IF NOT EXISTS tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'software',
+    name TEXT NOT NULL,
     source TEXT DEFAULT 'ai',
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    UNIQUE(kind, name)
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -178,6 +187,7 @@ export const INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_identify_logs_created ON identify_logs(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_organize_plans_created ON organize_plans(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_reports_created ON identification_reports(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_categories_kind ON categories(kind, sort_order);
 `
 
 /* ------------------------------ 版本记账 ------------------------------ */
@@ -207,37 +217,45 @@ export function columnsOf(d: SqlDb, table: string): Set<string> {
 
 /* ------------------------------ 内置数据 ------------------------------ */
 
-export function insertCategories(d: SqlDb, rows: Category[]): void {
+export function insertCategories(d: SqlDb, rows: Category[], kind: string): void {
   const stmt = d.prepare(
-    `INSERT OR REPLACE INTO categories (id, name, description, icon, sort_order)
-     VALUES (?, ?, ?, ?, ?)`
+    `INSERT OR REPLACE INTO categories (id, kind, name, description, icon, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?)`
   )
   tx(d, () => {
-    for (const r of rows) stmt.run(r.id, r.name, r.description ?? '', r.icon ?? '', r.sort_order)
+    for (const r of rows) stmt.run(r.id, kind, r.name, r.description ?? '', r.icon ?? '', r.sort_order)
   })
 }
 
-export function insertTag(d: SqlDb, name: string, source: TagSource): void {
+export function insertTag(d: SqlDb, name: string, source: TagSource, kind: string): void {
   d.prepare(
-    `INSERT INTO tags (name, source, created_at) VALUES (?, ?, ?)
-     ON CONFLICT(name) DO NOTHING`
-  ).run(name, source, Date.now())
+    `INSERT INTO tags (kind, name, source, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(kind, name) DO NOTHING`
+  ).run(kind, name, source, Date.now())
 }
 
-/** 分类表空了才装 —— 用户把 5 个全删了的话，总得有东西兜着 */
-export function seedCategories(d: SqlDb, categories: Category[]): void {
-  const seeded = d.prepare('SELECT COUNT(*) AS n FROM categories').get() as { n: number }
-  if (seeded.n > 0 || categories.length === 0) return
-  insertCategories(d, categories)
+/**
+ * 某个品类的分类表空了才装 —— 用户把它们全删了的话，总得有东西兜着。
+ *
+ * 按 kind 分别判断，不看整张表：0.5 的库升上来时表里已经有软件那 5 条，
+ * 看整张表就永远轮不到游戏的分类被装进去。
+ */
+export function seedCategories(d: SqlDb, categories: Category[], kind: string): void {
+  if (categories.length === 0) return
+  const seeded = d
+    .prepare('SELECT COUNT(*) AS n FROM categories WHERE kind = ?')
+    .get(kind) as { n: number }
+  if (seeded.n > 0) return
+  insertCategories(d, categories, kind)
 }
 
 /**
  * 内置标签入池。已存在的一律不动 —— 用户可能已经把「便携」改成了别的意思，
  * 或者把它并进了另一个标签，覆盖回去等于替他撤销一次决定。
  */
-export function seedBuiltinTags(d: SqlDb): void {
+export function seedTags(d: SqlDb, names: string[], kind: string): void {
   tx(d, () => {
-    for (const name of BUILTIN_TAGS) insertTag(d, name, 'user')
+    for (const name of names) insertTag(d, name, 'user', kind)
   })
 }
 
@@ -245,12 +263,14 @@ export function seedBuiltinTags(d: SqlDb): void {
  * 内置分类 + 内置标签 + 版本号，一次装齐。
  *
  * 只在恢复出厂之后调 —— 正常启动走 migrate() 里那些按版本号闸的分支。
- * 差别要紧：这里的 seedBuiltinTags 是无条件跑的，放到每次启动就会让用户
+ * 差别要紧：这里的 seedTags 是无条件跑的，放到每次启动就会让用户
  * 删掉的内置标签第二天又长回来。
  */
-export function seedDefaults(d: SqlDb, categories: Category[]): void {
-  seedCategories(d, categories)
-  seedBuiltinTags(d)
+export function seedDefaults(d: SqlDb, kinds: KindLike[]): void {
+  for (const k of kinds) {
+    seedCategories(d, k.defaultCategories, k.kind)
+    seedTags(d, k.defaultTags, k.kind)
+  }
   setSchemaVersion(d, SCHEMA_VERSION)
 }
 
@@ -292,30 +312,29 @@ export function initSchema(d: SqlDb, kinds: KindLike[] = []): void {
   // 但那个闸门挡不住下一次提版本：4 -> 5 会再跑一遍 rebuildCategories，而它第一行
   // 是 DELETE FROM categories，用户从 0.4 到现在自建的分类会被清光。
   // 一次性动作就该绑死在触发它的那个版本上。
-  if (from < 4) rebuildCategories(d, allCategories(kinds))
+  if (from < 4) rebuildCategories(d, kinds)
 
+  // 内置标签只在升级那一次装，正常启动不装 —— 否则用户删掉的内置标签会长回来
   if (from < SCHEMA_VERSION) {
-    seedBuiltinTags(d)
+    for (const k of kinds) seedTags(d, k.defaultTags, k.kind)
     setSchemaVersion(d, SCHEMA_VERSION)
   }
 
-  seedCategories(d, allCategories(kinds))
+  for (const k of kinds) seedCategories(d, k.defaultCategories, k.kind)
 }
 
-/** 公共层对品类模块的最小认知：几段 SQL，一份默认分类 */
+/** 公共层对品类模块的最小认知：几段 SQL，一份默认分类，一份默认标签 */
 export interface KindLike {
   kind: string
   defaultCategories: Category[]
+  /** 这个品类的内置标签池。「魂系」「开放世界」不该出现在软件的识别 prompt 里 */
+  defaultTags: string[]
   schema: {
     tables: string
     view?: string
     indexes?: string
     migrate?: (d: SqlDb, from: number) => void
   }
-}
-
-function allCategories(kinds: KindLike[]): Category[] {
-  return kinds.flatMap((k) => k.defaultCategories)
 }
 
 /**
@@ -329,27 +348,71 @@ export function migrate(d: SqlDb, from = schemaVersion(d)): void {
   if (!columnsOf(d, 'categories').has('description')) {
     d.exec(`ALTER TABLE categories ADD COLUMN description TEXT DEFAULT ''`)
   }
+
+  // 0.6 给分类和标签加 kind：在此之前库里的每一条都是软件的
+  if (!columnsOf(d, 'categories').has('kind')) {
+    d.exec(`ALTER TABLE categories ADD COLUMN kind TEXT NOT NULL DEFAULT 'software'`)
+  }
+  splitTagsByKind(d)
 }
 
 /**
- * 0.4 换一套分类：清空分类表，装上 DEFAULT_CATEGORIES 那 5 条。
+ * 0.5 -> 0.6：tags 的唯一键从 name 换成 (kind, name)。
+ *
+ * 改唯一约束 SQLite 只能重建表。id 原样搬过去 —— 重命名 / 合并 / 删除标签
+ * 这几个 IPC 拿的都是 id，换一套 id 等于把用户正开着的那个设置页弄失效。
+ */
+export function splitTagsByKind(d: SqlDb): void {
+  if (objectType(d, 'tags') !== 'table') return
+  if (columnsOf(d, 'tags').has('kind')) return
+
+  tx(d, () => {
+    d.exec(`
+      CREATE TABLE tags_v6 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL DEFAULT 'software',
+        name TEXT NOT NULL,
+        source TEXT DEFAULT 'ai',
+        created_at INTEGER NOT NULL,
+        UNIQUE(kind, name)
+      );
+      INSERT INTO tags_v6 (id, kind, name, source, created_at)
+        SELECT id, 'software', name, source, created_at FROM tags;
+    `)
+
+    const before = (d.prepare('SELECT COUNT(*) AS n FROM tags').get() as { n: number }).n
+    const after = (d.prepare('SELECT COUNT(*) AS n FROM tags_v6').get() as { n: number }).n
+    if (before !== after) {
+      throw new Error(`0.6 标签迁移条数对不上：tags=${before} tags_v6=${after}`)
+    }
+
+    d.exec('DROP TABLE tags')
+    d.exec('ALTER TABLE tags_v6 RENAME TO tags')
+  })
+}
+
+/**
+ * 0.4 换一套分类：清空分类表，装上各品类交上来的那几条。
  *
  * 「清空」是有意的，包括用户自建的分类 —— 分类是靠**名字**挂在条目上的，
  * 留着一个不在新体系里的分类，只会让侧边栏同时显示新旧两套格子。名下的条目按
  * CATEGORY_MOVES 迁移，映射不到的退回「其他」：条目本身一条不少，只是要重归一次。
  *
- * 只在「从 4 以前升上来」时跑一次，见 migrate() 里那句 `if (from < 4)`。
+ * 只在「从 4 以前升上来」时跑一次，见 initSchema 里那句 `if (from < 4)`。
+ * 那个年代库里只有软件，所以按名字重映射这一步对全表成立。
  */
-export function rebuildCategories(d: SqlDb, categories: Category[]): void {
+export function rebuildCategories(d: SqlDb, kinds: KindLike[]): void {
   tx(d, () => {
     d.prepare('DELETE FROM categories').run()
     // insertCategories 自己会开事务，这里直接走语句，别嵌套 BEGIN
     const stmt = d.prepare(
-      `INSERT OR REPLACE INTO categories (id, name, description, icon, sort_order)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT OR REPLACE INTO categories (id, kind, name, description, icon, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
-    for (const r of categories) {
-      stmt.run(r.id, r.name, r.description ?? '', r.icon ?? '', r.sort_order)
+    for (const k of kinds) {
+      for (const r of k.defaultCategories) {
+        stmt.run(r.id, k.kind, r.name, r.description ?? '', r.icon ?? '', r.sort_order)
+      }
     }
 
     // 暂存区也要迁 —— 升级前刚识别完还没确认的那批，分类同样是旧体系的。

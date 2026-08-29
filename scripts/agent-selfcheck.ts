@@ -79,6 +79,7 @@ import {
 } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { softwareKind } from '../electron/kinds/software/index.ts'
+import { gameKind } from '../electron/kinds/game/index.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -1734,6 +1735,218 @@ async function main(): Promise<void> {
     assert.ok(softwareKind.schema.view?.includes('is_portable'))
     assert.equal(softwareKind.kind, 'software')
     assert.ok(softwareKind.defaultCategories.length > 0, '分类要由模块自己提供')
+  })
+
+  /* --------------------------- 库迁移：0.5 -> 0.6 --------------------------- */
+
+  console.log('\n库迁移 · 0.5 -> 0.6 分类标签按品类隔开')
+
+  /** 造一张 0.5 形状的库：resource + software_meta + 全局单表的 categories / tags */
+  function makeV5Db(): InstanceType<typeof DatabaseSync> {
+    const d = makeV4Db()
+    initSchema(d as any, [softwareKind])
+    // 把版本号按回 5，并把 0.6 的痕迹抹掉，装成一个真正停在 0.5 的库
+    d.prepare(`UPDATE settings SET value = '5' WHERE key = '_schema'`).run()
+    return d
+  }
+
+  await check('5 -> 6 迁完，软件的分类和标签一条不少，且都归到 software 名下', () => {
+    const d = makeV5Db()
+    const before = (d.prepare('SELECT COUNT(*) AS n FROM categories').get() as any).n
+    initSchema(d as any, KINDS)
+
+    const soft = d.prepare(`SELECT name FROM categories WHERE kind = 'software'`).all() as any[]
+    assert.equal(soft.length, before, `软件分类条数变了：${before} -> ${soft.length}`)
+    assert.ok(soft.some((c) => c.name === '我的自建分类'), '自建分类必须还在，且还归软件')
+
+    const orphan = (
+      d.prepare(`SELECT COUNT(*) AS n FROM tags WHERE kind NOT IN ('software','game')`).get() as any
+    ).n
+    assert.equal(orphan, 0, '不该有落在两个品类之外的标签')
+    assert.equal(schemaVersion(d as any), 6)
+    d.close()
+  })
+
+  await check('游戏的分类和标签装进去了，而且不会串进软件那一侧', () => {
+    const d = makeV5Db()
+    initSchema(d as any, KINDS)
+
+    const gameCats = (d.prepare(`SELECT name FROM categories WHERE kind = 'game'`).all() as any[])
+      .map((c) => c.name)
+    assert.ok(gameCats.includes('RPG'), `游戏分类没装上：${gameCats.join(',')}`)
+
+    // 这一条守的就是加 kind 的理由：RPG / 魂系混进软件的池子，
+    // 软件识别 prompt 的分类菜单里就会出现 RPG，agent 会拿它去归类一个调试器
+    const softCats = (d.prepare(`SELECT name FROM categories WHERE kind = 'software'`).all() as any[])
+      .map((c) => c.name)
+    assert.ok(!softCats.includes('RPG'), 'RPG 串进软件分类了')
+    const softTags = (d.prepare(`SELECT name FROM tags WHERE kind = 'software'`).all() as any[])
+      .map((t) => t.name)
+    assert.ok(!softTags.includes('魂系'), '魂系串进软件标签池了')
+    assert.ok(softTags.includes('便携'), '软件自己的内置标签该在')
+    const gameTags = (d.prepare(`SELECT name FROM tags WHERE kind = 'game'`).all() as any[])
+      .map((t) => t.name)
+    assert.ok(gameTags.includes('魂系'), '游戏标签没装上')
+    d.close()
+  })
+
+  await check('同一个词能在两个品类下各存一份 —— 唯一键是 (kind, name)', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    const ins = d.prepare(`INSERT INTO tags (kind, name, source, created_at) VALUES (?, ?, 'user', 1)`)
+    ins.run('software', '横跨两界')
+    ins.run('game', '横跨两界')
+    assert.equal((d.prepare(`SELECT COUNT(*) AS n FROM tags WHERE name = '横跨两界'`).get() as any).n, 2)
+    // 同一个品类下仍然不许重复
+    assert.throws(() => ins.run('game', '横跨两界'), /UNIQUE|constraint/i)
+    d.close()
+  })
+
+  await check('标签 id 穿过迁移不变 —— 设置页正开着的那些按钮不能失效', () => {
+    const d = makeV5Db()
+    const before = new Map(
+      (d.prepare('SELECT id, name FROM tags').all() as any[]).map((t) => [t.name, t.id])
+    )
+    assert.ok(before.size > 0, '前置条件：0.5 的库里该有内置标签')
+    initSchema(d as any, KINDS)
+    for (const [name, id] of before) {
+      const now = d.prepare(`SELECT id FROM tags WHERE kind = 'software' AND name = ?`).get(name) as any
+      assert.equal(now?.id, id, `标签「${name}」的 id 变了：${id} -> ${now?.id}`)
+    }
+    d.close()
+  })
+
+  await check('5 -> 6 是幂等的：再跑两遍不重复装、不重复建表', () => {
+    const d = makeV5Db()
+    initSchema(d as any, KINDS)
+    const cats = (d.prepare('SELECT COUNT(*) AS n FROM categories').get() as any).n
+    const tags = (d.prepare('SELECT COUNT(*) AS n FROM tags').get() as any).n
+    initSchema(d as any, KINDS)
+    initSchema(d as any, KINDS)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM categories').get() as any).n, cats)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM tags').get() as any).n, tags)
+    d.close()
+  })
+
+  await check('0.4 的老库能一路迁到 6，自建分类照样还在', () => {
+    const d = makeV4Db()
+    initSchema(d as any, KINDS)
+    assert.equal(schemaVersion(d as any), 6)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM resource').get() as any).n, 3)
+    // 0.4 -> 6 会走 rebuildCategories（from < 4 不成立，这里 from = 4，所以不走）
+    const names = (d.prepare(`SELECT name FROM categories WHERE kind = 'software'`).all() as any[])
+      .map((c) => c.name)
+    assert.ok(names.includes('我的自建分类'), `自建分类被清了：${names.join(',')}`)
+    d.close()
+  })
+
+  await check('game_meta / save_backups / game 视图都建起来了', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    assert.equal(objectType(d as any, 'game_meta'), 'table')
+    assert.equal(objectType(d as any, 'save_backups'), 'table')
+    assert.equal(objectType(d as any, 'game'), 'view')
+    d.close()
+  })
+
+  await check('play_status 只收四个合法值，写错一个当场被挡下', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    d.prepare(
+      `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name)
+       VALUES ('g1', 'game', 1, 2, 'D:\\Games\\艾尔登法环', '艾尔登法环')`
+    ).run()
+    const ins = d.prepare(`INSERT INTO game_meta (resource_id, play_status) VALUES (?, ?)`)
+    ins.run('g1', 'playing')
+    // 拼错一个状态如果被静默收下，侧边栏会多出一个谁也点不到的幽灵分组
+    assert.throws(() => ins.run('g1', 'playng'), /CHECK|constraint/i)
+    d.close()
+  })
+
+  await check('删游戏时 game_meta 跟着走，但备份记录留着 —— 那些文件还在磁盘上', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    d.prepare(
+      `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name)
+       VALUES ('g1', 'game', 1, 2, 'D:\\Games\\X', 'X')`
+    ).run()
+    d.prepare(`INSERT INTO game_meta (resource_id) VALUES ('g1')`).run()
+    d.prepare(
+      `INSERT INTO save_backups (id, resource_id, save_path, backup_dir, created_at)
+       VALUES ('b1', 'g1', 'C:\\S', 'E:\\bak\\X\\save_1', 1)`
+    ).run()
+
+    d.prepare('DELETE FROM resource WHERE id = ?').run('g1')
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM game_meta').get() as any).n, 0, 'meta 该跟着删')
+    // 级联删掉记录不会删掉 E:\bak 下那份拷贝，只会让用户再也找不到它
+    assert.equal(
+      (d.prepare('SELECT COUNT(*) AS n FROM save_backups').get() as any).n,
+      1,
+      '备份记录不该被级联删掉'
+    )
+    d.close()
+  })
+
+  await check('game 视图把两张表拼起来，缺 meta 的游戏也要露面', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    d.prepare(
+      `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name, name_zh, category)
+       VALUES ('g1', 'game', 1, 2, 'D:\\G\\a', 'a.exe', '甲游戏', 'RPG')`
+    ).run()
+    d.prepare(
+      `INSERT INTO game_meta (resource_id, play_status, total_playtime_sec, save_paths)
+       VALUES ('g1', 'completed', 314159, '[{"path":"C:\\\\S","verified_at":9}]')`
+    ).run()
+    // 只有 resource 没有 meta 的那条：不该从库里凭空消失
+    d.prepare(
+      `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name, name_zh)
+       VALUES ('g2', 'game', 1, 2, 'D:\\G\\b', 'b.exe', '乙游戏')`
+    ).run()
+
+    const rows = d.prepare('SELECT * FROM game ORDER BY id').all() as any[]
+    assert.equal(rows.length, 2, `LEFT JOIN 该带出两条，实际 ${rows.length}`)
+    assert.equal(rows[0].play_status, 'completed')
+    assert.equal(rows[0].total_playtime_sec, 314159)
+    assert.equal(JSON.parse(rows[0].save_paths)[0].path, 'C:\\S')
+    assert.equal(rows[1].play_status, 'unplayed', '缺 meta 时要落到默认值')
+    assert.equal(rows[1].total_playtime_sec, 0)
+
+    // 软件视图不该看见游戏，反过来也一样
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM software').get() as any).n, 0)
+    d.close()
+  })
+
+  await check('公共层不认识游戏：TABLES_SQL 里没有任何游戏私有的东西', () => {
+    const ddl = TABLES_SQL.replace(/--[^\n]*/g, '')
+    for (const leak of ['game_meta', 'save_backups', 'play_status', 'cover_path']) {
+      assert.ok(!ddl.includes(leak), `公共层的 TABLES_SQL 里出现了游戏私有的 ${leak}`)
+    }
+    assert.ok(gameKind.schema.tables.includes('game_meta'))
+    assert.ok(gameKind.schema.tables.includes('save_backups'))
+    assert.ok(gameKind.schema.view?.includes('play_status'))
+    assert.equal(gameKind.kind, 'game')
+    assert.ok(gameKind.defaultCategories.length > 0, '分类要由模块自己提供')
+    assert.ok(gameKind.defaultTags.length > 0, '标签池也要由模块自己提供')
+  })
+
+  await check('两个品类的内置词表不重叠 —— 重叠就说明有一边归错了', () => {
+    const softCats = new Set(softwareKind.defaultCategories.map((c) => c.name))
+    const gameCats = gameKind.defaultCategories.map((c) => c.name)
+    // 「其他」是两边共有的兜底格子，其余不该撞
+    const shared = gameCats.filter((n) => softCats.has(n))
+    assert.deepEqual(shared, ['其他'], `除了「其他」不该有共有分类，实际：${shared.join(',')}`)
+    const softTags = new Set(softwareKind.defaultTags)
+    const dupTags = gameKind.defaultTags.filter((t) => softTags.has(t))
+    assert.deepEqual(dupTags, [], `内置标签重叠：${dupTags.join(',')}`)
+    // id 全局唯一：categories 的主键是 id，撞了会 INSERT OR REPLACE 把对方顶掉
+    const ids = [...softwareKind.defaultCategories, ...gameKind.defaultCategories].map((c) => c.id)
+    assert.equal(new Set(ids).size, ids.length, `分类 id 撞了：${ids.join(',')}`)
   })
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)

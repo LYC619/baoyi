@@ -215,6 +215,50 @@ export interface Tag {
   created_at: number
 }
 
+/* ------------------------------ 游戏品类 ------------------------------ */
+
+/**
+ * 游玩状态。四态是闭集，库里有 CHECK 约束兜着（见 kinds/game/schema.ts）。
+ * 只有「首次通过抱一启动」会自动从 unplayed 转成 playing，其余全靠手动 ——
+ * 抱一不做后台监控，猜错状态比让用户点一下更烦人。
+ */
+export type PlayStatus = 'unplayed' | 'playing' | 'completed' | 'shelved'
+
+/** 一条存档路径。verified_at 是最后一次确认它真实存在的时刻，0 表示还没验证过 */
+export interface SavePath {
+  path: string
+  verified_at: number
+}
+
+/** 关联文件：攻略、修改器、MOD 目录、模拟器 exe 之类 */
+export interface LinkedFile {
+  path: string
+  label: string
+  type: 'guide' | 'trainer' | 'mod' | 'emulator' | 'other'
+}
+
+/** game_meta 那张表的形状。resource 的公共字段不在这里，见 GAME_VIEW_SQL */
+export interface GameMeta {
+  cover_path: string
+  background_path: string
+  play_status: PlayStatus
+  total_playtime_sec: number
+  last_played_at: number
+  save_paths: SavePath[]
+  linked_files: LinkedFile[]
+}
+
+/** 一次存档备份的记录。backup_dir 指向磁盘上真实存在的一份拷贝 */
+export interface SaveBackup {
+  id: string
+  resource_id: string
+  save_path: string
+  backup_dir: string
+  size_bytes: number
+  file_count: number
+  created_at: number
+}
+
 export interface AIConfig {
   api_url: string
   api_key: string
