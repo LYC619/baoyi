@@ -8,12 +8,14 @@
  */
 import { computed, ref } from 'vue'
 import { Archive, Box, ChevronDown, Gamepad2, Hash } from 'lucide-vue-next'
-import { PLAY_STATUS_LABEL, useGameStore } from '@/stores/game'
-import type { PlayStatus } from '@/types'
+import { PLAY_STATUS_LABEL, SAVE_STATUS_LABEL, useGameStore } from '@/stores/game'
+import type { PlayStatus, SaveStatus } from '@/types'
 
 const store = useGameStore()
 
 const STATUSES: PlayStatus[] = ['playing', 'unplayed', 'completed', 'shelved']
+/** 未备份排第一：这一格是这个分组唯一有行动含义的那一格 */
+const SAVES: SaveStatus[] = ['unbacked', 'backed', 'none']
 
 const tagsOpen = ref(false)
 const visibleTags = computed(() =>
@@ -49,6 +51,21 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
         <span class="dot" :class="`dot--${s}`" />
         <span class="row__label">{{ PLAY_STATUS_LABEL[s] }}</span>
         <span class="row__count">{{ store.counts.status[s] }}</span>
+      </button>
+
+      <p class="sidebar__title">存档</p>
+      <!-- 同样是闭集，三格都留着。三个颜色对应三种「要不要管它」：
+           橙 = 有存档没备份，该动手；绿 = 已经有备份了；灰 = 抱一没找到路径 -->
+      <button
+        v-for="s in SAVES"
+        :key="s"
+        class="row"
+        :class="{ 'row--active': isActive('save', s) }"
+        @click="store.select({ kind: 'save', value: s })"
+      >
+        <span class="dot" :class="`dot--save-${s}`" />
+        <span class="row__label">{{ SAVE_STATUS_LABEL[s] }}</span>
+        <span class="row__count">{{ store.counts.save[s] }}</span>
       </button>
 
       <template v-if="store.counts.categories.length > 0">
@@ -210,5 +227,21 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
 }
 .dot--shelved {
   background: var(--warning);
+}
+
+/*
+ * 存档三色。未发现存档用空心圈而不是灰实心：项目里「实心 = 记到了，空心 = 没有
+ * 实据」这个约定在软件卡片的启动时间上已经用过一次，这里沿用同一套读法，
+ * 顺手也让它和上一组的「搁置」在扫视时不撞。
+ */
+.dot--save-unbacked {
+  background: #e8913a;
+}
+.dot--save-backed {
+  background: #6aa84f;
+}
+.dot--save-none {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-faint);
 }
 </style>

@@ -7,7 +7,7 @@
  * 主程序、存档、关联文件。存档那一块尤其要能看能改：Step 5 的备份直接吃它，
  * 识别时模型漏了或者认错了，用户得有地方纠正，而不是等备份备了个空目录。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Archive,
@@ -21,14 +21,17 @@ import {
   History,
   Link2,
   Loader2,
+  Play,
   RotateCcw,
   Save,
-  Trash2
+  Trash2,
+  Unlink
 } from 'lucide-vue-next'
 import EditableField from '@/components/ui/EditableField.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import { useToast } from '@/composables/useToast'
 import { PLAY_STATUS_LABEL, useGameStore } from '@/stores/game'
+import { useSettingsStore } from '@/stores/settings'
 import type { GameItem, PlayStatus, SaveBackup, SavePath } from '@/types'
 import {
   errorMessage,
@@ -44,6 +47,7 @@ const props = defineProps<{ id: string }>()
 
 const router = useRouter()
 const store = useGameStore()
+const settings = useSettingsStore()
 const { success, error, toast } = useToast()
 
 const item = ref<GameItem | null>(null)
@@ -148,6 +152,16 @@ async function addSavePath(): Promise<void> {
 
 const verifying = ref('')
 
+/**
+ * 这条路径在开库那次体检里是不是没找到。
+ *
+ * 名单是进库时算的一份快照，不会自己更新 —— 所以手动验过之后要把它撤掉（见下），
+ * 否则用户明明验成功了，标签还挂着「路径失效」，那就成了一句不成立的话。
+ */
+function isStale(target: string): boolean {
+  return (store.staleSaves.get(props.id) ?? []).includes(target)
+}
+
 /** 重新验一条。主进程验过了会自己把 verified_at 往前推，这里只负责把话说清楚 */
 async function verifySavePath(target: string): Promise<void> {
   if (!item.value) return
@@ -160,6 +174,9 @@ async function verifySavePath(target: string): Promise<void> {
       toast('目录还在，但里面一个文件都没有')
     } else {
       success(`还在，${check.files} 个文件，共 ${formatBytes(check.bytes)}`)
+      // 验到了就撤掉失效标记。撤的是整条游戏的记录而不是这一条路径：
+      // 一个游戏通常只有一两条存档路径，为了精确到单条去改数组不值得
+      store.clearStale(props.id)
       await load()
     }
   } catch (err) {
@@ -206,11 +223,50 @@ async function backupSave(target: string): Promise<void> {
     }
     await loadBackups()
     success(`${r.message}，共 ${formatBytes(r.backup?.size_bytes ?? 0)}`)
+    await pruneOver(r.over)
   } catch (err) {
     error(`备份没能跑起来：${errorMessage(err)}`)
   } finally {
     backingUp.value = ''
   }
+}
+
+/**
+ * 超出保留上限时问一句，问完才删。
+ *
+ * 主进程只**算出**哪几份超额，删不删在这里问 —— 备份的意义就是「我改主意时还
+ * 有退路」，让程序自己决定哪份退路可以扔掉，等于把这个意义抽掉一半。所以文案里
+ * 逐条列出时间和体量，用户拿这些才判断得出「最早那份是不是恰好是我想留的通关存档」。
+ * 拒绝也不算失败：上限只是提醒的阈值，不是必须清到的水位。
+ */
+async function pruneOver(over: SaveBackup[]): Promise<void> {
+  if (over.length === 0) return
+  const lines = over
+    .map((b) => `　· ${formatDateTime(b.created_at)}　${formatBytes(b.size_bytes)}`)
+    .join('\n')
+  const ok = window.confirm(
+    `这条存档的备份超过了保留上限（${settings.settings.save_backup_keep} 份）。\n\n` +
+      `删掉最早的 ${over.length} 份？\n${lines}\n\n` +
+      `磁盘上的拷贝会被删掉，删了就找不回来了。\n` +
+      `不删也没关系，下次备份还会再问一次；不想再被问可以在设置里把上限改成 0。`
+  )
+  if (!ok) return
+
+  let done = 0
+  const failed: string[] = []
+  for (const b of over) {
+    try {
+      const r = await window.baoyi.game.deleteBackup(b.id)
+      if (r.ok) done++
+      else failed.push(r.message)
+    } catch (err) {
+      failed.push(errorMessage(err))
+    }
+  }
+  await loadBackups()
+  if (done > 0) success(`已清理 ${done} 份旧备份`)
+  // 一条条报会刷屏，但也不能只说「部分失败」——第一条原因通常就是全部原因
+  if (failed.length > 0) error(`${failed.length} 份没删掉：${failed[0]}`)
 }
 
 /**
@@ -266,6 +322,56 @@ function toggleArchive(): void {
   void save({ is_archived: !item.value.is_archived })
 }
 
+/* ---------------------------- 启动与时长 ---------------------------- */
+
+/**
+ * 这个游戏此刻在不在跑。向主进程问，而不是自己记一个 ——
+ * 从详情页退出去再进来，页面状态没了，但游戏还在跑。
+ */
+const running = ref(false)
+
+async function refreshRunning(): Promise<void> {
+  if (!item.value) return
+  running.value = await window.baoyi.game.running(item.value.id)
+}
+
+async function launch(): Promise<void> {
+  if (!item.value) return
+  const r = await window.baoyi.game.launch(item.value.id)
+  if (!r.ok) {
+    error(r.message)
+    return
+  }
+  toast(r.message)
+  await refreshRunning()
+}
+
+/**
+ * 一段游玩结束。
+ *
+ * 只处理这一页正在看的那个游戏 —— 事件是广播的，别的游戏结束了不该让这一页刷新。
+ * 时长和状态都在主进程写完了，这里重读一次而不是自己算：算重了就是两份账。
+ */
+let offSession: (() => void) | null = null
+onMounted(() => {
+  // 失效名单平时是开库时算的，但直接落在详情页上（模块记忆恢复的路径、或者从
+  // 别处跳进来）时封面墙的 onMounted 没跑过 —— 真机上验出来就是这个：路径明明
+  // 不在了，这一页还挂着「2026-08-28 验证过」。所以没跑过就自己补一次。
+  if (!store.staleChecked) void store.checkSavePaths()
+
+  offSession = window.baoyi.game.onSession((e) => {
+    if (e.id !== props.id) return
+    running.value = false
+    void load()
+    // 没计入的那次要说明白为什么，所以用 toast 而不是 success —— 它不是一件成事
+    if (e.counted) success(e.message)
+    else toast(e.message)
+    if (e.status_changed) toast(`状态跟着改成了「${PLAY_STATUS_LABEL[e.play_status]}」`)
+  })
+  void refreshRunning()
+})
+onBeforeUnmount(() => offSession?.())
+
 async function reveal(): Promise<void> {
   if (!item.value) return
   await window.baoyi.game.revealInFolder(item.value.id)
@@ -307,6 +413,11 @@ function copyPath(path: string): void {
         </button>
 
         <div class="head__actions">
+          <!-- 启动放在第一个、用主色：详情页上其他都是管理动作，只有这个是「去玩」 -->
+          <button class="btn btn--primary" :disabled="running" @click="launch">
+            <component :is="running ? Loader2 : Play" :size="14" :class="{ spin: running }" />
+            {{ running ? '正在运行' : '启动' }}
+          </button>
           <button class="btn btn--ghost" @click="reveal">
             <FolderOpen :size="14" />
             打开所在文件夹
@@ -404,7 +515,13 @@ function copyPath(path: string): void {
                 <button class="path__text mono truncate" :title="`${s.path}（点击复制）`" @click="copyPath(s.path)">
                   {{ s.path }}
                 </button>
-                <span class="path__note">
+                <!-- 失效盖过验证时间：那个时间戳说的是过去某一刻它在，
+                     而这条说的是现在它不在，后者是用户此刻要知道的那句 -->
+                <span v-if="isStale(s.path)" class="path__note path__note--stale" title="开库时检查发现这个位置不存在了。可能是移动或卸载了游戏，也可能是所在的盘没接上">
+                  <Unlink :size="11" />
+                  路径失效
+                </span>
+                <span v-else class="path__note">
                   {{ s.verified_at ? `${formatDate(s.verified_at)} 验证过` : '未验证' }}
                 </span>
                 <button
@@ -435,12 +552,14 @@ function copyPath(path: string): void {
             </p>
             <p v-if="item.save_paths.length > 0" class="hint">
               备份放在设置 › 数据管理里指定的目录，一次备一份，不会覆盖上一份。
+              超过那里设的保留上限时会问一句要不要清掉最早的几份。
             </p>
           </section>
 
           <!--
-            备份列表。刻意不做自动备份和保留策略：备份是用户「我要留住这一刻」的
-            动作，定时替他决定留哪几份、删哪几份，等于替他扔东西。
+            备份列表。刻意不做自动备份：备份是用户「我要留住这一刻」的动作，
+            替他决定什么时候值得留住，等于把这个动作的意思抽掉。
+            保留上限只**提示**、不自动删，理由同上 —— 见 pruneOver。
           -->
           <section v-if="backups.length > 0" class="panel">
             <h2 class="sec-title">
@@ -784,6 +903,15 @@ function copyPath(path: string): void {
   flex: none;
   font-size: var(--fs-tag);
   color: var(--text-faint);
+}
+
+/* 用警示色但不做背景块：这是一句提示，不是一条错误 —— 路径失效很可能只是
+   移动硬盘没接上，把它渲染成红底会让人以为数据丢了 */
+.path__note--stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--warning);
 }
 
 .path__act {

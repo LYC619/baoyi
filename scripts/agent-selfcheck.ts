@@ -107,12 +107,25 @@ import {
   gameFolder,
   listBackups,
   MANIFEST,
+  overRetention,
   PAYLOAD,
   restoreBackup,
   restoreBlocked,
   stamp,
   type GameLike
 } from '../electron/kinds/game/backup.ts'
+import {
+  expandTemplate,
+  lookupSavePaths,
+  normalizeGameName,
+  truncateTemplate,
+  type SaveDbHandle
+} from '../electron/kinds/game/savedb.ts'
+import {
+  elapsedSeconds,
+  endSession,
+  MIN_SESSION_SEC
+} from '../electron/kinds/game/session.ts'
 import { isDriveRoot, nestedInside as nestedInsideShared } from '../electron/services/fstree.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
@@ -1985,6 +1998,8 @@ async function main(): Promise<void> {
 
   await gameIdentifySection()
   await saveBackupSection()
+  await saveDbSection()
+  await playSessionSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -2412,6 +2427,56 @@ async function gameIdentifySection(): Promise<void> {
       { name: '动作', count: 2 }
     )
     assert.equal(c.tags.find((t) => t.name === '像素')?.count, 2)
+    d.close()
+  })
+
+  await check('存档状态三分：没路径 / 有路径没备份 / 备过了，互斥且穷尽', () => {
+    const d = stocked()
+    // stocked() 里「苏丹的游戏」的 save_paths 是空的，另外两条非归档的都有路径
+    const sultan = listGames(d as any, { save: 'none' })
+    assert.deepEqual(sultan.map((g) => g.name_zh), ['苏丹的游戏'])
+    assert.equal(listGames(d as any, { save: 'unbacked' }).length, 2)
+    assert.equal(listGames(d as any, { save: 'backed' }).length, 0)
+
+    // 给「蔚蓝」记一份备份，它应当从 unbacked 挪到 backed
+    const celeste = listGames(d as any).find((g) => g.name_zh === '蔚蓝')!
+    d.prepare(
+      `INSERT INTO save_backups
+         (id, resource_id, save_path, backup_dir, size_bytes, file_count, created_at)
+       VALUES ('b1', ?, ?, 'D:\\\\bak\\\\x', 10, 1, 1)`
+    ).run(celeste.id, celeste.save_paths[0].path)
+
+    assert.deepEqual(
+      listGames(d as any, { save: 'backed' }).map((g) => g.name_zh),
+      ['蔚蓝']
+    )
+    assert.equal(listGames(d as any, { save: 'unbacked' }).length, 1)
+
+    // 三格加起来必须等于全部：漏一格就意味着有游戏在侧边栏里点不到
+    const c = gameCounts(d as any)
+    assert.deepEqual(Object.keys(c.save).sort(), ['backed', 'none', 'unbacked'])
+    assert.equal(c.save.none + c.save.unbacked + c.save.backed, c.all, '三格之和不等于全部')
+    assert.equal(c.save.backed, 1)
+    d.close()
+  })
+
+  await check('存档状态筛选和侧边栏计数用的是同一份判断，不会一边说 3 一边列 4', () => {
+    const d = stocked()
+    const c = gameCounts(d as any)
+    for (const s of ['none', 'unbacked', 'backed'] as const) {
+      assert.equal(
+        listGames(d as any, { save: s }).length,
+        c.save[s],
+        `${s} 的计数和列表不一致`
+      )
+    }
+    d.close()
+  })
+
+  await check('归档的游戏不进存档统计 —— 和分类标签同一个口径', () => {
+    const d = stocked()
+    // 归档那条是 payload() 的默认值，带存档路径且没备份，若被算进来 unbacked 会是 3
+    assert.equal(gameCounts(d as any).save.unbacked, 2)
     d.close()
   })
 
@@ -2939,7 +3004,344 @@ async function saveBackupSection(): Promise<void> {
     d.close()
   })
 
+  console.log('\n存档备份 · 保留上限')
+
+  await check('超出上限时报出最早的那几份，且一个字节都不删', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档M')
+    const now = Date.now()
+    for (let i = 0; i < 4; i++) {
+      await createBackup(d as any, HK, save, { backupRoot, now: now - (4 - i) * 86_400_000 })
+    }
+    const over = overRetention(d as any, HK.id, path.resolve(save), 2)
+    assert.equal(over.length, 2, '4 份留 2 份，该报 2 份超额')
+    assert.ok(over[0].created_at < over[1].created_at, '报出来的顺序该是从最早开始')
+    // 关键的一条：只回答问题，不动手
+    assert.equal(listBackups(d as any, HK.id).length, 4, 'overRetention 删了东西')
+    for (const b of over) {
+      assert.ok(fs.existsSync(b.backup_dir), '磁盘上的拷贝被 overRetention 删掉了')
+    }
+    d.close()
+  })
+
+  await check('刚好等于上限不算超，少于上限也不算', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档N')
+    const now = Date.now()
+    await createBackup(d as any, HK, save, { backupRoot, now: now - 86_400_000 })
+    await createBackup(d as any, HK, save, { backupRoot, now })
+    assert.deepEqual(overRetention(d as any, HK.id, path.resolve(save), 2), [], '等于上限不该报')
+    assert.deepEqual(overRetention(d as any, HK.id, path.resolve(save), 5), [], '少于上限不该报')
+    d.close()
+  })
+
+  await check('上限填 0 或填了不成立的值都当不限，永不提示', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档O')
+    const now = Date.now()
+    for (let i = 0; i < 3; i++) {
+      await createBackup(d as any, HK, save, { backupRoot, now: now - (3 - i) * 86_400_000 })
+    }
+    for (const keep of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.deepEqual(overRetention(d as any, HK.id, path.resolve(save), keep), [], `keep=${keep}`)
+    }
+    d.close()
+  })
+
+  await check('上限按「每条存档路径」算，不是每个游戏 —— 两条路径各留各的', async () => {
+    const d = freshDb()
+    const a = await makeSave('存档P1')
+    const b = await makeSave('存档P2')
+    const now = Date.now()
+    for (let i = 0; i < 3; i++) {
+      await createBackup(d as any, HK, a, { backupRoot, now: now - (3 - i) * 86_400_000 })
+    }
+    await createBackup(d as any, HK, b, { backupRoot, now })
+
+    // 同一个游戏名下一共 4 份，但按路径分开算：a 超 1 份，b 一份没超
+    assert.equal(overRetention(d as any, HK.id, path.resolve(a), 2).length, 1)
+    assert.deepEqual(overRetention(d as any, HK.id, path.resolve(b), 2), [])
+    d.close()
+  })
+
   await fsp.rm(base, { recursive: true, force: true })
+}
+
+/* ==================== 存档查表 · 第三层 ==================== */
+
+async function saveDbSection(): Promise<void> {
+  console.log('\n存档查表 · 模板截断')
+
+  await check('认得的占位符整条留下', () => {
+    assert.equal(
+      truncateTemplate('<winAppData>/Team Cherry/Hollow Knight'),
+      '<winAppData>/Team Cherry/Hollow Knight'
+    )
+  })
+
+  await check('在第一个认不得的段上截断，保留祖先目录', () => {
+    // 这两条就是当初被整条丢掉的艾尔登法环和空洞骑士
+    assert.equal(truncateTemplate('<winAppData>/EldenRing/<storeUserId>'), '<winAppData>/EldenRing')
+    assert.equal(
+      truncateTemplate('<home>/AppData/LocalLow/Team Cherry/Hollow Knight/*.dat'),
+      '<home>/AppData/LocalLow/Team Cherry/Hollow Knight'
+    )
+  })
+
+  await check('截断有下限：砍完只剩占位符根的整条丢掉', () => {
+    // 否则 %APPDATA% 整个 Roaming 会被当成某个游戏的存档目录备走
+    assert.equal(truncateTemplate('<winAppData>/<storeUserId>'), '')
+    assert.equal(truncateTemplate('<home>/*'), '')
+    assert.equal(truncateTemplate('<winDocuments>'), '')
+  })
+
+  await check('第一段就认不得的整条丢掉 —— Linux / Mac 的那些根', () => {
+    assert.equal(truncateTemplate('<root>/saves'), '')
+    assert.equal(truncateTemplate('<xdgData>/foo/bar'), '')
+    assert.equal(truncateTemplate('<xdgConfig>/x'), '')
+  })
+
+  console.log('\n存档查表 · 名字归一')
+
+  await check('大小写、空格、标点抹平，同一个游戏的几种写法归到一个键', () => {
+    const want = normalizeGameName('Elden Ring')
+    for (const variant of ['ELDEN RING', 'elden ring', 'Elden Ring™', ' Elden  Ring ', 'Elden-Ring']) {
+      assert.equal(normalizeGameName(variant), want, `${variant} 没归到同一个键`)
+    }
+  })
+
+  await check('中日韩字符保留 —— 按 \\w 过滤会把「原神」整个抹成空串', () => {
+    assert.equal(normalizeGameName('原神'), '原神')
+    assert.equal(normalizeGameName('苏丹的游戏'), '苏丹的游戏')
+    assert.ok(normalizeGameName('ぼくのなつやすみ').length > 0)
+  })
+
+  await check('罗马数字刻意不转 —— 这是已知取舍，不是漏洞', () => {
+    assert.notEqual(normalizeGameName('Final Fantasy VII'), normalizeGameName('Final Fantasy 7'))
+  })
+
+  console.log('\n存档查表 · 展开与查表')
+
+  /** 一份手写的小索引，形状和编译出来的那份一样 */
+  const miniDb: SaveDbHandle = {
+    format: 1,
+    source: 'selfcheck',
+    built_at: new Date(0).toISOString(),
+    games: {
+      eldenring: { name: 'Elden Ring', paths: ['<winAppData>/EldenRing/<storeUserId>'] },
+      hollowknight: {
+        name: 'Hollow Knight',
+        paths: [
+          '<home>/AppData/LocalLow/Team Cherry/Hollow Knight/*.dat',
+          '<home>/AppData/LocalLow/Team Cherry/Hollow Knight'
+        ]
+      },
+      celeste: {
+        name: 'Celeste',
+        paths: ['<base>/Saves', '<base>/Saves/debug.celeste']
+      },
+      onlybase: { name: 'Only Base', paths: ['<base>/Data'] },
+      unexpandable: { name: 'Unexpandable', paths: ['<xdgData>/foo'] }
+    }
+  }
+  const HOME = 'C:\\Users\\sc'
+  const ctx = { home: HOME }
+
+  await check('占位符展开成真实路径，分隔符归一到反斜杠', () => {
+    const out = expandTemplate('<home>/AppData/LocalLow/Team Cherry/Hollow Knight', ctx)
+    assert.equal(out, path.resolve(`${HOME}\\AppData\\LocalLow\\Team Cherry\\Hollow Knight`))
+    assert.ok(!out.includes('/'), '正斜杠没归一，路径会和库里其他路径长得不一样')
+  })
+
+  await check('<base> 只有调用方给了安装目录才展开，没给就展不开', () => {
+    assert.equal(expandTemplate('<base>/Saves', ctx), '')
+    assert.equal(
+      expandTemplate('<base>/Saves', { ...ctx, base: 'D:\\Games\\Celeste' }),
+      path.resolve('D:\\Games\\Celeste\\Saves')
+    )
+  })
+
+  await check('查表按名字命中，报出索引里的原名', () => {
+    const hit = lookupSavePaths(miniDb, ['艾尔登法环', 'ELDEN RING'], ctx)
+    assert.ok(hit, '没命中')
+    assert.equal(hit.matched, 'Elden Ring', '该报索引里的原名，用户才知道按哪个名字查到的')
+    assert.equal(hit.paths.length, 1)
+    assert.ok(hit.paths[0].endsWith('EldenRing'), '该截断到父目录，把所有档位都带上')
+  })
+
+  await check('多个名字按顺序试，第一个命中的就用它', () => {
+    // 第一个名字查不到，第二个能查到
+    const hit = lookupSavePaths(miniDb, ['某个不存在的游戏', 'Hollow Knight'], ctx)
+    assert.equal(hit?.matched, 'Hollow Knight')
+  })
+
+  await check('落在别人里面的路径被丢掉 —— 备父目录已经把子路径带上了', () => {
+    const hit = lookupSavePaths(miniDb, ['Celeste'], { ...ctx, base: 'D:\\Games\\Celeste' })
+    assert.equal(hit?.paths.length, 1, 'Saves 和 Saves\\debug.celeste 都留下了')
+    assert.ok(hit!.paths[0].endsWith('Saves'))
+  })
+
+  await check('截断之后重复的模板只留一条', () => {
+    // Hollow Knight 两条模板截断后是同一个目录
+    const hit = lookupSavePaths(miniDb, ['Hollow Knight'], ctx)
+    assert.equal(hit?.paths.length, 1, '两条模板截出同一个目录，该去重')
+  })
+
+  await check('命中了但一条都展不开，等于没命中', () => {
+    // onlybase 全是 <base>，没给安装目录时展不开
+    assert.equal(lookupSavePaths(miniDb, ['Only Base'], ctx), null)
+    // unexpandable 的模板第一段就认不得
+    assert.equal(lookupSavePaths(miniDb, ['Unexpandable'], ctx), null)
+  })
+
+  await check('没有索引时返回 null，不抛 —— 前两层照样得能工作', () => {
+    assert.equal(lookupSavePaths(null, ['Elden Ring'], ctx), null)
+    assert.equal(lookupSavePaths(miniDb, [], ctx), null)
+    assert.equal(lookupSavePaths(miniDb, ['', '  '], ctx), null, '空名字不该被当成键去查')
+  })
+
+  await check('查表结果只是候选，不带「已验证」的意思 —— 这一条守的是设计边界', () => {
+    // 这一条守的是设计边界：lookupSavePaths 返回的路径可能根本不存在
+    // （没装过这个游戏、装在别的账户下）。它必须再过 detect_save_path 那道验证。
+    const hit = lookupSavePaths(miniDb, ['Elden Ring'], { home: 'Z:\\nobody' })
+    assert.ok(hit, '路径不存在也照样返回 —— 存不存在由验证那一层说')
+    assert.ok(hit.paths[0].startsWith('Z:\\nobody') || hit.paths[0].includes('EldenRing'))
+  })
+}
+
+/* ==================== 游玩时长 · Step 6 ==================== */
+
+async function playSessionSection(): Promise<void> {
+  console.log('\n游玩时长 · 记账')
+
+  /** 铺一条刚扫进来的游戏：从没玩过，时长为 0 */
+  const oneGame = (): { d: InstanceType<typeof DatabaseSync>; id: string } => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    const { id } = insertGame(d as any, {
+      exe_path: 'D:\\Games\\HK\\hollow_knight.exe',
+      name_zh: '空洞骑士',
+      name_en: 'Hollow Knight',
+      summary: '',
+      description: '',
+      category: '动作',
+      tags: [],
+      official_url: '',
+      source_dir: 'D:\\Games\\HK',
+      file_size: 600_000,
+      save_paths: [],
+      linked_files: []
+    })
+    return { d, id }
+  }
+
+  await check('够门槛的一段游玩累加进总时长，并把上次游玩推到现在', () => {
+    const { d, id } = oneGame()
+    const before = Date.now()
+    const out = endSession(d as any, id, 1800)!
+    assert.equal(out.counted, true)
+    assert.equal(out.elapsed_sec, 1800)
+    assert.equal(out.total_playtime_sec, 1800)
+
+    const g = getGame(d as any, id)!
+    assert.equal(g.total_playtime_sec, 1800)
+    assert.ok(g.last_played_at >= before, 'last_played_at 没被推到这一刻')
+    d.close()
+  })
+
+  await check('多段游玩是累加，不是覆盖', () => {
+    const { d, id } = oneGame()
+    endSession(d as any, id, 600)
+    endSession(d as any, id, 900)
+    const out = endSession(d as any, id, 60)!
+    assert.equal(out.total_playtime_sec, 1560)
+    assert.equal(getGame(d as any, id)!.total_playtime_sec, 1560)
+    d.close()
+  })
+
+  await check('太短的那次不计入时长 —— 启动器一闪而过不算玩了 3 秒', () => {
+    const { d, id } = oneGame()
+    const out = endSession(d as any, id, 3)!
+    assert.equal(out.counted, false)
+    assert.equal(out.elapsed_sec, 3, '实际秒数照样报出来，不改成 0')
+    assert.equal(out.total_playtime_sec, 0, '不该被累加进去')
+    assert.equal(getGame(d as any, id)!.total_playtime_sec, 0)
+    d.close()
+  })
+
+  await check('太短也要更新上次游玩，并照样翻状态 —— 他确实启动过', () => {
+    const { d, id } = oneGame()
+    const out = endSession(d as any, id, 3)!
+    assert.equal(out.play_status, 'playing', '短一次也是玩过一次')
+    assert.equal(out.status_changed, true)
+    const g = getGame(d as any, id)!
+    assert.ok(g.last_played_at > 0, '上次游玩没更新')
+    assert.equal(g.play_status, 'playing')
+    d.close()
+  })
+
+  await check('没计入时那句话要说清为什么，不能显示「已记录 0 分钟」', () => {
+    const { d, id } = oneGame()
+    const out = endSession(d as any, id, 5)!
+    assert.ok(!out.message.includes('0 分钟'), '说成 0 分钟会让人以为功能坏了')
+    assert.ok(out.message.includes('启动器'), '该点出最可能的原因')
+    d.close()
+  })
+
+  await check('门槛是 60 秒：正好 60 计入，59 不计入', () => {
+    const a = oneGame()
+    assert.equal(endSession(a.d as any, a.id, MIN_SESSION_SEC)!.counted, true)
+    a.d.close()
+    const b = oneGame()
+    assert.equal(endSession(b.d as any, b.id, MIN_SESSION_SEC - 1)!.counted, false)
+    b.d.close()
+  })
+
+  await check('状态只做「想玩 → 在玩」这一个方向的翻转', () => {
+    const { d, id } = oneGame()
+    endSession(d as any, id, 1800)
+    assert.equal(getGame(d as any, id)!.play_status, 'playing')
+
+    // 用户自己标了通关，再玩一次不该把他改回「在玩」
+    updateGame(d as any, id, { play_status: 'completed' })
+    const out = endSession(d as any, id, 1800)!
+    assert.equal(out.play_status, 'completed', '把用户标的通关冲掉了')
+    assert.equal(out.status_changed, false)
+    assert.equal(out.total_playtime_sec, 3600, '时长还是要加')
+
+    // 搁置同理 —— 重新玩起来算不算「不搁置了」只有他自己知道
+    updateGame(d as any, id, { play_status: 'shelved' })
+    assert.equal(endSession(d as any, id, 1800)!.play_status, 'shelved')
+    d.close()
+  })
+
+  await check('游玩过程中条目被移除时，记账不把它写回来', () => {
+    const { d, id } = oneGame()
+    deleteGame(d as any, id)
+    assert.equal(endSession(d as any, id, 1800), null, '删掉的游戏不该因为一次结算长回来')
+    assert.equal(getGame(d as any, id), null)
+    d.close()
+  })
+
+  await check('时钟被往回调过时算 0 秒，不记一段负时长', () => {
+    const now = Date.now()
+    assert.equal(elapsedSeconds(now, now - 60_000), 0)
+    assert.equal(elapsedSeconds(now, now), 0)
+    assert.equal(elapsedSeconds(now - 90_000, now), 90)
+    // 不足一秒向下取整，不四舍五入到 1
+    assert.equal(elapsedSeconds(now - 900, now), 0)
+  })
+
+  await check('负时长喂进来也不会让总时长倒退', () => {
+    const { d, id } = oneGame()
+    endSession(d as any, id, 1800)
+    // elapsedSeconds 已经兜过底，这一条守的是 endSession 自己也不该被穿透
+    const out = endSession(d as any, id, -100)!
+    assert.equal(out.counted, false, '负数不该过门槛')
+    assert.equal(out.total_playtime_sec, 1800, '总时长倒退了')
+    d.close()
+  })
 }
 
 

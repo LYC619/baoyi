@@ -16,7 +16,8 @@ import type {
   GameQuery,
   LinkedFile,
   PlayStatus,
-  SavePath
+  SavePath,
+  SaveStatus
 } from '../../../src/types'
 import type { SqlDb } from '../../services/schema.ts'
 
@@ -126,6 +127,8 @@ export function setPlayStatus(d: SqlDb, id: string, status: PlayStatus): void {
 type Row = Record<string, any>
 
 export const PLAY_STATUSES: PlayStatus[] = ['unplayed', 'playing', 'completed', 'shelved']
+/** 从「最该被注意」排到「已经妥了」，侧栏按这个顺序显示 */
+export const SAVE_STATUSES: SaveStatus[] = ['unbacked', 'backed', 'none']
 
 /**
  * 库里的 JSON 列坏掉时退回空数组，而不是让整个列表页炸掉。
@@ -177,6 +180,21 @@ function rowToGame(row: Row): GameItem {
  * 应该在手边。从没玩过的（last_played_at = 0）自然沉到底，再按加入时间排，
  * 于是刚扫进来的一批仍然挨在一起，不会散成一片。
  */
+/**
+ * 存档状态的三个条件，同一份 SQL 供筛选和计数两处用 —— 分开写迟早会漂：
+ * 侧栏说「未备份 3 个」，点进去列出 4 个，这种不一致比没有这个功能更糟。
+ *
+ * save_paths 列是 `NOT NULL DEFAULT '[]'`，视图里还 COALESCE 过一次，
+ * 所以 json_array_length 拿不到 NULL，不必再兜。
+ */
+const SAVE_WHERE: Record<SaveStatus, string> = {
+  none: `json_array_length(save_paths) = 0`,
+  unbacked: `json_array_length(save_paths) > 0
+             AND NOT EXISTS (SELECT 1 FROM save_backups b WHERE b.resource_id = game.id)`,
+  backed: `json_array_length(save_paths) > 0
+           AND EXISTS (SELECT 1 FROM save_backups b WHERE b.resource_id = game.id)`
+}
+
 const GAME_ORDER: Record<NonNullable<GameQuery['sort']>, string> = {
   played: 'last_played_at DESC, created_at DESC',
   name: `COALESCE(NULLIF(name_zh, ''), NULLIF(name_en, ''), file_name) ASC`,
@@ -196,6 +214,8 @@ export function listGames(d: SqlDb, query: GameQuery = {}): GameItem[] {
     where.push('play_status = ?')
     params.push(query.status)
   }
+  // 白名单取值，不是把 query.save 拼进 SQL
+  if (query.save && SAVE_WHERE[query.save]) where.push(`(${SAVE_WHERE[query.save]})`)
   if (query.tag) {
     // tags 是 JSON 数组字符串，带引号匹配，免得「独立」命中「独立游戏」
     where.push('tags LIKE ?')
@@ -233,6 +253,13 @@ export function gameCounts(d: SqlDb): GameCounts {
     if (PLAY_STATUSES.includes(r.s as PlayStatus)) status[r.s as PlayStatus] = Number(r.n) || 0
   }
 
+  const save = Object.fromEntries(
+    SAVE_STATUSES.map((s) => [
+      s,
+      one(`SELECT COUNT(*) AS n FROM game WHERE is_archived = 0 AND (${SAVE_WHERE[s]})`)
+    ])
+  ) as Record<SaveStatus, number>
+
   const categories = (
     d
       .prepare(
@@ -252,6 +279,7 @@ export function gameCounts(d: SqlDb): GameCounts {
     all: one('SELECT COUNT(*) AS n FROM game WHERE is_archived = 0'),
     archived: one('SELECT COUNT(*) AS n FROM game WHERE is_archived = 1'),
     status,
+    save,
     categories,
     tags: [...tagMap.entries()]
       .map(([name, count]) => ({ name, count }))

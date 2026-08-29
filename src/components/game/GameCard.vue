@@ -7,13 +7,23 @@
  * 得自己站得住：首字 + 分类色，看上去像一张有意为之的卡，而不是一个破图。
  */
 import { computed } from 'vue'
-import { Clock } from 'lucide-vue-next'
+import { Clock, Unlink } from 'lucide-vue-next'
 import type { GameItem } from '@/types'
 import { formatPlaytime, formatRelative, gameTitle } from '@/utils'
-import { PLAY_STATUS_LABEL } from '@/stores/game'
+import { PLAY_STATUS_LABEL, useGameStore } from '@/stores/game'
 
 const props = defineProps<{ item: GameItem }>()
 defineEmits<{ (e: 'open', id: string): void }>()
+
+const store = useGameStore()
+
+/**
+ * 存档路径失效的角标。
+ *
+ * 独立于「游玩状态」那个角标显示，两者含义不冲突：一个说他玩到哪儿了，
+ * 一个说抱一记的那条路径现在指不到东西。压成一个角标会丢掉其中一句。
+ */
+const stale = computed(() => store.staleSaves.get(props.item.id) ?? [])
 
 const title = computed(() => gameTitle(props.item))
 
@@ -45,6 +55,13 @@ const coverUrl = computed(() => props.item.cover_path)
       <span v-else class="card__initial">{{ initial }}</span>
       <span v-if="item.play_status !== 'unplayed'" class="card__status">
         {{ PLAY_STATUS_LABEL[item.play_status] }}
+      </span>
+      <span
+        v-if="stale.length > 0"
+        class="card__stale"
+        :title="`存档路径找不到了：\n${stale.join('\n')}`"
+      >
+        <Unlink :size="11" />
       </span>
     </div>
 
@@ -108,6 +125,21 @@ const coverUrl = computed(() => props.item.cover_path)
   padding: 2px 7px;
   border-radius: var(--radius-tag);
   font-size: var(--fs-tag);
+  color: #fff;
+  background: rgb(0 0 0 / 0.5);
+  backdrop-filter: blur(4px);
+}
+
+/* 右上角，和左下的状态角标对开，两个同时出现也不叠 */
+.card__stale {
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   color: #fff;
   background: rgb(0 0 0 / 0.5);
   backdrop-filter: blur(4px);

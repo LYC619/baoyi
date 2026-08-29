@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc/handlers'
+import { finalizeGameSessions } from './kinds/game/service'
 import { closeDb, getSettings, iconsDir } from './services/database'
 
 const APP_ROOT = path.join(__dirname, '..')
@@ -100,5 +101,10 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform !== 'darwin') app.quit()
   })
 
-  app.on('will-quit', () => closeDb())
+  app.on('will-quit', () => {
+    // 顺序是硬要求：结算要写库，得赶在库关掉之前。所以这两件事放在同一个处理器里
+    // 按顺序写，而不是分成两个 app.on —— 那样就依赖注册顺序了。
+    finalizeGameSessions()
+    closeDb()
+  })
 }

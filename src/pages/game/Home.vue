@@ -36,8 +36,13 @@ const SORTS: Array<{ value: NonNullable<GameQuery['sort']>; label: string }> = [
   { value: 'name', label: '按名称' }
 ]
 
+let offSession: (() => void) | null = null
+
 onMounted(async () => {
   unsubscribe = window.baoyi.game.onProgress((p) => (progress.value = p))
+  // 在封面墙上也订阅：用户可能从详情页启动完就退回来，等游戏关掉时人在这一屏。
+  // 不订阅的话卡片上的时长要等到下一次开库才更新
+  offSession = window.baoyi.game.onSession(() => void store.reload())
   await store.reload()
   await nextTick()
   // 内容还没渲染时容器高度是 0，这时候设 scrollTop 会被浏览器吞掉
@@ -47,6 +52,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (content.value) rememberScroll('game', content.value.scrollTop)
   unsubscribe?.()
+  offSession?.()
 })
 
 const busyText = computed(() => {

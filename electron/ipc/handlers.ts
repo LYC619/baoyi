@@ -55,13 +55,17 @@ import { launchSoftware, revealInFolder } from '../kinds/software/launcher'
 import {
   backupSavePath,
   cancelGameScan,
+  checkAllSavePaths,
   checkSavePath,
   deleteSaveBackup,
   gameCountsOf,
   getGameItem,
   getSaveBackup,
+  isGameRunning,
+  launchGame,
   listGameItems,
   listSaveBackups,
+  onGameSession,
   removeGame,
   restoreSaveBackup,
   reverifySavePath,
@@ -188,6 +192,12 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('game:verify-save', (_e, id: string, target: string) =>
     reverifySavePath(id, target)
   )
+  ipcMain.handle('game:check-save-paths', () => checkAllSavePaths())
+
+  ipcMain.handle('game:launch', (_e, id: string) => launchGame(id))
+  ipcMain.handle('game:running', (_e, id: string) => isGameRunning(id))
+  // 一段游玩结束时主动推给界面：退出时刻由游戏进程决定，渲染进程没法自己等
+  onGameSession((id, outcome) => send('game:session', { id, ...outcome }))
   ipcMain.handle('game:backup-save', (_e, id: string, savePath: string) =>
     backupSavePath(id, savePath)
   )

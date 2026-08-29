@@ -7,6 +7,8 @@
  * 因此它只做绑定和汇总，不放任何判断规则。
  */
 
+import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import type {
   GameCounts,
@@ -17,9 +19,11 @@ import type {
   SaveBackup,
   SaveBackupResult,
   SavePath,
+  SavePathAlert,
   SavePathCheck,
   SaveRestoreResult
 } from '../../../src/types'
+import { app, shell } from 'electron'
 import { runAgent, type AgentEvent } from '../../services/agent/loop'
 import {
   getDb,
@@ -34,6 +38,7 @@ import {
   deleteBackup,
   getBackup,
   listBackups,
+  overRetention,
   restoreBackup,
   type GameLike
 } from './backup'
@@ -46,6 +51,8 @@ import {
   updateGame
 } from './db'
 import { candidatePrompt, fillGameSystem } from './prompts'
+import { loadSaveDb, type SaveDbHandle } from './savedb'
+import { elapsedSeconds, endSession, type SessionOutcome } from './session'
 import { inspectDir, probeSave, scanGameRoot, type GameCandidate } from './scanner'
 import { buildGameTools, type GameToolContext } from './tools'
 
@@ -61,6 +68,24 @@ let controller: AbortController | null = null
 
 export function cancelGameScan(): void {
   controller?.abort()
+}
+
+/**
+ * 已知存档位置索引在磁盘上的位置。
+ *
+ * 打包后它在 `process.resourcesPath` 下（electron-builder 的 extraResources 放过去的），
+ * 开发时在仓库的 `resources/` 里。这个判断只能在这一层做 —— savedb.ts 刻意不 import
+ * electron，所以它认不得 app.isPackaged。
+ */
+function saveDbPath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'save-manifest.json')
+    : path.join(app.getAppPath(), 'resources', 'save-manifest.json')
+}
+
+/** 索引读一次就缓存在 savedb.ts 里；读不到返回 null，前两层照样工作 */
+function gameSaveDb(): SaveDbHandle | null {
+  return loadSaveDb(saveDbPath())
 }
 
 /* ------------------------------ 读写转发 ------------------------------ */
@@ -111,21 +136,28 @@ function gameLike(id: string): GameLike | null {
  */
 export async function backupSavePath(id: string, savePath: string): Promise<SaveBackupResult> {
   const game = getGame(getDb(), id)
-  if (!game) return { ok: false, message: '找不到这个游戏', backup: null }
+  if (!game) return { ok: false, message: '找不到这个游戏', backup: null, over: [] }
 
   const known = game.save_paths.some(
     (s) => path.resolve(s.path).toLowerCase() === path.resolve(savePath).toLowerCase()
   )
   if (!known) {
-    return { ok: false, message: '这条存档路径不在这个游戏名下，已拒绝', backup: null }
+    return { ok: false, message: '这条存档路径不在这个游戏名下，已拒绝', backup: null, over: [] }
   }
 
-  return createBackup(
+  const made = await createBackup(
     getDb(),
     { id: game.id, name_zh: game.name_zh, name_en: game.name_en, file_name: game.file_name },
     savePath,
     { backupRoot: saveBackupRoot() }
   )
+  // 超出保留上限的名单只在备份成功之后算，而且只是**报告**：删不删由用户在界面上决定。
+  // 失败时不报 —— 那时候没有新增任何一份，谈不上超出。
+  if (!made.ok || !made.backup) return made
+  return {
+    ...made,
+    over: overRetention(getDb(), game.id, made.backup.save_path, getSettings().save_backup_keep)
+  }
 }
 
 export const listSaveBackups = (id: string): SaveBackup[] => listBackups(getDb(), id)
@@ -171,6 +203,121 @@ export function reverifySavePath(id: string, target: string): SavePathCheck {
     updateGame(getDb(), id, { save_paths: next })
   }
   return check
+}
+
+/* ------------------------------ 启动与时长 ------------------------------ */
+
+/**
+ * 正在进行的游玩：resource_id → 开始时刻。
+ *
+ * 只在内存里。进程内的一次游玩天然活不过应用本身，而应用退出前会把还开着的那些
+ * 结掉（见 finalizeGameSessions），所以不需要把它落盘。
+ *
+ * 同一个游戏重复点启动不新开一段：Map 的键就是游戏 id，第二次点的时候已经在跑了。
+ * 那种情况下开始时刻保持第一次的 —— 用户点第二下通常是以为没启动起来，
+ * 而不是真的开了第二份。
+ */
+const playing = new Map<string, number>()
+
+/** 一次游玩结束时通知渲染进程，界面靠它刷新时长和状态 */
+type SessionSink = (id: string, outcome: SessionOutcome) => void
+let sessionSink: SessionSink | null = null
+export function onGameSession(sink: SessionSink): void {
+  sessionSink = sink
+}
+
+/** 收一段游玩。id 已经不在 playing 里就什么都不做 —— 退出事件和退出前收尾会撞车 */
+function closeSession(id: string): void {
+  const startedAt = playing.get(id)
+  if (startedAt === undefined) return
+  playing.delete(id)
+  const outcome = endSession(getDb(), id, elapsedSeconds(startedAt, Date.now()))
+  if (outcome) sessionSink?.(id, outcome)
+}
+
+/**
+ * 启动一个游戏，并从这一刻开始算时长。
+ *
+ * 和软件那边的 launchSoftware 是两回事，所以没有复用：软件只需要记一个「启动过」
+ * 的时间点，游戏要的是一段有始有终的时长，因此必须留住 child 句柄等它的 exit。
+ *
+ * detached + unref 照旧：游戏是长时间运行的东西，不能让它拖着抱一不能退出。
+ * unref 之后 exit 事件仍然会到（它只是不再替这个句柄吊着事件循环），
+ * 而抱一自己的事件循环由应用本身撑着 —— 所以这两件事不冲突。
+ */
+export function launchGame(id: string): { ok: boolean; message: string } {
+  const game = getGame(getDb(), id)
+  if (!game) return { ok: false, message: '找不到这个游戏' }
+  if (!existsSync(game.path)) {
+    return { ok: false, message: `主程序不在了：${game.path}` }
+  }
+  if (playing.has(id)) return { ok: true, message: '这个游戏已经在运行了' }
+
+  playing.set(id, Date.now())
+  try {
+    const child = spawn(game.path, [], {
+      detached: true,
+      stdio: 'ignore',
+      // 和软件同一个理由：游戏普遍依赖同目录的资源和 dll，cwd 不对直接起不来
+      cwd: path.dirname(game.path),
+      windowsHide: false
+    })
+    child.on('error', () => {
+      // spawn 失败（要提权之类）时这一段游玩根本没开始，撤掉它而不是记一段假的
+      playing.delete(id)
+      void shell.openPath(game.path)
+    })
+    child.on('exit', () => closeSession(id))
+    child.unref()
+  } catch {
+    playing.delete(id)
+    void shell.openPath(game.path)
+    // 交给系统 shell 之后就跟不到进程了，这次不记时长 —— 记不到就不装作记到了
+    return { ok: true, message: '已交给系统打开，这次的时长跟不到' }
+  }
+  return { ok: true, message: `已启动${gameName(game)}` }
+}
+
+/**
+ * 应用退出前把还开着的那几段结掉。
+ *
+ * 不结的话，用户开着游戏顺手关掉抱一，这一段时长就整个丢了。结掉的话记到的是
+ * 「从启动到抱一退出」这一段，比整段丢掉更接近真实。差额是他关掉抱一之后继续玩的
+ * 那部分，我们确实不知道。
+ */
+export function finalizeGameSessions(): void {
+  for (const id of [...playing.keys()]) closeSession(id)
+}
+
+/** 这个游戏此刻是不是正被抱一跟着 */
+export const isGameRunning = (id: string): boolean => playing.has(id)
+
+/**
+ * 打开游戏库时扫一遍所有已记下的存档路径，把当下不存在的那些报回去。
+ *
+ * 只 existsSync，**一个字节都不写库**。写库的话，外置硬盘没插、网络盘没连上这种
+ * 一时的情况会被固化成一条「路径失效」永久留在记录里 —— 而它下一分钟就不成立了。
+ * 判断存放在哪里决定了它什么时候会过期：进程内的瞬时状态跟着这次会话消失，
+ * 正好和「这条路径此刻在不在」这个问题的有效期对上。
+ *
+ * 逐条 existsSync 是同步阻塞的，但量级是几十到几百次 stat，且只在开库时跑一次；
+ * 换成异步并发要多一层调度，省下的毫秒数用户感觉不到。
+ * 归档区一起查：归档只是不在主列表显示，存档还是他的存档。
+ */
+export function checkAllSavePaths(): SavePathAlert[] {
+  const alerts: SavePathAlert[] = []
+  for (const g of listGames(getDb(), { group: 'all' }).concat(
+    listGames(getDb(), { group: 'archived' })
+  )) {
+    const missing = g.save_paths.map((s) => s.path).filter((p) => !existsSync(p))
+    if (missing.length > 0) alerts.push({ id: g.id, name: gameName(g), missing })
+  }
+  return alerts
+}
+
+/** 详情页标题用的那套取名顺序，这里报警文案也用它，免得两处叫法不一样 */
+function gameName(g: GameItem): string {
+  return g.name_zh || g.name_en || g.file_name
 }
 
 /* ------------------------------ 扫描识别 ------------------------------ */
@@ -258,6 +405,7 @@ export async function scanGames(
   const categoryNames = categories.map((c) => c.name)
   const system = fillGameSystem(categories, pool, withSearch)
   const db = getDb()
+  const saveDb = gameSaveDb()
 
   // 串行而不是像 aiService 那样开三路并发：游戏一次扫出来通常是个位数，
   // 而串行时进度条上的「正在识别 X」是一句真话，并发时它只是三个里的某一个
@@ -271,6 +419,7 @@ export async function scanGames(
       db,
       tagPool: pool,
       searchConfig: settings.search,
+      saveDb,
       onRegister: () => {
         result.registered++
       },

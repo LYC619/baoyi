@@ -270,6 +270,13 @@ export interface SaveBackupResult {
   ok: boolean
   message: string
   backup: SaveBackup | null
+  /**
+   * 备份完之后，这条存档路径下超出保留上限的那几份，最旧的在前。
+   *
+   * **主进程不会自动删它们** —— 这是一份「可以删」的名单，删不删由用户在弹窗里决定。
+   * 保留上限是设置里的 `save_backup_keep`（默认 10，0 = 不限）。
+   */
+  over: SaveBackup[]
 }
 
 /**
@@ -330,11 +337,38 @@ export interface GameItem extends GameMeta {
   is_archived: boolean
 }
 
+/**
+ * 存档状态。这三个值互斥且穷尽，判定只看**库里记的东西**：
+ *
+ * - `none` 没发现存档路径（save_paths 是空的）
+ * - `unbacked` 发现了路径，但一份备份都没有
+ * - `backed` 发现了路径，且至少备份过一次
+ *
+ * 「路径失效」不在这里 —— 那是一条正交的信息（有路径、可能也有备份，只是路径当下
+ * 不存在了），塞进这个枚举会让三分变成含义重叠的四分。它走卡片上的角标。
+ */
+export type SaveStatus = 'none' | 'unbacked' | 'backed'
+
+/**
+ * 一条「这个游戏名下有存档路径当下不存在」的提醒。
+ *
+ * 开库时算出来的瞬时状态，**不入库** —— 外置硬盘没插上这种情况一分钟后就不成立了，
+ * 把它写进记录等于留下一个会过期却不会自己消失的判断。
+ */
+export interface SavePathAlert {
+  id: string
+  /** 游戏显示名，提醒文案直接用，省得渲染进程再查一次 */
+  name: string
+  /** 这次没找到的那几条路径；恒非空，空的条目根本不会出现在结果里 */
+  missing: string[]
+}
+
 export interface GameQuery {
   keyword?: string
   category?: string
   tag?: string
   status?: PlayStatus
+  save?: SaveStatus
   /** 归档区和正常区互斥，和软件那边同一个约定 */
   group?: 'all' | 'archived'
   sort?: 'played' | 'name' | 'playtime' | 'added'
@@ -345,8 +379,26 @@ export interface GameCounts {
   archived: number
   /** 四个游玩状态各有几个。闭集，缺的那个是 0 不是不存在 */
   status: Record<PlayStatus, number>
+  /** 三个存档状态各有几个。同样是闭集 */
+  save: Record<SaveStatus, number>
   categories: Array<{ name: string; count: number }>
   tags: Array<{ name: string; count: number }>
+}
+
+/**
+ * 一段游玩结束时推给界面的东西。
+ *
+ * `counted` 为 false 时 `elapsed_sec` 照样是真实秒数 —— 太短没计入总时长，
+ * 但发生过就是发生过，不把它改成 0。界面据此说一句实话而不是显示「玩了 0 分钟」。
+ */
+export interface GameSessionEvent {
+  id: string
+  elapsed_sec: number
+  counted: boolean
+  total_playtime_sec: number
+  status_changed: boolean
+  play_status: PlayStatus
+  message: string
 }
 
 /** 游戏扫描 + 识别是一条链路上的两截，进度也就用同一个形状报 */
@@ -432,6 +484,15 @@ export interface AppSettings {
    * 而用户数据目录在 C 盘。
    */
   save_backup_root: string
+  /**
+   * 每条存档路径最多留几份备份。0 = 不限。
+   *
+   * 超出上限时**不自动删**，只在备份完之后告诉用户「有 N 份超出了，要删吗」。
+   * 自动删等于替用户决定扔掉哪几份存档，而这个模块存在的全部理由就是别让存档丢。
+   * 上限按 (游戏, 存档路径) 一组算，不按游戏整体算 —— 否则备份得勤的那条路径
+   * 会把另一条挤掉。
+   */
+  save_backup_keep: number
   theme: 'dark' | 'light'
   view_mode: 'grid' | 'list'
   /**
@@ -815,6 +876,29 @@ export interface BaoyiApi {
      * 所以要带上游戏 id。空目录不算验过 —— 备份那一层也拒绝空目录。
      */
     verifySavePath(id: string, path: string): Promise<SavePathCheck>
+    /**
+     * 扫一遍所有已记下的存档路径，返回当下找不到的那些。开库时调一次。
+     *
+     * 只读，不写库：外置硬盘没插上是一时的，不该被固化成一条永久记录。
+     * 返回空数组表示每条路径都在。
+     */
+    checkSavePaths(): Promise<SavePathAlert[]>
+
+    /**
+     * 启动游戏，并从这一刻开始算时长。
+     *
+     * ok 只说明「起来了」，不说明时长跟得到 —— 走系统 shell 兜底的那条路跟不到，
+     * message 里会说清楚。
+     */
+    launch(id: string): Promise<{ ok: boolean; message: string }>
+    /** 这个游戏此刻是不是正被抱一跟着。跟不到的（shell 兜底启动的）一律返回 false */
+    running(id: string): Promise<boolean>
+    /**
+     * 一段游玩结束时的通知。退出时刻由游戏进程决定，界面等不出来，只能推。
+     * 条目在游玩过程中被删掉时不会有这条通知。
+     */
+    onSession(cb: (e: GameSessionEvent) => void): Unsubscribe
+
     /** 备份一条存档路径。失败时磁盘上不留半成品，也不写记录 */
     backupSave(id: string, savePath: string): Promise<SaveBackupResult>
     /** 一个游戏的备份，新的在前 */

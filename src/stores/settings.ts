@@ -11,6 +11,7 @@ const FALLBACK: AppSettings = {
   scan_dirs: [],
   organize_root: '',
   save_backup_root: '',
+  save_backup_keep: 10,
   theme: 'dark',
   view_mode: 'grid',
   group_by_category: false,

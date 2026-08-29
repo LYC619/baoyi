@@ -14,6 +14,13 @@ files:
 asarUnpack:
   - '**/node_modules/better-sqlite3/**'
 
+# 已知存档位置索引（scripts/build-save-manifest.ts 编译出来的，2 MB）。
+# 放进 resources 而不是打进 asar：它只在识别游戏时读一次，不该进 JS 包体，
+# 而 kinds/game/service.ts 会按 app.isPackaged 决定去哪儿找它。
+extraResources:
+  - from: resources/save-manifest.json
+    to: save-manifest.json
+
 # 应用图标：resources/icon.svg 是矢量源文件。
 # 打包前请导出 resources/icon.ico（Windows，含 256px）与 resources/icon.png（512x512），
 # 再把下面各平台的 icon 字段取消注释。缺省时 electron-builder 会使用 Electron 默认图标。

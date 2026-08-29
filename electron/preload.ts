@@ -74,6 +74,10 @@ const api: BaoyiApi = {
     onProgress: (cb) => subscribe('game:progress', cb),
     pickSavePath: () => ipcRenderer.invoke('game:pick-save-dir'),
     verifySavePath: (id: string, path: string) => ipcRenderer.invoke('game:verify-save', id, path),
+    checkSavePaths: () => ipcRenderer.invoke('game:check-save-paths'),
+    launch: (id: string) => ipcRenderer.invoke('game:launch', id),
+    running: (id: string) => ipcRenderer.invoke('game:running', id),
+    onSession: (cb) => subscribe('game:session', cb),
     backupSave: (id: string, savePath: string) =>
       ipcRenderer.invoke('game:backup-save', id, savePath),
     backups: (id: string) => ipcRenderer.invoke('game:backups', id),

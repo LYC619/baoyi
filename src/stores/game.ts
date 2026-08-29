@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
-import type { GameCounts, GameItem, GameQuery, PlayStatus } from '@/types'
+import type { GameCounts, GameItem, GameQuery, PlayStatus, SaveStatus } from '@/types'
 import { useToast } from '@/composables/useToast'
 import { createLatestGuard, errorMessage, plain } from '@/utils'
 
@@ -8,6 +8,7 @@ import { createLatestGuard, errorMessage, plain } from '@/utils'
 export type GameSelection =
   | { kind: 'group'; value: 'all' | 'archived' }
   | { kind: 'status'; value: PlayStatus }
+  | { kind: 'save'; value: SaveStatus }
   | { kind: 'category'; value: string }
   | { kind: 'tag'; value: string }
 
@@ -18,10 +19,21 @@ export const PLAY_STATUS_LABEL: Record<PlayStatus, string> = {
   shelved: '搁置'
 }
 
+/**
+ * 「未发现存档」而不是「无存档」：抱一只能说自己没找到，不能替用户断言游戏
+ * 真的不存盘。差别落在用户会不会去手动补一条路径上。
+ */
+export const SAVE_STATUS_LABEL: Record<SaveStatus, string> = {
+  unbacked: '未备份',
+  backed: '已备份',
+  none: '未发现存档'
+}
+
 const EMPTY_COUNTS: GameCounts = {
   all: 0,
   archived: 0,
   status: { unplayed: 0, playing: 0, completed: 0, shelved: 0 },
+  save: { unbacked: 0, backed: 0, none: 0 },
   categories: [],
   tags: []
 }
@@ -46,6 +58,7 @@ export const useGameStore = defineStore('game', () => {
     if (selection.kind === 'category') return selection.value
     if (selection.kind === 'tag') return `# ${selection.value}`
     if (selection.kind === 'status') return PLAY_STATUS_LABEL[selection.value]
+    if (selection.kind === 'save') return SAVE_STATUS_LABEL[selection.value]
     return selection.value === 'archived' ? '已归档' : '全部游戏'
   })
 
@@ -53,6 +66,7 @@ export const useGameStore = defineStore('game', () => {
     const q: GameQuery = { keyword: keyword.value.trim() || undefined, sort: sort.value }
     if (selection.kind === 'group') q.group = selection.value
     if (selection.kind === 'status') q.status = selection.value
+    if (selection.kind === 'save') q.save = selection.value
     if (selection.kind === 'category') q.category = selection.value
     if (selection.kind === 'tag') q.tag = selection.value
     return q
@@ -82,8 +96,45 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  /**
+   * 存档路径失效的名单：id → 这次没找到的那几条路径。
+   *
+   * 只活在内存里，跟着这次会话消失 —— 主进程刻意不写库（见 checkAllSavePaths），
+   * 渲染进程这边也就没有「持久化一份」的道理。外置硬盘插回来，重开一次库就干净了。
+   */
+  const staleSaves = ref(new Map<string, string[]>())
+  const staleCount = computed(() => staleSaves.value.size)
+  /**
+   * 这次会话里体检跑过没有。
+   *
+   * 不能用 `staleSaves.size === 0` 代替：那个 0 有两种含义 —— 「还没查」和
+   * 「查过了，每条都在」。详情页要靠这个区分决定自己该不该补一次，
+   * 拿 size 判断会变成「一切正常时每次进详情页都重扫一遍全库」。
+   */
+  const staleChecked = ref(false)
+
+  async function checkSavePaths(): Promise<void> {
+    try {
+      const alerts = await window.baoyi.game.checkSavePaths()
+      staleSaves.value = new Map(alerts.map((a) => [a.id, a.missing]))
+      staleChecked.value = true
+    } catch (err) {
+      // 这是一次顺手的体检，失败了不该拿一条红字挡在用户和他的游戏库之间。
+      // 后果只是角标不出现，比「开库先看到一条报错」轻
+      console.warn('存档路径检查失败', errorMessage(err))
+    }
+  }
+
+  /** 备份/改路径之后单条刷掉角标，不必为一个游戏重扫全库 */
+  function clearStale(id: string): void {
+    if (!staleSaves.value.has(id)) return
+    const next = new Map(staleSaves.value)
+    next.delete(id)
+    staleSaves.value = next
+  }
+
   async function reload(): Promise<void> {
-    await Promise.all([load(), refreshCounts()])
+    await Promise.all([load(), refreshCounts(), checkSavePaths()])
   }
 
   function select(next: GameSelection): void {
@@ -117,9 +168,14 @@ export const useGameStore = defineStore('game', () => {
     selection,
     activeKey,
     heading,
+    staleSaves,
+    staleCount,
+    staleChecked,
     load,
     reload,
     refreshCounts,
+    checkSavePaths,
+    clearStale,
     select,
     update,
     remove

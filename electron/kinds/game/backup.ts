@@ -243,6 +243,15 @@ export interface BackupOptions {
 }
 
 /**
+ * 失败结果。`over` 恒为空数组：没备份成功，自然也没有新的超额。
+ *
+ * 保留上限是设置项，只有 service 层拿得到，所以 `over` 由调用方在成功之后填。
+ */
+function noBackup(message: string): SaveBackupResult {
+  return { ok: false, message, backup: null, over: [] }
+}
+
+/**
  * 把一条存档路径备份一份。
  *
  * 先复制、再校验、最后才写库。反过来的话（先记账后复制），中途失败会留下一条
@@ -255,38 +264,32 @@ export async function createBackup(
   opts: BackupOptions
 ): Promise<SaveBackupResult> {
   const blocked = backupBlocked(savePath, opts.backupRoot)
-  if (blocked) return { ok: false, message: blocked, backup: null }
+  if (blocked) return noBackup(blocked)
 
   const source = path.resolve(savePath)
   let stat: Stats
   try {
     stat = await fsp.stat(source)
   } catch {
-    return { ok: false, message: `存档已经不在了：${source}`, backup: null }
+    return noBackup(`存档已经不在了：${source}`)
   }
 
   const shape: SaveShape = stat.isDirectory() ? 'dir' : 'file'
   if (shape === 'dir') {
     const src = await walkTree(source).catch(() => null)
-    if (!src) return { ok: false, message: `读不到存档目录：${source}`, backup: null }
+    if (!src) return noBackup(`读不到存档目录：${source}`)
     if (src.size === 0) {
       // 空目录备下来是一份「看起来有、其实没有」的备份，正是这个模块最该避免的东西
-      return {
-        ok: false,
-        message: `存档目录里一个文件都没有，没有备份的必要：${source}`,
-        backup: null
-      }
+      return noBackup(`存档目录里一个文件都没有，没有备份的必要：${source}`)
     }
   } else if (stat.size === 0) {
-    return { ok: false, message: `这个存档文件是空的，没有备份的必要：${source}`, backup: null }
+    return noBackup(`这个存档文件是空的，没有备份的必要：${source}`)
   }
 
   const at = opts.now ?? Date.now()
   const holder = path.join(opts.backupRoot, gameFolder(game))
   const dir = await freeDir(path.join(holder, backupFolder(source, at)))
-  if (!dir) {
-    return { ok: false, message: '同一秒里备份了太多次，稍等一下再试', backup: null }
-  }
+  if (!dir) return noBackup('同一秒里备份了太多次，稍等一下再试')
 
   const payload = path.join(dir, PAYLOAD)
   // 单文件存档也放进 save/ 里，保持「载荷永远是一个目录」——
@@ -303,11 +306,7 @@ export async function createBackup(
   } catch (err: any) {
     // 半成品必须清掉：留着它，下一次同名备份会被 freeDir 让位，用户则多一个空壳目录
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => {})
-    return {
-      ok: false,
-      message: `复制失败：${err?.code ?? err?.message ?? '未知错误'}`,
-      backup: null
-    }
+    return noBackup(`复制失败：${err?.code ?? err?.message ?? '未知错误'}`)
   }
 
   const bad =
@@ -316,7 +315,7 @@ export async function createBackup(
       : await verifyFile(source, landing, stat.size)
   if (bad) {
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => {})
-    return { ok: false, message: bad, backup: null }
+    return noBackup(bad)
   }
 
   // 体量按**拷贝**算而不是按源算：记录描述的是这份备份，源在这之后还会变
@@ -355,7 +354,8 @@ export async function createBackup(
     backup.created_at
   )
 
-  return { ok: true, message: `已备份 ${files} 个文件`, backup }
+  // over 留空由 service 填：这里不知道保留上限
+  return { ok: true, message: `已备份 ${files} 个文件`, backup, over: [] }
 }
 
 /* ============================== 读 ============================== */
@@ -385,6 +385,37 @@ export function getBackup(d: SqlDb, id: string): SaveBackup | null {
     | Record<string, any>
     | undefined
   return row ? rowToBackup(row) : null
+}
+
+/** 保留上限的默认值。0 = 不限，界面上写「不限」 */
+export const DEFAULT_KEEP = 10
+
+/**
+ * 超出保留上限的那几份，**最旧的在前**。没超出就是空数组。
+ *
+ * 按 (游戏, 存档路径) 一组算，不按游戏整体算：一个游戏可以有本体存档、配置、
+ * 云同步缓存好几条路径，按游戏算会让备份得勤的那条把另一条挤掉。
+ *
+ * 这个函数只**回答问题**，一个字节都不删。删除交给调用方 —— 界面拿到这份名单
+ * 之后要先问用户。自动删是用户明确否掉的做法（「定时替他决定留哪几份、删哪几份，
+ * 等于替他扔东西」），所以这里连一个「顺手删掉」的重载都不留。
+ */
+export function overRetention(
+  d: SqlDb,
+  resourceId: string,
+  savePath: string,
+  keep: number
+): SaveBackup[] {
+  if (!Number.isFinite(keep) || keep <= 0) return [] // 0 或非法值 = 不限
+  const rows = d
+    .prepare(
+      `SELECT * FROM save_backups
+       WHERE resource_id = ? AND save_path = ?
+       ORDER BY created_at ASC`
+    )
+    .all(resourceId, savePath) as Array<Record<string, any>>
+  const all = rows.map(rowToBackup)
+  return all.length > keep ? all.slice(0, all.length - keep) : []
 }
 
 /* ============================== 删 ============================== */

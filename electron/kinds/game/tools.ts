@@ -25,6 +25,7 @@ import { resolveInside as resolveInsideRoots } from '../../services/agent/paths.
 import { formatHits, search } from '../../services/searchService.ts'
 import { expandSavePath, probeSave, saveRootOf, saveRoots } from './scanner.ts'
 import { insertGame, type GamePayload } from './db.ts'
+import { lookupSavePaths, type SaveDbHandle } from './savedb.ts'
 
 /** 单次 list_directory 最多列出的条目数 */
 const LIST_LIMIT = 120
@@ -41,6 +42,13 @@ export interface GameToolContext {
   /** 现有标签池，用来收敛模型新造标签的冲动 */
   tagPool: string[]
   searchConfig: SearchConfig
+  /**
+   * 已知存档位置索引（存档发现第三层）。
+   *
+   * 可以是 null —— 索引文件没编译出来、或者打包时漏了，那时前两层照样工作，
+   * 只是少了一条捷径。给它一个「不可用」的合法状态，比让识别整个失败好。
+   */
+  saveDb?: SaveDbHandle | null
   onRegister?: (info: { name: string; exe_path: string; created: boolean }) => void
   onSkip?: (dir: string, reason: string) => void
 }
@@ -313,6 +321,36 @@ async function webSearch(ctx: GameToolContext, args: any): Promise<string> {
 
 /* ------------------------------ 工具定义 ------------------------------ */
 
+/**
+ * 查已知存档位置。
+ *
+ * 只报告「查到了什么」，**不替模型验证也不落库** —— 查表结果和模型的猜测在这里
+ * 是平级的证据，两者都得过 detect_save_path 那道门。索引是社区数据，某个游戏换过
+ * 存档位置、或者这台机器上装的是别的版本，都会让记录对不上。
+ */
+function lookupSaveDb(ctx: GameToolContext, args: any): string {
+  const name = str(args?.name, 120)
+  if (!name) return '要查的游戏名是空的。'
+  if (!ctx.saveDb) {
+    return '已知存档位置数据库不可用（索引文件缺失），这一步跳过，按常见位置猜即可。'
+  }
+
+  const hit = lookupSavePaths(ctx.saveDb, [name], { base: ctx.gameDir })
+  if (!hit) {
+    return (
+      `数据库里没有「${name}」的记录。可能是名字不对（试试官方英文名），` +
+      '也可能这个游戏没被收录。按常见存档位置猜，然后用 detect_save_path 验。'
+    )
+  }
+
+  const lines = hit.paths.map((p, i) => `${i + 1}. ${p}`)
+  return (
+    `按「${hit.matched}」查到 ${hit.paths.length} 个已知存档位置：\n${lines.join('\n')}\n` +
+    '这些是社区记录的位置，**还没有验证过这台机器上是否真实存在** —— ' +
+    '用 detect_save_path 逐个验，验过有文件的才能填进 save_paths。'
+  )
+}
+
 export function buildGameTools(
   ctx: GameToolContext,
   categoryNames: string[],
@@ -363,6 +401,26 @@ export function buildGameTools(
         required: ['path']
       },
       execute: (args) => detectSavePath(ctx, ledger, args)
+    },
+    {
+      name: 'lookup_save_paths',
+      description:
+        '按游戏名查「已知存档位置」数据库（来自 PCGamingWiki 社区，收录 19000+ 游戏）。' +
+        '认出游戏名之后**先调这个**，比自己猜存档位置准得多，查到的路径再用 detect_save_path 验证。' +
+        '查不到不代表没有存档，那时候再按常见位置猜。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description:
+              '游戏的英文原名，例如 Elden Ring、Hollow Knight。' +
+              '数据库的键是英文名，中文译名查不到 —— 中文游戏可以试试拼音或英文发行名。'
+          }
+        },
+        required: ['name']
+      },
+      execute: async (args) => lookupSaveDb(ctx, args)
     },
     {
       name: 'register_game',
