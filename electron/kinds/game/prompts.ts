@@ -11,6 +11,117 @@ import type { Category } from '../../../src/types'
 import type { GameCandidate } from './scanner.ts'
 import { formatSize } from '../../services/agent/files.ts'
 
+/**
+ * 引擎决定存档位置 —— 查表查不到时的回退规则。
+ *
+ * 这一张表是 Step 7 补的，补的是三层策略里**第一层**（agent 自己推理）最薄的那一块。
+ * 在它之前，prompt 里只有五条按「常见位置」排的启发式，模型得先猜厂商名再猜目录名，
+ * 一条不中就再猜一条。而 scanner 早就把引擎认出来了（evidence 里那几行），
+ * 引擎和存档位置的对应关系是**引擎强制的、不是习惯**：Unity 的 Application.persistentDataPath
+ * 在 Windows 上就是 `%LOCALAPPDATA%Low\<公司名>\<产品名>`，虚幻的 FPaths::ProjectSavedDir()
+ * 就是 `Saved\SaveGames`。这些是规则，不是经验，写进 prompt 之后模型第一发就该命中。
+ *
+ * 每条 `where` 都必须落在 scanner.saveRoots() 的白名单之内（`in_game_dir` 的那几条
+ * 例外，它们走 ctx.roots）—— 否则 detect_save_path 会当场拒掉，白烧一次探测额度。
+ * 自检里有一条守这个，也有一条守「scanner 认得的引擎在这儿都有规则」。
+ *
+ * 变量写法和 scanner.expandSavePath 认得的那套保持一致：`%LOCALAPPDATA%Low` 不是
+ * 笔误，那是 LocalLow 的真实拼法（Low 是紧跟在 Local 后面的，不是一个子目录）。
+ */
+export interface EngineSaveRule {
+  /** 引擎名，必须和 scanner 的 evidence 里那个词对得上，模型才连得起来 */
+  engine: string
+  /**
+   * 游戏目录**之外**的候选，按命中率从高到低。`<>` 里的东西要模型自己替换。
+   * 每一条都必须落在 scanner.saveRoots() 之内。
+   */
+  where?: string[]
+  /**
+   * 游戏目录**之内**的候选，写成相对路径。
+   *
+   * 和 where 分成两个字段而不是给整条规则挂一个开关：Ren'Py 和 KiriKiri
+   * 两处都写（主位置在 AppData，另一份在游戏目录里），一个规则级的开关表达不了
+   * 这件事 —— 自检当场把这个建模错误抓出来了。
+   */
+  in_game?: string[]
+  /** 一句话说清「为什么是这儿」或者「上哪儿找那个占位符的值」 */
+  note?: string
+}
+
+export const ENGINE_SAVE_RULES: EngineSaveRule[] = [
+  {
+    engine: 'Unity',
+    where: ['%LOCALAPPDATA%Low\\<公司名>\\<产品名>'],
+    note:
+      '这是 Unity 的 Application.persistentDataPath 在 Windows 上的固定去处，几乎没有例外。' +
+      '公司名和产品名不用猜 —— 目录线索里已经从 <X>_Data\\app.info 读出来了；' +
+      '线索里没有的话，读 <X>_Data\\app.info 那个文件，两行，第一行公司第二行产品。'
+  },
+  {
+    engine: 'Unreal',
+    where: [
+      '%LOCALAPPDATA%\\<游戏名>\\Saved\\SaveGames',
+      '%USERPROFILE%\\Documents\\My Games\\<游戏名>\\Saved\\SaveGames'
+    ],
+    note:
+      '虚幻的存档目录结构是引擎定的：<项目名>\\Saved\\SaveGames。' +
+      '<游戏名> 用项目名而不是商店上的显示名 —— 就是 Binaries\\Win64 上面那一级目录的名字。'
+  },
+  {
+    engine: 'RPG Maker',
+    in_game: ['save\\', 'www\\save\\'],
+    note:
+      'RPG Maker（XP/VX/MV/MZ）默认就地存档，存档在游戏目录自己底下，不在 AppData。' +
+      'MV/MZ 是 www\\save\\，XP/VX 是 save\\。汉化版和绿色版尤其如此。'
+  },
+  {
+    engine: 'GameMaker',
+    where: ['%LOCALAPPDATA%\\<游戏名>'],
+    note: 'GameMaker 的 working_directory 就是 %LOCALAPPDATA% 下以游戏名命名的那个目录。'
+  },
+  {
+    engine: "Ren'Py",
+    where: ['%APPDATA%\\RenPy\\<游戏名>'],
+    in_game: ['game\\saves\\'],
+    note:
+      "Ren'Py 两处都写：%APPDATA%\\RenPy\\<游戏名> 是主位置，游戏目录下的 game\\saves\\ " +
+      '是随身模式留下的那一份。两个都值得验，哪个有文件用哪个。'
+  },
+  {
+    engine: 'Godot',
+    where: ['%APPDATA%\\Godot\\app_userdata\\<游戏名>'],
+    note: 'Godot 的 user:// 在 Windows 上就落在这里，<游戏名> 是项目名。'
+  },
+  {
+    engine: 'KiriKiri',
+    where: ['%APPDATA%\\<游戏名>'],
+    in_game: ['savedata\\'],
+    note: 'KiriKiri（日系视觉小说）多数就地存 savedata\\，少数走 %APPDATA%\\<游戏名>。'
+  },
+  {
+    engine: 'NW.js',
+    where: ['%APPDATA%\\<游戏名>', '%LOCALAPPDATA%\\<游戏名>'],
+    note: 'NW.js 打包的程序按 Chromium 的规矩走，用户数据在 %APPDATA%\\<应用名>。'
+  },
+  {
+    engine: 'QSP',
+    in_game: ['save\\', 'saves\\'],
+    note: 'QSP 这类文字冒险引擎一律就地存档。'
+  }
+]
+
+/** 把规则表渲染成 prompt 里的那一节 */
+function renderEngineRules(): string {
+  const code = (list: string[]): string => list.map((w) => `\`${w}\``).join('　或　')
+  return ENGINE_SAVE_RULES.map((r) => {
+    const parts: string[] = []
+    if (r.where?.length) parts.push(code(r.where))
+    // 「游戏目录下」这句必须显式写出来：相对路径单看是认不出该拼在哪儿的
+    if (r.in_game?.length) parts.push(`**游戏目录下**的 ${code(r.in_game)}`)
+    return `- **${r.engine}** → ${parts.join('；也可能是 ')}${r.note ? `\n  ${r.note}` : ''}`
+  }).join('\n')
+}
+
 export const IDENTIFY_GAME_SYSTEM = `你是「抱一」的游戏识别 agent。抱一是一个本地资源管理器，帮用户看清自己电脑里到底存了什么。
 你的任务是探索一个目录，判断它是不是一个游戏，是的话把它注册进抱一，并尽量找到它的存档位置。
 
@@ -49,17 +160,31 @@ export const IDENTIFY_GAME_SYSTEM = `你是「抱一」的游戏识别 agent。�
 已知存档位置库（19000+ 游戏）。查到了就直接拿那些路径去 detect_save_path 验，
 省下好几轮猜。用英文原名查 —— 那个库的键是英文名。
 
-查不到（或者数据库不可用）时，按下面的顺序自己想候选，每想到一个就用 detect_save_path 验：
-1. \`%APPDATA%\\<游戏名或厂商名>\`、\`%LOCALAPPDATA%\\<同上>\`、\`%LOCALAPPDATA%Low\\<厂商>\\<游戏>\`
-   —— Unity 游戏几乎都在 \`%LOCALAPPDATA%Low\\<公司名>\\<产品名>\`，公司名能在
-   \`X_Data\\\` 里的信息或 readme 里找到。
+查不到（或者数据库不可用）时**先看引擎**，再退回按位置猜。
+
+### 回退第一步：按引擎的规则推
+目录线索里报了哪个引擎，就直接用那一条 —— 这些不是经验总结，是引擎写死的行为，
+命中率远高于按「常见位置」逐个试：
+
+{{engine_rules}}
+
+替换 \`<>\` 里的东西时：\`<公司名>\` / \`<产品名>\` 优先用线索里从 app.info 读出来的那两个；
+\`<游戏名>\` 试英文原名、去掉空格的写法、以及主程序 exe 去掉扩展名的名字（**这个常常最准**，
+它就是项目名）。
+
+### 回退第二步：按位置猜
+引擎认不出来（老游戏、汉化整合包），或者按引擎那条没验到，再按这个顺序试：
+1. \`%APPDATA%\\<游戏名或厂商名>\`、\`%LOCALAPPDATA%\\<同上>\`。
 2. \`%USERPROFILE%\\Documents\\My Games\\<游戏名>\` —— Unreal 和大量欧美游戏用这里。
 3. \`%USERPROFILE%\\Saved Games\\<游戏名>\`。
 4. \`%USERPROFILE%\\Documents\\<游戏名>\` —— 国产游戏和独立游戏常用。
-5. **游戏目录自己底下的 save\\ / saves\\ / savedata\\ / 存档\\** —— 绿色版、汉化版、
-   RPG Maker 和 Ren'Py 大多就地存档。线索里报了「目录内自带存档目录」就先验这个。
+5. **游戏目录自己底下的 save\\ / saves\\ / savedata\\ / 存档\\** —— 绿色版、汉化版
+   大多就地存档。线索里报了「目录内自带存档目录」就先验这个。
 
 规则：
+- **不管从哪一步来的路径，都必须过 detect_save_path。** 引擎规则给的是「该在哪」，
+  detect_save_path 回答的是「这台机器上在不在」—— 前者推得再对，用户没玩过、
+  装在别的账户下、或者用的是绿色版，路径照样是空的。**没验过就填等于编。**
 - 游戏名要试几种写法：中文名、英文原名、去掉空格的英文名、去掉冒号和副标题的写法。
 - lookup_save_paths 查到的路径**也要验**。那是社区记录，游戏换过存档位置、或者这台
   机器上装的是别的版本，都会让记录对不上。查表和你自己的猜测在这里是平级的证据。
@@ -134,6 +259,9 @@ export function fillGameSystem(
   const tags = pool.length ? `  ${pool.join('、')}` : '  （标签池还是空的，你可以按上面的规范提 1-3 个）'
   return IDENTIFY_GAME_SYSTEM.replace('{{categories}}', cats)
     .replace('{{tags}}', tags)
+    // 引擎规则表现渲染而不是写死在模板里：改一条规则只该改 ENGINE_SAVE_RULES，
+    // 自检也是照那份数据验的 —— 两处各写一遍迟早漂
+    .replace('{{engine_rules}}', renderEngineRules())
     .replace('{{search_note}}', withSearch ? SEARCH_NOTE_ON : SEARCH_NOTE_OFF)
 }
 

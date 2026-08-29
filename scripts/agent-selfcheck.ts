@@ -59,16 +59,19 @@ import {
 import {
   activityOf,
   compareVersions,
+  coverUrl as coverUrlOf,
   createLatestGuard,
   displayName,
   groupRounds,
   logToText,
+  LINK_TYPE_LABEL,
   parseVersion,
   plain,
   searchCalls,
   subtitleName,
   versionOf
 } from '../src/utils/index.ts'
+import type { LinkedFile } from '../src/types/index.ts'
 import { DatabaseSync } from 'node:sqlite'
 import {
   SCHEMA_VERSION,
@@ -99,7 +102,25 @@ import {
   type GamePayload
 } from '../electron/kinds/game/db.ts'
 import { acceptSavePaths, limitGameTags } from '../electron/kinds/game/tools.ts'
-import { candidatePrompt, fillGameSystem } from '../electron/kinds/game/prompts.ts'
+import {
+  candidatePrompt,
+  ENGINE_SAVE_RULES,
+  fillGameSystem
+} from '../electron/kinds/game/prompts.ts'
+import {
+  addLinks,
+  COVER_EXTS,
+  coverFileName,
+  coverSiblings,
+  guessLinkType,
+  hasLink,
+  isCoverExt,
+  LINK_TYPES,
+  MAX_LABEL,
+  MAX_LINKS,
+  relabelLink,
+  removeLink
+} from '../electron/kinds/game/links.ts'
 import {
   backupFolder,
   createBackup,
@@ -2000,6 +2021,8 @@ async function main(): Promise<void> {
   await saveBackupSection()
   await saveDbSection()
   await playSessionSection()
+  await engineRulesSection()
+  await linksAndCoverSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -3206,6 +3229,264 @@ async function saveDbSection(): Promise<void> {
     const hit = lookupSavePaths(miniDb, ['Elden Ring'], { home: 'Z:\\nobody' })
     assert.ok(hit, '路径不存在也照样返回 —— 存不存在由验证那一层说')
     assert.ok(hit.paths[0].startsWith('Z:\\nobody') || hit.paths[0].includes('EldenRing'))
+  })
+}
+
+/* ==================== 存档发现回退 · 引擎规则（Step 7） ==================== */
+
+/**
+ * 这一节守的是「规则表和执行它的那两道门对得上」。
+ *
+ * 引擎规则是 prompt 里的一段文字，不是可执行代码，所以它出错的方式很特别：
+ * 模型照着做了，然后 detect_save_path 当场拒掉 —— 一次探测额度白烧，而日志上
+ * 只会看到一句「路径越界」。这类错在 typecheck 和实跑里都不显形（跑起来照样有
+ * 结果，只是差了几次探测），只能在这儿守。
+ */
+async function engineRulesSection(): Promise<void> {
+  console.log('\n存档发现回退 · 引擎规则')
+
+  const home = os.homedir()
+  /** 把 `<公司名>` 这类占位符换成一个具体名字，好让路径能真的展开 */
+  const fill = (where: string): string => where.replace(/<[^>]+>/g, 'X')
+
+  await check('每条规则至少给一个候选位置 —— 一条都没有的规则等于一句空话', () => {
+    for (const rule of ENGINE_SAVE_RULES) {
+      assert.ok(
+        (rule.where?.length ?? 0) + (rule.in_game?.length ?? 0) > 0,
+        `${rule.engine} 一个候选位置都没给`
+      )
+    }
+  })
+
+  await check('每条规则的变量都是 expandSavePath 认得的 —— 认不得的会原样留在路径里', () => {
+    for (const rule of ENGINE_SAVE_RULES) {
+      for (const where of rule.where ?? []) {
+        const expanded = expandSavePath(fill(where), home)
+        assert.ok(
+          !expanded.includes('%'),
+          `${rule.engine} 的「${where}」里有 expandSavePath 认不得的变量，展开后还剩：${expanded}`
+        )
+      }
+    }
+  })
+
+  await check('每条规则都落在 saveRoots 白名单之内 —— 越界的会被 detect_save_path 当场拒掉', () => {
+    // 这一条是这一节存在的主要理由。规则表里写一个 %PROGRAMFILES%\Steam\userdata
+    // 看着很有道理，但那不在白名单里，模型照着做只会白烧一次探测额度
+    const roots = saveRoots(home)
+    for (const rule of ENGINE_SAVE_RULES) {
+      for (const where of rule.where ?? []) {
+        const expanded = expandSavePath(fill(where), home)
+        assert.ok(
+          saveRootOf(expanded, roots),
+          `${rule.engine} 的「${where}」展开成 ${expanded}，不在 saveRoots 白名单里`
+        )
+      }
+    }
+  })
+
+  await check('游戏目录内的候选写成相对路径 —— 绝对路径会指到别人的机器上去', () => {
+    for (const rule of ENGINE_SAVE_RULES) {
+      for (const where of rule.in_game ?? []) {
+        assert.ok(
+          !path.isAbsolute(where) && !where.includes('%'),
+          `${rule.engine} 的 in_game 里「${where}」不是相对游戏目录的写法`
+        )
+      }
+    }
+  })
+
+  await check('两处都写的引擎分成两个字段 —— 一个规则级的开关表达不了这件事', () => {
+    // Ren'Py 和 KiriKiri 的主位置在 AppData，游戏目录里还留一份。第一版给整条规则
+    // 挂了一个 in_game_dir 开关，于是这两个引擎必须二选一，自检当场抓出来了
+    for (const name of ["Ren'Py", 'KiriKiri']) {
+      const rule = ENGINE_SAVE_RULES.find((r) => r.engine === name)!
+      assert.ok(rule.where?.length, `${name} 少了 AppData 那一半`)
+      assert.ok(rule.in_game?.length, `${name} 少了游戏目录那一半`)
+    }
+  })
+
+  await check('scanner 认得的引擎在规则表里都有对应规则', () => {
+    // scanner 认出 GameMaker 却没有对应规则时，evidence 里那句「GameMaker 引擎」
+    // 就成了一条模型用不上的线索 —— 它得自己回去猜位置，这一层等于没做
+    const engines = ENGINE_SAVE_RULES.map((r) => r.engine)
+    for (const word of ['Unity', 'Unreal', 'RPG Maker', 'GameMaker', "Ren'Py", 'Godot', 'KiriKiri', 'QSP', 'NW.js']) {
+      assert.ok(engines.includes(word), `scanner 认得 ${word}，但规则表里没有它的存档位置`)
+    }
+  })
+
+  await check('Unity 那条和 scanner 从 app.info 拼出来的路径是同一个写法', () => {
+    // 两处写法不一致（一处 %LOCALAPPDATA%Low、一处 %LOCALAPPDATA%\Low）时，模型
+    // 会以为它们是两个不同的位置，于是把同一个地方验两次
+    const unity = ENGINE_SAVE_RULES.find((r) => r.engine === 'Unity')!
+    assert.ok(
+      unity.where![0].startsWith('%LOCALAPPDATA%Low\\'),
+      `Unity 的写法和 scanner 的 unityAppInfo 不一致：${unity.where![0]}`
+    )
+    // LocalLow 的真实拼法就是 Local 后面紧跟 Low，不是一个子目录
+    const expanded = expandSavePath(fill(unity.where![0]), home)
+    assert.ok(expanded.includes('LocalLow'), `没展开成 LocalLow：${expanded}`)
+  })
+
+  await check('规则表整个渲染进了 prompt，每条引擎和位置都在里面', () => {
+    const filled = fillGameSystem(gameKind.defaultCategories, gameKind.defaultTags, true)
+    assert.ok(!filled.includes('{{engine_rules}}'), '插槽没填')
+    for (const rule of ENGINE_SAVE_RULES) {
+      assert.ok(filled.includes(rule.engine), `${rule.engine} 没进 prompt`)
+      for (const where of [...(rule.where ?? []), ...(rule.in_game ?? [])]) {
+        assert.ok(filled.includes(where), `${rule.engine} 的「${where}」没进 prompt`)
+      }
+    }
+    // 相对路径单看认不出该拼在哪儿，渲染时必须把「游戏目录下」说出来
+    assert.ok(filled.includes('**游戏目录下**的'), 'in_game 那些候选没标明是相对游戏目录的')
+  })
+
+  await check('prompt 里「引擎规则也必须验」这句话在 —— 规则是「该在哪」，不是「在」', () => {
+    // 加了一张很有把握的规则表之后，最大的新风险是模型觉得「引擎规则这么确定，
+    // 不用验了吧」，然后填一个这台机器上根本不存在的路径。那正是备份一个空目录
+    // 的来源，也是这一整层存在的理由被抽掉的那一刻
+    const filled = fillGameSystem(gameKind.defaultCategories, gameKind.defaultTags, true)
+    assert.ok(
+      filled.includes('都必须过 detect_save_path'),
+      '没有那句「不管从哪一步来的路径都要验」'
+    )
+    assert.ok(filled.includes('没验过就填等于编'), '没把后果说清')
+  })
+
+  await check('引擎规则排在按位置猜之前 —— 顺序本身就是那条策略', () => {
+    const filled = fillGameSystem(gameKind.defaultCategories, gameKind.defaultTags, true)
+    const byEngine = filled.indexOf('回退第一步：按引擎的规则推')
+    const byGuess = filled.indexOf('回退第二步：按位置猜')
+    const byLookup = filled.indexOf('lookup_save_paths')
+    assert.ok(byEngine > 0 && byGuess > 0, '两节都得在')
+    assert.ok(byLookup < byEngine, '查表该排在引擎规则之前 —— 查得到就不必推')
+    assert.ok(byEngine < byGuess, '引擎规则该排在按位置猜之前')
+  })
+}
+
+/* ==================== 关联文件与封面 · Step 7 ==================== */
+
+async function linksAndCoverSection(): Promise<void> {
+  console.log('\n关联文件 · 增删改')
+
+  const link = (p: string, over: Partial<LinkedFile> = {}): LinkedFile => ({
+    path: p,
+    label: path.basename(p),
+    type: 'other',
+    ...over
+  })
+
+  await check('类型猜测保守：文档猜攻略、目录猜 MOD、exe 一律 other', () => {
+    assert.equal(guessLinkType('D:\\x\\图文攻略.pdf'), 'guide')
+    assert.equal(guessLinkType('D:\\x\\说明.TXT'), 'guide', '扩展名要不分大小写')
+    assert.equal(guessLinkType('D:\\x\\mods', true), 'mod')
+    // exe 可能是修改器，也可能是配置工具、汉化补丁、另一个游戏的启动器。
+    // 猜错了用户得先看懂我们猜错了才能改，而 other 显示的就是文件名本身
+    assert.equal(guessLinkType('D:\\x\\Trainer.exe'), 'other')
+  })
+
+  await check('重复的路径不再加一条，大小写和尾斜杠都算同一条', () => {
+    const list = [link('D:\\资料\\攻略.pdf')]
+    assert.equal(addLinks(list, [link('d:\\资料\\攻略.PDF')]).length, 1)
+    assert.equal(addLinks(list, [link('D:\\资料\\攻略.pdf\\')]).length, 1)
+    assert.equal(addLinks(list, [link('D:\\资料\\另一份.pdf')]).length, 2)
+  })
+
+  await check('加进来时标签截断、类型兜底、空路径跳过', () => {
+    const out = addLinks([], [
+      link('D:\\x\\a.pdf', { label: '一'.repeat(40) }),
+      link('D:\\x\\b.pdf', { type: 'nope' as any }),
+      link('   ', { label: '空的' })
+    ])
+    assert.equal(out.length, 2, '空路径该被跳过')
+    assert.equal(out[0].label.length, MAX_LABEL)
+    assert.equal(out[1].type, 'other', '不认识的类型该兜成 other')
+  })
+
+  await check('封顶时保留已有的，新的填到满为止', () => {
+    // 已有的那些是用户之前一条条挑出来的，比这一次框选的更该留
+    const existing = Array.from({ length: MAX_LINKS - 1 }, (_, i) => link(`D:\\x\\old${i}.pdf`))
+    const out = addLinks(existing, [link('D:\\x\\new1.pdf'), link('D:\\x\\new2.pdf')])
+    assert.equal(out.length, MAX_LINKS)
+    assert.ok(out.slice(0, MAX_LINKS - 1).every((f) => f.path.includes('old')), '已有的被挤掉了')
+    assert.ok(out[MAX_LINKS - 1].path.includes('new1'))
+  })
+
+  await check('hasLink 是 service 层的越界检查，认路径不认写法', () => {
+    // 这一条守的是 openGameLink 那道门：它拦的是「让渲染进程打开任意本地文件」，
+    // 而路径写法不同就漏过去的话，这道门等于没有
+    const list = [link('D:\\资料\\攻略.pdf')]
+    assert.ok(hasLink(list, 'd:\\资料\\攻略.pdf'))
+    assert.ok(hasLink(list, 'D:\\资料\\.\\攻略.pdf'), '规范化之后是同一条')
+    assert.ok(!hasLink(list, 'D:\\资料\\别的.pdf'))
+    assert.ok(!hasLink([], 'D:\\资料\\攻略.pdf'))
+  })
+
+  await check('删一条只删那一条，删不存在的不报错也不改动别的', () => {
+    const list = [link('D:\\x\\a.pdf'), link('D:\\x\\b.pdf')]
+    assert.deepEqual(removeLink(list, 'D:\\X\\A.PDF').map((f) => f.path), ['D:\\x\\b.pdf'])
+    assert.equal(removeLink(list, 'D:\\x\\没有这条.pdf').length, 2)
+  })
+
+  await check('标签改空退回文件名，不留一片空白', () => {
+    const list = [link('D:\\x\\图文攻略.pdf', { label: '攻略' })]
+    assert.equal(relabelLink(list, 'D:\\x\\图文攻略.pdf', '   ')[0].label, '图文攻略.pdf')
+    assert.equal(relabelLink(list, 'D:\\x\\图文攻略.pdf', '  新名字 ')[0].label, '新名字')
+  })
+
+  await check('类型名单是闭集，且每一格都有中文标签 —— 缺一格是界面上一个空白下拉项', () => {
+    assert.deepEqual(LINK_TYPES, ['guide', 'trainer', 'mod', 'emulator', 'other'])
+    for (const t of LINK_TYPES) {
+      assert.ok(LINK_TYPE_LABEL[t], `${t} 没有中文标签`)
+    }
+    // 反向也要对：标签表里多一个不存在的类型，下拉框里会出现一个选不出结果的项
+    assert.deepEqual(Object.keys(LINK_TYPE_LABEL).sort(), [...LINK_TYPES].sort())
+  })
+
+  console.log('\n封面 · 文件命名')
+
+  await check('封面按游戏 id 命名 —— 游戏改名不该让封面变成孤儿', () => {
+    // 名字在详情页上随时能改，文件名跟着改就得同步挪文件，不挪就对不上
+    assert.equal(coverFileName('abc-123', 'D:\\图\\艾尔登法环.png'), 'abc-123.png')
+    assert.equal(coverFileName('abc-123', 'D:\\图\\封面.JPEG'), 'abc-123.jpeg', '扩展名要归成小写')
+  })
+
+  await check('认不得的扩展名退回 .png 而不是原样带出去', () => {
+    assert.equal(coverFileName('id1', 'D:\\图\\x.tga'), 'id1.png')
+    assert.equal(coverFileName('id1', 'D:\\图\\没有扩展名'), 'id1.png')
+  })
+
+  await check('格式白名单只放 Chromium 一定渲染得出来的，.ico 和 .psd 不收', () => {
+    assert.ok(isCoverExt('a.png') && isCoverExt('A.WEBP') && isCoverExt('a.avif'))
+    // .ico 是图标，塞进 2:3 的框里必然糊；.psd / .tga 直接是破图
+    assert.ok(!isCoverExt('a.ico'), '.ico 不该收')
+    assert.ok(!isCoverExt('a.psd') && !isCoverExt('a.tga'))
+    assert.ok(!isCoverExt('封面'), '没扩展名的不该收')
+  })
+
+  await check('换扩展名时清孤儿的名单覆盖所有认得的格式', () => {
+    // png 换成 jpg 时旧文件不会被覆盖，不清就留下一个谁也不引用、
+    // 却和新封面同名不同扩展名的文件 —— 看着像是没换成功
+    const siblings = coverSiblings('id1')
+    assert.equal(siblings.length, COVER_EXTS.length)
+    for (const ext of COVER_EXTS) {
+      assert.ok(siblings.includes(`id1${ext}`), `${ext} 不在清理名单里`)
+    }
+    assert.ok(siblings.includes(coverFileName('id1', 'x.jpg')), '实际会写出来的名字必须在清理名单里')
+  })
+
+  await check('封面路径和图标一样只按 basename 找文件 —— 协议那头防的是 ../ 穿越', () => {
+    // main.ts 的 baoyi:// 处理器拿 path.basename 兜底，渲染进程这边的 coverUrl
+    // 也只取最后一段。两边一致，中间那段路径怎么写都到不了别的目录
+    assert.equal(coverUrlOf('C:\\Users\\x\\AppData\\Roaming\\baoyi\\covers\\id1.png', 7), 'baoyi://cover/id1.png?v=7')
+    assert.equal(coverUrlOf('..\\..\\Windows\\System32\\evil.png', 1), 'baoyi://cover/evil.png?v=1')
+    assert.equal(coverUrlOf('', 1), '', '没有封面时不该拼出一个指向 undefined 的地址')
+  })
+
+  await check('版本号跟着 updated_at 走 —— 文件名不变，不带它换了图也不刷新', () => {
+    const a = coverUrlOf('D:\\covers\\id1.png', 1000)
+    const b = coverUrlOf('D:\\covers\\id1.png', 2000)
+    assert.notEqual(a, b, '换封面之后 URL 必须变，否则 Chromium 继续用缓存里那张旧图')
   })
 }
 

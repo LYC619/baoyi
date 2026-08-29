@@ -909,6 +909,28 @@ export interface BaoyiApi {
     deleteBackup(backupId: string): Promise<{ ok: boolean; message: string }>
     /** 在资源管理器里打开一份备份 */
     openBackup(backupId: string): Promise<void>
+
+    /**
+     * 选文件（或目录）挂成关联文件，选完直接落库，返回更新后的条目。
+     * 取消返回 null。已经加过的那些会被跳过，不报错。
+     */
+    pickLinks(id: string, kind: 'file' | 'dir'): Promise<GameItem | null>
+    /**
+     * 打开一条关联文件 / 在资源管理器里选中它。
+     *
+     * 路径必须已经在这个游戏的关联名单里，否则拒绝 —— 这两个口子能打开任意
+     * 本地文件，来路是必须核对的。
+     */
+    openLink(id: string, target: string): Promise<{ ok: boolean; message: string }>
+    revealLink(id: string, target: string): Promise<{ ok: boolean; message: string }>
+
+    /**
+     * 选一张图当封面。图会被拷进用户数据目录，之后原图挪走或删掉都不影响显示。
+     * 取消返回 null；格式不认或拷贝失败时 ok 为 false。
+     */
+    pickCover(id: string): Promise<{ ok: boolean; message: string; item: GameItem | null } | null>
+    /** 撤掉封面，退回首字占位。磁盘上那份拷贝一起删 */
+    clearCover(id: string): Promise<GameItem | null>
   }
   categories: {
     list(): Promise<Category[]>

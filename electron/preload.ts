@@ -83,7 +83,13 @@ const api: BaoyiApi = {
     backups: (id: string) => ipcRenderer.invoke('game:backups', id),
     restoreBackup: (backupId: string) => ipcRenderer.invoke('game:restore-backup', backupId),
     deleteBackup: (backupId: string) => ipcRenderer.invoke('game:delete-backup', backupId),
-    openBackup: (backupId: string) => ipcRenderer.invoke('game:open-backup', backupId)
+    openBackup: (backupId: string) => ipcRenderer.invoke('game:open-backup', backupId),
+    pickLinks: (id: string, kind: 'file' | 'dir') =>
+      ipcRenderer.invoke('game:pick-links', id, kind),
+    openLink: (id: string, target: string) => ipcRenderer.invoke('game:open-link', id, target),
+    revealLink: (id: string, target: string) => ipcRenderer.invoke('game:reveal-link', id, target),
+    pickCover: (id: string) => ipcRenderer.invoke('game:pick-cover', id),
+    clearCover: (id: string) => ipcRenderer.invoke('game:clear-cover', id)
   },
   categories: {
     list: () => ipcRenderer.invoke('categories:list'),

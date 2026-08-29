@@ -15,10 +15,13 @@ import {
   ArrowLeft,
   BadgeCheck,
   ExternalLink,
+  FilePlus,
   FolderOpen,
   FolderPlus,
   HardDriveDownload,
   History,
+  Image,
+  ImageOff,
   Link2,
   Loader2,
   Play,
@@ -32,15 +35,17 @@ import TagBadge from '@/components/ui/TagBadge.vue'
 import { useToast } from '@/composables/useToast'
 import { PLAY_STATUS_LABEL, useGameStore } from '@/stores/game'
 import { useSettingsStore } from '@/stores/settings'
-import type { GameItem, PlayStatus, SaveBackup, SavePath } from '@/types'
+import type { GameItem, LinkedFile, PlayStatus, SaveBackup, SavePath } from '@/types'
 import {
+  coverUrl,
   errorMessage,
   formatBytes,
   formatDate,
   formatDateTime,
   formatPlaytime,
   formatRelative,
-  gameTitle
+  gameTitle,
+  LINK_TYPE_LABEL
 } from '@/utils'
 
 const props = defineProps<{ id: string }>()
@@ -83,6 +88,44 @@ const hue = computed(() => {
   for (const ch of title.value) h = (h * 31 + ch.charCodeAt(0)) % 360
   return h
 })
+
+/* ---------------------------- 封面 ---------------------------- */
+
+/** 同 GameCard：走 baoyi://cover/，updated_at 当版本号破缓存 */
+const cover = computed(() =>
+  item.value ? coverUrl(item.value.cover_path, item.value.updated_at) : ''
+)
+
+/**
+ * 换封面。主进程把图拷进 userData 再落库，所以这里拿回来的条目是最终形态，
+ * 不用自己再 load 一次。
+ *
+ * 不做自动找封面（规划书里是 P2，仍然没做），所以这一条是**唯一**的上封面途径 ——
+ * 界面上得让人找得到：占位封面本身就是那个按钮，鼠标移上去出现「换封面」。
+ */
+async function pickCover(): Promise<void> {
+  if (!item.value) return
+  const r = await window.baoyi.game.pickCover(item.value.id)
+  if (!r) return
+  if (!r.ok) {
+    error(r.message)
+    return
+  }
+  if (r.item) item.value = r.item
+  // 封面墙那边也要跟着换，否则退回去还是旧的
+  void store.load()
+  success(r.message)
+}
+
+async function clearCover(): Promise<void> {
+  if (!item.value?.cover_path) return
+  if (!window.confirm('撤掉这张封面？\n\n会退回首字占位。你原来那张图不受影响，删掉的是抱一自己存的那份拷贝。')) {
+    return
+  }
+  const updated = await window.baoyi.game.clearCover(item.value.id)
+  if (updated) item.value = updated
+  void store.load()
+}
 
 /** 走 store 而不是直接调 IPC：卡片墙和侧边栏计数要跟着一起更新 */
 async function save(patch: Partial<GameItem>): Promise<void> {
@@ -317,6 +360,68 @@ async function dropBackup(b: SaveBackup): Promise<void> {
 
 const openBackup = (b: SaveBackup): Promise<void> => window.baoyi.game.openBackup(b.id)
 
+/* ---------------------------- 关联文件 ---------------------------- */
+
+/**
+ * 关联文件：攻略、修改器、MOD 目录、模拟器。
+ *
+ * 识别时 agent 会往里填游戏目录内的那些，这里补的是用户自己管的那一半 ——
+ * 而用户的攻略十有八九**不在**游戏目录里（`D:\资料\攻略`），所以加的时候走的是
+ * 另一道边界（见 service.ts 的 addGameLinks），不受识别沙箱约束。
+ */
+const LINK_TYPES: Array<LinkedFile['type']> = ['guide', 'trainer', 'mod', 'emulator', 'other']
+
+async function addLinks(kind: 'file' | 'dir'): Promise<void> {
+  if (!item.value) return
+  try {
+    const updated = await window.baoyi.game.pickLinks(item.value.id, kind)
+    if (!updated) return
+    const before = item.value.linked_files.length
+    item.value = updated
+    const added = updated.linked_files.length - before
+    // 一条没加上通常是「选中的这些已经在名单里了」，说清楚比静默好
+    if (added > 0) success(`已关联 ${added} 个${kind === 'dir' ? '文件夹' : '文件'}`)
+    else toast('这些已经在关联列表里了')
+  } catch (err) {
+    error(`关联失败：${errorMessage(err)}`)
+  }
+}
+
+/** 打开一条。打不开的类型（没有关联程序）由主进程把系统那句话原样带回来 */
+async function openLink(f: LinkedFile): Promise<void> {
+  if (!item.value) return
+  const r = await window.baoyi.game.openLink(item.value.id, f.path)
+  if (!r.ok) error(r.message)
+}
+
+async function revealLink(f: LinkedFile): Promise<void> {
+  if (!item.value) return
+  const r = await window.baoyi.game.revealLink(item.value.id, f.path)
+  if (!r.ok) error(r.message)
+}
+
+/** 只解除关联，不动磁盘上的文件 —— 那是用户自己的东西，我们没有删它的道理 */
+function removeLink(f: LinkedFile): void {
+  if (!item.value) return
+  void save({ linked_files: item.value.linked_files.filter((x) => x.path !== f.path) })
+}
+
+function relabelLink(f: LinkedFile, raw: string): void {
+  if (!item.value) return
+  const label = raw.trim().slice(0, 20) || f.path.split(/[\\/]/).pop() || f.label
+  if (label === f.label) return
+  void save({
+    linked_files: item.value.linked_files.map((x) => (x.path === f.path ? { ...x, label } : x))
+  })
+}
+
+function retypeLink(f: LinkedFile, type: LinkedFile['type']): void {
+  if (!item.value) return
+  void save({
+    linked_files: item.value.linked_files.map((x) => (x.path === f.path ? { ...x, type } : x))
+  })
+}
+
 function toggleArchive(): void {
   if (!item.value) return
   void save({ is_archived: !item.value.is_archived })
@@ -446,8 +551,23 @@ function copyPath(path: string): void {
         <!-- ------------------------------ 主列 ------------------------------ -->
         <div class="col col--main">
           <section class="hero panel">
+            <!--
+              封面本身就是「换封面」那个按钮：自动找封面没做，这是唯一的入口，
+              藏在别处等于没有。悬停才显形，不占静态视觉重量
+            -->
             <div class="hero__cover" :style="{ '--hue': hue }">
-              <span>{{ initial }}</span>
+              <img v-if="cover" :src="cover" :alt="title" class="hero__img" />
+              <span v-else class="hero__initial">{{ initial }}</span>
+
+              <div class="hero__coverActs">
+                <button class="hero__coverBtn" :title="item.cover_path ? '换一张封面' : '选一张封面图'" @click="pickCover">
+                  <Image :size="13" />
+                  {{ item.cover_path ? '换封面' : '加封面' }}
+                </button>
+                <button v-if="item.cover_path" class="hero__coverBtn" title="撤掉封面，退回首字占位" @click="clearCover">
+                  <ImageOff :size="13" />
+                </button>
+              </div>
             </div>
 
             <div class="hero__text">
@@ -599,19 +719,71 @@ function copyPath(path: string): void {
             </ul>
           </section>
 
-          <section v-if="item.linked_files.length > 0" class="panel">
+          <!--
+            关联文件。列的是「标签 + 类型 + 路径」，标签在最前 ——
+            用户找的是「那份攻略」，不是「D:\资料\某游戏\攻略\图文.pdf」。
+            路径小一号排在后面，需要核对时才看。
+          -->
+          <section class="panel">
             <h2 class="sec-title">
               <Link2 :size="14" />
               关联文件
+              <span v-if="item.linked_files.length > 0" class="sec-title__count">
+                {{ item.linked_files.length }}
+              </span>
+              <button class="sec-title__act" title="关联一个文件：攻略、修改器、存档修改工具…" @click="addLinks('file')">
+                <FilePlus :size="13" />
+                加文件
+              </button>
+              <button class="sec-title__act sec-title__act--tight" title="关联一个文件夹：MOD、整合包…" @click="addLinks('dir')">
+                <FolderPlus :size="13" />
+                加文件夹
+              </button>
             </h2>
-            <ul class="paths">
-              <li v-for="f in item.linked_files" :key="f.path" class="path">
-                <button class="path__text mono truncate" :title="`${f.path}（点击复制）`" @click="copyPath(f.path)">
-                  {{ f.path }}
-                </button>
-                <span class="path__note">{{ f.label || f.type }}</span>
+
+            <ul v-if="item.linked_files.length > 0" class="links">
+              <li v-for="f in item.linked_files" :key="f.path" class="link-row">
+                <div class="link-row__main">
+                  <input
+                    class="link-row__label"
+                    :value="f.label"
+                    placeholder="给它起个名字"
+                    title="改个好认的名字"
+                    @change="relabelLink(f, ($event.target as HTMLInputElement).value)"
+                  />
+                  <select
+                    class="link-row__type"
+                    :value="f.type"
+                    title="类型只影响这里显示的词，不影响打开方式"
+                    @change="retypeLink(f, ($event.target as HTMLSelectElement).value as LinkedFile['type'])"
+                  >
+                    <option v-for="t in LINK_TYPES" :key="t" :value="t">{{ LINK_TYPE_LABEL[t] }}</option>
+                  </select>
+                  <button
+                    class="link-row__path mono truncate"
+                    :title="`${f.path}（点击复制）`"
+                    @click="copyPath(f.path)"
+                  >
+                    {{ f.path }}
+                  </button>
+                </div>
+                <div class="link-row__acts">
+                  <button class="path__act" title="打开它" @click="openLink(f)">
+                    <ExternalLink :size="13" />
+                  </button>
+                  <button class="path__act" title="在资源管理器里选中它" @click="revealLink(f)">
+                    <FolderOpen :size="13" />
+                  </button>
+                  <button class="path__del" title="解除关联（不会删磁盘上的文件）" @click="removeLink(f)">
+                    <Trash2 :size="13" />
+                  </button>
+                </div>
               </li>
             </ul>
+            <p v-else class="hint">
+              把攻略、修改器、MOD 目录挂在这儿，下次找它们不用再翻硬盘。
+              解除关联只是把这条记录去掉，不会删你的文件。
+            </p>
           </section>
 
           <section class="panel">
@@ -782,20 +954,61 @@ function copyPath(path: string): void {
 }
 
 .hero__cover {
+  position: relative;
   flex: none;
   width: 96px;
   aspect-ratio: 2 / 3;
   border-radius: var(--radius-card);
+  overflow: hidden;
   display: grid;
   place-items: center;
-  font-family: var(--font-display);
-  font-size: 34px;
-  color: rgb(255 255 255 / 0.82);
   background: linear-gradient(
     155deg,
     hsl(var(--hue) 26% 26%),
     hsl(calc(var(--hue) + 28) 22% 15%)
   );
+}
+
+.hero__initial {
+  font-family: var(--font-display);
+  font-size: 34px;
+  color: rgb(255 255 255 / 0.82);
+}
+
+.hero__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 悬停才出现：封面区平时该是封面，不是一块按钮面板 */
+.hero__coverActs {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 4px;
+  background: rgb(0 0 0 / 0.62);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity var(--t-fast) ease;
+}
+.hero__cover:hover .hero__coverActs,
+.hero__coverActs:focus-within {
+  opacity: 1;
+}
+
+.hero__coverBtn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-tag);
+  color: rgb(255 255 255 / 0.86);
+}
+.hero__coverBtn:hover {
+  color: #fff;
 }
 
 .hero__text {
@@ -932,6 +1145,84 @@ function copyPath(path: string): void {
 }
 .path__del:hover {
   color: var(--danger);
+}
+
+/* ------------------------------- 关联文件 ------------------------------- */
+.links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.link-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-input);
+  background: var(--hover-surface);
+}
+
+.link-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 标签可以直接改：这一列是用户认这条记录的依据，改它比改类型常见得多 */
+.link-row__label {
+  flex: none;
+  width: 116px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  outline: none;
+  padding: 2px 5px;
+  color: var(--text-main);
+  font-size: var(--fs-tag);
+}
+.link-row__label:hover {
+  border-color: var(--divider);
+}
+.link-row__label:focus {
+  border-color: var(--accent);
+}
+
+.link-row__type {
+  flex: none;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: var(--radius-tag);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  border: 1px solid var(--divider);
+  font-size: var(--fs-tag);
+  outline: none;
+}
+
+.link-row__path {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: var(--fs-tag);
+  color: var(--text-faint);
+}
+.link-row__path:hover {
+  color: var(--text-sub);
+}
+
+.link-row__acts {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 两个「加」并排时，第二个不再自己吃掉 margin-left: auto */
+.sec-title__act--tight {
+  margin-left: 0;
 }
 
 /* ------------------------------- 备份列表 ------------------------------- */

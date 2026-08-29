@@ -8,7 +8,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import fs, { existsSync } from 'node:fs'
 import path from 'node:path'
 import type {
   GameCounts,
@@ -16,6 +16,7 @@ import type {
   GameQuery,
   GameScanProgress,
   GameScanResult,
+  LinkedFile,
   SaveBackup,
   SaveBackupResult,
   SavePath,
@@ -26,6 +27,7 @@ import type {
 import { app, shell } from 'electron'
 import { runAgent, type AgentEvent } from '../../services/agent/loop'
 import {
+  coversDir,
   getDb,
   getSettings,
   listCategories,
@@ -50,6 +52,16 @@ import {
   listGames,
   updateGame
 } from './db'
+import {
+  addLinks,
+  coverFileName,
+  coverSiblings,
+  guessLinkType,
+  hasLink,
+  isCoverExt,
+  COVER_EXTS,
+  MAX_LINKS
+} from './links'
 import { candidatePrompt, fillGameSystem } from './prompts'
 import { loadSaveDb, type SaveDbHandle } from './savedb'
 import { elapsedSeconds, endSession, type SessionOutcome } from './session'
@@ -93,11 +105,145 @@ function gameSaveDb(): SaveDbHandle | null {
 export const listGameItems = (query: GameQuery = {}): GameItem[] => listGames(getDb(), query)
 export const getGameItem = (id: string): GameItem | null => getGame(getDb(), id)
 export const gameCountsOf = (): GameCounts => gameCounts(getDb())
-export const removeGame = (id: string): void => deleteGame(getDb(), id)
 
 export function updateGameItem(id: string, patch: Partial<GameItem>): GameItem | null {
   return updateGame(getDb(), id, patch)
 }
+
+/**
+ * 从库里移除一个游戏，顺手删掉它的封面文件。
+ *
+ * 封面能删是因为它是**我们**拷进 userData 的一份副本，用户原来那张图还在他自己的
+ * 目录里 —— 删掉不丢东西。存档备份不能这么处理（deleteGame 那边刻意不删），
+ * 那是他的存档，不是我们生成的缓存。这两件事的判据是「这份文件是谁的」。
+ */
+export function removeGame(id: string): void {
+  dropCoverFiles(id)
+  deleteGame(getDb(), id)
+}
+
+/* ------------------------------ 关联文件 ------------------------------ */
+
+/**
+ * 把用户选的几个文件/目录挂到一个游戏上。
+ *
+ * 和识别时的 coerceLinkedFiles 分开走两条路，因为边界不同：那边的路径是模型给的，
+ * 必须锁在游戏目录里；这里的路径是用户在系统对话框里亲手点的，攻略放在
+ * `D:\资料\攻略` 是完全正常的事，锁在游戏目录里等于这个功能一半用不了。
+ * 判断规则本身（去重、封顶、类型猜测）两边共用 links.ts，不各写一份。
+ */
+export function addGameLinks(id: string, targets: string[]): GameItem | null {
+  const game = getGame(getDb(), id)
+  if (!game) return null
+
+  const incoming: LinkedFile[] = []
+  for (const raw of targets) {
+    const target = path.resolve(raw)
+    let isDir = false
+    try {
+      isDir = fs.statSync(target).isDirectory()
+    } catch {
+      continue // 选完到落库之间被删掉了，跳过而不是记一条指不到的路径
+    }
+    incoming.push({
+      path: target,
+      label: path.basename(target),
+      type: guessLinkType(target, isDir)
+    })
+  }
+  if (incoming.length === 0) return game
+
+  return updateGame(getDb(), id, { linked_files: addLinks(game.linked_files, incoming) })
+}
+
+/**
+ * 打开一条关联文件（或在资源管理器里选中它）。
+ *
+ * 先核对它在不在这个游戏的名单里 —— 否则这就是一个「让渲染进程指定打开任意路径」
+ * 的口子。名单里的那些是用户自己加的或识别时验过的，这一步只确认来路。
+ */
+export async function openGameLink(
+  id: string,
+  target: string,
+  mode: 'open' | 'reveal' = 'open'
+): Promise<{ ok: boolean; message: string }> {
+  const game = getGame(getDb(), id)
+  if (!game) return { ok: false, message: '找不到这个游戏' }
+  if (!hasLink(game.linked_files, target)) {
+    return { ok: false, message: '这条路径不在这个游戏的关联文件里，已拒绝' }
+  }
+  if (!existsSync(target)) {
+    return { ok: false, message: `这个文件不在了：${target}` }
+  }
+
+  if (mode === 'reveal') {
+    shell.showItemInFolder(target)
+    return { ok: true, message: '' }
+  }
+  // openPath 返回的是错误字符串，空串才是成功 —— 双击打不开的类型（没有关联程序）
+  // 会走到这里，得把系统那句话原样交给用户
+  const err = await shell.openPath(target)
+  return err ? { ok: false, message: err } : { ok: true, message: '' }
+}
+
+/* ------------------------------ 封面 ------------------------------ */
+
+/** 清掉这个游戏在封面目录里的所有文件（含换过扩展名留下的孤儿） */
+function dropCoverFiles(id: string): void {
+  const dir = coversDir()
+  for (const name of coverSiblings(id)) {
+    try {
+      fs.rmSync(path.join(dir, name), { force: true })
+    } catch {
+      /* 正被渲染进程占用之类，删不掉就留着，下次换封面会覆盖 */
+    }
+  }
+}
+
+/**
+ * 换封面：把用户选的图**拷进** userData 下的 covers/，再把路径写进库。
+ *
+ * 拷而不是记一个指向原图的路径，有两个理由，第二个才是决定性的：
+ *   · 原图被挪走、被删、在没插的移动硬盘上时，封面墙会整片破图；
+ *   · 打包后页面跑在 `file://` 下，`<img src="C:\...">` 加载不出来 ——
+ *     必须走 `baoyi://` 协议，而那个协议只在白名单目录里找文件（见 main.ts）。
+ *     所以「拷进来」不是一个保守的选择，是这个功能唯一能成立的形态。
+ */
+export function setGameCover(id: string, source: string): { ok: boolean; message: string } {
+  const game = getGame(getDb(), id)
+  if (!game) return { ok: false, message: '找不到这个游戏' }
+
+  const from = path.resolve(source)
+  if (!isCoverExt(from)) {
+    return { ok: false, message: `只认这些格式：${COVER_EXTS.join('、')}` }
+  }
+  if (!existsSync(from)) return { ok: false, message: '这个文件不在了' }
+
+  // 换扩展名时旧文件不会被覆盖，先整个清一遍再拷 —— 不清就会留下一个
+  // 谁也不引用的孤儿，而它和新封面同名不同扩展名，看着像是没换成功
+  dropCoverFiles(id)
+
+  const name = coverFileName(id, from)
+  try {
+    fs.copyFileSync(from, path.join(coversDir(), name))
+  } catch (err: any) {
+    return { ok: false, message: `拷贝失败：${err?.message ?? '未知错误'}` }
+  }
+
+  // 存完整路径而不是只存文件名，和 resource.icon_path 一个约定：
+  // 渲染进程那边统一用 coverUrl() 取 basename 拼协议地址
+  updateGame(getDb(), id, { cover_path: path.join(coversDir(), name) })
+  return { ok: true, message: '封面已更换' }
+}
+
+/** 撤掉封面，退回首字占位。磁盘上那份拷贝一起删，留着只是占地方 */
+export function clearGameCover(id: string): GameItem | null {
+  dropCoverFiles(id)
+  return updateGame(getDb(), id, { cover_path: '' })
+}
+
+/** 关联文件的条数上限，给界面上那句提示用 —— 不让渲染进程自己写一个 20 */
+export const gameLinkLimit = (): number => MAX_LINKS
 
 /* ------------------------------ 存档与备份 ------------------------------ */
 

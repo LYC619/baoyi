@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   IdentifyLog,
   IdentifyLogStatus,
+  LinkedFile,
   MasteryLevel,
   SearchCallRecord,
   SoftwareItem,
@@ -37,6 +38,28 @@ export function iconUrl(iconPath: string): string {
   if (!iconPath) return ''
   const name = iconPath.split(/[\\/]/).pop() ?? ''
   return name ? `baoyi://icon/${encodeURIComponent(name)}` : ''
+}
+
+/**
+ * 封面同样走 baoyi://，但多一个 `?v=` —— 那是**必需的**，不是保险。
+ *
+ * 封面文件名是按游戏 id 定的（见 kinds/game/links.ts 的 coverFileName），所以换一张
+ * 封面之后 URL 一个字符都不会变，Chromium 会继续拿内存里那张旧图。换封面时库里的
+ * `updated_at` 一定会被推到当下，拿它当版本号，换过就自然破缓存，没换过就仍然命中。
+ */
+export function coverUrl(coverPath: string, version = 0): string {
+  if (!coverPath) return ''
+  const name = coverPath.split(/[\\/]/).pop() ?? ''
+  return name ? `baoyi://cover/${encodeURIComponent(name)}?v=${version}` : ''
+}
+
+/** 关联文件类型显示成什么词。label 为空时才用得上，是最后的退路 */
+export const LINK_TYPE_LABEL: Record<LinkedFile['type'], string> = {
+  guide: '攻略',
+  trainer: '修改器',
+  mod: 'MOD',
+  emulator: '模拟器',
+  other: '其他'
 }
 
 /**

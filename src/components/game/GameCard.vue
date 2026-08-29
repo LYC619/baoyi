@@ -2,14 +2,14 @@
 /**
  * 封面墙的一格。竖版 2:3，因为游戏封面本来就是这个比例。
  *
- * cover_path 现在一律是空的 —— 自动找封面（search_cover）在规划书里是 P2，
- * Step 7 才做手动更换。所以占位不是「临时凑合」，它是当前唯一的形态，
- * 得自己站得住：首字 + 分类色，看上去像一张有意为之的卡，而不是一个破图。
+ * 封面是用户在详情页手工指的（Step 7），自动找封面仍然没做 —— 它在规划书里是 P2。
+ * 所以**大多数卡片长期是占位形态**，占位不能当「临时凑合」来做，它得自己站得住：
+ * 首字 + 按名字散出来的稳定色，看上去像一张有意为之的卡，而不是一个破图。
  */
 import { computed } from 'vue'
 import { Clock, Unlink } from 'lucide-vue-next'
 import type { GameItem } from '@/types'
-import { formatPlaytime, formatRelative, gameTitle } from '@/utils'
+import { coverUrl, formatPlaytime, formatRelative, gameTitle } from '@/utils'
 import { PLAY_STATUS_LABEL, useGameStore } from '@/stores/game'
 
 const props = defineProps<{ item: GameItem }>()
@@ -41,17 +41,17 @@ const hue = computed(() => {
 })
 
 /**
- * ponytail: cover_path 现在恒为空串，所以这里直接把它当 URL 用是安全的。
- * Step 7 接手动换封面时要连一个 baoyi://file 之类的自定义协议一起加 ——
- * 渲染进程直接 src="C:\..." 在打包后的 file:// 页面里是加载不出来的。
+ * 走 baoyi://cover/ 而不是把 cover_path 直接当 src：打包后页面跑在 `file://` 下，
+ * `src="C:\..."` 加载不出来。updated_at 当版本号破缓存 —— 换封面时文件名不变
+ * （按 id 定的），不带它换了图也不会刷新。
  */
-const coverUrl = computed(() => props.item.cover_path)
+const cover = computed(() => coverUrl(props.item.cover_path, props.item.updated_at))
 </script>
 
 <template>
   <button class="card" :title="item.summary || title" @click="$emit('open', item.id)">
     <div class="card__cover" :style="{ '--hue': hue }">
-      <img v-if="coverUrl" :src="coverUrl" :alt="title" class="card__img" />
+      <img v-if="cover" :src="cover" :alt="title" class="card__img" />
       <span v-else class="card__initial">{{ initial }}</span>
       <span v-if="item.play_status !== 'unplayed'" class="card__status">
         {{ PLAY_STATUS_LABEL[item.play_status] }}

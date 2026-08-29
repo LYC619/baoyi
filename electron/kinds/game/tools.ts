@@ -127,7 +127,11 @@ type ProbeLedger = Map<string, number>
 
 function describeProbe(target: string, probe: ReturnType<typeof probeSave>): string {
   if (!probe.exists) {
-    return `${target}\n不存在。换一个写法或换一个位置再试，或者放弃 —— save_paths 留空是可以接受的。`
+    return (
+      `${target}\n不存在。换一个写法或换一个位置再试 —— 引擎规则那一节里同一个引擎` +
+      '通常给了两个候选，游戏名也可以换成主程序 exe 去掉扩展名的那个名字。' +
+      '或者放弃：save_paths 留空是可以接受的答案。'
+    )
   }
   if (probe.files === 0) {
     return `${target}\n目录存在，但**一个文件都没有**。这多半不是这个游戏的存档目录，不要填进 save_paths。`
@@ -339,7 +343,10 @@ function lookupSaveDb(ctx: GameToolContext, args: any): string {
   if (!hit) {
     return (
       `数据库里没有「${name}」的记录。可能是名字不对（试试官方英文名），` +
-      '也可能这个游戏没被收录。按常见存档位置猜，然后用 detect_save_path 验。'
+      '也可能这个游戏没被收录。\n' +
+      '**接下来按「怎么找存档」里的引擎规则推**：目录线索报了哪个引擎就用那一条，' +
+      '那些规则是引擎写死的行为，比按常见位置逐个试准得多。推出来的路径照样要用 ' +
+      'detect_save_path 验过才算。'
     )
   }
 
@@ -407,7 +414,7 @@ export function buildGameTools(
       description:
         '按游戏名查「已知存档位置」数据库（来自 PCGamingWiki 社区，收录 19000+ 游戏）。' +
         '认出游戏名之后**先调这个**，比自己猜存档位置准得多，查到的路径再用 detect_save_path 验证。' +
-        '查不到不代表没有存档，那时候再按常见位置猜。',
+        '查不到不代表没有存档 —— 那时候退回系统提示里的引擎规则去推。',
       parameters: {
         type: 'object',
         properties: {

@@ -4,7 +4,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc/handlers'
 import { finalizeGameSessions } from './kinds/game/service'
-import { closeDb, getSettings, iconsDir } from './services/database'
+import { closeDb, coversDir, getSettings, iconsDir } from './services/database'
 
 const APP_ROOT = path.join(__dirname, '..')
 const RENDERER_DIST = path.join(APP_ROOT, 'dist')
@@ -21,14 +21,27 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
-function registerIconProtocol(): void {
+/**
+ * hostname → 去哪个目录里找文件。
+ *
+ * 白名单式的映射，不是「把 hostname 当路径拼进去」：后者等于让渲染进程指定
+ * 读哪个目录。加一种资源就在这儿加一行，加不了别的。
+ */
+const PROTOCOL_DIRS: Record<string, () => string> = {
+  icon: iconsDir,
+  cover: coversDir
+}
+
+function registerFileProtocol(): void {
   protocol.handle('baoyi', async (request) => {
     const url = new URL(request.url)
-    if (url.hostname !== 'icon') return new Response('Not Found', { status: 404 })
+    const resolveDir = PROTOCOL_DIRS[url.hostname]
+    if (!resolveDir) return new Response('Not Found', { status: 404 })
 
-    // basename 兜底，杜绝 ../ 穿越到图标目录之外
+    // basename 兜底，杜绝 ../ 穿越到那个目录之外。查询串（封面用它破缓存）
+    // 不进 pathname，所以这里不必额外剥
     const name = path.basename(decodeURIComponent(url.pathname))
-    const file = path.join(iconsDir(), name)
+    const file = path.join(resolveDir(), name)
     if (!fs.existsSync(file)) return new Response('Not Found', { status: 404 })
     return net.fetch(pathToFileURL(file).toString())
   })
@@ -88,7 +101,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
-    registerIconProtocol()
+    registerFileProtocol()
     registerIpcHandlers(getWindow)
     createWindow()
 

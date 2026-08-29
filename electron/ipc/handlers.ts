@@ -53,10 +53,12 @@ import {
 } from '../services/database'
 import { launchSoftware, revealInFolder } from '../kinds/software/launcher'
 import {
+  addGameLinks,
   backupSavePath,
   cancelGameScan,
   checkAllSavePaths,
   checkSavePath,
+  clearGameCover,
   deleteSaveBackup,
   gameCountsOf,
   getGameItem,
@@ -66,12 +68,15 @@ import {
   listGameItems,
   listSaveBackups,
   onGameSession,
+  openGameLink,
   removeGame,
   restoreSaveBackup,
   reverifySavePath,
   scanGames,
+  setGameCover,
   updateGameItem
 } from '../kinds/game/service'
+import { COVER_EXTS } from '../kinds/game/links'
 import {
   materialize,
   previewOrganize,
@@ -209,6 +214,51 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const backup = getSaveBackup(backupId)
     if (backup?.backup_dir) await shell.openPath(backup.backup_dir)
   })
+
+  /* -------------------------- 关联文件 -------------------------- */
+
+  /**
+   * 选文件或选目录，两个入口。
+   *
+   * Windows 的对话框不支持同时选文件和目录（openFile + openDirectory 一起给的话
+   * 只有前者生效），所以这里按调用方要的那种开，界面上是两个按钮。
+   * MOD 通常是一个目录，攻略和修改器通常是单个文件，两种都要能加。
+   */
+  ipcMain.handle('game:pick-links', async (_e, id: string, kind: 'file' | 'dir' = 'file') => {
+    const win = getWindow()
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, {
+      title: kind === 'dir' ? '选择要关联的文件夹（MOD、整合包…）' : '选择要关联的文件（攻略、修改器…）',
+      properties:
+        kind === 'dir' ? ['openDirectory', 'multiSelections'] : ['openFile', 'multiSelections']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return addGameLinks(id, result.filePaths)
+  })
+
+  ipcMain.handle('game:open-link', (_e, id: string, target: string) => openGameLink(id, target))
+  ipcMain.handle('game:reveal-link', (_e, id: string, target: string) =>
+    openGameLink(id, target, 'reveal')
+  )
+
+  /* ---------------------------- 封面 ---------------------------- */
+
+  ipcMain.handle('game:pick-cover', async (_e, id: string) => {
+    const win = getWindow()
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择封面图（竖版 2:3 效果最好）',
+      properties: ['openFile'],
+      // 扩展名名单来自 links.ts，和真正执行校验的那份是同一个来源 ——
+      // 对话框过滤器和校验规则分开写，迟早出现「选得进来但存不下去」
+      filters: [{ name: '图片', extensions: COVER_EXTS.map((e) => e.slice(1)) }]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const outcome = setGameCover(id, result.filePaths[0])
+    return { ...outcome, item: outcome.ok ? getGameItem(id) : null }
+  })
+
+  ipcMain.handle('game:clear-cover', (_e, id: string) => clearGameCover(id))
 
   /* ------------------------------ 分类 ------------------------------ */
   ipcMain.handle('categories:list', () => listCategories())

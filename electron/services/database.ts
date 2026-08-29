@@ -74,6 +74,19 @@ export function iconsDir(): string {
 }
 
 /**
+ * 游戏封面目录。和 icons 分开而不是共用一个目录：
+ *
+ * 图标是抱一自己从 exe 里抽出来的**缓存**，清掉不丢东西，下次识别会重新抽 ——
+ * `clearIcons()` 就是照这个前提写的，重置时整个目录一扫而空。封面是用户亲手指的
+ * 一张图，性质是**资产**。混在一起的话，「清空图标缓存」会顺手把他挑的封面全删了。
+ */
+export function coversDir(): string {
+  const dir = path.join(app.getPath('userData'), 'covers')
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/**
  * 存档备份根目录，并保证它存在。
  *
  * 设置为空时退回用户数据目录下的 save-backups —— 和 icons 同一个套路：
