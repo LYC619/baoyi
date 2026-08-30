@@ -55,6 +55,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
     endpoint: '',
     enabled: false
   },
+  // 默认关，因为它要用户自己去 TMDB 注册一个 key。域名留空表示用官方地址，
+  // 具体的默认域名写在 kinds/video/tmdb.ts 里 —— 那是它自己的事
+  tmdb: {
+    api_key: '',
+    api_domain: '',
+    image_domain: '',
+    enabled: false
+  },
   scan_dirs: [],
   organize_root: '',
   save_backup_root: '',
@@ -1729,7 +1737,10 @@ export function getSettings(): AppSettings {
     ...DEFAULT_SETTINGS,
     ...stored,
     ai: { ...DEFAULT_SETTINGS.ai, ...(stored.ai ?? {}) },
-    search: { ...DEFAULT_SETTINGS.search, ...(stored.search ?? {}) }
+    search: { ...DEFAULT_SETTINGS.search, ...(stored.search ?? {}) },
+    // 逐个嵌套对象都要单独铺一层默认值：老库里存的 tmdb 只有三个键时，
+    // 展开 stored 会让新加的那个键变成 undefined 而不是取默认
+    tmdb: { ...DEFAULT_SETTINGS.tmdb, ...(stored.tmdb ?? {}) }
   }
 }
 
@@ -1740,7 +1751,8 @@ export function patchSettings(patch: Partial<AppSettings>): AppSettings {
     ...current,
     ...patch,
     ai: { ...current.ai, ...(patch.ai ?? {}) },
-    search: { ...current.search, ...(patch.search ?? {}) }
+    search: { ...current.search, ...(patch.search ?? {}) },
+    tmdb: { ...current.tmdb, ...(patch.tmdb ?? {}) }
   }
   const stmt = d.prepare(
     `INSERT INTO settings (key, value) VALUES (?, ?)

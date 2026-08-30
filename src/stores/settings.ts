@@ -8,6 +8,7 @@ const FALLBACK: AppSettings = {
   ai_profiles: [],
   ai_profile_id: '',
   search: { provider: 'model_builtin', api_key: '', endpoint: '', enabled: false },
+  tmdb: { api_key: '', api_domain: '', image_domain: '', enabled: false },
   scan_dirs: [],
   organize_root: '',
   save_backup_root: '',

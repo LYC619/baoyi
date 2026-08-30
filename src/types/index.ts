@@ -498,6 +498,12 @@ export interface AppSettings {
   /** 当前选中的 profile。空串表示「临时配置」——改了还没存成一套 */
   ai_profile_id: string
   search: SearchConfig
+  /**
+   * 影视刮削配置。和 search 分开而不是复用它 —— TMDB 是一个结构化的
+   * 影视数据库，不是搜索引擎：它回的是带 id 的条目和季集表，
+   * 而搜索引擎回的是网页。两者在识别链路上做的是不同的事。
+   */
+  tmdb: TmdbConfig
   scan_dirs: string[]
   /**
    * 自动整理的目标根目录。和 scan_dirs 刻意分开 —— 扫描是「去哪里找」，
@@ -1035,6 +1041,52 @@ export interface VideoCounts {
   status: Record<WatchStatus, number>
   categories: Array<{ name: string; count: number }>
   tags: Array<{ name: string; count: number }>
+}
+
+/**
+ * TMDB 刮削配置。
+ *
+ * 和 AIConfig / SearchConfig 同一个约定：**用户带自己的 key**。TMDB 的个人
+ * key 是免费的，注册就有 —— 不内置一个共享 key，那既违反它的服务条款，
+ * 也会在额度被打爆的那天让所有用户一起失效。
+ *
+ * `api_domain` 存在的理由很实际：`api.themoviedb.org` 在国内多数网络下连不上，
+ * 而这是个中文用户为主的工具。留一个域名覆盖，用户可以填自己的反代 ——
+ * 没有它，刮削这一整步对一大半用户直接是不可用的。
+ * `image_domain` 同理（`image.tmdb.org` 是另一个域名，单独被墙）。
+ */
+export interface TmdbConfig {
+  api_key: string
+  /** 留空用官方 `api.themoviedb.org`。只填域名，不带协议和路径 */
+  api_domain: string
+  /** 留空用官方 `image.tmdb.org` */
+  image_domain: string
+  enabled: boolean
+}
+
+/** 视频扫描 + 识别是一条链路上的两截，进度用同一个形状报，同 GameScanProgress */
+export interface VideoScanProgress {
+  phase: 'scanning' | 'identifying' | 'done'
+  /** 正在扫的根目录 / 正在识别的条目路径 */
+  current: string
+  /** identifying 阶段才有意义；scanning 阶段 total 未知，恒为 0 */
+  processed: number
+  total: number
+  registered: number
+  failed: number
+  /** agent 最近一步动作的人话翻译 */
+  log: string
+}
+
+export interface VideoScanResult {
+  /** 扫出来的候选条目数（电影 + 剧集） */
+  candidates: number
+  registered: number
+  skipped: number
+  failed: number
+  tokens: number
+  /** 这次一共新建了几集。剧集库的「这次扫描有没有用」全靠它 */
+  episodes: number
 }
 
 export type Unsubscribe = () => void

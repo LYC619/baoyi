@@ -204,6 +204,27 @@ import {
   readContainerInfo,
   resolutionLabel
 } from '../electron/kinds/video/mediainfo.ts'
+import {
+  imageUrl,
+  mapCandidate,
+  mapDetail,
+  mapSeasonEpisodes,
+  normDomain,
+  normTitle,
+  scoreCandidate,
+  tmdbAvailable,
+  yearOf
+} from '../electron/kinds/video/tmdb.ts'
+import {
+  buildFacts,
+  emptyFacts,
+  guessSubtitleLanguage,
+  mergeFacts,
+  pickMainNfo
+} from '../electron/kinds/video/facts.ts'
+import { fillVideoSystem, videoCandidatePrompt } from '../electron/kinds/video/prompts.ts'
+import { buildVideoTools, limitVideoTags } from '../electron/kinds/video/tools.ts'
+import { VIDEO_CATEGORIES, VIDEO_TAGS } from '../electron/kinds/video/taxonomy.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -2104,6 +2125,9 @@ async function main(): Promise<void> {
   await videoScanSection()
   await videoNfoSection()
   await videoContainerSection()
+  await videoTmdbSection()
+  await videoFactsSection()
+  await videoIdentifySection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -5423,6 +5447,810 @@ async function videoContainerSection(): Promise<void> {
   })
 
   await fsp.rm(dir, { recursive: true, force: true })
+}
+
+/* ==================== TMDB 刮削 · v0.7 Step 5 ==================== */
+
+/**
+ * TMDB 客户端的纯逻辑部分。
+ *
+ * 这一段全部不碰网络 —— 验的是**匹配和映射规则**，那才是会静默出错的地方。
+ * 「能不能发出 HTTP 请求」是运行环境的事，而「1920x800 该判成 1080p」
+ * 「剧集的导演在 created_by 而不是 crew」错了不报错，只让界面显示错的值。
+ */
+async function videoTmdbSection(): Promise<void> {
+  console.log('\nTMDB 刮削 · 匹配与映射')
+
+  await check('域名归一：用户粘什么进来都切成主机名', () => {
+    assert.equal(normDomain('', 'api.themoviedb.org'), 'api.themoviedb.org')
+    assert.equal(normDomain('https://tmdb.example.com/', 'x'), 'tmdb.example.com')
+    // 带 /3 的很常见 —— 不切的话会拼出 /3/3/search/movie
+    assert.equal(normDomain('https://tmdb.example.com/3', 'x'), 'tmdb.example.com')
+    assert.equal(normDomain('tmdb.example.com/some/path', 'x'), 'tmdb.example.com')
+    assert.equal(normDomain('   ', 'fallback'), 'fallback')
+  })
+
+  await check('标题归一：去标点折空白大写，CJK 不受影响', () => {
+    // 同一部片在不同来源里的标点几乎从不一致，这是精确比对能命中的前提
+    assert.equal(normTitle('蜘蛛侠：英雄无归'), normTitle('蜘蛛侠:英雄无归'))
+    assert.equal(normTitle('Spider-Man: No Way Home'), normTitle('spider man no way home'))
+    assert.equal(normTitle('教父'), '教父')
+    // 归一不能把不同的片抹成同一个
+    assert.notEqual(normTitle('教父'), normTitle('教父2'))
+  })
+
+  await check('打分：标题精确命中 + 年份吻合最高', () => {
+    const base = { title: '沙丘', original_title: 'Dune', media_type: 'movie' as const, poster_path: '/a.jpg', votes: 5000 }
+    const exact = scoreCandidate({ ...base, year: 2021 }, { title: '沙丘', year: 2021, type: 'movie' })
+    const wrongYear = scoreCandidate({ ...base, year: 2015 }, { title: '沙丘', year: 2021, type: 'movie' })
+    const wrongTitle = scoreCandidate({ ...base, title: '不相干', original_title: 'Other', year: 2021 }, { title: '沙丘', year: 2021, type: 'movie' })
+    assert.ok(exact > wrongYear, '年份差 6 年该扣分')
+    assert.ok(exact > wrongTitle, '标题不匹配该扣分')
+    // 原名命中和译名命中同权 —— 用户库里两种写法都有
+    const byOriginal = scoreCandidate({ ...base, year: 2021 }, { title: 'Dune', year: 2021, type: 'movie' })
+    assert.equal(byOriginal, exact)
+  })
+
+  await check('打分：年份差 1 年只轻扣 —— 上映年 / 引进年 / 跨年首播都是常态', () => {
+    const c = { title: '某剧', original_title: 'Show', media_type: 'tv' as const, poster_path: '', votes: 100 }
+    const gap0 = scoreCandidate({ ...c, year: 2023 }, { title: '某剧', year: 2023, type: 'series' })
+    const gap1 = scoreCandidate({ ...c, year: 2022 }, { title: '某剧', year: 2023, type: 'series' })
+    const gap5 = scoreCandidate({ ...c, year: 2018 }, { title: '某剧', year: 2023, type: 'series' })
+    assert.ok(gap0 > gap1 && gap1 > gap5)
+    // 差 1 年仍该是正分（标题命中 100 打底），不能因为差一年就掉到负数被排到末尾
+    assert.ok(gap1 > 0, '差 1 年不该被打成负分')
+  })
+
+  await check('打分：类型对不上要扣 —— 剧集不该匹到 movie 条目', () => {
+    const want = { title: '三体', year: 2023, type: 'series' as const }
+    const tv = scoreCandidate({ title: '三体', original_title: '', year: 2023, media_type: 'tv', poster_path: '', votes: 500 }, want)
+    const movie = scoreCandidate({ title: '三体', original_title: '', year: 2023, media_type: 'movie', poster_path: '', votes: 500 }, want)
+    assert.ok(tv > movie)
+  })
+
+  await check('打分只排序不取舍 —— 中文库里标题全不同也可能是同一部片', () => {
+    // 这一条守的是设计意图：分数低不等于错。发布组写的简称和 TMDB 官方译名
+    // 常常一个字都不一样，让分数替 agent 做决定会在这里静默刮错片
+    const odd = scoreCandidate(
+      { title: '疯狂的麦克斯4：狂暴之路', original_title: 'Mad Max: Fury Road', year: 2015, media_type: 'movie', poster_path: '/p.jpg', votes: 20000 },
+      { title: '狂暴之路', year: 2015, type: 'movie' }
+    )
+    // 包含关系拿 40 分，加年份 50 加类型 25 —— 排得进候选，但不是满分
+    assert.ok(odd > 0 && odd < 175, `包含关系应该拿中间分，实际 ${odd}`)
+  })
+
+  await check('搜索结果映射：电影和剧集的字段名不一样，两套都要认', () => {
+    const movie = mapCandidate(
+      { id: 693134, title: '沙丘2', original_title: 'Dune: Part Two', release_date: '2024-02-27', vote_average: 8.15, vote_count: 4000, poster_path: '/a.jpg', overview: '简介', original_language: 'en' },
+      'movie'
+    )
+    assert.ok(movie)
+    assert.equal(movie!.year, 2024)
+    assert.equal(movie!.rating, 8.2, '十分制并保留一位小数')
+    assert.equal(movie!.media_type, 'movie')
+
+    const tv = mapCandidate(
+      { id: 1, name: '漫长的季节', original_name: 'The Long Season', first_air_date: '2023-04-22', vote_average: 8.9, vote_count: 200 },
+      'tv'
+    )
+    assert.ok(tv)
+    assert.equal(tv!.title, '漫长的季节')
+    assert.equal(tv!.year, 2023)
+  })
+
+  await check('multi 搜索里带 media_type 时以它为准，人物条目会被筛掉', () => {
+    // /search/multi 会回 person，它没有 title/name 之外的可用字段
+    const person = mapCandidate({ id: 5, media_type: 'person', name: '张艺谋' }, 'movie')
+    // mapCandidate 本身不筛，它交给 tmdbSearch 按有没有标题筛 ——
+    // 但 media_type 得原样透出来，不能被 fallback 顶掉
+    assert.ok(person)
+    assert.notEqual(person!.media_type, 'person', 'media_type 只允许 movie/tv 两个值')
+
+    const asTv = mapCandidate({ id: 6, media_type: 'tv', name: '剧', first_air_date: '2020-01-01' }, 'movie')
+    assert.equal(asTv!.media_type, 'tv', 'media_type 该压过 fallback')
+  })
+
+  await check('垃圾输入给 null 而不是一个半成品条目', () => {
+    for (const junk of [null, undefined, {}, { id: 0 }, { id: -1 }, { id: 'abc' }, 42]) {
+      assert.equal(mapCandidate(junk, 'movie'), null)
+    }
+  })
+
+  const movieDetail = {
+    id: 278,
+    title: '肖申克的救赎',
+    original_title: 'The Shawshank Redemption',
+    release_date: '1994-09-23',
+    vote_average: 8.7,
+    vote_count: 26000,
+    runtime: 142,
+    overview: '一部关于希望的电影。',
+    tagline: '恐惧让你沦为囚犯，希望让你重获自由。',
+    imdb_id: 'tt0111161',
+    original_language: 'en',
+    homepage: 'https://example.com',
+    poster_path: '/p.jpg',
+    backdrop_path: '/b.jpg',
+    genres: [{ id: 18, name: '剧情' }, { id: 80, name: '犯罪' }],
+    production_countries: [{ name: '美国' }],
+    production_companies: [{ name: 'Castle Rock' }],
+    credits: {
+      crew: [
+        { job: 'Director', name: '弗兰克·德拉邦特' },
+        { job: 'Screenplay', name: '弗兰克·德拉邦特' },
+        { job: 'Producer', name: '不该出现' }
+      ],
+      cast: [
+        { name: '蒂姆·罗宾斯', character: '安迪' },
+        { name: '摩根·弗里曼', character: '瑞德' }
+      ]
+    }
+  }
+
+  await check('电影详情映射：导演从 crew 取，Producer 不算', () => {
+    const d = mapDetail(movieDetail, 'movie')
+    assert.ok(d)
+    assert.deepEqual(d!.directors, ['弗兰克·德拉邦特'])
+    assert.deepEqual(d!.writers, ['弗兰克·德拉邦特'])
+    assert.equal(d!.runtime_min, 142)
+    assert.equal(d!.imdb_id, 'tt0111161')
+    assert.equal(d!.year, 1994)
+    assert.equal(d!.end_year, 0, '电影没有完结年份')
+    assert.equal(d!.status, '', '电影没有状态')
+    assert.deepEqual(d!.cast.map((c) => c.name), ['蒂姆·罗宾斯', '摩根·弗里曼'])
+  })
+
+  await check('剧集详情：导演取 created_by，因为每集导演都不同', () => {
+    const d = mapDetail(
+      {
+        id: 1,
+        name: '漫长的季节',
+        first_air_date: '2023-04-22',
+        last_air_date: '2023-05-01',
+        status: 'Ended',
+        episode_run_time: [45],
+        created_by: [{ name: '辛爽' }],
+        credits: { crew: [{ job: 'Director', name: '某集导演' }], cast: [] },
+        seasons: [
+          { season_number: 1, name: '第 1 季', episode_count: 12, air_date: '2023-04-22' },
+          { season_number: 0, name: '特别篇', episode_count: 2, air_date: '' }
+        ],
+        external_ids: { imdb_id: 'tt21708796' }
+      },
+      'tv'
+    )
+    assert.ok(d)
+    assert.deepEqual(d!.directors, ['辛爽'], '剧集的「导演」是主创')
+    assert.equal(d!.end_year, 2023)
+    assert.equal(d!.status, 'Ended')
+    assert.equal(d!.runtime_min, 45, '剧集片长取 episode_run_time 第一个')
+    assert.equal(d!.imdb_id, 'tt21708796', '剧集的 imdb id 在 external_ids 里')
+    // 第 0 季（特别篇）是正片，不能被筛掉 —— 和 scanner 里 Specials/ 那条一致
+    assert.equal(d!.seasons.length, 2)
+    assert.equal(d!.seasons[0].season_number, 0, '季按季号排，0 在前')
+  })
+
+  await check('空季（episode_count 为 0）要剔掉 —— 详情页上摆一个点不开的空壳', () => {
+    const d = mapDetail(
+      {
+        id: 2,
+        name: 'x',
+        seasons: [
+          { season_number: 1, episode_count: 10 },
+          { season_number: 2, episode_count: 0, name: '还没开播' }
+        ]
+      },
+      'tv'
+    )
+    assert.equal(d!.seasons.length, 1)
+    assert.equal(d!.seasons[0].season_number, 1)
+  })
+
+  await check('季集表映射：按集号排序，无效集号剔掉', () => {
+    const eps = mapSeasonEpisodes(
+      {
+        episodes: [
+          { season_number: 1, episode_number: 3, name: '第三集', air_date: '2023-04-24', runtime: 45 },
+          { season_number: 1, episode_number: 1, name: '第一集', air_date: '2023-04-22', runtime: 46 },
+          { season_number: 1, episode_number: 0, name: '无效' }
+        ]
+      },
+      1
+    )
+    assert.equal(eps.length, 2)
+    assert.deepEqual(eps.map((e) => e.episode_number), [1, 3])
+    assert.ok(eps[0].air_date_ts > 0)
+    // 日期走 Date.UTC，和 nfo.ts 的 dateToEpochSec 必须是同一个值，
+    // 否则同一集的首播日期在两条路径上差一天
+    assert.equal(eps[0].air_date_ts, dateToEpochSec('2023-04-22'))
+  })
+
+  await check('季号为 0 时不被 || 吞掉 —— 0 是合法季号（特别篇）', () => {
+    const eps = mapSeasonEpisodes({ episodes: [{ season_number: 0, episode_number: 1, name: 'SP' }] }, 0)
+    assert.equal(eps.length, 1)
+    assert.equal(eps[0].season_number, 0)
+  })
+
+  await check('图片地址拼装，域名可覆盖（image.tmdb.org 单独被墙）', () => {
+    const cfg = { api_key: 'k', api_domain: '', image_domain: '', enabled: true }
+    assert.equal(imageUrl(cfg, '/abc.jpg'), 'https://image.tmdb.org/t/p/w500/abc.jpg')
+    // 相对路径没有前导斜杠时也要拼对
+    assert.equal(imageUrl(cfg, 'abc.jpg'), 'https://image.tmdb.org/t/p/w500/abc.jpg')
+    assert.equal(imageUrl({ ...cfg, image_domain: 'img.mirror.com' }, '/a.jpg', 'original'), 'https://img.mirror.com/t/p/original/a.jpg')
+    assert.equal(imageUrl(cfg, ''), '', '没有图片给空串而不是一个坏地址')
+  })
+
+  await check('可用性判断：关了或没 key 都算不可用', () => {
+    assert.equal(tmdbAvailable({ api_key: 'k', api_domain: '', image_domain: '', enabled: true }), true)
+    assert.equal(tmdbAvailable({ api_key: '', api_domain: '', image_domain: '', enabled: true }), false)
+    assert.equal(tmdbAvailable({ api_key: 'k', api_domain: '', image_domain: '', enabled: false }), false)
+    assert.equal(tmdbAvailable({ api_key: '   ', api_domain: '', image_domain: '', enabled: true }), false)
+  })
+
+  await check('年份抽取只认开头四位数字', () => {
+    assert.equal(yearOf('2024-02-27'), 2024)
+    assert.equal(yearOf('2024'), 2024)
+    assert.equal(yearOf(''), 0)
+    assert.equal(yearOf(null), 0)
+    assert.equal(yearOf('不是日期'), 0)
+  })
+}
+
+/* ==================== 本地事实汇总 · v0.7 Step 5 ==================== */
+
+/**
+ * `facts.ts`：把扫描结果 + nfo + 容器元数据合成一条事实。
+ *
+ * 这一段验的是**三个来源冲突时谁压过谁**。这些规则错了不报错，
+ * 只让详情页上显示一个错的值 —— 而错的分辨率和错的年份，用户不会去核对。
+ *
+ * 优先级设计：nfo > 容器 > 文件名，唯一的例外是分辨率/编码/时长，容器压过文件名。
+ */
+async function videoFactsSection(): Promise<void> {
+  console.log('\n本地事实汇总')
+
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-facts-'))
+
+  /* -------- 拿真实目录树跑一遍扫描，再合并事实 -------- */
+  const root = path.join(dir, '影视')
+  await fsp.mkdir(path.join(root, '沙丘 (2021)'), { recursive: true })
+  await fsp.writeFile(path.join(root, '沙丘 (2021)', 'Dune.2021.1080p.BluRay.x264-GROUP.mkv'), 'x')
+  await fsp.writeFile(path.join(root, '沙丘 (2021)', 'Dune.2021.1080p.BluRay.x264-GROUP.chs.srt'), 'x')
+  await fsp.writeFile(
+    path.join(root, '沙丘 (2021)', 'movie.nfo'),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+  <title>沙丘</title>
+  <originaltitle>Dune</originaltitle>
+  <year>2021</year>
+  <plot>厄崔迪家族的故事。</plot>
+  <runtime>155</runtime>
+  <genre>科幻</genre>
+  <genre>冒险</genre>
+  <director>丹尼斯·维伦纽瓦</director>
+  <uniqueid type="tmdb" default="true">438631</uniqueid>
+  <uniqueid type="imdb">tt1160419</uniqueid>
+  <rating>7.8</rating>
+  <actor><name>提莫西·查拉梅</name><role>保罗</role></actor>
+</movie>`
+  )
+
+  await check('电影：nfo 的 id / 简介 / 类型都被读进来了', async () => {
+    const cands = scanVideoRoot(root)
+    assert.equal(cands.length, 1, `应该只有一条候选，实际 ${cands.length}`)
+    const f = await buildFacts(cands[0]!)
+    assert.equal(f.video_type, 'movie')
+    assert.equal(f.tmdb_id, '438631', 'nfo 里的 tmdb id 是这一步最值钱的东西')
+    assert.equal(f.imdb_id, 'tt1160419')
+    assert.equal(f.title_zh, '沙丘')
+    assert.equal(f.original_title, 'Dune')
+    assert.equal(f.year, 2021)
+    assert.ok(f.plot.includes('厄崔迪'))
+    assert.deepEqual(f.genres, ['科幻', '冒险'])
+    assert.deepEqual(f.directors, ['丹尼斯·维伦纽瓦'])
+    assert.deepEqual(f.actors, ['提莫西·查拉梅'])
+    assert.equal(f.nfo_rating, 7.8)
+  })
+
+  await check('电影：文件名的技术事实进来了，外挂字幕挂成 index=-1 的轨', async () => {
+    const f = await buildFacts(scanVideoRoot(root)[0]!)
+    assert.equal(f.resolution, '1080p')
+    assert.equal(f.source, 'BLURAY')
+    assert.equal(f.release_group, 'GROUP')
+    assert.equal(f.external_subtitles.length, 1)
+    const ext = f.subtitle_tracks.find((t) => t.index === -1)
+    assert.ok(ext, '外挂字幕该并进字幕轨列表')
+    assert.equal(ext!.language, 'zh', '.chs. 该认成中文')
+    assert.ok(ext!.path.endsWith('.srt'), '外挂轨要带路径，内嵌轨才是空串')
+  })
+
+  await check('电影：nfo 路径记进 nfo_files，parts 带上文件', async () => {
+    const f = await buildFacts(scanVideoRoot(root)[0]!)
+    assert.equal(f.nfo_files.length, 1)
+    assert.equal(f.parts.length, 1)
+    assert.equal(f.parts[0].label, '', '不是分卷就不该有 CD 标签')
+    // 时长读不出来（假文件不是真视频），nfo 的 runtime 顶上：155 分钟
+    assert.equal(f.duration_sec, 155 * 60, 'nfo 的 runtime_min 该在容器读不出时兜底')
+  })
+
+  /* -------- 剧集：tvshow.nfo + 单集 nfo -------- */
+  const showDir = path.join(dir, '剧集', '漫长的季节')
+  await fsp.mkdir(path.join(showDir, 'Season 1'), { recursive: true })
+  await fsp.writeFile(
+    path.join(showDir, 'tvshow.nfo'),
+    `<tvshow><title>漫长的季节</title><year>2023</year><status>Ended</status>
+     <uniqueid type="tmdb">205050</uniqueid><plot>东北往事。</plot></tvshow>`
+  )
+  for (const n of [1, 2, 3]) {
+    await fsp.writeFile(path.join(showDir, 'Season 1', `漫长的季节.S01E0${n}.1080p.WEB-DL.mkv`), 'x')
+  }
+  await fsp.writeFile(
+    path.join(showDir, 'Season 1', '漫长的季节.S01E02.1080p.WEB-DL.nfo'),
+    `<episodedetails><title>第二集标题</title><season>1</season><episode>2</episode>
+     <aired>2023-04-23</aired><runtime>48</runtime></episodedetails>`
+  )
+
+  await check('剧集：tvshow.nfo 被挑成主 nfo，单集 nfo 不会顶替它', async () => {
+    const cands = scanVideoRoot(path.join(dir, '剧集'))
+    assert.equal(cands.length, 1)
+    const f = await buildFacts(cands[0]!)
+    assert.equal(f.video_type, 'series')
+    assert.equal(f.title_zh, '漫长的季节')
+    assert.equal(f.tmdb_id, '205050')
+    assert.equal(f.status, 'Ended')
+    assert.ok(f.plot.includes('东北'), '简介该来自 tvshow.nfo 而不是某一集')
+    assert.equal(f.episode_files, 3)
+    assert.deepEqual(f.seasons, [1])
+  })
+
+  await check('剧集：单集 nfo 按同名对齐到那一集，不会串到别集', async () => {
+    const f = await buildFacts(scanVideoRoot(path.join(dir, '剧集'))[0]!)
+    const e2 = f.episodes.find((e) => e.episode === 2)
+    const e1 = f.episodes.find((e) => e.episode === 1)
+    assert.ok(e2 && e1)
+    assert.equal(e2!.title, '第二集标题')
+    assert.ok(e2!.air_date > 0, '首播日期该从单集 nfo 来')
+    assert.equal(e1!.title, '', '第 1 集没有 nfo，标题该是空串而不是借用第 2 集的')
+    assert.equal(e1!.air_date, 0)
+  })
+
+  await check('剧集的 duration_sec 是单集时长而不是全剧总长', async () => {
+    const f = await buildFacts(scanVideoRoot(path.join(dir, '剧集'))[0]!)
+    // 容器读不出来，退回 nfo。这里 tvshow.nfo 没写 runtime，所以是 0 ——
+    // 关键是它不该是「三集之和」
+    assert.ok(f.duration_sec < 3 * 60 * 60, '不该把三集时长加起来当剧的时长')
+  })
+
+  /* -------- 纯函数：优先级规则 -------- */
+  await check('分辨率：容器压过文件名 —— 改名转发的片子文件名会写错', () => {
+    const candidate = {
+      video_type: 'movie' as const,
+      path: 'C:\\x\\a.mkv',
+      title_zh: '某片', title_en: '', year: 2020,
+      files: [{
+        path: 'C:\\x\\a.mkv', name: 'a.mkv', size: 100, part: null,
+        parsed: { ...parseVideoName('某片.2020.1080p.WEB-DL.mkv') }
+      }],
+      episodes: [], sidecars: { nfo: [], images: [], subtitles: [] }, extras: [], evidence: []
+    }
+    const containers = new Map([['C:\\x\\a.mkv', {
+      duration_sec: 7200, container: 'Matroska', width: 1280, height: 720,
+      resolution: '720p', video_codec: 'HEVC', audio_tracks: [], subtitle_tracks: []
+    }]])
+    const f = mergeFacts(candidate, null, new Map(), containers)
+    assert.equal(f.resolution, '720p', '容器说 720p 就是 720p，文件名写的 1080p 不算')
+    assert.equal(f.video_codec, 'HEVC')
+    assert.equal(f.duration_sec, 7200)
+    // 片源和发布组只有文件名知道，容器里没有这个概念
+    assert.equal(f.source, 'WEBDL')
+  })
+
+  await check('年份：nfo 压过文件名', () => {
+    const candidate = {
+      video_type: 'movie' as const, path: 'C:\\x\\a.mkv',
+      title_zh: '某片', title_en: '', year: 2019,
+      files: [{ path: 'C:\\x\\a.mkv', name: 'a.mkv', size: 1, part: null, parsed: parseVideoName('某片.2019.mkv') }],
+      episodes: [], sidecars: { nfo: [], images: [], subtitles: [] }, extras: [], evidence: []
+    }
+    const nfo = parseNfo('<movie><title>某片</title><year>2021</year></movie>')
+    assert.ok(nfo)
+    const f = mergeFacts(candidate, nfo, new Map(), new Map())
+    assert.equal(f.year, 2021, 'nfo 是刮削结论，比文件名可信')
+  })
+
+  await check('分卷电影的时长是各卷之和 —— 被切成两半的片子，总长才是片长', () => {
+    const mk = (p: string, part: number) => ({
+      path: p, name: path.basename(p), size: 500, part,
+      parsed: parseVideoName(path.basename(p))
+    })
+    const candidate = {
+      video_type: 'movie' as const, path: 'C:\\x', title_zh: '老片', title_en: '', year: 1999,
+      files: [mk('C:\\x\\m.CD1.avi', 1), mk('C:\\x\\m.CD2.avi', 2)],
+      episodes: [], sidecars: { nfo: [], images: [], subtitles: [] }, extras: [], evidence: []
+    }
+    const blank = { container: '', width: 0, height: 0, resolution: '', video_codec: '', audio_tracks: [], subtitle_tracks: [] }
+    const containers = new Map([
+      ['C:\\x\\m.CD1.avi', { ...blank, duration_sec: 3000 }],
+      ['C:\\x\\m.CD2.avi', { ...blank, duration_sec: 2800 }]
+    ])
+    const f = mergeFacts(candidate, null, new Map(), containers)
+    assert.equal(f.duration_sec, 5800)
+    assert.equal(f.parts.length, 2)
+    assert.deepEqual(f.parts.map((p) => p.label), ['CD1', 'CD2'])
+  })
+
+  await check('nfo 标题是中文还是外文要分开落 —— 判不出来的交给 agent', () => {
+    const candidate = {
+      video_type: 'movie' as const, path: 'C:\\x\\a.mkv', title_zh: '', title_en: 'Some Film', year: 2020,
+      files: [], episodes: [], sidecars: { nfo: [], images: [], subtitles: [] }, extras: [], evidence: []
+    }
+    const cn = mergeFacts(candidate, parseNfo('<movie><title>某中文片</title></movie>'), new Map(), new Map())
+    assert.equal(cn.title_zh, '某中文片')
+    assert.equal(cn.title_en, 'Some Film', '中文 nfo 标题不该盖掉文件名里的英文标题')
+
+    const en = mergeFacts(candidate, parseNfo('<movie><title>Official Title</title></movie>'), new Map(), new Map())
+    assert.equal(en.title_en, 'Official Title')
+    assert.equal(en.title_zh, '')
+  })
+
+  await check('主 nfo 挑选：按根标签认，不只看文件名', () => {
+    const ep = parseNfo('<episodedetails><title>第一集</title></episodedetails>')!
+    const show = parseNfo('<tvshow><title>剧名</title></tvshow>')!
+    const movie = parseNfo('<movie><title>片名</title></movie>')!
+
+    // 剧集：单集 nfo 不能顶替 tvshow.nfo。拿一集的 nfo 当整部剧的，
+    // 简介会变成「第 3 集：…」，而 tmdb_id 会是那一集的 id
+    assert.equal(pickMainNfo([{ file: 'a.nfo', data: ep }], 'series'), null)
+    const picked = pickMainNfo([{ file: 'a.nfo', data: ep }, { file: 'tvshow.nfo', data: show }], 'series')
+    assert.equal(picked?.data.kind, 'tvshow')
+    // 电影：认 movie 根标签，不管文件名叫什么
+    assert.equal(pickMainNfo([{ file: '随便.nfo', data: movie }], 'movie')?.data.kind, 'movie')
+    assert.equal(pickMainNfo([], 'movie'), null)
+  })
+
+  await check('没有 tvshow.nfo 时从单集 nfo 借 id，但不借文本', async () => {
+    const borrowDir = path.join(dir, '借id', '某剧')
+    await fsp.mkdir(borrowDir, { recursive: true })
+    for (const n of [1, 2]) {
+      await fsp.writeFile(path.join(borrowDir, `某剧.S01E0${n}.mkv`), 'x')
+    }
+    await fsp.writeFile(
+      path.join(borrowDir, '某剧.S01E01.nfo'),
+      `<episodedetails><title>只是第一集的标题</title><season>1</season><episode>1</episode>
+       <plot>只是第一集的简介</plot><uniqueid type="tmdb">99999</uniqueid></episodedetails>`
+    )
+    const f = await buildFacts(scanVideoRoot(path.join(dir, '借id'))[0]!)
+    assert.equal(f.tmdb_id, '99999', 'id 该借过来 —— 有它刮削就是精确查询')
+    assert.equal(f.plot, '', '简介不能借：那是一集的简介，不是整部剧的')
+    assert.ok(!f.title_zh.includes('只是第一集'), '标题也不能借')
+  })
+
+  await check('字幕语言只认明确写了的，认不出来给空串不猜', () => {
+    assert.equal(guessSubtitleLanguage('片名.chs.srt'), 'zh')
+    assert.equal(guessSubtitleLanguage('片名.简体.ass'), 'zh')
+    assert.equal(guessSubtitleLanguage('片名.繁體中文.srt'), 'zh')
+    assert.equal(guessSubtitleLanguage('片名.eng.srt'), 'en')
+    assert.equal(guessSubtitleLanguage('片名.jpn.ass'), 'ja')
+    // 猜错比不标更烦：用户点开「中文字幕」得到一轨英文
+    assert.equal(guessSubtitleLanguage('片名.srt'), '')
+    assert.equal(guessSubtitleLanguage('subtitle_track_2.srt'), '')
+  })
+
+  await check('空事实的零值齐全 —— 调用方不用到处 ?.', () => {
+    const f = emptyFacts()
+    assert.equal(f.year, 0)
+    assert.equal(f.tmdb_id, '')
+    assert.deepEqual(f.episodes, [])
+    assert.deepEqual(f.audio_tracks, [])
+    assert.equal(f.episode_files, 0)
+  })
+
+  await fsp.rm(dir, { recursive: true, force: true })
+}
+
+/* ==================== 视频识别 · v0.7 Step 5 ==================== */
+
+/**
+ * 提示词与工具集。
+ *
+ * 两条重点：
+ *
+ * 1. **提示词和工具集必须对得上。** 说了有 web_search 却没注册，模型会去调
+ *    一个不存在的工具，白烧一轮 —— 软件那边踩过这个坑，游戏那边的注释里记着。
+ * 2. **编出来的 tmdb_id 必须被拦住。** 编 id 的后果是下次刷新刮到另一部片，
+ *    海报简介季集表全换成别人的，用户得手工全删一遍。
+ */
+async function videoIdentifySection(): Promise<void> {
+  console.log('\n视频识别 · 提示词与工具')
+
+  const facts = {
+    ...emptyFacts(),
+    video_type: 'movie' as const,
+    path: 'C:\\影视\\沙丘 (2021)\\Dune.mkv',
+    dir: 'C:\\影视\\沙丘 (2021)',
+    title_zh: '沙丘',
+    title_en: 'Dune',
+    year: 2021,
+    resolution: '1080p',
+    video_codec: 'AVC',
+    source: 'BLURAY',
+    release_group: 'GROUP',
+    duration_sec: 9300,
+    audio_tracks: [{ index: 0, language: 'zh', label: '国语 5.1', codec: 'DTS', path: '' }],
+    evidence: ['独占目录「沙丘 (2021)」，标题取目录名']
+  }
+
+  await check('任务描述把技术事实说成确定值，不留「你可以核实」的余地', () => {
+    const p = videoCandidatePrompt(facts)
+    assert.ok(p.includes('1080p'))
+    assert.ok(p.includes('BLURAY'))
+    assert.ok(p.includes('国语 5.1'))
+    assert.ok(p.includes('不用再验证'), '措辞上必须堵住「去核实一下」这条路')
+    // 留了余地模型就会真去核实，而它没有工具能核实，于是它会编
+    assert.ok(!/供参考|仅供参考|可以核实/.test(p))
+  })
+
+  await check('有 id 时任务描述明确要求走精确查询，不要搜索', () => {
+    const p = videoCandidatePrompt({ ...facts, tmdb_id: '438631', imdb_id: 'tt1160419' })
+    assert.ok(p.includes('438631'))
+    assert.ok(p.includes('tt1160419'))
+    assert.ok(p.includes('不要再搜索'), 'id 在手还去搜就是白烧一轮')
+  })
+
+  await check('剧集的任务描述报季集情况，且说明集表由系统补', () => {
+    const p = videoCandidatePrompt({
+      ...facts,
+      video_type: 'series',
+      episodes: [
+        { season: 1, episode: 1, title: '', path: 'a', file_size: 1, duration_sec: 0, air_date: 0 },
+        { season: 1, episode: 2, title: '第二集', path: 'b', file_size: 1, duration_sec: 0, air_date: 0 }
+      ],
+      episode_files: 2,
+      seasons: [1]
+    })
+    assert.ok(p.includes('磁盘上有 2 集'))
+    assert.ok(p.includes('S01E02 第二集'))
+    assert.ok(p.includes('你不用管集列表'), '否则模型会试图逐集填进 register_video')
+  })
+
+  await check('集列表长时截断，但要说清还有多少集没列', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      season: 1, episode: i + 1, title: '', path: `e${i}`, file_size: 1, duration_sec: 0, air_date: 0
+    }))
+    const p = videoCandidatePrompt({ ...facts, video_type: 'series', episodes: many, episode_files: 40, seasons: [1] })
+    assert.ok(p.includes('还有 34 集'), '截断了得说一声，否则模型以为只有 6 集')
+    assert.ok(!p.includes('S01E40'), '第 40 集不该出现在 prompt 里')
+  })
+
+  await check('系统提示的占位符全被填掉，分类逐条带描述进去', () => {
+    const s = fillVideoSystem(VIDEO_CATEGORIES, VIDEO_TAGS, true, true)
+    // 占位符漏一个，模型看到的就是字面量 {{tags}}
+    assert.ok(!s.includes('{{'), `还有没填的占位符：${s.match(/\{\{\w+\}\}/g)?.join(' ')}`)
+    for (const c of VIDEO_CATEGORIES) {
+      assert.ok(s.includes(`· ${c.name} —— ${c.description}`), `分类「${c.name}」没进 prompt`)
+    }
+    assert.ok(s.includes(VIDEO_TAGS.join('、')), '标签池该整条填进去')
+  })
+
+  await check('空分类表 / 空标签池要给兜底话术，不留空行', () => {
+    const s = fillVideoSystem([], [], true, true)
+    assert.ok(!s.includes('{{'))
+    assert.ok(s.includes('分类表是空的'))
+    assert.ok(s.includes('标签池还是空的'))
+  })
+
+  await check('视频 prompt 不夹带另两个品类的词', () => {
+    const s = fillVideoSystem(VIDEO_CATEGORIES, VIDEO_TAGS, true, true)
+    // v0.5 的学费：分类和标签曾是全局单表，「开发工具」进过游戏 prompt
+    for (const alien of ['开发工具', '系统管理', '魂系', '绿色软件', '存档', 'exe']) {
+      assert.ok(!s.includes(alien), `视频 prompt 里出现了别的品类的词：${alien}`)
+    }
+  })
+
+  await check('提示词和工具集对得上：关搜索时明确说了没有 web_search 这个工具', () => {
+    const off = fillVideoSystem(VIDEO_CATEGORIES, VIDEO_TAGS, false, true)
+    assert.ok(off.includes('没有开启联网搜索'))
+    assert.ok(off.includes('不要尝试调用'), '光不提不够 —— 得明确说这个工具不存在')
+    // 开着的时候要真的教它怎么用，而不是只提一句名字
+    const on = fillVideoSystem(VIDEO_CATEGORIES, VIDEO_TAGS, true, true)
+    assert.ok(on.includes('web_search'))
+    assert.ok(!on.includes('没有开启联网搜索'))
+  })
+
+  await check('没配 TMDB 时提示词说清三个工具都没有，并给降级指示', () => {
+    const noTmdb = fillVideoSystem(VIDEO_CATEGORIES, VIDEO_TAGS, true, false)
+    assert.ok(noTmdb.includes('本次运行没有配置 TMDB'))
+    assert.ok(noTmdb.includes('tmdb_id 留空'))
+    assert.ok(noTmdb.includes('不要编简介'), '没有数据源时最容易发生的失手就是编简介')
+  })
+
+  /* -------- 工具集的形状 -------- */
+  const db = new DatabaseSync(':memory:')
+  initSchema(db as any, KINDS)
+
+  const mkCtx = (over: Record<string, unknown> = {}) => ({
+    facts,
+    db: db as any,
+    tagPool: [...VIDEO_TAGS],
+    searchConfig: { provider: 'model_builtin' as const, api_key: '', endpoint: '', enabled: false },
+    // 默认关掉 TMDB：这一节只验工具形状和核对逻辑，一次网络请求都不该发出去
+    tmdbConfig: { api_key: '', api_domain: '', image_domain: '', enabled: false },
+    ...over
+  })
+
+  await check('工具集里没有 list_directory / read_text_file —— 视频用不上', () => {
+    const names = buildVideoTools(mkCtx(), ['华语'], true, true).map((t) => t.name)
+    // 目录结构 scanner 看过了，facts 读过了。给一个用不上的工具只会引诱模型
+    // 浪费一轮，而每轮都要把整个上下文重发
+    assert.ok(!names.includes('list_directory'))
+    assert.ok(!names.includes('read_text_file'))
+    assert.ok(names.includes('register_video'))
+    assert.ok(names.includes('skip_entry'))
+  })
+
+  await check('开关决定工具在不在：TMDB 关了那三个工具就不该出现', () => {
+    const withAll = buildVideoTools(mkCtx(), ['华语'], true, true).map((t) => t.name)
+    assert.ok(withAll.includes('tmdb_search') && withAll.includes('tmdb_detail') && withAll.includes('tmdb_find'))
+    assert.ok(withAll.includes('web_search'))
+
+    const bare = buildVideoTools(mkCtx(), ['华语'], false, false).map((t) => t.name)
+    assert.deepEqual(bare, ['register_video', 'skip_entry'])
+  })
+
+  await check('register_video 的参数表里没有技术字段 —— 那些不许模型经手', () => {
+    const tool = buildVideoTools(mkCtx(), ['华语'], true, true).find((t) => t.name === 'register_video')
+    assert.ok(tool)
+    const props = Object.keys((tool!.parameters as any).properties)
+    for (const tech of ['resolution', 'video_codec', 'duration_sec', 'audio_tracks', 'source', 'release_group']) {
+      assert.ok(!props.includes(tech), `register_video 不该收 ${tech}，它是本地确定值`)
+    }
+    assert.ok(props.includes('name_zh') && props.includes('category') && props.includes('tmdb_id'))
+  })
+
+  await check('分类枚举来自实参，模型选不出表外的值', () => {
+    const tool = buildVideoTools(mkCtx(), ['华语', '欧美'], true, true).find((t) => t.name === 'register_video')
+    const cat = (tool!.parameters as any).properties.category
+    assert.deepEqual(cat.enum, ['华语', '欧美'])
+  })
+
+  /* -------- 标签收敛 -------- */
+  await check('标签收敛：池内照收，池外只留 2 个，总数封顶 3', () => {
+    const pool = new Set(VIDEO_TAGS)
+    assert.deepEqual(limitVideoTags(['科幻', '悬疑'], pool), ['科幻', '悬疑'])
+    // 池外的只留前 2 个
+    const mixed = limitVideoTags(['科幻', '新词甲', '新词乙', '新词丙'], pool)
+    assert.equal(mixed.length, 3)
+    assert.ok(mixed.includes('科幻'))
+    assert.ok(!mixed.includes('新词丙'))
+    assert.deepEqual(limitVideoTags(null, pool), [])
+    assert.deepEqual(limitVideoTags('不是数组', pool), [])
+  })
+
+  await check('技术词不许当标签 —— 它们已经是 video_meta 上的真列了', () => {
+    const pool = new Set(VIDEO_TAGS)
+    const got = limitVideoTags(['4K', 'HEVC', '蓝光', 'HDR', '杜比', '科幻'], pool)
+    assert.deepEqual(got, ['科幻'], `技术词该被剔掉，实际留下 ${got.join('、')}`)
+    // 大小写不敏感，写法也不止一种
+    assert.deepEqual(limitVideoTags(['hevc', '1080p', 'x265', 'web-dl'], pool), [])
+  })
+
+  await check('标签去重 —— 模型重复报同一个词不该占掉两个格子', () => {
+    assert.deepEqual(limitVideoTags(['科幻', '科幻', '悬疑'], new Set(VIDEO_TAGS)), ['科幻', '悬疑'])
+  })
+
+  /* -------- 编 id 必须被拦住 -------- */
+  await check('编出来的 tmdb_id 被丢掉，并把这件事回灌给模型', async () => {
+    const d = new DatabaseSync(':memory:')
+    initSchema(d as any, KINDS)
+
+    let registered: any = null
+    const tools = buildVideoTools(
+      mkCtx({ db: d as any, onRegister: (info: any) => { registered = info } }) as any,
+      ['欧美'],
+      false,
+      false
+    )
+    const out = await tools.find((t) => t.name === 'register_video')!.execute({
+      name_zh: '沙丘',
+      summary: '沙漠星球上的权力更替',
+      category: '欧美',
+      // 这个 id 从来没在任何一次查询里出现过
+      tmdb_id: 123456,
+      tags: ['科幻']
+    })
+
+    assert.ok(registered, '注册本身该成功 —— 编了 id 不等于整条记录作废')
+    assert.ok(out.includes('123456'), '要把编的那个 id 说出来，否则模型下一条继续编')
+    assert.ok(out.includes('已被忽略'))
+
+    const row = d.prepare('SELECT tmdb_id FROM video_meta').get() as any
+    assert.equal(row.tmdb_id, '', '编的 id 绝不能落库 —— 下次刷新会刮到另一部片')
+    d.close()
+  })
+
+  await check('数字型 tmdb_id 也要认 —— 参数表声明的就是 number', async () => {
+    const d = new DatabaseSync(':memory:')
+    initSchema(d as any, KINDS)
+    const tools = buildVideoTools(mkCtx({ db: d as any }) as any, ['欧美'], false, false)
+    const reg = tools.find((t) => t.name === 'register_video')!
+
+    // 守规矩的模型交 JSON 数字。用 str() 读会读成空串，于是这个 id 既不落库
+    // 也不报「被忽略」—— 刮削静默失效，日志里什么都看不出来。
+    // 这里 ledger 是空的，所以正确行为是**明确拒绝**，而不是当没填过
+    const out = await reg.execute({ name_zh: '沙丘', summary: 'x', category: '欧美', tmdb_id: 438631 })
+    assert.ok(out.includes('438631'), '数字 id 被静默吞掉了，不是被拒绝')
+
+    // 字符串写法、带前缀的写法都要落到同一个值上
+    const out2 = await reg.execute({ name_zh: '沙丘', summary: 'x', category: '欧美', tmdb_id: 'tmdb:438631' })
+    assert.ok(out2.includes('438631'))
+    // 真的没填时不该报「你编了个 id」
+    const out3 = await reg.execute({ name_zh: '沙丘', summary: 'x', category: '欧美' })
+    assert.ok(!out3.includes('已被忽略'))
+    assert.ok(out3.includes('未填'))
+    d.close()
+  })
+
+  await check('技术字段按本地事实落库，不受模型影响', async () => {
+    const d = new DatabaseSync(':memory:')
+    initSchema(d as any, KINDS)
+
+    const tools = buildVideoTools(mkCtx({ db: d as any }) as any, ['欧美'], false, false)
+    await tools.find((t) => t.name === 'register_video')!.execute({
+      name_zh: '沙丘', summary: '一句话', category: '欧美',
+      // 模型硬塞技术字段也没用 —— 它们不在参数表里，register 不读
+      resolution: '480p', video_codec: '假编码', duration_sec: 1
+    })
+
+    const row = d
+      .prepare('SELECT resolution, video_codec, duration_sec, source, release_group FROM video_meta')
+      .get() as any
+    assert.equal(row.resolution, '1080p', '该用容器/文件名读出来的值')
+    assert.equal(row.video_codec, 'AVC')
+    assert.equal(row.duration_sec, 9300)
+    assert.equal(row.source, 'BLURAY')
+    assert.equal(row.release_group, 'GROUP')
+    d.close()
+  })
+
+  await check('落库路径用扫描器给的那个，模型改不动', async () => {
+    const d = new DatabaseSync(':memory:')
+    initSchema(d as any, KINDS)
+    const tools = buildVideoTools(mkCtx({ db: d as any }) as any, ['欧美'], false, false)
+    await tools.find((t) => t.name === 'register_video')!.execute({
+      name_zh: '沙丘', summary: 'x', category: '欧美', path: 'C:\\别的地方\\假的.mkv'
+    })
+    const row = d.prepare('SELECT path, source_dir FROM resource').get() as any
+    assert.equal(row.path, facts.path)
+    assert.equal(row.source_dir, facts.dir)
+    d.close()
+  })
+
+  await check('skip_entry 用的是扫描器给的路径，不收模型的 path', async () => {
+    // 用 any：赋值发生在回调里，控制流分析看不见，标成联合类型会被收窄成 never
+    let skipped: any = null
+    const tools = buildVideoTools(
+      mkCtx({ onSkip: (p: string, reason: string) => { skipped = { path: p, reason } } }) as any,
+      ['华语'],
+      false,
+      false
+    )
+    const skip = tools.find((t) => t.name === 'skip_entry')!
+    // 参数表里根本没有 path —— 模型无从指定一个别的路径
+    assert.ok(!Object.keys((skip.parameters as any).properties).includes('path'))
+    await skip.execute({ reason: '是教学录屏' })
+    assert.ok(skipped)
+    assert.equal(skipped.path, facts.path)
+    assert.equal(skipped.reason, '是教学录屏')
+  })
+
+  await check('name_zh 为空要报错而不是存一条无名条目', async () => {
+    const tools = buildVideoTools(mkCtx(), ['华语'], false, false)
+    const reg = tools.find((t) => t.name === 'register_video')!
+    await assert.rejects(() => reg.execute({ summary: 'x', category: '华语' }))
+    await assert.rejects(() => reg.execute({ name_zh: '   ', summary: 'x', category: '华语' }))
+  })
+
+  db.close()
 }
 
 void main()
