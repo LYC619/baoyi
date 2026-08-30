@@ -4,7 +4,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc/handlers'
 import { finalizeGameSessions } from './kinds/game/service'
-import { closeDb, coversDir, getSettings, iconsDir } from './services/database'
+import { closeDb, coversDir, getSettings, iconsDir, postersDir } from './services/database'
 
 const APP_ROOT = path.join(__dirname, '..')
 const RENDERER_DIST = path.join(APP_ROOT, 'dist')
@@ -29,7 +29,8 @@ protocol.registerSchemesAsPrivileged([
  */
 const PROTOCOL_DIRS: Record<string, () => string> = {
   icon: iconsDir,
-  cover: coversDir
+  cover: coversDir,
+  poster: postersDir
 }
 
 function registerFileProtocol(): void {

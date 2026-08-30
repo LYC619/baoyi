@@ -95,6 +95,21 @@ export function coversDir(): string {
 }
 
 /**
+ * 影视海报目录。第三个图片目录，不是随手多开的一个 —— 它在上面那条
+ * 「缓存 vs 资产」的线上落在**中间**，所以两边都不该收它。
+ *
+ * 海报绝大多数是刮削下来的，丢了重刮一次就有，这一点像 icons；但用户也能自己
+ * 挑一张，那一张跟游戏封面一样是资产。塞进 covers/ 的话，将来做「清理刮削缓存」
+ * 就没有一个能安全下手的目录；塞进 icons/ 的话，`clearIcons()` 会把用户手动
+ * 挑的海报一起删掉。单独一个目录，两种清理都有明确边界。
+ */
+export function postersDir(): string {
+  const dir = path.join(app.getPath('userData'), 'posters')
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/**
  * 存档备份根目录，并保证它存在。
  *
  * 设置为空时退回用户数据目录下的 save-backups —— 和 icons 同一个套路：
@@ -1823,17 +1838,22 @@ export function dataStats(): DataStats {
 
   const icons = dirUsage(iconsDir())
   const covers = dirUsage(coversDir())
+  const posters = dirUsage(postersDir())
 
   return {
     software: one('SELECT COUNT(*) AS n FROM software'),
     games: one('SELECT COUNT(*) AS n FROM game'),
+    videos: one('SELECT COUNT(*) AS n FROM video'),
+    episodes: one('SELECT COUNT(*) AS n FROM episode'),
     units: one('SELECT COUNT(*) AS n FROM scan_units'),
     logs: one('SELECT COUNT(*) AS n FROM identify_logs'),
     dbBytes: fileSize(dbFile) + fileSize(`${dbFile}-wal`),
     icons: icons.count,
     iconBytes: icons.bytes,
     covers: covers.count,
-    coverBytes: covers.bytes
+    coverBytes: covers.bytes,
+    posters: posters.count,
+    posterBytes: posters.bytes
   }
 }
 
@@ -1842,9 +1862,13 @@ export function dataStats(): DataStats {
 export interface ResetSummary {
   software: number
   games: number
+  videos: number
+  /** 跟着影视条目一起清掉的集数。见 resetData 里数它的那一行 */
+  episodes: number
   units: number
   icons: number
   covers: number
+  posters: number
   /** 保留下来的存档备份记录数。磁盘上那些备份文件一个都没动，见下面的注释 */
   saveBackupsKept: number
   settingsCleared: boolean
@@ -1891,6 +1915,14 @@ function clearCovers(): number {
 }
 
 /**
+ * 清空海报目录，返回删掉的文件数。理由和 `clearCovers()` 一字不差：
+ * 文件名是 `<条目 id>.<后缀>`，条目记录一删，这些图就再没有任何代码路径读得到。
+ */
+function clearPosters(): number {
+  return wipeDir(postersDir(), '下次刮削会覆盖')
+}
+
+/**
  * 重置识别数据。
  *
  * mode = 'library'：清掉全部品类的条目、待识别目录、整理记录、图标缓存和封面，
@@ -1915,6 +1947,10 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
   const count = (sql: string) => (d.prepare(sql).get() as { n: number }).n
   const software = count('SELECT COUNT(*) AS n FROM software')
   const games = count('SELECT COUNT(*) AS n FROM game')
+  // 影视条目和它下面的集数分开数：一部剧清掉的是一行，但用户感觉上没的是几十集。
+  // 只报「1 个影视条目」会让人以为季集表还在
+  const videos = count('SELECT COUNT(*) AS n FROM video')
+  const episodes = count('SELECT COUNT(*) AS n FROM episode')
   const units = count('SELECT COUNT(*) AS n FROM scan_units')
   // 先数下来，因为下面刻意不删它 —— 报给用户的是「留了多少」，不是「清了多少」
   const saveBackupsKept = count('SELECT COUNT(*) AS n FROM save_backups')
@@ -1960,6 +1996,7 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
 
   const icons = clearIcons()
   const covers = clearCovers()
+  const posters = clearPosters()
 
   // 删完把 WAL 落盘并把文件收缩回去，不然 db 文件不会变小
   try {
@@ -1969,7 +2006,18 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
     /* 收缩失败不影响数据已被清空这个事实 */
   }
 
-  return { software, games, units, icons, covers, saveBackupsKept, settingsCleared: mode === 'all' }
+  return {
+    software,
+    games,
+    videos,
+    episodes,
+    units,
+    icons,
+    covers,
+    posters,
+    saveBackupsKept,
+    settingsCleared: mode === 'all'
+  }
 }
 
 export function closeDb(): void {

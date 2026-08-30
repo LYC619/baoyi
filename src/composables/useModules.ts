@@ -11,7 +11,7 @@
 
 import { ref } from 'vue'
 
-export type ModuleKey = 'software' | 'game'
+export type ModuleKey = 'software' | 'game' | 'video'
 
 export interface ModuleTab {
   key: ModuleKey
@@ -22,7 +22,8 @@ export interface ModuleTab {
 
 export const MODULE_TABS: ModuleTab[] = [
   { key: 'software', label: '软件', home: 'home' },
-  { key: 'game', label: '游戏', home: 'game-home' }
+  { key: 'game', label: '游戏', home: 'game-home' },
+  { key: 'video', label: '影视', home: 'video-home' }
 ]
 
 /**
@@ -33,13 +34,20 @@ export const MODULE_TABS: ModuleTab[] = [
  */
 export const activeModule = ref<ModuleKey>('software')
 
-const lastPath: Record<ModuleKey, string> = { software: '', game: '' }
-const scrollTop: Record<ModuleKey, number> = { software: 0, game: 0 }
+const lastPath: Record<ModuleKey, string> = { software: '', game: '', video: '' }
+const scrollTop: Record<ModuleKey, number> = { software: 0, game: 0, video: 0 }
 
-/** 路由上挂的模块标记。没标记的（设置 / 引导）返回 null */
+/**
+ * 路由上挂的模块标记。没标记的（设置 / 引导）返回 null。
+ *
+ * 拿 MODULE_TABS 当名单而不是写一串 `m === 'x' ||`：加模块时那串条件是最容易
+ * 漏的一处，而漏了的表现是「顶栏 Tab 不亮、切回来回不到刚才那页」——
+ * 两个都不报错，只是安静地不对。名单只有一份，就漏不掉。
+ */
 export function moduleOf(meta: { module?: unknown }): ModuleKey | null {
   const m = meta.module
-  return m === 'software' || m === 'game' ? m : null
+  if (typeof m !== 'string') return null
+  return MODULE_TABS.some((t) => t.key === m) ? (m as ModuleKey) : null
 }
 
 /** 由路由 afterEach 调用：记住「刚才在哪个模块的哪一页」 */

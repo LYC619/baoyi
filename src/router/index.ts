@@ -52,6 +52,19 @@ const router = createRouter({
       meta: { module: 'game' }
     },
     {
+      path: '/video',
+      name: 'video-home',
+      component: () => import('@/pages/video/Home.vue'),
+      meta: { module: 'video' }
+    },
+    {
+      path: '/video/:id',
+      name: 'video-detail',
+      component: () => import('@/pages/video/Detail.vue'),
+      props: true,
+      meta: { module: 'video' }
+    },
+    {
       path: '/onboarding',
       name: 'onboarding',
       component: () => import('@/pages/Onboarding.vue')

@@ -54,7 +54,8 @@ import type {
   SearchCallRecord,
   SearchProvider,
   Tag,
-  TitleLang
+  TitleLang,
+  TmdbConfig
 } from '@/types'
 
 const route = useRoute()
@@ -398,6 +399,61 @@ async function testSearchConn(): Promise<void> {
     searchResult.value = await window.baoyi.ai.testSearch(currentSearchConfig())
   } finally {
     searchTesting.value = false
+  }
+}
+
+/* ---------------------------- TMDB 刮削配置 ---------------------------- */
+
+/*
+ * 和联网搜索并排放在这一页，不单开一个「影视」Tab：两者是同一类东西 ——
+ * 用户自带 Key 的外部数据源，都影响识别质量而不影响别的。分成两页反而要用户
+ * 记住「刮削」和「搜索」在设置里是两处。
+ */
+
+const tmdbKey = ref(settings.settings.tmdb.api_key)
+const tmdbApiDomain = ref(settings.settings.tmdb.api_domain)
+const tmdbImageDomain = ref(settings.settings.tmdb.image_domain)
+const tmdbEnabled = ref(settings.settings.tmdb.enabled)
+const tmdbTesting = ref(false)
+const tmdbResult = ref<{ ok: boolean; message: string } | null>(null)
+
+/** 够不够真的发出一次请求（不看 enabled）。和主进程 tmdbAvailable 同一条判据 */
+const tmdbUsable = computed(() => tmdbKey.value.trim().length > 0)
+
+function currentTmdbConfig(): TmdbConfig {
+  return {
+    api_key: tmdbKey.value.trim(),
+    api_domain: tmdbApiDomain.value.trim(),
+    image_domain: tmdbImageDomain.value.trim(),
+    // 没 Key 不许是开着的，同搜索那边：开关开着而主进程判定不可用，
+    // 用户只会以为刮削在工作
+    enabled: tmdbEnabled.value && tmdbUsable.value
+  }
+}
+
+/** 从「没 Key」跨到「有 Key」时顺手打开。理由和 saveSearch 一字不差 */
+async function saveTmdb(): Promise<void> {
+  const autoOn = !settings.settings.tmdb.api_key.trim() && tmdbUsable.value && !tmdbEnabled.value
+  if (autoOn) tmdbEnabled.value = true
+  await settings.patch({ tmdb: currentTmdbConfig() })
+  success(autoOn ? 'TMDB 配置已保存，并已自动启用' : 'TMDB 配置已保存')
+}
+
+async function toggleTmdb(): Promise<void> {
+  if (!tmdbUsable.value) {
+    tmdbEnabled.value = false
+    return
+  }
+  await settings.patch({ tmdb: currentTmdbConfig() })
+}
+
+async function testTmdbConn(): Promise<void> {
+  tmdbTesting.value = true
+  tmdbResult.value = null
+  try {
+    tmdbResult.value = await window.baoyi.ai.testTmdb(currentTmdbConfig())
+  } finally {
+    tmdbTesting.value = false
   }
 }
 
@@ -888,7 +944,9 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
       : ''
     success(
       `已清空 ${summary.software} 个软件条目、${summary.games} 个游戏条目、` +
-        `${summary.units} 个目录记录、${summary.icons} 个图标、${summary.covers} 张封面${kept}`
+        `${summary.videos} 个影视条目（${summary.episodes} 集）、` +
+        `${summary.units} 个目录记录、${summary.icons} 个图标、${summary.covers} 张封面、` +
+        `${summary.posters} 张海报${kept}`
     )
   } catch (err) {
     // 不给反馈的话，失败看起来和成功一模一样 —— 按钮变回可点，什么都没发生
@@ -1356,6 +1414,78 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </p>
           </section>
 
+          <!--
+            TMDB。影视识别专用，和上面的通用搜索是两条独立的路：
+            没有 TMDB 也能扫进来（按文件名 + 模型知识），只是拿不到官方简介、
+            评分和完整季集表 —— 而季集表是「缺哪几集」这件事的唯一来源。
+          -->
+          <section class="panel">
+            <div class="sec-head">
+              <h2>TMDB 刮削（影视）</h2>
+              <label
+                class="switch"
+                :class="{ 'switch--off': !tmdbUsable }"
+                :title="tmdbUsable ? '' : '请先填入 API Key'"
+              >
+                <input
+                  v-model="tmdbEnabled"
+                  type="checkbox"
+                  :disabled="!tmdbUsable"
+                  @change="toggleTmdb"
+                />
+                <span>{{ tmdbEnabled && tmdbUsable ? '已启用' : '已关闭' }}</span>
+              </label>
+            </div>
+            <p class="sec-desc">
+              影视条目的官方标题、简介、评分、海报和季集表都从这里来。
+              个人 Key 是免费的，在 themoviedb.org 注册后于「设置 › API」页面申领。
+              不填也能扫描 —— 条目照样入库，只是没有海报和季集表，也就看不出缺哪几集。
+            </p>
+            <p v-if="!tmdbUsable" class="hint hint--block">请先填入 API Key。</p>
+
+            <div class="form">
+              <label class="field">
+                <span class="field__label">API Key</span>
+                <input
+                  v-model="tmdbKey"
+                  class="input mono"
+                  type="password"
+                  placeholder="TMDB 的 API Key（v3 auth）"
+                />
+              </label>
+              <!--
+                两个域名单独给，不合成一个：接口和图片走的是不同的主机，
+                而国内的反代方案常常只代理其中一个
+              -->
+              <label class="field">
+                <span class="field__label">接口域名（可留空用官方）</span>
+                <input v-model="tmdbApiDomain" class="input mono" placeholder="api.themoviedb.org" />
+              </label>
+              <label class="field">
+                <span class="field__label">图片域名（可留空用官方）</span>
+                <input v-model="tmdbImageDomain" class="input mono" placeholder="image.tmdb.org" />
+              </label>
+            </div>
+
+            <div class="row">
+              <button class="btn btn--primary" @click="saveTmdb">保存配置</button>
+              <button class="btn btn--ghost" :disabled="tmdbTesting || !tmdbUsable" @click="testTmdbConn">
+                <Loader2 v-if="tmdbTesting" :size="14" class="spin" />
+                测试连接
+              </button>
+            </div>
+
+            <p v-if="tmdbResult" class="result" :class="{ 'result--bad': !tmdbResult.ok }">
+              {{ tmdbResult.message }}
+            </p>
+
+            <p class="sec-desc sec-desc--foot">
+              两个域名各填只填域名，不带 <span class="mono">https://</span> 和路径。
+              官方的 <span class="mono">api.themoviedb.org</span> 在国内多数网络下连不上，
+              填自己的反代能解决；海报下载只允许走这里填的图片域名，别处的地址一概不收。
+            </p>
+          </section>
+
           <!-- 额度花在哪了。数据全部从识别日志里现取，不单独记账 -->
           <section class="panel">
             <button class="sec-head sec-head--btn" @click="toggleSearchLog">
@@ -1718,16 +1848,20 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             <ul v-if="stats" class="tally">
               <li><b>{{ stats.software }}</b><span>软件条目</span></li>
               <li><b>{{ stats.games }}</b><span>游戏条目</span></li>
+              <li><b>{{ stats.videos }}</b><span>影视条目</span></li>
               <li><b>{{ formatBytes(stats.dbBytes) }}</b><span>数据库</span></li>
               <li><b>{{ stats.icons }}</b><span>图标缓存</span></li>
               <li><b>{{ formatBytes(stats.iconBytes) }}</b><span>图标占用</span></li>
               <li><b>{{ stats.covers }}</b><span>游戏封面</span></li>
               <li><b>{{ formatBytes(stats.coverBytes) }}</b><span>封面占用</span></li>
+              <li><b>{{ stats.posters }}</b><span>影视海报</span></li>
+              <li><b>{{ formatBytes(stats.posterBytes) }}</b><span>海报占用</span></li>
             </ul>
             <p v-if="stats" class="hint hint--block">
-              另有 {{ stats.units }} 条目录记录、{{ stats.logs }} 条识别日志。
-              封面和图标分开算 —— 图标是缓存，重新识别就能再取；封面是你亲手指的图，
-              只在清空条目时才会跟着走。
+              另有 {{ stats.episodes }} 条季集记录、{{ stats.units }} 条目录记录、{{ stats.logs }}
+              条识别日志。图标是缓存，重新识别就能再取；封面和海报是资产 ——
+              封面是你亲手指的图，海报多半是刮来的但也可能是你选的，
+              两者都只在清空条目时才跟着走。
             </p>
           </section>
 

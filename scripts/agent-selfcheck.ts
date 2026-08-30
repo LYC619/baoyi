@@ -62,14 +62,18 @@ import {
   coverUrl as coverUrlOf,
   createLatestGuard,
   displayName,
+  formatDuration,
   groupRounds,
+  isLocalPosterPath,
   logToText,
   LINK_TYPE_LABEL,
   parseVersion,
   plain,
+  posterUrl,
   searchCalls,
   subtitleName,
-  versionOf
+  versionOf,
+  videoTitle
 } from '../src/utils/index.ts'
 import type { LinkedFile } from '../src/types/index.ts'
 import { DatabaseSync } from 'node:sqlite'
@@ -238,6 +242,20 @@ import {
 import { fillVideoSystem, videoCandidatePrompt } from '../electron/kinds/video/prompts.ts'
 import { buildVideoTools, limitVideoTags } from '../electron/kinds/video/tools.ts'
 import { VIDEO_CATEGORIES, VIDEO_TAGS } from '../electron/kinds/video/taxonomy.ts'
+import {
+  acceptPosterUrl,
+  // 和 game/covers.ts 的同名函数重名，这里换个名字进来。两份实现刻意保持一致，
+  // 一致性由「海报和游戏封面认的格式是同一份名单」那条断言盯着
+  extFromContentType as posterExtFromContentType,
+  extFromPath,
+  isLocalPoster,
+  isPosterExt,
+  MAX_POSTER_BYTES,
+  pickSidecarPoster,
+  posterFileName,
+  posterSiblings,
+  POSTER_EXTS
+} from '../electron/kinds/video/posters.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -2182,6 +2200,7 @@ async function main(): Promise<void> {
   await videoFactsSection()
   await videoDoubanSection()
   await videoIdentifySection()
+  await videoPosterSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -6853,6 +6872,247 @@ async function videoIdentifySection(): Promise<void> {
   })
 
   db.close()
+}
+
+/* ==================== 视频海报 · v0.7 Step 6 ==================== */
+
+/**
+ * 挑图、命名、下载白名单。
+ *
+ * 这一节盯的是三件会实打实变成破图的事：
+ *
+ * 1. **`poster_path` 那一列存过两种值**（TMDB 相对路径 / 本机绝对路径）。分错
+ *    一头是永远加载不出来的图，另一头是去拼一个 `.../w500/D:/...` 的地址。
+ * 2. **图片域名是用户配的。** 白名单必须跟着当下这份配置走 —— 写死官方域名
+ *    等于把配了反代的用户全挡在外面，而那批人正是最需要这个功能的。
+ * 3. **挑图的优先级**决定用户看到的是竖版海报，还是被裁掉两边的横版剧照。
+ */
+async function videoPosterSection(): Promise<void> {
+  console.log('\n视频海报 · 挑图与下载')
+
+  await check('海报和游戏封面认的格式是同一份名单', () => {
+    // kinds/ 之间不该互相 import，所以这份一致性没有编译期保障，只能靠这一条盯着。
+    // 两处都是最终塞进渲染进程 <img> 的图，能渲染的集合本就是同一个
+    assert.deepEqual(POSTER_EXTS, COVER_EXTS)
+    assert.ok(isPosterExt('a.JPG') && isPosterExt('海报.webp'))
+    assert.ok(!isPosterExt('a.ico') && !isPosterExt('a.psd'), '塞进 2:3 的框里必然糊')
+    assert.ok(!isPosterExt('poster'), '没扩展名的不收')
+  })
+
+  await check('海报文件按条目 id 命名，认不出的扩展名退回 .jpg', () => {
+    // 用片名的话，详情页上改个名字就得同步挪文件；不挪就是一堆对不上的孤儿
+    assert.equal(posterFileName('v1', 'D:\\x\\poster.PNG'), 'v1.png')
+    assert.equal(posterFileName('v1', '/t/p/w500/abc.jpg'), 'v1.jpg')
+    assert.equal(posterFileName('v1', 'noext'), 'v1.jpg')
+    assert.equal(posterFileName('v1', 'a.svg'), 'v1.jpg', '不认的格式不能原样落到文件名上')
+  })
+
+  await check('换扩展名时清孤儿的名单覆盖所有认得的格式', () => {
+    const siblings = posterSiblings('v1')
+    assert.equal(siblings.length, POSTER_EXTS.length)
+    for (const ext of POSTER_EXTS) assert.ok(siblings.includes(`v1${ext}`), `${ext} 不在清理名单里`)
+    // 实际会写出来的那个名字必须在名单里，否则 dropPosterFiles 漏删的正是当前这张
+    assert.ok(siblings.includes(posterFileName('v1', 'x.webp')))
+  })
+
+  await check('本地海报和 TMDB 相对路径分得开 —— 这一列两种值都存过', () => {
+    // 刮削阶段先落 TMDB 的相对路径，下载完覆盖成本机绝对路径。两者都以分隔符
+    // 开头，光看第一个字符分不出来
+    assert.equal(isLocalPoster('D:\\baoyi\\posters\\v1.jpg'), true)
+    assert.equal(isLocalPoster('d:/baoyi/posters/v1.jpg'), true)
+    assert.equal(isLocalPoster('\\\\nas\\share\\v1.jpg'), true, 'UNC 也是本地路径')
+    assert.equal(isLocalPoster('/home/u/.config/baoyi/posters/v1.jpg'), true)
+
+    // TMDB 那种只有一层：`/abc123.jpg`
+    assert.equal(isLocalPoster('/wPRcNZ4Q1Rk.jpg'), false)
+    assert.equal(isLocalPoster(''), false)
+    assert.equal(isLocalPoster('   '), false, '空白串不能算成一个本地文件')
+    // 空值进来不能抛 —— 这一列是从库里读的，历史行什么形状都有
+    assert.equal(isLocalPoster(undefined as any), false)
+    assert.equal(isLocalPoster(null as any), false)
+  })
+
+  await check('图片白名单跟着用户配的域名走，不是写死官方那个', () => {
+    // 官方图片域名在国内基本连不上，用户填反代是常态。写死就等于把配了反代的
+    // 用户全挡在外面 —— image_domain 这个配置项存在的理由就是这个
+    const proxy = { api_key: 'k', api_domain: '', image_domain: 'https://img.mycdn.cn/', enabled: true }
+    assert.equal(acceptPosterUrl('https://img.mycdn.cn/t/p/w500/abc.jpg', proxy), true)
+    // 配了反代之后官方域名就不在白名单里了：允许的是「用户填的那台机器」，
+    // 不是「我们认识的所有机器」
+    assert.equal(acceptPosterUrl('https://image.tmdb.org/t/p/w500/abc.jpg', proxy), false)
+
+    // 没填时退回默认域名，这条路不能因为配置项空着就断掉
+    const bare = { api_key: 'k', api_domain: '', image_domain: '', enabled: true }
+    assert.equal(acceptPosterUrl('https://image.tmdb.org/t/p/w500/abc.jpg', bare), true)
+  })
+
+  await check('白名单卡的是主机名本身，前缀像也不放', () => {
+    const cfg = { api_key: 'k', api_domain: '', image_domain: 'img.mycdn.cn', enabled: true }
+    // 地址里那段相对路径来自 TMDB 的响应，等于外部输入。不卡主机就等于让远端
+    // 决定这个进程去连哪台机器
+    assert.equal(acceptPosterUrl('https://img.mycdn.cn.evil.test/t/p/w500/a.jpg', cfg), false)
+    assert.equal(acceptPosterUrl('https://evil.test/img.mycdn.cn/a.jpg', cfg), false)
+    assert.equal(acceptPosterUrl('https://u:p@evil.test/a.jpg?h=img.mycdn.cn', cfg), false)
+    assert.equal(acceptPosterUrl('http://img.mycdn.cn/t/p/w500/a.jpg', cfg), false, 'http 不收')
+    assert.equal(acceptPosterUrl('https://img.mycdn.cn/t/p/w500/a.svg', cfg), false)
+    assert.equal(acceptPosterUrl('https://img.mycdn.cn/t/p/w500/abc', cfg), false, '看不出是图片的不收')
+    assert.equal(acceptPosterUrl('not a url', cfg), false, '拼不出 URL 时不能抛')
+    assert.equal(acceptPosterUrl('', cfg), false)
+    assert.equal(acceptPosterUrl('https://img.mycdn.cn/a.jpg', undefined as any), false, '没配置时不该抛')
+  })
+
+  await check('拼地址的那头和验地址的那头对得上', () => {
+    // 两处各写一份域名归一，改了一处就是「下载失败：这个图片地址不在允许的来源里」，
+    // 而用户看不出是哪一头错了
+    for (const domain of ['', 'img.mycdn.cn', 'https://img.mycdn.cn/', 'https://img.mycdn.cn/3']) {
+      const cfg = { api_key: 'k', api_domain: '', image_domain: domain, enabled: true }
+      const url = imageUrl(cfg, '/wPRcNZ4Q1Rk.jpg', 'w500')
+      assert.ok(acceptPosterUrl(url, cfg), `imageUrl 拼出的 ${url} 被自己的白名单拒了`)
+    }
+  })
+
+  await check('扩展名以 content-type 为准，认不出就不落盘', () => {
+    // 远端完全可以在 .jpg 地址上回一张 webp，而扩展名写错的文件在 <img> 里
+    // 未必渲染得出来
+    assert.equal(posterExtFromContentType('image/jpeg'), '.jpg')
+    assert.equal(posterExtFromContentType('image/JPEG; charset=binary'), '.jpg')
+    assert.equal(posterExtFromContentType('  Image/WebP  '), '.webp')
+    assert.equal(posterExtFromContentType('image/x-ms-bmp'), '.bmp', '老 IIS 回的就是这个写法')
+    // 反代挂了会回一个 HTML 错误页，那玩意儿存成 .jpg 就是一张永久的破图
+    assert.equal(posterExtFromContentType('text/html'), '')
+    assert.equal(posterExtFromContentType(''), '')
+    assert.equal(posterExtFromContentType(undefined as any), '')
+    for (const ct of ['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/gif', 'image/bmp']) {
+      assert.ok(POSTER_EXTS.includes(posterExtFromContentType(ct)), `${ct} 推出的扩展名不在白名单里`)
+    }
+    // 两个品类的图走的是同一条「按 content-type 定扩展名」的路，结论必须一样
+    assert.equal(posterExtFromContentType('image/avif'), extFromContentType('image/avif'))
+  })
+
+  await check('从路径取扩展名时不把查询串算进去', () => {
+    assert.equal(extFromPath('/t/p/w500/abc.JPG'), '.jpg')
+    assert.equal(extFromPath('/t/p/w500/abc'), '')
+    assert.equal(extFromPath('/a.jpg/b'), '', '最后一段没扩展名就是没有')
+    assert.equal(extFromPath(''), '')
+    assert.equal(extFromPath(undefined as any), '')
+  })
+
+  await check('体积上限是个有限值，且大得下得了正常海报', () => {
+    // w500 的竖版海报通常几十 KB。上限太小会把正常海报拒掉，而错误信息只会说「图太大了」
+    assert.ok(Number.isFinite(MAX_POSTER_BYTES))
+    assert.ok(MAX_POSTER_BYTES > 1024 * 1024)
+  })
+
+  await check('挑图优先级：竖版海报压过横版剧照', () => {
+    // fanart / backdrop 是横版，塞进 2:3 的框里会被裁掉两边，只当兜底
+    assert.equal(pickSidecarPoster(['/m/fanart.jpg', '/m/poster.jpg']), '/m/poster.jpg')
+    assert.equal(pickSidecarPoster(['/m/poster.jpg', '/m/folder.jpg']), '/m/poster.jpg')
+    assert.equal(pickSidecarPoster(['/m/folder.jpg', '/m/fanart.jpg']), '/m/folder.jpg')
+    // 认不出名字的也压过横版：一个目录里孤零零一张 jpg，十次里九次就是海报，
+    // 而 fanart 是确定的横版
+    assert.equal(pickSidecarPoster(['/m/fanart.jpg', '/m/IMG_8821.jpg']), '/m/IMG_8821.jpg')
+    // 只有横版时还是用它 —— 比首字占位像样
+    assert.equal(pickSidecarPoster(['/m/backdrop.png']), '/m/backdrop.png')
+  })
+
+  await check('挑图和目录里文件的先后无关', () => {
+    // readdirSync 的顺序跟文件系统有关，同一个片库在两台机器上可能不一样。
+    // 优先级要是被顺序影响，就会出现「他那儿是海报，我这儿是剧照」
+    const files = ['/m/fanart.jpg', '/m/season01-poster.jpg', '/m/poster.jpg', '/m/folder.jpg']
+    for (let i = 0; i < files.length; i++) {
+      const rotated = [...files.slice(i), ...files.slice(0, i)]
+      assert.equal(pickSidecarPoster(rotated), '/m/poster.jpg', `顺序 ${rotated.join(',')} 挑错了`)
+    }
+  })
+
+  await check('`<片名>-poster.jpg` 认得出来，且比 folder.jpg 优先', () => {
+    // tinyMediaManager 默认就写这个名字，用户目录里躺着的往往正是它
+    const files = ['/m/folder.jpg', '/m/Dune.2021.1080p-poster.jpg', '/m/fanart.jpg']
+    assert.equal(pickSidecarPoster(files, 'Dune.2021.1080p.mkv'), '/m/Dune.2021.1080p-poster.jpg')
+    // 传的是 file_name（带扩展名），归一时要把 .mkv 切掉
+    assert.equal(pickSidecarPoster(['/m/Dune-poster.jpg'], 'Dune.mkv'), '/m/Dune-poster.jpg')
+    // 片名对不上时也还能按通用后缀认出来，只是排在 folder 后面
+    assert.equal(pickSidecarPoster(['/m/别的名字-poster.jpg'], 'Dune.mkv'), '/m/别的名字-poster.jpg')
+  })
+
+  await check('季海报只在整部剧的海报缺席时才顶上', () => {
+    assert.equal(pickSidecarPoster(['/s/season01-poster.jpg', '/s/poster.jpg']), '/s/poster.jpg')
+    assert.equal(pickSidecarPoster(['/s/season01-poster.jpg', '/s/fanart.jpg']), '/s/season01-poster.jpg')
+  })
+
+  await check('banner / clearlogo / 单集缩略图一概不当海报', () => {
+    // 这几类塞进竖版框里的结果比首字占位更难看：logo 是透明底的横条，
+    // thumb 是某一集的截图
+    for (const bad of ['banner', 'clearlogo', 'clearart', 'logo', 'disc', 'discart', 'characterart', 'thumb', 'landscape']) {
+      assert.equal(pickSidecarPoster([`/m/${bad}.jpg`]), '', `${bad}.jpg 不该被挑成海报`)
+    }
+    assert.equal(pickSidecarPoster(['/m/S01E02-thumb.jpg']), '', '单集截图不是整部剧的海报')
+    assert.equal(pickSidecarPoster(['/m/Dune-banner.png']), '')
+    // 排除的只是这些名字，同目录还有别的图时不能被连带拖下水
+    assert.equal(pickSidecarPoster(['/m/banner.jpg', '/m/poster.jpg']), '/m/poster.jpg')
+  })
+
+  await check('挑不到就返回空串，让上层去走联网那条路', () => {
+    assert.equal(pickSidecarPoster([]), '')
+    assert.equal(pickSidecarPoster(['/m/Dune.mkv', '/m/Dune.nfo', '/m/Dune.srt']), '')
+    assert.equal(pickSidecarPoster(['/m/banner.jpg']), '', '全被排除时等于没挑到')
+    // 大小写不该影响认名字：Windows 上文件名大小写不敏感，用户手里就是各种写法
+    assert.equal(pickSidecarPoster(['/m/POSTER.JPG']), '/m/POSTER.JPG')
+    assert.equal(pickSidecarPoster(['D:\\影视\\沙丘\\Poster.jpg']), 'D:\\影视\\沙丘\\Poster.jpg')
+  })
+
+  /* -------- 渲染进程那一侧 -------- */
+
+  await check('渲染进程和主进程对「是不是本地海报」的判断一字不差', () => {
+    // 两份实现刻意各写一份（一边在 Node、一边在浏览器，隔着 contextBridge），
+    // 漂了的后果是整墙破图或者整墙占位，而两处都不报错。用同一组用例锁住
+    for (const v of [
+      'D:\\baoyi\\posters\\v1.jpg',
+      'd:/baoyi/posters/v1.jpg',
+      '\\\\nas\\share\\v1.jpg',
+      '/home/u/.config/baoyi/posters/v1.jpg',
+      '/wPRcNZ4Q1Rk.jpg',
+      '',
+      '   '
+    ]) {
+      assert.equal(isLocalPosterPath(v), isLocalPoster(v), `两处对 ${JSON.stringify(v)} 的判断不一致`)
+    }
+  })
+
+  await check('海报地址只取 basename，且 TMDB 相对路径退回占位', () => {
+    assert.equal(posterUrl('D:\\baoyi\\posters\\v1.jpg', 7), 'baoyi://poster/v1.jpg?v=7')
+    // 协议那头也拿 basename 兜底（见 main.ts），两边一致，中间那段怎么写都出不去
+    assert.equal(posterUrl('D:\\p\\..\\..\\Windows\\System32\\evil.png', 1), 'baoyi://poster/evil.png?v=1')
+    // 相对路径连本地文件都算不上，更早一步就退回占位了 —— 比封面那条路多挡一层
+    assert.equal(posterUrl('..\\..\\Windows\\System32\\evil.png', 1), '')
+    // 刮削阶段落的相对路径拼进协议地址是一张必然 404 的破图，占位比破图诚实
+    assert.equal(posterUrl('/wPRcNZ4Q1Rk.jpg', 1), '', 'TMDB 相对路径不该拼成协议地址')
+    assert.equal(posterUrl('', 1), '')
+    // 文件名不变，不带版本号换了图不刷新
+    assert.notEqual(posterUrl('D:\\p\\v1.jpg', 1), posterUrl('D:\\p\\v1.jpg', 2))
+  })
+
+  await check('片名兜底到文件名时把扩展名剥掉，剧集的目录名原样留着', () => {
+    const v = (over: Record<string, string>) => ({ name_zh: '', name_en: '', file_name: '', ...over })
+    assert.equal(videoTitle(v({ name_zh: '沙丘', name_en: 'Dune', file_name: 'a.mkv' })), '沙丘')
+    assert.equal(videoTitle(v({ name_en: 'Dune', file_name: 'a.mkv' })), 'Dune')
+    assert.equal(videoTitle(v({ file_name: 'Dune.2021.1080p.mkv' })), 'Dune.2021.1080p')
+    // 剧集那条记录的 file_name 是目录名，没有扩展名可剥
+    assert.equal(videoTitle(v({ file_name: '黑暗荣耀 第一季' })), '黑暗荣耀 第一季')
+    // 结尾那截不像扩展名就别动：剥掉「.2021」会让标题看着像少了一半
+    assert.equal(videoTitle(v({ file_name: '沙丘.2021' })), '沙丘.2021')
+    assert.equal(videoTitle(v({})), '')
+  })
+
+  await check('片长 0 显示成「—」，不是「0 分钟」', () => {
+    // 0 的含义是「读不出来」（容器元数据缺失、文件已经不在了），不是零分钟
+    assert.equal(formatDuration(0), '—')
+    assert.equal(formatDuration(-1), '—')
+    // 单集按分钟说 —— 42 分钟写成「0.7 小时」没人这么说话
+    assert.equal(formatDuration(42 * 60), '42 分钟')
+    assert.equal(formatDuration(9300), '2 小时 35 分')
+    assert.equal(formatDuration(7200), '2 小时', '整点不该拖一个「0 分」')
+  })
 }
 
 void main()

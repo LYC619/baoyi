@@ -154,6 +154,94 @@ export function gameTitle(g: { name_zh: string; name_en: string; file_name: stri
   return g.name_zh || g.name_en || g.file_name.replace(/\.exe$/i, '')
 }
 
+/**
+ * 影视卡片 / 详情页打头的名字。中文名优先，都没有就退回文件名。
+ *
+ * 比 gameTitle 多剥一层扩展名：视频的扩展名有一长串（mkv / mp4 / avi / ts…），
+ * 而剧集那条记录的 file_name 是目录名、压根没有扩展名。所以用 lastIndexOf
+ * 判一下再剥，而不是拿一个正则去套 —— 套不全的那些会露出 `.mkv` 结尾。
+ */
+export function videoTitle(v: { name_zh: string; name_en: string; file_name: string }): string {
+  if (v.name_zh) return v.name_zh
+  if (v.name_en) return v.name_en
+  const name = v.file_name ?? ''
+  const dot = name.lastIndexOf('.')
+  const tail = dot > 0 ? name.slice(dot) : ''
+  // 只剥看起来像扩展名的那一截：位置靠后、长度 2-4、纯字母数字。
+  // 纯数字的那截不剥 —— 认的容器扩展名里没有一个是纯数字（见 scanner.ts 的
+  // VIDEO_EXTS），所以 `.2021` 一定是年份而不是扩展名，剥掉就是把「沙丘.2021」
+  // 显示成「沙丘」，白丢一个用户拿来分辨重拍片的信息
+  const looksLikeExt = /^\.[a-z0-9]{2,4}$/i.test(tail) && !/^\.\d+$/.test(tail)
+  return looksLikeExt ? name.slice(0, dot) : name
+}
+
+/**
+ * 海报走 baoyi://poster/，`?v=` 的理由和封面一字不差（文件名按 id 定，换图 URL 不变）。
+ *
+ * 多一件事：这一列有可能存着 TMDB 的**相对路径**（刮削先落，下载后才覆盖成本机路径）。
+ * 那种值拼进协议地址是一张必然 404 的破图，所以这里直接返回空串，
+ * 让界面走首字占位那条路 —— 占位比破图诚实。判据同 posters.ts 的 isLocalPoster。
+ */
+export function posterUrl(posterPath: string, version = 0): string {
+  if (!posterPath) return ''
+  if (!isLocalPosterPath(posterPath)) return ''
+  const name = posterPath.split(/[\\/]/).pop() ?? ''
+  return name ? `baoyi://poster/${encodeURIComponent(name)}?v=${version}` : ''
+}
+
+/**
+ * `poster_path` 里这个值是不是本机文件。
+ *
+ * 和主进程 `kinds/video/posters.ts` 的 `isLocalPoster` 是同一份判断，刻意各写一份：
+ * 那边在 Node 里、这边在浏览器里，中间隔着 contextBridge，import 不过来。
+ * 两份漂了的后果是海报显示不出来，所以自检里盯着同一组用例。
+ */
+export function isLocalPosterPath(value: string): boolean {
+  const v = String(value ?? '').trim()
+  if (!v) return false
+  if (/^[a-z]:[\\/]/i.test(v)) return true
+  if (v.startsWith('\\\\')) return true
+  if (v.startsWith('/')) return v.slice(1).includes('/')
+  return false
+}
+
+/**
+ * 片长。0 表示读不出来（容器元数据缺失、或者文件已经不在了），不是「零分钟」。
+ *
+ * 电影按「x 小时 y 分」，剧集单集按分钟 —— 一集 42 分钟写成「0.7 小时」没人这么说话。
+ * 分界线放在 90 分钟：比这短的多半是单集或短片。
+ */
+export function formatDuration(sec: number): string {
+  if (!sec || sec < 0) return '—'
+  const mins = Math.round(sec / 60)
+  if (mins < 90) return `${mins} 分钟`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m === 0 ? `${h} 小时` : `${h} 小时 ${m} 分`
+}
+
+/**
+ * 播放进度显示成「看到 1:23:45」那种。
+ *
+ * 用绝对时刻而不是百分比：用户下次要接着看，脑子里记的是「上次看到那个转场」，
+ * 而 37% 换算不成任何他认得的东西。总时长读不出来时也照样能显示，
+ * 这一点百分比做不到。
+ */
+export function formatPosition(sec: number): string {
+  if (!sec || sec < 0) return ''
+  const s = Math.floor(sec % 60)
+  const m = Math.floor(sec / 60) % 60
+  const h = Math.floor(sec / 3600)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
+}
+
+/** 季集号写成 `S01E02`。季号为 0 是特别篇，TMDB 的约定 */
+export function episodeCode(season: number, episode: number): string {
+  const pad = (n: number) => String(Math.max(0, n)).padStart(2, '0')
+  return `S${pad(season)}E${pad(episode)}`
+}
+
 /** 这条「上次活跃」是抱一自己记的，还是从磁盘上推出来的 */
 export type ActivitySource = 'baoyi' | 'external' | 'none'
 

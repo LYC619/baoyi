@@ -11,6 +11,7 @@ import assert from 'node:assert/strict'
 import {
   activeModule,
   moduleOf,
+  MODULE_TABS,
   moduleTarget,
   recallScroll,
   rememberScroll,
@@ -53,4 +54,34 @@ rememberScroll('software', 820)
 assert.equal(recallScroll('software'), 820)
 assert.equal(recallScroll('game'), 0)
 
-console.log('模块记忆自检通过：7 组')
+// 8. 影视这一格和另两个同构 —— 新模块接进来最容易漏的就是这几处
+assert.equal(moduleOf({ module: 'video' }), 'video')
+assert.deepEqual(moduleTarget('video'), { name: 'video-home' })
+trackRoute(route('/video/v1', 'video'))
+assert.equal(activeModule.value, 'video')
+assert.equal(moduleTarget('video'), '/video/v1')
+// 进设置页不冲掉影视的记忆，另两个模块的也还在
+trackRoute(route('/settings'))
+assert.equal(activeModule.value, 'video')
+assert.equal(moduleTarget('video'), '/video/v1')
+assert.equal(moduleTarget('game'), '/game')
+assert.equal(moduleTarget('software'), '/detail/abc')
+// 滚动位置三份独立：海报墙那一屏和软件列表滚到哪儿没有关系
+rememberScroll('video', 1240)
+assert.equal(recallScroll('video'), 1240)
+assert.equal(recallScroll('software'), 820)
+
+// 9. 三个 Tab 的注册表本身要完整：key 不重、home 路由名不重。
+//    重了的表现是「点这个 Tab 跳到了另一个模块」，而它不报错
+const keys = MODULE_TABS.map((t) => t.key)
+const homes = MODULE_TABS.map((t) => t.home)
+assert.deepEqual(keys, ['software', 'game', 'video'], 'Tab 顺序就是顶栏从左到右的顺序')
+assert.equal(new Set(keys).size, keys.length)
+assert.equal(new Set(homes).size, homes.length)
+for (const tab of MODULE_TABS) {
+  assert.ok(tab.label.trim(), `模块 ${tab.key} 没有 Tab 文案`)
+  // 每个 key 都得能被 moduleOf 认出来，否则 afterEach 那头永远记不上
+  assert.equal(moduleOf({ module: tab.key }), tab.key)
+}
+
+console.log(`模块记忆自检通过：9 组 / ${MODULE_TABS.length} 个模块`)

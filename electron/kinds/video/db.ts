@@ -623,6 +623,16 @@ export function deleteVideo(d: SqlDb, id: string): void {
  * **dropped 不参与推导** —— 「弃」是用户主动做的判断，看了 8 集不看了和
  * 「在看」在数据上无法区分，只能由用户说。所以这个函数只在
  * 当前状态不是 dropped 时才动它。
+ *
+ * **没文件的集不进分母**（`path === ''`，即「TMDB 说有这集，磁盘上没有」）。
+ * 手上 11 集全看完、还差 5 集没下，这里给的是 watched 而不是 watching。
+ * 这一条是有意的，别顺手「修」成按 episode_total 算：
+ *   - 按总集数算的话，「看完」在把整部剧凑齐之前永远到不了，而是否凑齐
+ *     取决于用户想不想下，不取决于他看到哪了；
+ *   - 在看那一组是侧栏里唯一有行动含义的一格（接着看什么，见 Sidebar.vue）。
+ *     一部现在没有任何一集能点开播的剧待在那儿，就是往唯一的待办清单里塞噪音。
+ * 「还差 5 集」这个信息没丢，详情页照样显示 11/16 并把缺的集列出来 ——
+ * 它属于详情页，不属于侧栏计数。
  */
 export function deriveSeriesStatus(episodes: Episode[]): WatchStatus | null {
   const withFile = episodes.filter((e) => e.path !== '')

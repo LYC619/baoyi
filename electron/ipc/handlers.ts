@@ -9,10 +9,14 @@ import type {
   GameQuery,
   IdentifyLogQuery,
   OrganizeCommand,
+  Episode,
   PendingItem,
   SearchConfig,
   SoftwareItem,
-  SoftwareQuery
+  SoftwareQuery,
+  TmdbConfig,
+  VideoItem,
+  VideoQuery
 } from '../../src/types'
 import { cancelAi, completeWithAi, listModels, testConnection } from '../kinds/software/aiService'
 import {
@@ -79,6 +83,24 @@ import {
   updateGameItem
 } from '../kinds/game/service'
 import { COVER_EXTS } from '../kinds/game/links'
+import {
+  cancelVideoScan,
+  clearVideoPoster,
+  fetchVideoPoster,
+  getVideoItem,
+  listVideoEpisodes,
+  listVideoItems,
+  removeVideo,
+  revealVideo,
+  scanVideos,
+  setVideoPoster,
+  updateVideoEpisode,
+  updateVideoItem,
+  videoCountsOf,
+  videoScanReadiness
+} from '../kinds/video/service'
+import { POSTER_EXTS } from '../kinds/video/posters'
+import { testTmdb } from '../kinds/video/tmdb'
 import {
   materialize,
   previewOrganize,
@@ -269,6 +291,71 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return { ...outcome, item: outcome.ok ? getGameItem(id) : null }
   })
 
+  /* ------------------------------ 影视 ------------------------------ */
+  ipcMain.handle('video:list', (_e, query: VideoQuery = {}) => listVideoItems(query))
+  ipcMain.handle('video:get', (_e, id: string) => getVideoItem(id))
+  ipcMain.handle('video:update', (_e, id: string, patch: Partial<VideoItem>) =>
+    updateVideoItem(id, patch)
+  )
+  ipcMain.handle('video:remove', (_e, id: string) => removeVideo(id))
+  ipcMain.handle('video:counts', () => videoCountsOf())
+  ipcMain.handle('video:reveal', (_e, id: string) => revealVideo(id))
+  ipcMain.handle('video:readiness', () => videoScanReadiness())
+  ipcMain.handle('video:scan', (_e, dirs: string[]) =>
+    scanVideos(dirs, (p) => send('video:progress', p))
+  )
+  ipcMain.on('video:cancel', () => cancelVideoScan())
+
+  ipcMain.handle('video:pick-dirs', async () => {
+    const win = getWindow()
+    if (!win) return []
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择影视目录（可多选）',
+      properties: ['openDirectory', 'multiSelections']
+    })
+    return result.canceled ? [] : result.filePaths
+  })
+
+  ipcMain.handle('video:episodes', (_e, id: string) => listVideoEpisodes(id))
+
+  /**
+   * 改一集，顺带把整部剧的条目取回来。
+   *
+   * 两个值一起返回而不是让界面改完再查一次：`updateVideoEpisode` 内部会把剧一级的
+   * 观看状态刷一遍（标完最后一集，整部剧就该变成「看完」），而界面上那句「3/12 集」
+   * 和侧栏计数都靠条目那一行。分两趟拿的话，中间那一瞬界面显示的是自相矛盾的两个数。
+   */
+  ipcMain.handle('video:update-episode', (_e, episodeId: string, patch: Partial<Episode>) => {
+    const episode = updateVideoEpisode(episodeId, patch)
+    return { episode, item: episode ? getVideoItem(episode.resource_id) : null }
+  })
+
+  /* ---------------------------- 海报 ---------------------------- */
+
+  ipcMain.handle('video:fetch-poster', async (_e, id: string) => {
+    const outcome = await fetchVideoPoster(id)
+    // changed 为 false 时也把条目带回去：那可能是「已经有海报了」，
+    // 而界面此刻手里那份可能是刮削阶段那个还没下载的相对路径
+    return { ok: outcome.ok, message: outcome.message, item: outcome.ok ? getVideoItem(id) : null }
+  })
+
+  ipcMain.handle('video:pick-poster', async (_e, id: string) => {
+    const win = getWindow()
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择海报图（竖版 2:3 效果最好）',
+      properties: ['openFile'],
+      // 名单来自 posters.ts，和真正执行校验的那份是同一个来源 ——
+      // 对话框过滤器和校验规则分开写，迟早出现「选得进来但存不下去」
+      filters: [{ name: '图片', extensions: POSTER_EXTS.map((e) => e.slice(1)) }]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const outcome = setVideoPoster(id, result.filePaths[0])
+    return { ...outcome, item: outcome.ok ? getVideoItem(id) : null }
+  })
+
+  ipcMain.handle('video:clear-poster', (_e, id: string) => clearVideoPoster(id))
+
   /* ------------------------------ 分类 ------------------------------ */
   ipcMain.handle('categories:list', () => listCategories())
   ipcMain.handle('categories:upsert', (_e, category: Category) => upsertCategory(category))
@@ -324,6 +411,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('ai:test', (_e, config: AIConfig) => testConnection(config))
   ipcMain.handle('ai:models', (_e, config: AIConfig) => listModels(config))
   ipcMain.handle('ai:test-search', (_e, config: SearchConfig) => testSearch(config))
+  ipcMain.handle('ai:test-tmdb', (_e, config: TmdbConfig) => testTmdb(config))
 
   /* ---------------------------- 识别日志 ---------------------------- */
   ipcMain.handle('logs:list', (_e, query: IdentifyLogQuery = {}) => listIdentifyLogs(query))

@@ -633,9 +633,13 @@ export interface AIResult {
 export interface ResetSummary {
   software: number
   games: number
+  videos: number
+  /** 跟着影视条目一起清掉的集数。一部剧只是一行，但用户感觉上没的是几十集 */
+  episodes: number
   units: number
   icons: number
   covers: number
+  posters: number
   /**
    * 保留下来的存档备份记录数 —— 这一项是「没清掉多少」而不是「清掉多少」。
    * 磁盘上那些备份文件一个都没动，记录留着才找得到它们。
@@ -648,6 +652,9 @@ export interface ResetSummary {
 export interface DataStats {
   software: number
   games: number
+  videos: number
+  /** 季集表的总行数，含缺文件的那些。它比影视条目数更能说明库有多大 */
+  episodes: number
   units: number
   logs: number
   /** 数据库占用字节数，含还没落盘的 WAL */
@@ -657,6 +664,9 @@ export interface DataStats {
   /** 封面和图标分开报：存留策略不同，但都占磁盘 */
   covers: number
   coverBytes: number
+  /** 影视海报又是一栏。多数是刮削来的，占的空间比封面容易涨 */
+  posters: number
+  posterBytes: number
 }
 
 /* ------------------------------ 目录整理 ------------------------------ */
@@ -1239,6 +1249,53 @@ export interface BaoyiApi {
       url: string
     ): Promise<{ ok: boolean; message: string; item: GameItem | null }>
   }
+  video: {
+    list(query?: VideoQuery): Promise<VideoItem[]>
+    get(id: string): Promise<VideoItem | null>
+    update(id: string, patch: Partial<VideoItem>): Promise<VideoItem | null>
+    /** 只从库里移除，不动磁盘上的视频文件 */
+    remove(id: string): Promise<void>
+    counts(): Promise<VideoCounts>
+    /** 剧集选中目录，电影选中文件 */
+    revealInFolder(id: string): Promise<void>
+    /** 选影视目录，可多选。取消返回空数组 */
+    pickDirectories(): Promise<string[]>
+    /**
+     * 扫描 + 识别一条龙，结果直接落库。
+     *
+     * 调之前该先问一次 `readiness()`：没配 AI 是硬拦，没配 TMDB 只是降级，
+     * 两种情况界面要说的话不一样。
+     */
+    scan(dirs: string[]): Promise<VideoScanResult>
+    cancel(): void
+    onProgress(cb: (p: VideoScanProgress) => void): Unsubscribe
+    /** 扫描前的可用性检查。ok 为 false 是硬拦；ok 为 true 而 message 非空是降级提醒 */
+    readiness(): Promise<{ ok: boolean; message: string }>
+
+    /** 一部剧的所有集，按季集号排。电影返回空数组 */
+    episodes(id: string): Promise<Episode[]>
+    /**
+     * 改一集。改完整部剧的观看状态会跟着刷一遍，所以要把条目也拿回来 ——
+     * 界面上那个「3/12 集」和侧栏计数都得跟着动。
+     */
+    updateEpisode(
+      episodeId: string,
+      patch: Partial<Episode>
+    ): Promise<{ episode: Episode | null; item: VideoItem | null }>
+
+    /**
+     * 定海报。三条来路按顺序试：同目录的海报图 → 刮削时记下的 TMDB 相对路径
+     * → 都没有就返回 ok:false 让用户自己选一张。
+     *
+     * 单独一个口子而不是在扫描里顺手下完：下载是网络活，而扫描已经够慢了；
+     * 更要紧的是用户重扫一次不该把自己手动选的海报冲掉。
+     */
+    fetchPoster(id: string): Promise<{ ok: boolean; message: string; item: VideoItem | null }>
+    /** 选一张本地图当海报。取消返回 null */
+    pickPoster(id: string): Promise<{ ok: boolean; message: string; item: VideoItem | null } | null>
+    /** 撤掉海报，退回首字占位。磁盘上那份拷贝一起删 */
+    clearPoster(id: string): Promise<VideoItem | null>
+  }
   categories: {
     list(): Promise<Category[]>
     upsert(category: Category): Promise<Category[]>
@@ -1293,6 +1350,8 @@ export interface BaoyiApi {
     /** 拉服务商的模型列表（GET /models）。失败时返回 message，不抛 */
     models(config: AIConfig): Promise<{ ok: boolean; message: string; models: string[] }>
     testSearch(config: SearchConfig): Promise<{ ok: boolean; message: string }>
+    /** 试一次 TMDB：拿配置发一次真实搜索，成了就说搜到了什么 */
+    testTmdb(config: TmdbConfig): Promise<{ ok: boolean; message: string }>
     onProgress(cb: (p: AIProgress) => void): Unsubscribe
   }
   data: {

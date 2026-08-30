@@ -11,11 +11,13 @@ import {
 } from '@/composables/useModules'
 import { useSoftwareStore } from '@/stores/software'
 import { useGameStore } from '@/stores/game'
+import { useVideoStore } from '@/stores/video'
 
 const route = useRoute()
 const router = useRouter()
 const software = useSoftwareStore()
 const game = useGameStore()
+const video = useVideoStore()
 
 const maximized = ref(false)
 let unsubscribe: (() => void) | null = null
@@ -23,8 +25,9 @@ let unsubscribe: (() => void) | null = null
 onMounted(async () => {
   maximized.value = await window.baoyi.win.isMaximized()
   unsubscribe = window.baoyi.win.onMaximizeChange((v) => (maximized.value = v))
-  // 顶栏一直在，游戏页却未必进过 —— 数字得自己去取一次，不能等那一页来喂
+  // 顶栏一直在，游戏页和影视页却未必进过 —— 数字得自己去取一次，不能等那一页来喂
   void game.refreshCounts()
+  void video.refreshCounts()
 })
 
 onUnmounted(() => unsubscribe?.())
@@ -37,15 +40,17 @@ const close = () => window.baoyi.win.close()
 const showTabs = computed(() => route.name !== 'onboarding')
 
 /**
- * total 为 null = 「还没有这回事」，显示成「—」。软件和游戏现在都有真数字了，
+ * total 为 null = 「还没有这回事」，显示成「—」。三个模块现在都有真数字了，
  * 这条分支留着是给下一个模块用的 —— 新模块接进来时，库表建好之前报 0
  * 就是在替一个不存在的表撒谎。
  *
- * 游戏的 pending 恒为 0：游戏识别直接落库，没有确认队列（见 kinds/game/service.ts）。
+ * 游戏和影视的 pending 恒为 0：这两个品类识别直接落库，没有确认队列
+ * （见 kinds/game/service.ts 和 kinds/video/service.ts 里同一段理由）。
  */
 const stats = computed<Record<ModuleKey, { total: number | null; pending: number }>>(() => ({
   software: { total: software.counts.all, pending: software.counts.pending_confirm },
-  game: { total: game.counts.all, pending: 0 }
+  game: { total: game.counts.all, pending: 0 },
+  video: { total: video.counts.all, pending: 0 }
 }))
 
 function go(key: ModuleKey): void {

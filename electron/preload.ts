@@ -5,6 +5,7 @@ import type {
   AppSettings,
   BaoyiApi,
   Category,
+  Episode,
   GameItem,
   GameQuery,
   IdentifyLogQuery,
@@ -13,7 +14,10 @@ import type {
   SearchConfig,
   SoftwareItem,
   SoftwareQuery,
-  Unsubscribe
+  TmdbConfig,
+  Unsubscribe,
+  VideoItem,
+  VideoQuery
 } from '../src/types'
 
 /** 把 ipcRenderer.on 包成「返回取消订阅函数」的形式，组件卸载时好清理 */
@@ -94,6 +98,26 @@ const api: BaoyiApi = {
     setCoverFromUrl: (id: string, url: string) =>
       ipcRenderer.invoke('game:set-cover-url', id, url)
   },
+  video: {
+    list: (query: VideoQuery = {}) => ipcRenderer.invoke('video:list', plain(query)),
+    get: (id: string) => ipcRenderer.invoke('video:get', id),
+    update: (id: string, patch: Partial<VideoItem>) =>
+      ipcRenderer.invoke('video:update', id, plain(patch)),
+    remove: (id: string) => ipcRenderer.invoke('video:remove', id),
+    counts: () => ipcRenderer.invoke('video:counts'),
+    revealInFolder: (id: string) => ipcRenderer.invoke('video:reveal', id),
+    pickDirectories: () => ipcRenderer.invoke('video:pick-dirs'),
+    scan: (dirs: string[]) => ipcRenderer.invoke('video:scan', plain(dirs)),
+    cancel: () => ipcRenderer.send('video:cancel'),
+    onProgress: (cb) => subscribe('video:progress', cb),
+    readiness: () => ipcRenderer.invoke('video:readiness'),
+    episodes: (id: string) => ipcRenderer.invoke('video:episodes', id),
+    updateEpisode: (episodeId: string, patch: Partial<Episode>) =>
+      ipcRenderer.invoke('video:update-episode', episodeId, plain(patch)),
+    fetchPoster: (id: string) => ipcRenderer.invoke('video:fetch-poster', id),
+    pickPoster: (id: string) => ipcRenderer.invoke('video:pick-poster', id),
+    clearPoster: (id: string) => ipcRenderer.invoke('video:clear-poster', id)
+  },
   categories: {
     list: () => ipcRenderer.invoke('categories:list'),
     upsert: (category: Category) => ipcRenderer.invoke('categories:upsert', plain(category)),
@@ -137,6 +161,7 @@ const api: BaoyiApi = {
     test: (config: AIConfig) => ipcRenderer.invoke('ai:test', plain(config)),
     models: (config: AIConfig) => ipcRenderer.invoke('ai:models', plain(config)),
     testSearch: (config: SearchConfig) => ipcRenderer.invoke('ai:test-search', plain(config)),
+    testTmdb: (config: TmdbConfig) => ipcRenderer.invoke('ai:test-tmdb', plain(config)),
     onProgress: (cb) => subscribe('ai:progress', cb)
   },
   data: {

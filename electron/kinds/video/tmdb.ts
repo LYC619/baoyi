@@ -115,7 +115,8 @@ export interface TmdbDetail {
 /* ============================== 纯逻辑 ============================== */
 
 const DEFAULT_API_DOMAIN = 'api.themoviedb.org'
-const DEFAULT_IMAGE_DOMAIN = 'image.tmdb.org'
+/** 导出给 posters.ts 算下载白名单用 —— 那边允许的主机就是这份配置里的图片域名 */
+export const DEFAULT_IMAGE_DOMAIN = 'image.tmdb.org'
 
 /**
  * 用户填的域名归一。
