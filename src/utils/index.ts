@@ -149,6 +149,35 @@ export function formatPlaytime(sec: number): string {
   return hours < 10 ? `${hours.toFixed(1)} 小时` : `${Math.round(hours)} 小时`
 }
 
+/**
+ * 受保护字段的界面说法（「改过的字段」那一格用它）。
+ *
+ * 键要和 `electron/kinds/video/db.ts` 的 `PROTECTED_FIELDS` 一一对应 ——
+ * 少一个，那个字段在面板里就显示成裸列名（`douban_rating`）。自检里有一条
+ * 双向盯着这件事。
+ *
+ * 放在 utils 而不是 stores/video.ts：自检载不进 pinia（`defineStore` 要活的
+ * Vue 应用），而这张表是纯数据，跟 store 没关系。放在 store 里的话自检就
+ * 验不到「名单和文案对不对得上」，而那正是最容易漏的一处。
+ */
+export const PROTECTED_FIELD_LABEL: Record<string, string> = {
+  name_zh: '片名',
+  name_en: '原名',
+  summary: '简介',
+  description: '详细说明',
+  category: '分类',
+  tags: '标签',
+  official_url: '官网',
+  video_type: '类型',
+  year: '年份',
+  end_year: '完结年份',
+  rating: 'TMDB 评分',
+  tmdb_id: 'TMDB id',
+  imdb_id: 'IMDb id',
+  douban_id: '豆瓣 id',
+  douban_rating: '豆瓣评分'
+}
+
 /** 游戏卡片 / 详情页打头的名字。中文名优先，都没有就退回主程序文件名 */
 export function gameTitle(g: { name_zh: string; name_en: string; file_name: string }): string {
   return g.name_zh || g.name_en || g.file_name.replace(/\.exe$/i, '')

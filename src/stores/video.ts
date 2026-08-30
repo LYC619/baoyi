@@ -31,6 +31,7 @@ export const VIDEO_TYPE_LABEL: Record<VideoType, string> = {
   series: '剧集'
 }
 
+
 const EMPTY_COUNTS: VideoCounts = {
   all: 0,
   archived: 0,
@@ -122,6 +123,16 @@ export const useVideoStore = defineStore('video', () => {
     return updated
   }
 
+  /**
+   * 撤掉字段保护，让它们下次重扫时重新跟着刮削走。传空数组 = 全撤。
+   *
+   * 不刷新计数：这个动作不改任何值，只改「下次重扫要不要写这一栏」，
+   * 侧栏那些数字一个都不会变。
+   */
+  async function restoreScraped(id: string, fields: string[] = []): Promise<VideoItem | null> {
+    return merge(await window.baoyi.video.restoreScraped(id, plain(fields)))
+  }
+
   async function remove(id: string): Promise<void> {
     await window.baoyi.video.remove(id)
     items.value = items.value.filter((x) => x.id !== id)
@@ -176,6 +187,7 @@ export const useVideoStore = defineStore('video', () => {
     select,
     merge,
     update,
+    restoreScraped,
     remove,
     fillPosters
   }

@@ -103,7 +103,15 @@ export const VIDEO_META_SQL = `
     -- 这一列来自搜索服务商的摘要（见 douban.ts）—— 两个数的来源、时效、
     -- 可信度都不一样。合并成一列之后界面上就只剩一个不知道打哪儿来的数字，
     -- 而中文用户看影视评分时,「这是豆瓣的分」本身就是信息。
-    douban_rating REAL NOT NULL DEFAULT 0
+    douban_rating REAL NOT NULL DEFAULT 0,
+
+    -- 用户在界面上改过哪些字段，JSON 字符串数组，如 '["category","name_zh"]'。
+    -- 重扫时这些字段跳过不写，见 db.ts 的 PROTECTED_* 两张名单。
+    --
+    -- 存字段名而不是存「改过没有」一个布尔：用户只把分类从「欧美」改成「科幻」
+    -- 的时候，新刮到的简介照样该写进去。一个布尔会把整行都锁住，
+    -- 于是「我纠正了一个字段」变成「这条从此不再更新」。
+    user_edited TEXT NOT NULL DEFAULT '[]'
   );
 `
 
@@ -196,6 +204,7 @@ export const VIDEO_VIEW_SQL = `
     COALESCE(m.imdb_id, '') AS imdb_id,
     COALESCE(m.douban_id, '') AS douban_id,
     COALESCE(m.douban_rating, 0) AS douban_rating,
+    COALESCE(m.user_edited, '[]') AS user_edited,
     (SELECT COUNT(*) FROM episode e WHERE e.resource_id = r.id) AS episode_total,
     (SELECT COUNT(*) FROM episode e WHERE e.resource_id = r.id AND e.watch_status = 'watched')
       AS episode_watched,
@@ -221,14 +230,27 @@ export const VIDEO_INDEXES_SQL = `
 `
 
 /**
- * 补 0.7 开发途中加的两列。见文件头「migrate 只做补列」。
+ * 补 0.7 开发途中加的三列。见文件头「migrate 只做补列」。
  *
- * `from` 收下但不用：这两列的闸门是「列在不在」而不是版本号，理由同上。
+ * `from` 收下但不用：这几列的闸门是「列在不在」而不是版本号，理由同上。
  * 幂等，每次启动都跑，列已经在就是空操作。
  *
  * 视图必须在这之后建 —— `initSchema` 已经是这个顺序（migrate → view），
- * 而 `VIDEO_VIEW_SQL` 里 SELECT 了这两列：老库上如果先建视图，
+ * 而 `VIDEO_VIEW_SQL` 里 SELECT 了这几列：老库上如果先建视图，
  * 会当场报 no such column，然后后面的语句连着 migrate 全都不跑。
+ *
+ * ## 补列之后还要把视图撤掉
+ *
+ * `VIDEO_VIEW_SQL` 是 `CREATE VIEW IF NOT EXISTS`，对已经有 video 视图的库
+ * 是**空操作** —— 加列不会让视图多出这一列。0.7 开发版装过的库于是会停在
+ * 「表里有 user_edited、视图里没有」，而 `getVideo` 是从视图读的：
+ * 拿到的每条 user_edited 都是 undefined，界面上所有保护标记消失，
+ * 重扫照旧把用户改过的字段覆盖掉 —— 这一步等于没做，且不报任何错。
+ *
+ * 所以列不齐时把视图撤掉，让 initSchema 紧接着的那步照新定义重建。
+ * 视图里没有数据，drop 掉是无损的。用「视图缺列」而不是「刚补过列」作判断，
+ * 是因为前者对 0.7 开发版的库也成立 —— 那些库的列早就补上了，
+ * 缺的恰恰只有视图。
  */
 export function migrateVideo(d: SqlDb, from: number): void {
   void from
@@ -239,6 +261,13 @@ export function migrateVideo(d: SqlDb, from: number): void {
   }
   if (!cols.has('douban_rating')) {
     d.exec('ALTER TABLE video_meta ADD COLUMN douban_rating REAL NOT NULL DEFAULT 0')
+  }
+  if (!cols.has('user_edited')) {
+    d.exec(`ALTER TABLE video_meta ADD COLUMN user_edited TEXT NOT NULL DEFAULT '[]'`)
+  }
+
+  if (objectType(d, 'video') === 'view' && !columnsOf(d, 'video').has('user_edited')) {
+    d.exec('DROP VIEW video')
   }
 }
 

@@ -103,6 +103,8 @@ const api: BaoyiApi = {
     get: (id: string) => ipcRenderer.invoke('video:get', id),
     update: (id: string, patch: Partial<VideoItem>) =>
       ipcRenderer.invoke('video:update', id, plain(patch)),
+    restoreScraped: (id: string, fields: string[] = []) =>
+      ipcRenderer.invoke('video:restore-scraped', id, plain(fields)),
     remove: (id: string) => ipcRenderer.invoke('video:remove', id),
     counts: () => ipcRenderer.invoke('video:counts'),
     revealInFolder: (id: string) => ipcRenderer.invoke('video:reveal', id),

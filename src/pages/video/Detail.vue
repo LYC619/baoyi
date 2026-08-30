@@ -40,6 +40,7 @@ import {
   formatPosition,
   formatRelative,
   posterUrl,
+  PROTECTED_FIELD_LABEL,
   videoTitle
 } from '@/utils'
 
@@ -175,6 +176,32 @@ function commitTags(raw: string): void {
 function toggleArchive(): void {
   if (!item.value) return
   void save({ is_archived: !item.value.is_archived })
+}
+
+/* ------------------------- 改过的字段 ------------------------- */
+
+/**
+ * 用户改过、因而重扫时会被保留的字段。
+ *
+ * 兜底成裸字段名而不是丢掉：真漏了标签的时候，显示 `douban_rating` 也比
+ * 那一行凭空消失好 —— 后者会让用户以为保护没生效。自检里有一条盯着别漏。
+ */
+const editedFields = computed(() =>
+  (item.value?.user_edited ?? []).map((field) => ({
+    field,
+    label: PROTECTED_FIELD_LABEL[field] ?? field
+  }))
+)
+
+/** 传空数组 = 全撤。不改值，只改「下次重扫要不要写这一栏」 */
+async function unprotect(fields: string[]): Promise<void> {
+  if (!item.value) return
+  try {
+    const updated = await store.restoreScraped(item.value.id, fields)
+    if (updated) item.value = updated
+  } catch (err) {
+    error(`取消保留失败：${errorMessage(err)}`)
+  }
 }
 
 /* ---------------------------- 季集表 ---------------------------- */
@@ -610,6 +637,39 @@ function copyPath(path: string): void {
               placeholder="用「、」隔开，最多 8 个"
               @commit="commitTags"
             />
+          </section>
+
+          <!--
+            改过的字段。只在真有改动时出现 —— 没改过任何东西的条目上，
+            这一格是纯噪音。
+
+            文案说的是「重扫时保留」而不是「已锁定」：用户要知道的是
+            这个标记在什么时候起作用，而它只在重扫那一刻起作用。
+          -->
+          <section v-if="editedFields.length > 0" class="panel">
+            <h2 class="sec-title">改过的字段</h2>
+            <p class="panel__note">
+              重扫时这几栏保持你改的值，不会被刮削覆盖。
+            </p>
+            <ul class="edited">
+              <li v-for="f in editedFields" :key="f.field" class="edited__row">
+                <span class="edited__name">{{ f.label }}</span>
+                <button
+                  class="edited__undo"
+                  title="以后这一栏听刮削的（下次重扫才会变，不是现在）"
+                  @click="unprotect([f.field])"
+                >
+                  取消保留
+                </button>
+              </li>
+            </ul>
+            <button
+              v-if="editedFields.length > 1"
+              class="edited__all"
+              @click="unprotect([])"
+            >
+              全部取消保留
+            </button>
           </section>
 
           <section class="panel">
@@ -1141,5 +1201,52 @@ function copyPath(path: string): void {
 }
 .link:hover {
   color: var(--accent);
+}
+
+/* --------------------------- 改过的字段 --------------------------- */
+.panel__note {
+  margin: -2px 0 10px;
+  font-size: var(--fs-tag);
+  color: var(--text-faint);
+  line-height: 1.6;
+}
+
+.edited {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.edited__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: var(--fs-tag);
+}
+
+.edited__name {
+  color: var(--text-sub);
+}
+
+.edited__undo,
+.edited__all {
+  font-size: var(--fs-tag);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.edited__undo:hover,
+.edited__all:hover {
+  color: var(--accent);
+}
+
+.edited__all {
+  margin-top: 8px;
+  text-align: left;
 }
 </style>

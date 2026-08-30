@@ -98,6 +98,58 @@ export const WATCH_STATUSES: WatchStatus[] = ['unwatched', 'watching', 'watched'
 export const VIDEO_TYPES: VideoType[] = ['movie', 'series']
 
 /**
+ * 用户改过就不再被重扫覆盖的字段，按落在哪张表分开。
+ *
+ * ## 为什么是这一份名单，而不是「所有能改的字段」
+ *
+ * 名单的边界是**「这个值是猜的，还是从文件上读出来的」**：
+ *
+ * - 猜的（在名单里）：片名、简介、分类、标签、年份、类型、几个刮削 id。
+ *   用户改它们**正是因为刮错了** —— agent 把《三体》的分类给成「欧美」、
+ *   把发布组的烂译名当片名。重扫再猜一次，多半还是同一个错。
+ * - 读出来的（不在名单里）：分辨率、编码、片源、发布组、时长、音轨、字幕轨、
+ *   分卷。这些来自 mediainfo 和文件名，**换了个 1080p 的版本就该跟着变**。
+ *   把它们锁住的后果是：用户换了片源，详情页还写着 720p，而那一栏正是
+ *   他用来分辨手上是哪个版本的。
+ *
+ * 所以「用户改过」在这两类上的含义不一样：一类是「我知道得比刮削准」，
+ * 另一类是「我手上的文件变了」。只有前者需要保护。
+ *
+ * `rating` / `douban_rating` 在名单里：它们确实是外部事实，但重扫时刮回来的
+ * 是**同一个来源的同一个数**，覆盖不产生新信息；而用户改过评分说明他不认
+ * 那个数。`tmdb_id` / `imdb_id` / `douban_id` 更要保护 —— 用户改这个是在说
+ * 「你匹配错片了」，不保护的话下次重扫按错的 id 又把整条刮一遍。
+ *
+ * `notes` / `is_archived` / `watch_status` / `position_sec` 不在名单里，
+ * 因为 `insertVideo` 本来就不写它们（见那个函数的注释），不需要这一层。
+ */
+export const PROTECTED_RESOURCE_FIELDS = [
+  'name_zh', 'name_en', 'summary', 'description', 'category', 'tags', 'official_url'
+] as const
+export const PROTECTED_META_FIELDS = [
+  'video_type', 'year', 'end_year', 'rating',
+  'tmdb_id', 'imdb_id', 'douban_id', 'douban_rating'
+] as const
+
+/** 两张名单合起来。界面上「这个字段被保护着」的判断用它 */
+export const PROTECTED_FIELDS: readonly string[] = [
+  ...PROTECTED_RESOURCE_FIELDS,
+  ...PROTECTED_META_FIELDS
+]
+
+/** 解析 user_edited 那一列。脏数据一律当「没改过」，不让它拦住重扫 */
+export function parseUserEdited(raw: unknown): string[] {
+  if (typeof raw !== 'string' || raw === '') return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((f): f is string => typeof f === 'string' && PROTECTED_FIELDS.includes(f))
+  } catch {
+    return []
+  }
+}
+
+/**
  * 以 path 作唯一键：同一部片反复识别是更新，不是再开一条。
  *
  * 更新时只覆盖识别/刮削认出来的字段。**观看状态和播放位置一律不动** ——
@@ -114,39 +166,55 @@ export const VIDEO_TYPES: VideoType[] = ['movie', 'series']
  * 补进新发现的集、更新已有集的文件路径和时长，但不动那一集的
  * watch_status / position_sec / watched_at。用户新下了后半季，
  * 前半季看到哪儿了得保住。
+ *
+ * **用户在界面上改过的字段也跳过**（`user_edited` 那一列，见
+ * `PROTECTED_RESOURCE_FIELDS` / `PROTECTED_META_FIELDS`）。跳的是字段不是整行：
+ * 用户只改过分类的话，新刮到的简介照样写进去。没有这一层的话，用户把分类从
+ * 「欧美」改成「科幻」、把烂译名改成通行叫法，下一次重扫全退回 agent 说的
+ * 那个值 —— 而重扫可能只是因为他往那个目录里加了一集。
  */
 export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
   const now = Date.now()
-  const common = [
-    p.name_zh,
-    p.name_en,
-    p.summary,
-    p.description,
-    p.category,
-    JSON.stringify(p.tags),
-    p.official_url,
-    p.source_dir,
-    path.basename(p.path),
-    p.file_size
+
+  // 字段名和值配对着走，因为重扫时要按 user_edited 把其中几对摘掉。
+  // 摘不了「第 3 个问号对应 category」这种写法 —— 那是上一版的形状，
+  // 摘掉一个值就得同时数着改 SQL 里的问号，改错一个是静默写错列
+  const resourceFields: Array<[string, string | number]> = [
+    ['name_zh', p.name_zh],
+    ['name_en', p.name_en],
+    ['summary', p.summary],
+    ['description', p.description],
+    ['category', p.category],
+    ['tags', JSON.stringify(p.tags)],
+    ['official_url', p.official_url]
+  ]
+  // 这三个不属于「刮出来的」，是文件本身的事实，永远跟着重扫走
+  const resourceAlways: Array<[string, string | number]> = [
+    ['source_dir', p.source_dir],
+    ['file_name', path.basename(p.path)],
+    ['file_size', p.file_size]
   ]
 
-  const metaCols = [
-    p.video_type,
-    p.year,
-    p.end_year,
-    p.rating,
-    p.duration_sec,
-    p.resolution,
-    p.video_codec,
-    p.source,
-    p.release_group,
-    JSON.stringify(p.audio_tracks),
-    JSON.stringify(p.subtitle_tracks),
-    JSON.stringify(p.parts),
-    p.tmdb_id,
-    p.imdb_id,
-    p.douban_id,
-    p.douban_rating
+  const metaFields: Array<[string, string | number]> = [
+    ['video_type', p.video_type],
+    ['year', p.year],
+    ['end_year', p.end_year],
+    ['rating', p.rating],
+    ['tmdb_id', p.tmdb_id],
+    ['imdb_id', p.imdb_id],
+    ['douban_id', p.douban_id],
+    ['douban_rating', p.douban_rating]
+  ]
+  // 本地事实那一组，不受保护，见 PROTECTED_META_FIELDS 的注释
+  const metaAlways: Array<[string, string | number]> = [
+    ['duration_sec', p.duration_sec],
+    ['resolution', p.resolution],
+    ['video_codec', p.video_codec],
+    ['source', p.source],
+    ['release_group', p.release_group],
+    ['audio_tracks', JSON.stringify(p.audio_tracks)],
+    ['subtitle_tracks', JSON.stringify(p.subtitle_tracks)],
+    ['parts', JSON.stringify(p.parts)]
   ]
 
   const existing = d.prepare('SELECT id FROM resource WHERE path = ?').get(p.path) as
@@ -159,45 +227,70 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
   if (existing) {
     id = existing.id
     created = false
+
+    // meta 行可能不存在（手工改库、或早于 video_meta 建表的条目），补一行再写。
+    // 提到读 user_edited 之前 —— 没这一行的话下面那句 SELECT 拿不到东西，
+    // 保护名单会变成空的，等于这一层没生效
+    d.prepare('INSERT OR IGNORE INTO video_meta (resource_id) VALUES (?)').run(id)
+    const edited = new Set(
+      parseUserEdited(
+        (
+          d.prepare('SELECT user_edited FROM video_meta WHERE resource_id = ?').get(id) as
+            | { user_edited?: unknown }
+            | undefined
+        )?.user_edited
+      )
+    )
+
+    const resourceSets = [
+      ...resourceFields.filter(([f]) => !edited.has(f)),
+      ...resourceAlways
+    ]
     d.prepare(
-      `UPDATE resource SET
-         name_zh = ?, name_en = ?, summary = ?, description = ?, category = ?, tags = ?,
-         official_url = ?, source_dir = ?, file_name = ?, file_size = ?,
+      `UPDATE resource SET ${resourceSets.map(([f]) => `${f} = ?`).join(', ')},
          ai_status = 'done', updated_at = ?
        WHERE id = ?`
-    ).run(...common, now, id)
+    ).run(...resourceSets.map(([, v]) => v), now, id)
 
-    // meta 行可能不存在（手工改库、或早于 video_meta 建表的条目），补一行再写
-    d.prepare('INSERT OR IGNORE INTO video_meta (resource_id) VALUES (?)').run(id)
+    const metaSets = [...metaFields.filter(([f]) => !edited.has(f)), ...metaAlways]
     d.prepare(
-      `UPDATE video_meta SET
-         video_type = ?, year = ?, end_year = ?, rating = ?, duration_sec = ?,
-         resolution = ?, video_codec = ?, source = ?, release_group = ?,
-         audio_tracks = ?, subtitle_tracks = ?, parts = ?, tmdb_id = ?, imdb_id = ?,
-         douban_id = ?, douban_rating = ?,
+      `UPDATE video_meta SET ${metaSets.map(([f]) => `${f} = ?`).join(', ')},
          linked_files = CASE WHEN linked_files IN ('[]', '') THEN ? ELSE linked_files END,
          poster_path = CASE WHEN poster_path = '' THEN ? ELSE poster_path END,
          fanart_path = CASE WHEN fanart_path = '' THEN ? ELSE fanart_path END
        WHERE resource_id = ?`
-    ).run(...metaCols, JSON.stringify(p.linked_files), p.poster_path, p.fanart_path, id)
+    ).run(
+      ...metaSets.map(([, v]) => v),
+      JSON.stringify(p.linked_files),
+      p.poster_path,
+      p.fanart_path,
+      id
+    )
   } else {
     id = randomUUID()
     created = true
+    // 新条目：还没人改过任何字段，两组全写进去
+    const rCols = [...resourceFields, ...resourceAlways]
     d.prepare(
       `INSERT INTO resource
-         (id, kind, created_at, updated_at, path, icon_path,
-          name_zh, name_en, summary, description, category, tags,
-          official_url, source_dir, file_name, file_size, ai_status)
-       VALUES (?, 'video', ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'done')`
-    ).run(id, now, now, p.path, ...common)
+         (id, kind, created_at, updated_at, path, icon_path, ai_status,
+          ${rCols.map(([f]) => f).join(', ')})
+       VALUES (?, 'video', ?, ?, ?, '', 'done', ${rCols.map(() => '?').join(', ')})`
+    ).run(id, now, now, p.path, ...rCols.map(([, v]) => v))
+
+    const mCols = [...metaFields, ...metaAlways]
     d.prepare(
       `INSERT INTO video_meta
-         (resource_id, video_type, year, end_year, rating, duration_sec,
-          resolution, video_codec, source, release_group,
-          audio_tracks, subtitle_tracks, parts, tmdb_id, imdb_id,
-          douban_id, douban_rating, linked_files, poster_path, fanart_path)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, ...metaCols, JSON.stringify(p.linked_files), p.poster_path, p.fanart_path)
+         (resource_id, linked_files, poster_path, fanart_path,
+          ${mCols.map(([f]) => f).join(', ')})
+       VALUES (?, ?, ?, ?, ${mCols.map(() => '?').join(', ')})`
+    ).run(
+      id,
+      JSON.stringify(p.linked_files),
+      p.poster_path,
+      p.fanart_path,
+      ...mCols.map(([, v]) => v)
+    )
   }
 
   const episodesAdded = upsertEpisodes(d, id, p.episodes)
@@ -349,6 +442,7 @@ function rowToVideo(row: Row): VideoItem {
     imdb_id: String(row.imdb_id ?? ''),
     douban_id: String(row.douban_id ?? ''),
     douban_rating: Number(row.douban_rating) || 0,
+    user_edited: parseUserEdited(row.user_edited),
     episode_total: Number(row.episode_total) || 0,
     episode_watched: Number(row.episode_watched) || 0,
     episode_present: Number(row.episode_present) || 0
@@ -535,11 +629,11 @@ export function videoCounts(d: SqlDb): VideoCounts {
  *
  * 三个 episode_* 刻意不在名单里 —— 它们是视图现算的，写不进去。
  */
-const VIDEO_RESOURCE_COLUMNS = new Set([
+export const VIDEO_RESOURCE_COLUMNS = new Set([
   'name_zh', 'name_en', 'summary', 'description', 'category', 'tags',
   'official_url', 'notes', 'is_archived'
 ])
-const VIDEO_META_COLUMNS = new Set([
+export const VIDEO_META_COLUMNS = new Set([
   'video_type', 'poster_path', 'fanart_path', 'year', 'end_year', 'rating',
   'watch_status', 'position_sec', 'duration_sec', 'last_watched_at',
   'resolution', 'video_codec', 'source', 'release_group',
@@ -552,6 +646,65 @@ function toColumn(key: string, value: unknown): string | number {
   if (Array.isArray(value)) return JSON.stringify(value)
   if (typeof value === 'number') return value
   return String(value ?? '')
+}
+
+/**
+ * 把这次改动里受保护的字段记进 `user_edited`。
+ *
+ * 只加不减 —— 撤保护走 `restoreScrapedFields`，是用户显式点的另一个动作。
+ *
+ * `poster_path` 不在保护名单里，所以经由 `setPoster` / `clearPoster` 走到这里的
+ * 改动不会留下标记。那两条路本来就有自己的保护（`CASE WHEN poster_path = ''`），
+ * 不需要在这儿重复一遍。
+ */
+function markUserEdited(d: SqlDb, id: string, changedFields: string[]): void {
+  const mine = changedFields.filter((f) => PROTECTED_FIELDS.includes(f))
+  if (mine.length === 0) return
+
+  d.prepare('INSERT OR IGNORE INTO video_meta (resource_id) VALUES (?)').run(id)
+  const before = parseUserEdited(
+    (
+      d.prepare('SELECT user_edited FROM video_meta WHERE resource_id = ?').get(id) as
+        | { user_edited?: unknown }
+        | undefined
+    )?.user_edited
+  )
+  const merged = [...new Set([...before, ...mine])]
+  if (merged.length === before.length) return
+  d.prepare('UPDATE video_meta SET user_edited = ? WHERE resource_id = ?').run(
+    JSON.stringify(merged),
+    id
+  )
+}
+
+/**
+ * 撤掉几个字段的保护，让它们下次重扫时重新跟着刮削走。
+ *
+ * **它不把值改回去。** 刮削原来那个值没有存第二份 —— 用户改的时候就把它
+ * 覆盖了。所以这个动作的真实含义是「以后这一栏听刮削的」，界面上的文案
+ * 必须这么写：叫「恢复成刮削值」会让用户以为点一下就变回去了，
+ * 而实际要等下一次重扫才变，中间那段时间他会以为功能坏了。
+ *
+ * 传空数组 = 全撤。
+ */
+export function restoreScrapedFields(d: SqlDb, id: string, fields: string[]): VideoItem | null {
+  const before = parseUserEdited(
+    (
+      d.prepare('SELECT user_edited FROM video_meta WHERE resource_id = ?').get(id) as
+        | { user_edited?: unknown }
+        | undefined
+    )?.user_edited
+  )
+  const drop = fields.length === 0 ? before : fields
+  const next = before.filter((f) => !drop.includes(f))
+  if (next.length !== before.length) {
+    d.prepare('UPDATE video_meta SET user_edited = ? WHERE resource_id = ?').run(
+      JSON.stringify(next),
+      id
+    )
+    d.prepare('UPDATE resource SET updated_at = ? WHERE id = ?').run(Date.now(), id)
+  }
+  return getVideo(d, id)
 }
 
 export function updateVideo(d: SqlDb, id: string, patch: Partial<VideoItem>): VideoItem | null {
@@ -573,6 +726,8 @@ export function updateVideo(d: SqlDb, id: string, patch: Partial<VideoItem>): Vi
       id
     )
   }
+
+  markUserEdited(d, id, entries.map(([k]) => k))
 
   // updated_at 只在总表上，改哪张表都要动它
   d.prepare('UPDATE resource SET updated_at = ? WHERE id = ?').run(Date.now(), id)

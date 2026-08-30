@@ -1,9 +1,15 @@
 /**
- * 真机验 v0.7 Step 6：海报墙渲染、`baoyi://poster/` 那条协议、季集列表、观看状态。
+ * 真机验 v0.7 Step 6 / 6b：海报墙渲染、`baoyi://poster/` 那条协议、季集列表、
+ * 观看状态，以及「改过的字段」那块面板。
  *
  * 用法（先 npm run build，profile 里先铺好数据）：
  *   npx electron . --user-data-dir=<临时 profile> --remote-debugging-port=9222
  *   node --experimental-strip-types scripts/verify-video-cdp.ts <临时 profile>
+ *
+ * **这一路不可重跑。** 【五】把 11 集标成看完、【六】删掉 vid-0001 的海报、
+ * 【七】改了 vid-0006 两栏又撤掉保护 —— 都是真写库。第二遍跑的时候起点全不对，
+ * 会红上一堆，而那些红是上一遍自己留下的，不是回归。要重跑就删掉整个 profile
+ * 重铺：空跑一次应用建表 → verify-video-seed → 重启应用 → 这个脚本。
  *
  * **为什么这一路非真机不可。** 五道闸门验的全是纯逻辑。它们看不见：
  * `<img src="baoyi://poster/...">` 到底解出来没有（协议注册、白名单目录、
@@ -113,6 +119,7 @@ async function main(): Promise<void> {
      await probe('get', () => window.baoyi.video.get('vid-0001'))
      await probe('episodes', () => window.baoyi.video.episodes('vid-0004'))
      await probe('readiness', () => window.baoyi.video.readiness())
+     await probe('restore-scraped', () => window.baoyi.video.restoreScraped('vid-0003', ['summary']))
      return out`
   )
   for (const [name, val] of Object.entries(ipc)) {
@@ -284,7 +291,108 @@ async function main(): Promise<void> {
     `posters/ 还剩 ${leftover.join(', ') || '空'}`
   )
 
-  console.log('\n【七】统计面板认得影视')
+  console.log('\n【七】改过的字段：面板渲染 + 取消保留')
+  // 自检验的是「重扫时值还在不在」，那是纯逻辑。这里验的是它在界面上露不露面：
+  // user_edited 要能过一趟 IPC（视图里少这一列的话这儿就是空数组，而库结构看着是对的）、
+  // 字段名要换成中文文案、点「取消保留」那一行要当场消失。
+  await goto(ws, '#/video/vid-0006')
+
+  const editedBefore = await evalJs(
+    ws,
+    `for (let i = 0; i < 40; i++) {
+       if (document.querySelector('.hero')) break
+       await new Promise((r) => setTimeout(r, 200))
+     }
+     const v = await window.baoyi.video.get('vid-0006')
+     return { marks: v.user_edited, panel: !!document.querySelector('.edited') }`
+  )
+  assert(
+    '没改过任何东西时名单是空的',
+    Array.isArray(editedBefore.marks) && editedBefore.marks.length === 0,
+    JSON.stringify(editedBefore.marks)
+  )
+  assert('没改过时面板不出现', editedBefore.panel === false)
+
+  // 改两栏：一栏在 resource 上（分类），一栏在 video_meta 上（年份）。
+  // 两张表各走一条 UPDATE，只验一张的话另一张漏了看不出来
+  await evalJs(
+    ws,
+    `await window.baoyi.video.update('vid-0006', { category: '华语', year: 2016 })
+     return true`
+  )
+  await goto(ws, '#/video/vid-0006')
+
+  const editedAfter = await evalJs(
+    ws,
+    `for (let i = 0; i < 40; i++) {
+       if (document.querySelector('.edited')) break
+       await new Promise((r) => setTimeout(r, 200))
+     }
+     const v = await window.baoyi.video.get('vid-0006')
+     return {
+       marks: v.user_edited,
+       rows: [...document.querySelectorAll('.edited__name')].map((n) => n.textContent.trim()),
+       undos: document.querySelectorAll('.edited__undo').length,
+       hasAll: !!document.querySelector('.edited__all')
+     }`
+  )
+  console.log('  改过的字段:', JSON.stringify(editedAfter))
+
+  assert(
+    '两栏都记上了',
+    ['category', 'year'].every((f) => editedAfter.marks.includes(f)),
+    JSON.stringify(editedAfter.marks)
+  )
+  assert('面板列出两行', editedAfter.undos === 2, `拿到 ${editedAfter.undos}`)
+  assert(
+    '显示的是中文文案，不是字段名',
+    editedAfter.rows.includes('分类') && editedAfter.rows.includes('年份'),
+    JSON.stringify(editedAfter.rows)
+  )
+  assert('两行以上才给「全部取消保留」', editedAfter.hasAll === true)
+
+  // 点真按钮，不走 IPC —— 要验的就是那个 @click 接对了
+  const afterUndo = await evalJs(
+    ws,
+    `document.querySelector('.edited__undo').click()
+     for (let i = 0; i < 40; i++) {
+       if (document.querySelectorAll('.edited__undo').length < 2) break
+       await new Promise((r) => setTimeout(r, 200))
+     }
+     const v = await window.baoyi.video.get('vid-0006')
+     return {
+       marks: v.user_edited,
+       undos: document.querySelectorAll('.edited__undo').length,
+       hasAll: !!document.querySelector('.edited__all'),
+       category: v.category, year: v.year
+     }`
+  )
+  console.log('  撤一行之后:', JSON.stringify(afterUndo))
+
+  assert('点一下少一行', afterUndo.undos === 1, `拿到 ${afterUndo.undos}`)
+  assert('名单里也少一个', afterUndo.marks.length === 1, JSON.stringify(afterUndo.marks))
+  assert('只剩一行时收起「全部取消保留」', afterUndo.hasAll === false)
+  // 撤保护 ≠ 把值改回去。刮削那个值没存第二份，撤掉只是「以后听刮削的」。
+  // 这一条要是反了，用户点一下当场丢掉自己改的内容
+  assert(
+    '撤保护没有当场改值',
+    afterUndo.category === '华语' && afterUndo.year === 2016,
+    `category=${afterUndo.category} year=${afterUndo.year}`
+  )
+
+  const afterUndoAll = await evalJs(
+    ws,
+    `await window.baoyi.video.restoreScraped('vid-0006', [])
+     const v = await window.baoyi.video.get('vid-0006')
+     return { marks: v.user_edited }`
+  )
+  assert(
+    '传空数组 = 全撤',
+    afterUndoAll.marks.length === 0,
+    JSON.stringify(afterUndoAll.marks)
+  )
+
+  console.log('\n【八】统计面板认得影视')
   await goto(ws, '#/settings?tab=data')
   const stats = await evalJs(
     ws,
@@ -304,7 +412,7 @@ async function main(): Promise<void> {
   assert('stats.videos 是 7（含归档）', stats.stats.videos === 7, `拿到 ${stats.stats.videos}`)
   assert('stats.episodes 是 16', stats.stats.episodes === 16, `拿到 ${stats.stats.episodes}`)
 
-  console.log('\n【八】库里的实况 —— 不信应用自己的汇报')
+  console.log('\n【九】库里的实况 —— 不信应用自己的汇报')
   const db = new DatabaseSync(path.join(profile, 'baoyi.db'))
   const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n
   assert('episode 表 16 行', n(`SELECT COUNT(*) AS n FROM episode`) === 16)
@@ -316,6 +424,13 @@ async function main(): Promise<void> {
   assert(
     '缺文件的 5 集还是 unwatched —— 没被整季标记连带标上',
     n(`SELECT COUNT(*) AS n FROM episode WHERE path = '' AND watch_status = 'watched'`) === 0
+  )
+  // 【七】把 vid-0006 的保护全撤了，库里该是空数组而不是 NULL：
+  // 视图那边 COALESCE 兜着，直接读表能看出这一列到底写没写
+  assert(
+    '撤完之后库里是 []，不是 NULL',
+    (db.prepare(`SELECT user_edited FROM video_meta WHERE resource_id = 'vid-0006'`).get() as any)
+      ?.user_edited === '[]'
   )
   db.close()
 

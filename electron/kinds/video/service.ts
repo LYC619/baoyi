@@ -37,6 +37,7 @@ import {
   nextEpisode,
   syncSeriesStatus,
   updateEpisode,
+  restoreScrapedFields,
   updateVideo,
   videoCounts,
   videosUnder
@@ -79,6 +80,14 @@ export const nextVideoEpisode = (id: string, season: number, episode: number): E
 
 export function updateVideoItem(id: string, patch: Partial<VideoItem>): VideoItem | null {
   return updateVideo(getDb(), id, patch)
+}
+
+/**
+ * 撤掉几个字段的「用户改过」标记，让它们下次重扫时重新跟着刮削走。
+ * 传空数组 = 全撤。不改现在的值，见 `db.ts` 的 `restoreScrapedFields`。
+ */
+export function restoreVideoScraped(id: string, fields: string[] = []): VideoItem | null {
+  return restoreScrapedFields(getDb(), id, fields)
 }
 
 /**

@@ -70,6 +70,7 @@ import {
   parseVersion,
   plain,
   posterUrl,
+  PROTECTED_FIELD_LABEL,
   searchCalls,
   subtitleName,
   versionOf,
@@ -80,6 +81,7 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   SCHEMA_VERSION,
   TABLES_SQL,
+  columnsOf,
   initSchema,
   objectType,
   schemaVersion
@@ -177,10 +179,17 @@ import {
   listEpisodes,
   listVideos,
   nextEpisode,
+  parseUserEdited,
+  PROTECTED_FIELDS,
+  PROTECTED_META_FIELDS,
+  PROTECTED_RESOURCE_FIELDS,
+  restoreScrapedFields,
   syncSeriesStatus,
   updateEpisode,
   updateVideo,
   videoCounts,
+  VIDEO_META_COLUMNS,
+  VIDEO_RESOURCE_COLUMNS,
   type VideoPayload
 } from '../electron/kinds/video/db.ts'
 import {
@@ -2201,6 +2210,7 @@ async function main(): Promise<void> {
   await videoDoubanSection()
   await videoIdentifySection()
   await videoPosterSection()
+  await videoUserEditedSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -7112,6 +7122,287 @@ async function videoPosterSection(): Promise<void> {
     assert.equal(formatDuration(42 * 60), '42 分钟')
     assert.equal(formatDuration(9300), '2 小时 35 分')
     assert.equal(formatDuration(7200), '2 小时', '整点不该拖一个「0 分」')
+  })
+}
+
+/* ============== 重扫保住用户改过的字段 · v0.7 Step 6b ============== */
+
+/**
+ * `user_edited` 那一层。
+ *
+ * 这一段要挡住的三类事，每一类都是静默的：
+ *
+ * 1. **保护没生效** —— 重扫照旧覆盖，用户改的东西无声退回 agent 说的那个值。
+ *    他下次打开才发现，而那时已经无从知道是哪一步弄丢的。
+ * 2. **保护过头** —— 把整行锁住，或者把本地事实（分辨率、时长）也锁住。
+ *    前者让「我纠正了一个字段」变成「这条从此不再更新」；后者更隐蔽：
+ *    用户换了 4K 片源，详情页还写着 720p，而那一栏正是他用来分辨版本的。
+ * 3. **视图缺列** —— 表里补上了 `user_edited`，视图没跟着重建。
+ *    `getVideo` 从视图读，于是每条都是空名单，界面上标记全消失，
+ *    重扫照旧覆盖 —— 表现和第 1 类一模一样，但原因在迁移里。
+ *
+ * 所以这里的正反两面都要验：改过的字段留住，**没改过的字段照旧被刷新**。
+ * 只验前一半的话，一个「重扫什么都不写」的实现也能全绿。
+ */
+async function videoUserEditedSection(): Promise<void> {
+  console.log('\n视频 · 重扫保住用户改过的字段')
+
+  const { DatabaseSync } = await import('node:sqlite')
+
+  const freshDb = (): InstanceType<typeof DatabaseSync> => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    return d
+  }
+
+  const payload = (over: Partial<VideoPayload> = {}): VideoPayload => ({
+    path: 'D:\\Movies\\Dune.2024.mkv',
+    video_type: 'movie',
+    name_zh: '沙丘：第二部分',
+    name_en: 'Dune: Part Two',
+    summary: '厄崔迪家族的复仇之路',
+    description: '',
+    category: '欧美',
+    tags: ['科幻', '冒险'],
+    official_url: '',
+    source_dir: 'D:\\Movies',
+    file_size: 78_400_000_000,
+    year: 2024,
+    end_year: 0,
+    rating: 8.7,
+    duration_sec: 9960,
+    resolution: '2160p',
+    video_codec: 'HEVC',
+    source: 'WEB-DL',
+    release_group: '',
+    audio_tracks: [],
+    subtitle_tracks: [],
+    parts: [],
+    linked_files: [],
+    tmdb_id: '693134',
+    imdb_id: 'tt15239678',
+    douban_id: '',
+    douban_rating: 0,
+    poster_path: '',
+    fanart_path: '',
+    episodes: [],
+    ...over
+  })
+
+  await check('新条目的名单是空的 —— 还没人改过任何东西', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, payload())
+    assert.deepEqual(getVideo(d as any, id)!.user_edited, [])
+    d.close()
+  })
+
+  await check('改过的字段进名单，改没改过的不进', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, payload())
+    updateVideo(d as any, id, { category: '科幻' })
+    assert.deepEqual(getVideo(d as any, id)!.user_edited, ['category'])
+
+    // 多改几个是并进去，不是替换掉
+    updateVideo(d as any, id, { name_zh: '沙丘 2', tags: ['科幻'] })
+    assert.deepEqual(
+      [...getVideo(d as any, id)!.user_edited].sort(),
+      ['category', 'name_zh', 'tags']
+    )
+
+    // 观看状态和笔记不在保护名单里 —— insertVideo 本来就不写它们
+    updateVideo(d as any, id, { watch_status: 'watched', notes: '看过了' })
+    assert.ok(
+      !getVideo(d as any, id)!.user_edited.includes('watch_status'),
+      'watch_status 不该进名单，它不受重扫威胁'
+    )
+    d.close()
+  })
+
+  await check('重扫：改过的字段留住，没改过的照旧被刷新', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, payload())
+    updateVideo(d as any, id, { category: '科幻', name_zh: '沙丘 2' })
+
+    // 第二次扫到同一条，刮削给出一整套新值
+    insertVideo(
+      d as any,
+      payload({
+        category: '欧美',
+        name_zh: '沙丘：第二部分',
+        summary: '换了个简介',
+        rating: 9.4
+      })
+    )
+
+    const v = getVideo(d as any, id)!
+    assert.equal(v.category, '科幻', '用户改的分类被重扫覆盖了 —— 这一层没生效')
+    assert.equal(v.name_zh, '沙丘 2', '用户改的片名被重扫覆盖了')
+    // 反面：没改过的字段必须跟着刮削走。少了这两条，
+    // 一个「重扫什么都不写」的实现也能通过上面那两条
+    assert.equal(v.summary, '换了个简介', '没改过的简介该被刷新')
+    assert.equal(v.rating, 9.4, '没改过的评分该被刷新')
+    d.close()
+  })
+
+  await check('本地事实不受保护：换了片源，分辨率和时长要跟着变', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, payload())
+    // 用户把这几栏也改过一遍（界面允许改）
+    updateVideo(d as any, id, { resolution: '720p', duration_sec: 100, video_codec: 'H264' })
+
+    insertVideo(d as any, payload({ resolution: '2160p', duration_sec: 9960, video_codec: 'HEVC' }))
+
+    const v = getVideo(d as any, id)!
+    // 这几栏来自 mediainfo 和文件名。锁住的后果是用户换了 4K 片源，
+    // 详情页还写着 720p —— 而那一栏正是他用来分辨手上是哪个版本的
+    assert.equal(v.resolution, '2160p', '分辨率是从文件读出来的，不该被锁住')
+    assert.equal(v.duration_sec, 9960)
+    assert.equal(v.video_codec, 'HEVC')
+    d.close()
+  })
+
+  await check('保护的是字段不是整行', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, payload())
+    updateVideo(d as any, id, { category: '科幻' })
+    insertVideo(d as any, payload({ category: '欧美', summary: '新简介', year: 2025 }))
+    const v = getVideo(d as any, id)!
+    assert.equal(v.category, '科幻')
+    // 一个布尔标记会把这两条一起锁住，于是「我纠正了一个字段」
+    // 变成「这条从此不再更新」
+    assert.equal(v.summary, '新简介')
+    assert.equal(v.year, 2025)
+    d.close()
+  })
+
+  await check('撤保护之后重扫又能写了', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, payload())
+    updateVideo(d as any, id, { category: '科幻', name_zh: '沙丘 2' })
+
+    // 撤单个：另一个还留着
+    restoreScrapedFields(d as any, id, ['category'])
+    assert.deepEqual(getVideo(d as any, id)!.user_edited, ['name_zh'])
+    // 撤保护本身不改值 —— 刮削原来那个值没存第二份，得等下一次重扫才变。
+    // 界面文案因此说「以后听刮削的」，不说「恢复成刮削值」
+    assert.equal(getVideo(d as any, id)!.category, '科幻', '撤保护不该当场改值')
+
+    insertVideo(d as any, payload({ category: '欧美', name_zh: '沙丘：第二部分' }))
+    const v = getVideo(d as any, id)!
+    assert.equal(v.category, '欧美', '撤了保护的字段该重新跟着刮削走')
+    assert.equal(v.name_zh, '沙丘 2', '没撤的那个还得留着')
+    d.close()
+  })
+
+  await check('传空数组 = 全撤', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, payload())
+    updateVideo(d as any, id, { category: '科幻', name_zh: '沙丘 2', year: 1984 })
+    restoreScrapedFields(d as any, id, [])
+    assert.deepEqual(getVideo(d as any, id)!.user_edited, [])
+    d.close()
+  })
+
+  await check('脏数据不拦住重扫', () => {
+    // 手工改库、旧版本残留、JSON 写坏了 —— 这一列坏掉时该退回「没改过」。
+    // 反过来（坏数据当成「全改过」）会让整条记录从此不再更新，而没人看得出为什么
+    assert.deepEqual(parseUserEdited('not json'), [])
+    assert.deepEqual(parseUserEdited('{"a":1}'), [])
+    assert.deepEqual(parseUserEdited(''), [])
+    assert.deepEqual(parseUserEdited(null), [])
+    assert.deepEqual(parseUserEdited(undefined), [])
+    assert.deepEqual(parseUserEdited('[1,2,3]'), [])
+    // 不认识的字段名要滤掉：留着它就会在界面上显示成一行裸列名，
+    // 而且永远撤不掉（用户点「取消保留」传的是这个名字，DB 里删得掉，
+    // 但下次又从同一份脏数据里长回来）
+    assert.deepEqual(parseUserEdited('["category","bogus_field"]'), ['category'])
+  })
+
+  await check('保护名单和界面文案一一对应', () => {
+    // 漏一个的表现是那一行显示成裸列名（`douban_rating`）。
+    // 兜底逻辑让它不至于消失，但那不是能给用户看的东西
+    for (const f of PROTECTED_FIELDS) {
+      assert.ok(PROTECTED_FIELD_LABEL[f], `字段 ${f} 没有界面文案`)
+    }
+    // 反向：文案表里不该有名单外的键 —— 那种键永远显示不出来，
+    // 是维护时的误导（看着支持，其实那个字段根本不受保护）
+    for (const f of Object.keys(PROTECTED_FIELD_LABEL)) {
+      assert.ok(PROTECTED_FIELDS.includes(f), `文案表里的 ${f} 不在保护名单里`)
+    }
+    assert.equal(new Set(PROTECTED_FIELDS).size, PROTECTED_FIELDS.length, '名单里有重复')
+  })
+
+  await check('两张名单不重叠，且都是界面真能改的字段', () => {
+    const overlap = PROTECTED_RESOURCE_FIELDS.filter((f) =>
+      (PROTECTED_META_FIELDS as readonly string[]).includes(f)
+    )
+    assert.deepEqual(overlap, [], `同一个字段落在两张表上：${overlap.join(',')}`)
+    // 保护一个界面改不了的字段是死代码 —— 它永远进不了名单
+    for (const f of PROTECTED_FIELDS) {
+      assert.ok(
+        VIDEO_RESOURCE_COLUMNS.has(f) || VIDEO_META_COLUMNS.has(f),
+        `${f} 受保护，但界面改不了它`
+      )
+    }
+  })
+
+  await check('迁移：老库补上列之后，视图里也要有这一列', () => {
+    // 这一条挡的是最隐蔽那类失败：表里有 user_edited、视图里没有。
+    // getVideo 从视图读，于是每条都是空名单 —— 界面上标记全没了，
+    // 重扫照旧覆盖，而库结构看着是对的
+    const d = freshDb()
+    // 造出「0.7 开发版装过的库」：列还在，但视图是旧定义
+    d.exec('DROP VIEW video')
+    d.exec(`
+      CREATE VIEW video AS
+      SELECT r.id, r.name_zh, r.name_en, r.summary, r.description, r.category, r.tags,
+             r.official_url, r.notes, r.is_archived, r.created_at, r.updated_at,
+             r.path, r.file_name, r.file_size, r.source_dir, r.ai_status,
+             m.video_type, m.poster_path, m.fanart_path, m.year, m.end_year, m.rating,
+             m.watch_status, m.position_sec, m.duration_sec, m.last_watched_at,
+             m.resolution, m.video_codec, m.source, m.release_group,
+             m.audio_tracks, m.subtitle_tracks, m.parts, m.linked_files,
+             m.tmdb_id, m.imdb_id, m.douban_id, m.douban_rating,
+             0 AS episode_total, 0 AS episode_watched, 0 AS episode_present
+      FROM resource r LEFT JOIN video_meta m ON m.resource_id = r.id
+      WHERE r.kind = 'video'
+    `)
+    assert.ok(!columnsOf(d as any, 'video').has('user_edited'), '前置条件：视图确实缺这一列')
+
+    // 再跑一次 initSchema，migrate 该把旧视图撤掉、按新定义重建
+    initSchema(d as any, KINDS)
+    assert.ok(
+      columnsOf(d as any, 'video').has('user_edited'),
+      '视图没跟着重建 —— 界面上保护标记会全部消失，而库结构看着是对的'
+    )
+
+    // 重建完还得真的能用
+    const { id } = insertVideo(d as any, payload())
+    updateVideo(d as any, id, { category: '科幻' })
+    assert.deepEqual(getVideo(d as any, id)!.user_edited, ['category'])
+    d.close()
+  })
+
+  await check('回滚 v7 之后这一列跟着 video_meta 一起消失', () => {
+    // 这一列刻意放在 video_meta 而不是 resource：rollback-v7 把 video_meta
+    // 整张 drop 掉，列自然没了。放在 resource 上的话，退回 0.6 的库里会
+    // 留一列谁也不认识的 user_edited
+    const d = freshDb()
+    assert.ok(columnsOf(d as any, 'video_meta').has('user_edited'))
+    assert.ok(
+      !columnsOf(d as any, 'resource').has('user_edited'),
+      'user_edited 不该在 resource 上 —— 回滚 v7 会把它留成孤儿列'
+    )
+    d.close()
+  })
+
+  await check('没有为这一列提 SCHEMA_VERSION', () => {
+    // 和 douban_id / douban_rating 同一个判断（见 kinds/video/schema.ts 文件头）：
+    // 8 的含义该是「0.8 的库形状」。拿它标记 0.7 开发途中的一个可空列，
+    // 会让 rollback-v7 那句「退回 0.6」和将来 rollback-v8 的界限说不清。
+    // 闸门是 columnsOf().has()，下次启动自己补上
+    assert.equal(SCHEMA_VERSION, 7, '这一列不该动版本号，闸门是「列在不在」')
   })
 }
 

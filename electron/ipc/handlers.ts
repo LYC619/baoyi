@@ -94,6 +94,7 @@ import {
   revealVideo,
   scanVideos,
   setVideoPoster,
+  restoreVideoScraped,
   updateVideoEpisode,
   updateVideoItem,
   videoCountsOf,
@@ -296,6 +297,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('video:get', (_e, id: string) => getVideoItem(id))
   ipcMain.handle('video:update', (_e, id: string, patch: Partial<VideoItem>) =>
     updateVideoItem(id, patch)
+  )
+  ipcMain.handle('video:restore-scraped', (_e, id: string, fields: string[] = []) =>
+    restoreVideoScraped(id, fields)
   )
   ipcMain.handle('video:remove', (_e, id: string) => removeVideo(id))
   ipcMain.handle('video:counts', () => videoCountsOf())

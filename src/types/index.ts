@@ -1042,6 +1042,16 @@ export interface VideoItem extends VideoMeta {
   notes: string
   is_archived: boolean
 
+  /**
+   * 用户在界面上改过、因而不再被重扫覆盖的字段名。
+   *
+   * 只可能包含刮削猜出来的那些字段（片名 / 简介 / 分类 / 标签 / 年份 / 类型 /
+   * 几个刮削 id）。分辨率、编码、时长这类从文件上读出来的事实不进这个名单 ——
+   * 换了片源就该跟着变，锁住反而是错的。名单在
+   * `electron/kinds/video/db.ts` 的 `PROTECTED_FIELDS`。
+   */
+  user_edited: string[]
+
   /** 这部剧一共几集（含缺文件的）。电影恒为 0 */
   episode_total: number
   /** 看完了几集 */
@@ -1253,6 +1263,15 @@ export interface BaoyiApi {
     list(query?: VideoQuery): Promise<VideoItem[]>
     get(id: string): Promise<VideoItem | null>
     update(id: string, patch: Partial<VideoItem>): Promise<VideoItem | null>
+    /**
+     * 撤掉几个字段的「用户改过」标记，让它们下次重扫时重新跟着刮削走。
+     * 传空数组或不传 = 全撤。
+     *
+     * **不改现在的值** —— 刮削原来那个值没存第二份。所以界面文案要说
+     * 「以后听刮削的」，不能说「恢复成刮削值」：后者会让用户以为点完就变，
+     * 而实际要等下一次重扫。
+     */
+    restoreScraped(id: string, fields?: string[]): Promise<VideoItem | null>
     /** 只从库里移除，不动磁盘上的视频文件 */
     remove(id: string): Promise<void>
     counts(): Promise<VideoCounts>
