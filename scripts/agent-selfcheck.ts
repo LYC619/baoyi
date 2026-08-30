@@ -196,6 +196,14 @@ import {
   scanVideoRoot,
   stackParts
 } from '../electron/kinds/video/scanner.ts'
+import { dateToEpochSec, parseNfo, parseNfoEpisodes } from '../electron/kinds/video/nfo.ts'
+import {
+  mapMediaInfo,
+  mediaInfoWasmPath,
+  normLanguage,
+  readContainerInfo,
+  resolutionLabel
+} from '../electron/kinds/video/mediainfo.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -2094,6 +2102,8 @@ async function main(): Promise<void> {
   await videoDataSection()
   await videoFilenameSection()
   await videoScanSection()
+  await videoNfoSection()
+  await videoContainerSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -5063,6 +5073,356 @@ async function videoScanSection(): Promise<void> {
   })
 
   await fsp.rm(base, { recursive: true, force: true })
+}
+
+/* ==================== NFO 解析 · v0.7 Step 4 ==================== */
+
+/**
+ * nfo 是视频版的 `app.info`，而且更好 —— 它常常直接带着 TMDB / IMDB id。
+ * 所以这一段验的重点不是「字段读没读到」，而是**最值钱的那几个字段在各种
+ * 畸形输入下还在不在**：id、标题、年份。
+ *
+ * 用例的形状全部照真实片库里会出现的样子写：CDATA 包着带 HTML 的简介、
+ * 历年不同工具留下的三代 id 写法、一格里塞多个类型的 genre、
+ * 只有一行 URL 的老 nfo、以及被手改坏的 XML。
+ */
+async function videoNfoSection(): Promise<void> {
+  console.log('\nNFO 解析')
+
+  const fullMovie = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+  <title>沙丘</title>
+  <originaltitle>Dune</originaltitle>
+  <plot><![CDATA[一段带 <b>HTML</b> 的简介 & 特殊字符]]></plot>
+  <year>2021</year>
+  <premiered>2021-10-22</premiered>
+  <runtime>155</runtime>
+  <mpaa>PG-13</mpaa>
+  <genre>科幻</genre>
+  <genre>冒险 / 剧情</genre>
+  <studio>Legendary</studio>
+  <director>Denis Villeneuve</director>
+  <credits>Jon Spaihts</credits>
+  <credits>Eric Roth</credits>
+  <set><name>沙丘系列</name></set>
+  <ratings>
+    <rating name="themoviedb" max="10" default="true"><value>7.8</value><votes>11234</votes></rating>
+    <rating name="imdb" max="10"><value>8.0</value><votes>700000</votes></rating>
+  </ratings>
+  <userrating>9</userrating>
+  <uniqueid type="tmdb" default="true">438631</uniqueid>
+  <uniqueid type="imdb">tt1160419</uniqueid>
+  <actor><name>提莫西·查拉梅</name><role>保罗</role><order>0</order><thumb>http://x/1.jpg</thumb></actor>
+  <actor><name>赞达亚</name><role>契妮</role><order>1</order></actor>
+  <playcount>2</playcount>
+  <resume><position>1200.5</position><total>9300</total></resume>
+  <thumb aspect="poster">http://x/poster.jpg</thumb>
+  <fanart><thumb>http://x/fan1.jpg</thumb><thumb>http://x/fan2.jpg</thumb></fanart>
+</movie>`
+
+  await check('电影 nfo：标题 / 年份 / 日期 / 片长 / 分级都读得出来', () => {
+    const n = parseNfo(fullMovie)!
+    assert.equal(n.kind, 'movie')
+    assert.equal(n.title, '沙丘')
+    assert.equal(n.original_title, 'Dune')
+    assert.equal(n.year, 2021)
+    assert.equal(n.premiered, '2021-10-22')
+    assert.equal(n.runtime_min, 155)
+    assert.equal(n.mpaa, 'PG-13')
+    assert.equal(n.set, '沙丘系列')
+  })
+
+  await check('CDATA 里的 HTML 和实体字符原样保留，不被吃掉', () => {
+    const n = parseNfo(fullMovie)!
+    assert.equal(n.plot, '一段带 <b>HTML</b> 的简介 & 特殊字符')
+  })
+
+  await check('一格里塞多个类型的 genre 拆得开，且去重保序', () => {
+    const n = parseNfo(fullMovie)!
+    assert.deepEqual(n.genres, ['科幻', '冒险', '剧情'])
+    assert.deepEqual(n.writers, ['Jon Spaihts', 'Eric Roth'])
+  })
+
+  await check('演员表带角色和序号，没有 name 的条目丢掉', () => {
+    const n = parseNfo(fullMovie)!
+    assert.equal(n.actors.length, 2)
+    assert.equal(n.actors[0].name, '提莫西·查拉梅')
+    assert.equal(n.actors[0].role, '保罗')
+    assert.equal(n.actors[1].thumb, '')
+    const empty = parseNfo('<movie><actor><role>无名氏</role></actor></movie>')!
+    assert.equal(empty.actors.length, 0)
+  })
+
+  await check('uniqueid 的现代写法：按 type 分派，default 不影响归属', () => {
+    const n = parseNfo(fullMovie)!
+    assert.equal(n.tmdb_id, '438631')
+    assert.equal(n.imdb_id, 'tt1160419')
+  })
+
+  await check('老写法的 <id>：tt 开头归 IMDB，纯数字归 TMDB', () => {
+    assert.equal(parseNfo('<movie><id>tt0111161</id></movie>')!.imdb_id, 'tt0111161')
+    assert.equal(parseNfo('<movie><id>550</id></movie>')!.tmdb_id, '550')
+    // 已经有 tvdb 时纯数字的 <id> 不认 —— 那多半是同一个 tvdb id，
+    // 认成 tmdb 会去刮到另一部完全不相干的片
+    const withTvdb = parseNfo('<tvshow><id>73739</id><uniqueid type="tvdb">73739</uniqueid></tvshow>')!
+    assert.equal(withTvdb.tvdb_id, '73739')
+    assert.equal(withTvdb.tmdb_id, '')
+  })
+
+  await check('评分一律折算成十分制，max 必须看', () => {
+    assert.equal(parseNfo(fullMovie)!.rating, 7.8)
+    // 现代写法带 max
+    assert.equal(parseNfo('<movie><ratings><rating max="100" default="true"><value>75</value></rating></ratings></movie>')!.rating, 7.5)
+    // 老写法没有 max，超过 10 的按百分制折
+    const legacy = parseNfo('<movie><rating>85</rating><votes>1,234</votes></movie>')!
+    assert.equal(legacy.rating, 8.5)
+    assert.equal(legacy.votes, 1234, '带千分位逗号的票数要读得出来')
+  })
+
+  await check('default="true" 的那条评分优先，没有就取第一条', () => {
+    const n = parseNfo(fullMovie)!
+    assert.equal(n.votes, 11234, '取的应该是 themoviedb 那条而不是 imdb 那条')
+    const noDefault = parseNfo('<movie><ratings><rating><value>6.0</value></rating><rating><value>9.0</value></rating></ratings></movie>')!
+    assert.equal(noDefault.rating, 6.0)
+  })
+
+  await check('观看状态只读出来，不在这一层折算成 watch_status', () => {
+    const n = parseNfo(fullMovie)!
+    assert.equal(n.playcount, 2)
+    assert.equal(n.resume_position_sec, 1201)
+    assert.equal(n.resume_total_sec, 9300)
+    // 这一层不该有 watch_status 字段 —— 采信别家媒体中心的记录是入库策略要决定的事
+    assert.equal((n as unknown as Record<string, unknown>).watch_status, undefined)
+  })
+
+  await check('季集号的零值是 -1 而不是 0 —— 0 是合法季号（特别篇）', () => {
+    const movie = parseNfo(fullMovie)!
+    assert.equal(movie.season, -1)
+    assert.equal(movie.episode, -1)
+    const sp = parseNfo('<episodedetails><season>0</season><episode>1</episode></episodedetails>')!
+    assert.equal(sp.season, 0, '第 0 季被当成了「没写」')
+    assert.equal(sp.episode, 1)
+  })
+
+  await check('只有一行 URL 的老 nfo 也要把 id 捞出来', () => {
+    const imdb = parseNfo('https://www.imdb.com/title/tt0111161/\n')!
+    assert.equal(imdb.imdb_id, 'tt0111161')
+    assert.equal(imdb.kind, 'unknown')
+    const tmdb = parseNfo('https://www.themoviedb.org/movie/438631-dune')!
+    assert.equal(tmdb.tmdb_id, '438631')
+  })
+
+  await check('BOM 和 XML 前面的注释不影响根标签识别', () => {
+    const n = parseNfo('﻿<!-- written by SomeTool -->\n<movie><title>带BOM</title></movie>')!
+    assert.equal(n.title, '带BOM')
+    assert.equal(n.kind, 'movie')
+  })
+
+  await check('XML 被改坏时仍要把 id 捞回来 —— 解析器是静默恢复不是抛异常', () => {
+    // 实测行为：fast-xml-parser 遇到没闭合的标签不抛，而是丢掉那段内容。
+    // 所以 try/catch 等不到，得靠 withIdBackfill 去原文里再扫一遍
+    const n = parseNfo('<movie><title>没闭合 <uniqueid type="imdb">tt0111161</movie>')!
+    assert.equal(n.title, '没闭合')
+    assert.equal(n.imdb_id, 'tt0111161', 'id 在畸形 XML 里丢了')
+  })
+
+  await check('已经解出 id 时不被原文兜底覆盖', () => {
+    // 原文里另有一个 tt 号，但正常解析出来的那个优先
+    const n = parseNfo('<movie><uniqueid type="imdb">tt1160419</uniqueid><plot>参考 tt0111161</plot></movie>')!
+    assert.equal(n.imdb_id, 'tt1160419')
+  })
+
+  await check('多集 nfo：两段 episodedetails 都取得到，parseNfo 只给第一段', () => {
+    const multi = `<episodedetails><title>第一集</title><season>1</season><episode>1</episode></episodedetails>
+<episodedetails><title>第二集</title><season>1</season><episode>2</episode></episodedetails>`
+    const all = parseNfoEpisodes(multi)
+    assert.deepEqual(all.map((e) => `S${e.season}E${e.episode} ${e.title}`), ['S1E1 第一集', 'S1E2 第二集'])
+    assert.equal(parseNfo(multi)!.title, '第一集')
+  })
+
+  await check('没有 <year> 时从 premiered / aired 里补', () => {
+    const ep = parseNfo('<episodedetails><aired>2023-05-01</aired></episodedetails>')!
+    assert.equal(ep.year, 2023)
+    assert.equal(ep.premiered_ts, dateToEpochSec('2023-05-01'))
+  })
+
+  await check('日期转 Unix 秒走 UTC，不受运行机器时区影响', () => {
+    // new Date('2021-10-22') 在不同运行时对无时区日期的解释不一样，
+    // 会让同一个 nfo 在不同机器上差出一天
+    assert.equal(dateToEpochSec('2021-10-22'), 1634860800)
+    assert.equal(dateToEpochSec('2021-10-22 20:00:00'), 1634860800)
+    assert.equal(dateToEpochSec('不是日期'), 0)
+    assert.equal(dateToEpochSec('2021-13-01'), 0, '月份越界应该给 0 而不是滚到下一年')
+  })
+
+  await check('空内容和认不出的内容返回 null，不返回空壳', () => {
+    assert.equal(parseNfo(''), null)
+    assert.equal(parseNfo('   '), null)
+    assert.equal(parseNfo('随便什么东西'), null)
+    assert.equal(parseNfo('<musicvideo><title>x</title></musicvideo>'), null)
+  })
+
+  await check('带属性的标签取得到文本', () => {
+    assert.equal(parseNfo('<movie><title lang="zh">带属性</title></movie>')!.title, '带属性')
+    assert.deepEqual(parseNfo(fullMovie)!.thumbs, ['http://x/poster.jpg'])
+    assert.deepEqual(parseNfo(fullMovie)!.fanarts, ['http://x/fan1.jpg', 'http://x/fan2.jpg'])
+  })
+}
+
+/* ==================== 容器元数据 · v0.7 Step 4 ==================== */
+
+/**
+ * 分两半验：`mapMediaInfo` 是纯函数，拿 fixture 把每条映射规则验一遍；
+ * `readContainerInfo` 要真读文件，用一个**手写的 WAV** 端到端跑一次。
+ *
+ * 手写 WAV 是这里唯一能拿到的「真实媒体文件」—— 本机没有编码器，
+ * 而 WAV 的头 44 字节是固定格式，写得出来。它验的是最要紧的那件事：
+ * **WASM 在纯 node 下加载得起来**。这条如果坏了，Step 4 整个就是空的，
+ * 而它坏起来的方式（打包后 wasm 找不到）恰恰是最容易漏的。
+ */
+async function videoContainerSection(): Promise<void> {
+  console.log('\n容器元数据')
+
+  await check('分辨率分档宽度优先 —— 宽银幕的 1920x800 是 1080p 不是 720p', () => {
+    assert.equal(resolutionLabel(1920, 1080), '1080p')
+    assert.equal(resolutionLabel(1920, 800), '1080p', '按高度分档会把宽银幕判低一档')
+    assert.equal(resolutionLabel(3840, 1608), '2160p')
+    assert.equal(resolutionLabel(1280, 720), '720p')
+    assert.equal(resolutionLabel(720, 480), '480p')
+    // 只有高度时才走高度分档
+    assert.equal(resolutionLabel(0, 1080), '1080p')
+    assert.equal(resolutionLabel(0, 0), '')
+  })
+
+  await check('分辨率词汇和文件名解析那一套对得上，否则筛选器会当成两种东西', () => {
+    // filename.ts 的 literalResolution 给的是小写 `1080p`
+    const fromName = parseVideoName('某片.2021.1080p.WEB-DL.mkv').resolution
+    assert.equal(fromName, '1080p')
+    assert.equal(resolutionLabel(1920, 1080), fromName)
+  })
+
+  await check('语言代码归一：zho / chi / Chinese / zh-CN 都是 zh', () => {
+    assert.equal(normLanguage('zho'), 'zh')
+    assert.equal(normLanguage('chi'), 'zh')
+    assert.equal(normLanguage('Chinese'), 'zh')
+    assert.equal(normLanguage('zh-CN'), 'zh')
+    assert.equal(normLanguage('eng'), 'en')
+    assert.equal(normLanguage(''), '')
+    assert.equal(normLanguage('klingon'), '', '认不出的语言给空串而不是原样返回')
+  })
+
+  const fixture = {
+    media: {
+      track: [
+        { '@type': 'General', Duration: '9300.5', Format: 'Matroska' },
+        { '@type': 'Video', Format: 'HEVC', Width: '3840', Height: '1608' },
+        { '@type': 'Audio', Format: 'DTS', Language: 'zho', 'Channel(s)': '6', Title: '国语 5.1' },
+        { '@type': 'Audio', Format: 'AAC', Language: 'en', Channels: '2' },
+        { '@type': 'Text', Format: 'UTF-8', Language: 'chi' },
+        { '@type': 'Text', Format: 'PGS', Language: 'eng', Forced: 'Yes' }
+      ]
+    }
+  }
+
+  await check('映射：时长 / 容器 / 尺寸 / 编码各就各位', () => {
+    const c = mapMediaInfo(fixture)
+    assert.equal(c.duration_sec, 9301)
+    assert.equal(c.container, 'Matroska')
+    assert.equal(c.width, 3840)
+    assert.equal(c.resolution, '2160p')
+    assert.equal(c.video_codec, 'HEVC')
+  })
+
+  await check('音轨按出现顺序编号，容器写了标题就用它', () => {
+    const c = mapMediaInfo(fixture)
+    assert.equal(c.audio_tracks.length, 2)
+    assert.deepEqual(c.audio_tracks.map((t) => t.index), [0, 1])
+    assert.equal(c.audio_tracks[0].label, '国语 5.1', '压制组写的标题比我们拼的准，应该优先')
+    assert.equal(c.audio_tracks[0].language, 'zh')
+    assert.equal(c.audio_tracks[1].label, '英语 立体声', '没有标题时才拼一个')
+  })
+
+  await check('`Channel(s)` 和 `Channels` 两种键名都认 —— 大小写和标点不稳', () => {
+    const c = mapMediaInfo(fixture)
+    assert.ok(c.audio_tracks[0].label.includes('5.1'))
+    const alt = mapMediaInfo({ media: { track: [{ '@type': 'Audio', Format: 'AC3', 'channel(s)': '8' }] } })
+    assert.equal(alt.audio_tracks[0].label, '7.1')
+  })
+
+  await check('内嵌字幕轨单列，强制轨标出来', () => {
+    const c = mapMediaInfo(fixture)
+    assert.equal(c.subtitle_tracks.length, 2)
+    assert.equal(c.subtitle_tracks[0].label, '中文')
+    assert.equal(c.subtitle_tracks[1].label, '英语 强制')
+    // 内嵌轨没有路径，路径是外挂字幕才有的
+    assert.ok(c.subtitle_tracks.every((t) => t.path === ''))
+  })
+
+  await check('垃圾输入不炸，返回全零值', () => {
+    for (const junk of [null, undefined, {}, { media: {} }, { media: { track: '不是数组' } }, 42]) {
+      const c = mapMediaInfo(junk)
+      assert.equal(c.duration_sec, 0)
+      assert.deepEqual(c.audio_tracks, [])
+    }
+  })
+
+  await check('General 没有时长时退回视频轨的', () => {
+    const c = mapMediaInfo({
+      media: { track: [{ '@type': 'General', Format: 'Matroska' }, { '@type': 'Video', Duration: '120' }] }
+    })
+    assert.equal(c.duration_sec, 120)
+  })
+
+  await check('WASM 找得到 —— 找不到的话 Step 4 整个是空的', () => {
+    const p = mediaInfoWasmPath()
+    assert.ok(p, 'MediaInfoModule.wasm 没找到')
+    assert.ok(fs.existsSync(p), `wasm 路径不存在：${p}`)
+  })
+
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-mi-'))
+
+  await check('端到端：手写一个 WAV，WASM 真能解出时长和音轨', async () => {
+    // 本机没有编码器，但 WAV 的头 44 字节是固定格式，手写得出来。
+    // 这一条验的是「WASM 在纯 node 下加载得起来并真的在解析」
+    const rate = 8000
+    const dataBytes = rate * 2 * 2 // 2 秒，16 位单声道
+    const wav = Buffer.alloc(44 + dataBytes)
+    wav.write('RIFF', 0); wav.writeUInt32LE(36 + dataBytes, 4); wav.write('WAVE', 8)
+    wav.write('fmt ', 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20)
+    wav.writeUInt16LE(1, 22); wav.writeUInt32LE(rate, 24)
+    wav.writeUInt32LE(rate * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34)
+    wav.write('data', 36); wav.writeUInt32LE(dataBytes, 40)
+    const p = path.join(dir, 'tone.wav')
+    await fsp.writeFile(p, wav)
+
+    const info = await readContainerInfo(p)
+    assert.ok(info, 'WASM 没能解析手写的 WAV')
+    assert.equal(info!.container, 'Wave')
+    assert.equal(info!.duration_sec, 2)
+    assert.equal(info!.audio_tracks.length, 1)
+    assert.equal(info!.audio_tracks[0].codec, 'PCM')
+    assert.equal(info!.audio_tracks[0].label, '单声道')
+  })
+
+  await check('读不了的文件返回 null，不抛 —— 一个坏文件不该停下整次扫描', async () => {
+    assert.equal(await readContainerInfo(path.join(dir, '不存在.mkv')), null)
+    const empty = path.join(dir, 'empty.mkv')
+    await fsp.writeFile(empty, '')
+    assert.equal(await readContainerInfo(empty), null, '空文件应该给 null')
+    assert.equal(await readContainerInfo(dir), null, '目录应该给 null')
+  })
+
+  await check('不是媒体的文件给全零值而不是假数据', async () => {
+    const txt = path.join(dir, 'a.txt')
+    await fsp.writeFile(txt, 'hello '.repeat(500))
+    const info = await readContainerInfo(txt)
+    assert.ok(info, '应该返回结构而不是 null')
+    assert.equal(info!.duration_sec, 0)
+    assert.equal(info!.video_codec, '')
+    assert.deepEqual(info!.audio_tracks, [])
+  })
+
+  await fsp.rm(dir, { recursive: true, force: true })
 }
 
 void main()

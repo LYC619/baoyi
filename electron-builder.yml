@@ -21,6 +21,19 @@ extraResources:
   - from: resources/save-manifest.json
     to: save-manifest.json
 
+  # MediaInfoLib 的 WASM（约 4 MB），读视频容器元数据用。
+  #
+  # 必须显式列在这儿，有两个原因叠在一起：mediainfo.js 是 devDependency，
+  # 而 electron-builder 只打包 dependencies；就算它是 dependency，
+  # .wasm 也是二进制资产，vite 打不进 dist-electron/main.js 里去。
+  #
+  # 落点和 kinds/video/mediainfo.ts 里 findWasm() 的第三条候选
+  # （process.resourcesPath 下的同名文件）是对死的，改这儿要同时改那儿。
+  # 漏了不会报错，只会让打包后的应用读不出时长和音轨 —— 开发时一切正常，
+  # 装完之后详情页少半屏，是最容易漏到用户手上的那种。
+  - from: node_modules/mediainfo.js/dist/MediaInfoModule.wasm
+    to: MediaInfoModule.wasm
+
 # 应用图标：resources/icon.svg 是矢量源文件，icon.ico / icon.png 由
 # `npx electron scripts/make-icons.cjs` 从它生成（Electron 自己的 Chromium 渲染，
 # 跟应用里看到的是同一个结果）。改了 svg 就重跑一次，不要手工描图 ——
