@@ -14,6 +14,9 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { ScanUnit } from '../../../src/types'
+// 带 .ts 后缀：selfcheck 用 node --experimental-strip-types 直接加载这个文件，
+// Node 的 ESM 解析不会替你补后缀（Vite 两种都收，所以只有这条路会报错）
+import { countExes } from './exeCount.ts'
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', '.svn', '.hg', '$recycle.bin', 'system volume information',
@@ -114,34 +117,15 @@ function looksLikeCollection(level: Level): boolean {
   return !level.hasExe && !level.hasFiles && level.dirs.length > 0
 }
 
-/** 递归统计一个目录下的 exe 数量 */
-async function countExes(root: string, opts: PlanOptions): Promise<number> {
-  let count = 0
-  const stack: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }]
-
-  while (stack.length > 0) {
-    if (opts.cancelled?.() || count >= MAX_EXES_PER_UNIT) break
-    const { dir, depth } = stack.pop()!
-    opts.onDir?.(dir)
-
-    let entries: fs.Dirent[]
-    try {
-      entries = await fsp.readdir(dir, { withFileTypes: true })
-    } catch {
-      continue // 权限不足 / 目录已消失，跳过即可
-    }
-
-    for (const entry of entries) {
-      if (opts.cancelled?.()) break
-      if (entry.isDirectory()) {
-        if (depth >= MAX_DEPTH || skippable(entry.name)) continue
-        stack.push({ dir: path.join(dir, entry.name), depth: depth + 1 })
-      } else if (entry.isFile() && path.extname(entry.name).toLowerCase() === '.exe') {
-        count++
-        if (count >= MAX_EXES_PER_UNIT) break
-      }
-    }
-  }
+/** 递归统计一个目录下的 exe 数量。遍历本体在 exeCount.ts，那里只有这一份 */
+async function countUnitExes(root: string, opts: PlanOptions): Promise<number> {
+  const { count } = await countExes(root, {
+    maxDepth: MAX_DEPTH,
+    maxExes: MAX_EXES_PER_UNIT,
+    skip: skippable,
+    onDir: opts.onDir,
+    cancelled: opts.cancelled
+  })
   return count
 }
 
@@ -163,7 +147,7 @@ async function planDir(
 
   if (!looksLikeCollection(level)) {
     // 软件目录：整棵子树交给 agent，它才有可能把 x32/x64 合并成一条
-    const exeCount = await countExes(dir, opts)
+    const exeCount = await countUnitExes(dir, opts)
     // 一个 exe 都没有的目录不用惊动 agent
     if (exeCount > 0) units.push({ dir, root, exe_count: exeCount, loose_only: false })
     return

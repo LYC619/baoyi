@@ -39,6 +39,7 @@ import {
   mapCategory
 } from '../electron/services/taxonomy.ts'
 import { planRoot, skippable } from '../electron/kinds/software/scanPlan.ts'
+import { countExes } from '../electron/kinds/software/exeCount.ts'
 import {
   defaultAction,
   defaultFolder,
@@ -513,6 +514,63 @@ async function main(): Promise<void> {
     const stopped = await planRoot(scanRoot, { cancelled: () => true })
     assert.equal(stopped.units.length, 0)
     assert.equal(stopped.loose.length, 0)
+  })
+
+  /* ----------------------------- 数 exe 的遍历 ----------------------------- */
+
+  // 这一节守的是「界面别卡死」。从前 tools.ts 里有一份同步的 readdirSync 递归，
+  // agent 每调一次 list_directory 就在主进程上跑最坏 36 万次目录项访问，
+  // Windows 直接判「未响应」。现在只剩 exeCount.ts 这一份异步实现，两边共用。
+  console.log('\n扫描 · 数 exe 的遍历')
+
+  await check('数得对，且把子目录算进去', async () => {
+    const r = await countExes(path.join(scanRoot, 'BlueStacks X'), { maxDepth: 8 })
+    assert.equal(r.count, 2, 'HD-Player.exe + plugins\\helper.exe')
+    assert.equal(r.truncated, false)
+    assert.ok(r.visited > 0, 'visited 要如实报，调用方拿它扣预算')
+  })
+
+  await check('maxDepth 到底就不再往下', async () => {
+    const deep = path.join(scanRoot, '深')
+    assert.equal((await countExes(deep, { maxDepth: 8 })).count, 1, 'a/b/c/deep.exe')
+    assert.equal((await countExes(deep, { maxDepth: 2 })).count, 0, '第 3 层的 exe 不该数到')
+  })
+
+  await check('skip 名单里的目录不进去', async () => {
+    const bare = await countExes(scanRoot, { maxDepth: 8 })
+    const skipped = await countExes(scanRoot, { maxDepth: 8, skip: skippable })
+    assert.ok(bare.count > skipped.count, 'node_modules 里那个 exe 该被 skip 挡掉')
+  })
+
+  await check('撞上 maxExes：count 是下界，truncated 为真', async () => {
+    const r = await countExes(scanRoot, { maxDepth: 8, maxExes: 2 })
+    assert.equal(r.count, 2)
+    assert.equal(r.truncated, true, '没数完必须说出来 —— agent 靠它区分「真的 0 个」和「没数完」')
+  })
+
+  await check('撞上 maxEntries：预算花光就收手', async () => {
+    const r = await countExes(scanRoot, { maxDepth: 8, maxEntries: 3 })
+    assert.equal(r.truncated, true)
+    assert.ok(r.visited <= 3, `visited 不该超过预算，实际 ${r.visited}`)
+  })
+
+  await check('预算为 0 时一项都不访问', async () => {
+    const r = await countExes(scanRoot, { maxDepth: 8, maxEntries: 0 })
+    assert.equal(r.count, 0)
+    assert.equal(r.visited, 0)
+    assert.equal(r.truncated, true)
+  })
+
+  await check('取消信号一进来就收手', async () => {
+    const r = await countExes(scanRoot, { maxDepth: 8, cancelled: () => true })
+    assert.equal(r.count, 0)
+    assert.equal(r.truncated, true)
+  })
+
+  await check('读不到的目录当空目录，不抛', async () => {
+    const r = await countExes(path.join(scanRoot, '并不存在'), { maxDepth: 8 })
+    assert.equal(r.count, 0)
+    assert.equal(r.truncated, false, '目录不存在不算「没数完」，它确实没有 exe')
   })
 
   await fsp.rm(scanRoot, { recursive: true, force: true })

@@ -11,7 +11,11 @@ import path from 'node:path'
 import type { Launcher, MoveRisk, RegisterPayload, SearchConfig } from '../../../src/types'
 import { readExternalActiveAt } from '../../services/activity'
 import { extractIcon } from '../../services/iconExtractor'
+import { countExes } from './exeCount'
 import { readPeArch, readPeInfo } from './peReader'
+// skippable 和扫描时用的是同一份名单：同一棵目录树，扫描不进去的地方
+// agent 也不该为了数 exe 进去
+import { skippable } from './scanPlan'
 import { formatHits, search } from '../../services/searchService'
 import {
   isSkipped,
@@ -29,7 +33,15 @@ import { resolveInside as resolveInsideRoots } from '../../services/agent/paths'
 
 /** 统计子目录里的 exe 时的护栏，避免在 node_modules 之类的目录里空转 */
 const COUNT_MAX_DEPTH = 3
-const COUNT_MAX_ENTRIES = 3000
+/**
+ * **一次 list_directory 的总遍历预算**，所有子目录共用。
+ *
+ * 从前这个上限是「每个子目录 3000 项」，于是一次工具调用最坏要访问
+ * 120 × 3000 = 36 万个目录项 —— 这是界面卡死的直接原因。改成整次调用共用一份预算，
+ * 最坏就是这个数。花完了后面的子目录报一个带 `+` 的下界，agent 照样能判断
+ * 「值不值得进去看」，那本来就是这个数字的唯一用途。
+ */
+const COUNT_BUDGET = 20_000
 /** 单次 list_directory 最多列出的条目数 */
 const LIST_LIMIT = 120
 
@@ -57,32 +69,6 @@ function resolveInside(ctx: ToolContext, raw: unknown): string {
 
 /* ------------------------------ 目录浏览 ------------------------------ */
 
-/** 递归数一个目录下有多少 exe，用来告诉 agent 值不值得进去看 */
-function countExes(dir: string): number {
-  let count = 0
-  let visited = 0
-  const stack: Array<{ dir: string; depth: number }> = [{ dir, depth: 0 }]
-
-  while (stack.length > 0) {
-    const { dir: current, depth } = stack.pop()!
-    let entries: fs.Dirent[]
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      if (++visited > COUNT_MAX_ENTRIES) return count
-      if (entry.isDirectory()) {
-        if (depth < COUNT_MAX_DEPTH) stack.push({ dir: path.join(current, entry.name), depth: depth + 1 })
-      } else if (entry.isFile() && path.extname(entry.name).toLowerCase() === '.exe') {
-        count++
-      }
-    }
-  }
-  return count
-}
-
 async function listDirectory(ctx: ToolContext, args: any): Promise<string> {
   const dir = resolveInside(ctx, args?.path)
 
@@ -100,11 +86,21 @@ async function listDirectory(ctx: ToolContext, args: any): Promise<string> {
   const docs: string[] = []
   const others: string[] = []
 
+  // 整次调用共用的遍历预算，见 COUNT_BUDGET
+  let budget = COUNT_BUDGET
+
   for (const entry of entries.slice(0, LIST_LIMIT)) {
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      const n = countExes(full)
-      dirs.push(`  ${entry.name}/  —— 内含 ${n} 个 exe`)
+      const { count, truncated, visited } = await countExes(full, {
+        maxDepth: COUNT_MAX_DEPTH,
+        maxEntries: budget,
+        skip: skippable
+      })
+      budget = Math.max(0, budget - visited)
+      // 带 `+` 是在说「至少这么多，没数完」。别把下界写成确切值 ——
+      // agent 拿这个数决定要不要进去，「0 个 exe」和「没数完」对它是两回事
+      dirs.push(`  ${entry.name}/  —— 内含 ${count}${truncated ? '+' : ''} 个 exe`)
       continue
     }
     if (!entry.isFile()) continue
