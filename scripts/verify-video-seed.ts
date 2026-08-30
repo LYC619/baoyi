@@ -70,6 +70,8 @@ interface SeedVideo {
   doubanRating: number
   duration: number
   archived?: boolean
+  /** path 指向 profile 里那个真文件，用来验「真的调起了播放器」。见 PLAYABLE */
+  playable?: boolean
 }
 
 const VIDEOS: SeedVideo[] = [
@@ -108,8 +110,46 @@ const VIDEOS: SeedVideo[] = [
     id: 'vid-0007', name: '收进箱底的片', type: 'movie', poster: '', status: 'watched',
     category: '华语', tags: '', year: 2008, rating: 7.0, doubanRating: 7.1, duration: 7200,
     archived: true
+  },
+  // Step 7：唯一一条 path 指向**真实存在**的文件（见下面 PLAYABLE）。
+  // 别的条目路径都是 D:\假影视\... ，点播放只能验到「文件不在了」那一支；
+  // 而「真的调起了播放器 + 状态从未看抬到在看」这一段得有个真文件才验得到
+  {
+    id: 'vid-0008', name: '能真打开的片', type: 'movie', poster: '', status: 'unwatched',
+    category: '欧美', tags: '', year: 2019, rating: 6.5, doubanRating: 0, duration: 3600,
+    playable: true
   }
 ]
+
+/**
+ * 那个真文件：profile 里的一个 .txt。
+ *
+ * 为什么是 txt 而不是 mkv：要验的是 `shell.openPath` 这一步真的走通了，
+ * 而那取决于**系统有没有关联程序**。假 mkv 在这台机器上可能关联着某个
+ * 播放器、也可能什么都没有，两种情况下这条检查的含义完全不同。txt 一定
+ * 有关联（记事本），而且开出来的窗口一句 `Stop-Process` 就收拾干净。
+ *
+ * 代价是它会在验证过程中真的弹一个记事本出来。CDP 那一路把这条检查排在
+ * 最后并且立刻杀掉进程 —— 记事本抢焦点会把 Electron 窗口的 rAF 掐掉，
+ * 后面的 DOM 查询会看起来像是页面卡住了（v0.6 记过这个坑）。
+ */
+const PLAYABLE = path.join(profile, '能真打开的片.txt')
+fs.writeFileSync(PLAYABLE, '这是验证用的假视频文件。\r\n', 'utf8')
+
+/**
+ * 外挂字幕：两个真文件 + 一个内嵌轨。
+ *
+ * 三条都要有，因为详情页把内嵌和外挂分成了两块显示，而那个区别的判据是
+ * `path` 空不空。只铺一种的话，分不分开都能「看着对」。
+ * 文件要真存在 —— `revealSubtitle` 会 `existsSync` 一道。
+ */
+const SUB_DIR = path.join(profile, 'subs')
+fs.mkdirSync(SUB_DIR, { recursive: true })
+const SUBS = ['沙丘.简体.srt', '沙丘.英文.ass'].map((name) => {
+  const p = path.join(SUB_DIR, name)
+  fs.writeFileSync(p, '1\r\n00:00:01,000 --> 00:00:02,000\r\n假字幕\r\n', 'utf8')
+  return p
+})
 
 for (const v of VIDEOS) {
   const isSeries = v.type === 'series'
@@ -124,8 +164,8 @@ for (const v of VIDEOS) {
      VALUES (?, 'video', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'done', ?)`
   ).run(
     v.id, now, now,
-    isSeries ? dir : `${dir}\\${file}`,
-    isSeries ? v.name : file,
+    v.playable ? PLAYABLE : isSeries ? dir : `${dir}\\${file}`,
+    v.playable ? path.basename(PLAYABLE) : isSeries ? v.name : file,
     isSeries ? 0 : 4_000_000_000,
     'D:\\假影视',
     v.name,
@@ -143,17 +183,29 @@ for (const v of VIDEOS) {
     posterPath = '/wPRcNZ4Q1RkzhtsFRSMJfLmMx1v.jpg'
   }
 
+  // 字幕轨只给沙丘：一条内嵌 + 两个外挂。详情页把这两类分开显示，
+  // 判据是 path 空不空，所以两类都得有实物
+  const subtitleTracks =
+    v.id === 'vid-0001'
+      ? [
+          { index: 2, language: 'zh', label: '简体中文', codec: 'SUBRIP', path: '' },
+          { index: -1, language: 'zh', label: SUBS[0]!.split(/[\\/]/).pop(), codec: 'SRT', path: SUBS[0] },
+          { index: -1, language: 'en', label: SUBS[1]!.split(/[\\/]/).pop(), codec: 'ASS', path: SUBS[1] }
+        ]
+      : []
+
   db.prepare(
     `INSERT INTO video_meta
        (resource_id, video_type, poster_path, year, rating, watch_status,
         duration_sec, resolution, video_codec, source, release_group,
-        audio_tracks, tmdb_id, douban_id, douban_rating)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        audio_tracks, subtitle_tracks, tmdb_id, douban_id, douban_rating)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     v.id, v.type, posterPath, v.year, v.rating, v.status, v.duration,
     isSeries ? '' : '1080p', isSeries ? '' : 'AVC', isSeries ? '' : 'BLURAY',
     isSeries ? '' : 'GROUP',
     JSON.stringify([{ index: 0, language: 'zh', label: '国语 5.1', codec: 'DTS', path: '' }]),
+    JSON.stringify(subtitleTracks),
     v.year ? '438631' : '', v.doubanRating ? '3820120' : '', v.doubanRating
   )
 }
@@ -164,24 +216,30 @@ for (const v of VIDEOS) {
  * 第一季 8 集全有文件、看完 5 集 —— 详情页该显示 5/8，剧一级是「在看」。
  * 第二季 8 集只有 3 个文件 —— 剩下 5 集 path 为空串，那是「知道有这一集、
  * 磁盘上没文件」，界面上必须露面，否则用户不知道自己缺什么。
+ *
+ * **S02E02 留一个断点**（Step 7 加的）：这样「点播放该开哪一集」在真数据上
+ * 有得可验 —— 有断点的那一集要压过「第一集没看完的」（那会是 S01E06）。
+ * 不留断点的话两条规则给出同一个答案，等于只验了一条。
  */
 let epSeq = 0
 for (const season of [1, 2]) {
   for (let ep = 1; ep <= 8; ep++) {
     const hasFile = season === 1 || ep <= 3
     const watched = season === 1 && ep <= 5
+    const resuming = season === 2 && ep === 2
     db.prepare(
       `INSERT INTO episode
          (id, resource_id, season, episode, title, path, file_size,
-          duration_sec, watch_status, watched_at, air_date)
-       VALUES (?, 'vid-0004', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          duration_sec, watch_status, position_sec, watched_at, air_date)
+       VALUES (?, 'vid-0004', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       `ep-${String(++epSeq).padStart(4, '0')}`, season, ep,
       `第 ${ep} 集的标题`,
       hasFile ? `D:\\假影视\\黑暗荣耀\\S0${season}\\S0${season}E0${ep}.mkv` : '',
       hasFile ? 2_000_000_000 : 0,
       hasFile ? 3300 : 0,
-      watched ? 'watched' : 'unwatched',
+      watched ? 'watched' : resuming ? 'watching' : 'unwatched',
+      resuming ? 812 : 0,
       watched ? now : 0,
       0
     )
@@ -198,7 +256,10 @@ console.log(
       archived: n(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 1`),
       episodes: n(`SELECT COUNT(*) AS n FROM episode`),
       episodesMissingFile: n(`SELECT COUNT(*) AS n FROM episode WHERE path = ''`),
-      posterFiles: fs.readdirSync(postersDir).length
+      episodesResuming: n(`SELECT COUNT(*) AS n FROM episode WHERE position_sec > 0`),
+      posterFiles: fs.readdirSync(postersDir).length,
+      playableFile: PLAYABLE,
+      subtitleFiles: SUBS.length
     },
     null,
     2

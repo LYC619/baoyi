@@ -36,7 +36,7 @@ import type { SearchConfig, TmdbConfig, VideoPart } from '../../../src/types'
 import { formatHits, search, searchCached } from '../../services/searchService.ts'
 import { insertVideo, type EpisodePayload, type VideoPayload } from './db.ts'
 import { doubanLookup, doubanQuery, doubanUrl, type DoubanCandidate } from './douban.ts'
-import type { VideoFacts } from './facts.ts'
+import type { EpisodeFacts, VideoFacts } from './facts.ts'
 import {
   tmdbDetail,
   tmdbFindByExternalId,
@@ -320,15 +320,8 @@ async function fetchEpisodes(
   ctx: VideoToolContext,
   detail: TmdbDetail
 ): Promise<{ list: EpisodePayload[]; note: string }> {
-  const have = new Map<string, { path: string; file_size: number; duration_sec: number; title: string }>()
-  for (const ep of ctx.facts.episodes) {
-    have.set(`${ep.season}/${ep.episode}`, {
-      path: ep.path,
-      file_size: ep.file_size,
-      duration_sec: ep.duration_sec,
-      title: ep.title
-    })
-  }
+  const have = new Map<string, EpisodeFacts>()
+  for (const ep of ctx.facts.episodes) have.set(`${ep.season}/${ep.episode}`, ep)
 
   const wanted = ctx.facts.seasons.length > 0 ? ctx.facts.seasons : [1]
   const available = new Set(detail.seasons.map((s) => s.season_number))
@@ -361,7 +354,8 @@ async function fetchEpisodes(
         path: local?.path ?? '',
         file_size: local?.file_size ?? 0,
         duration_sec: local?.duration_sec || e.runtime_min * 60,
-        air_date: e.air_date_ts
+        air_date: e.air_date_ts,
+        ...watchOf(local)
       })
     }
   }
@@ -379,7 +373,9 @@ async function fetchEpisodes(
       path: local.path,
       file_size: local.file_size,
       duration_sec: local.duration_sec,
-      air_date: 0
+      // 这一支是「TMDB 没收录」，air_date 用本地 nfo 的而不是硬写 0
+      air_date: local.air_date,
+      ...watchOf(local)
     })
   }
 
@@ -391,6 +387,23 @@ async function fetchEpisodes(
   return { list, note }
 }
 
+/**
+ * 别家 nfo 记的观看状态，摊平成 payload 上那三个可选字段。
+ *
+ * 没有痕迹时给空对象而不是 `watch_status: 'unwatched'` —— 展开进 payload 里
+ * 就是「这三个键不存在」，`upsertEpisodes` 那边落到列默认值上。
+ * 显式写 unwatched 也是同一个结果，但那等于宣称「nfo 说他没看过」，
+ * 而事实是 nfo 什么都没说。见 `EpisodeFacts.watch` 的注释。
+ */
+function watchOf(e: EpisodeFacts | undefined): Partial<EpisodePayload> {
+  if (!e?.watch) return {}
+  return {
+    watch_status: e.watch.watch_status,
+    position_sec: e.watch.position_sec,
+    watched_at: e.watch.watched_at
+  }
+}
+
 /** 本地事实里的集列表，TMDB 不可用或没挑条目时用它 */
 function localEpisodes(f: VideoFacts): EpisodePayload[] {
   return f.episodes.map((e) => ({
@@ -400,7 +413,8 @@ function localEpisodes(f: VideoFacts): EpisodePayload[] {
     path: e.path,
     file_size: e.file_size,
     duration_sec: e.duration_sec,
-    air_date: e.air_date
+    air_date: e.air_date,
+    ...watchOf(e)
   }))
 }
 
@@ -517,7 +531,16 @@ async function register(
     // 详情响应里白拿 —— 不存的话 Step 6 得为每个条目把详情重取一遍
     poster_path: detail?.poster_path ?? '',
     fanart_path: detail?.backdrop_path ?? '',
-    episodes
+    episodes,
+    // 电影从 nfo 带过来的观看状态。只在新建时生效，剧集恒为 null，
+    // 两条都在 db.ts 里把着，见 VideoPayload 上那一组字段
+    ...(f.watch
+      ? {
+          watch_status: f.watch.watch_status,
+          position_sec: f.watch.position_sec,
+          last_watched_at: f.watch.watched_at
+        }
+      : {})
   }
 
   const outcome = insertVideo(ctx.db, payload)

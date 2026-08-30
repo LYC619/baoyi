@@ -180,6 +180,7 @@ import {
   listVideos,
   nextEpisode,
   parseUserEdited,
+  resumeEpisode,
   PROTECTED_FIELDS,
   PROTECTED_META_FIELDS,
   PROTECTED_RESOURCE_FIELDS,
@@ -210,7 +211,12 @@ import {
   scanVideoRoot,
   stackParts
 } from '../electron/kinds/video/scanner.ts'
-import { dateToEpochSec, parseNfo, parseNfoEpisodes } from '../electron/kinds/video/nfo.ts'
+import {
+  dateToEpochSec,
+  parseNfo,
+  parseNfoEpisodes,
+  type NfoData
+} from '../electron/kinds/video/nfo.ts'
 import {
   mapMediaInfo,
   mediaInfoWasmPath,
@@ -234,6 +240,7 @@ import {
   emptyFacts,
   guessSubtitleLanguage,
   mergeFacts,
+  nfoWatchState,
   pickMainNfo
 } from '../electron/kinds/video/facts.ts'
 import {
@@ -2211,6 +2218,7 @@ async function main(): Promise<void> {
   await videoIdentifySection()
   await videoPosterSection()
   await videoUserEditedSection()
+  await videoPlaybackSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -6370,8 +6378,8 @@ async function videoIdentifySection(): Promise<void> {
       ...facts,
       video_type: 'series',
       episodes: [
-        { season: 1, episode: 1, title: '', path: 'a', file_size: 1, duration_sec: 0, air_date: 0 },
-        { season: 1, episode: 2, title: '第二集', path: 'b', file_size: 1, duration_sec: 0, air_date: 0 }
+        { season: 1, episode: 1, title: '', path: 'a', file_size: 1, duration_sec: 0, air_date: 0, watch: null },
+        { season: 1, episode: 2, title: '第二集', path: 'b', file_size: 1, duration_sec: 0, air_date: 0, watch: null }
       ],
       episode_files: 2,
       seasons: [1]
@@ -6383,7 +6391,8 @@ async function videoIdentifySection(): Promise<void> {
 
   await check('集列表长时截断，但要说清还有多少集没列', () => {
     const many = Array.from({ length: 40 }, (_, i) => ({
-      season: 1, episode: i + 1, title: '', path: `e${i}`, file_size: 1, duration_sec: 0, air_date: 0
+      season: 1, episode: i + 1, title: '', path: `e${i}`, file_size: 1, duration_sec: 0, air_date: 0,
+      watch: null
     }))
     const p = videoCandidatePrompt({ ...facts, video_type: 'series', episodes: many, episode_files: 40, seasons: [1] })
     assert.ok(p.includes('还有 34 集'), '截断了得说一声，否则模型以为只有 6 集')
@@ -7403,6 +7412,339 @@ async function videoUserEditedSection(): Promise<void> {
     // 会让 rollback-v7 那句「退回 0.6」和将来 rollback-v8 的界限说不清。
     // 闸门是 columnsOf().has()，下次启动自己补上
     assert.equal(SCHEMA_VERSION, 7, '这一列不该动版本号，闸门是「列在不在」')
+  })
+}
+
+/* ================= 播放与进度 · v0.7 Step 7 ================= */
+
+/**
+ * 两件事：**别家 nfo 的观看状态怎么进来**，和**点播放开哪一集**。
+ *
+ * 这一段要挡住的：
+ *
+ * 1. **重扫覆盖用户的进度** —— Step 6b 刚从「刮削字段」那个入口修掉这个错，
+ *    nfo 导入是它的第二个入口，而且更隐蔽：用户在抱一里标了看完，
+ *    重扫一遍被 Kodi 那份旧 nfo 的 playcount=0 顶回未看。所以
+ *    `upsertEpisodes` 的 UPDATE 分支必须一列都不碰这三样。
+ * 2. **导入时把「没说」当成「说了没看」** —— nfo 里没有任何观看痕迹时，
+ *    写一个显式的 unwatched 和不写在库里是同一个结果，但在代码里是两回事：
+ *    前者宣称「那份 nfo 说他没看过」。折算函数必须给 null。
+ * 3. **CHECK 约束炸在扫描中途** —— 那三列的值一路来自磁盘上别人写的 xml。
+ *    watch_status 有闭集约束，写进去一个没见过的词是整条 INSERT 抛异常，
+ *    而它发生在扫描循环里，表现是「扫到某个目录就整趟失败」。
+ * 4. **播放挑错集** —— 一部 40 集的剧点播放开了第 1 集，或者开了一集
+ *    用户明确标过「不看了」的花絮。
+ */
+async function videoPlaybackSection(): Promise<void> {
+  console.log('\n视频 · 播放与进度')
+
+  const { DatabaseSync } = await import('node:sqlite')
+
+  const freshDb = (): InstanceType<typeof DatabaseSync> => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    return d
+  }
+
+  const seriesPayload = (episodes: any[]): VideoPayload =>
+    ({
+      path: 'D:\\TV\\孤独摇滚',
+      video_type: 'series',
+      name_zh: '孤独摇滚！',
+      name_en: 'Bocchi the Rock!',
+      summary: '社恐少女组乐队',
+      description: '',
+      category: '日本',
+      tags: [],
+      official_url: '',
+      source_dir: 'D:\\TV',
+      file_size: 0,
+      year: 2022,
+      end_year: 0,
+      rating: 0,
+      duration_sec: 1440,
+      resolution: '1080p',
+      video_codec: 'HEVC',
+      source: '',
+      release_group: '',
+      audio_tracks: [],
+      subtitle_tracks: [],
+      parts: [],
+      linked_files: [],
+      tmdb_id: '119100',
+      imdb_id: '',
+      douban_id: '',
+      douban_rating: 0,
+      poster_path: '',
+      fanart_path: '',
+      episodes
+    }) as VideoPayload
+
+  const ep = (n: number, over: Record<string, unknown> = {}) => ({
+    season: 1,
+    episode: n,
+    title: `第 ${n} 集`,
+    path: `D:\\TV\\孤独摇滚\\S01E${String(n).padStart(2, '0')}.mkv`,
+    file_size: 1_400_000_000,
+    duration_sec: 1440,
+    air_date: 0,
+    ...over
+  })
+
+  /* -------------------- nfo 折算 -------------------- */
+
+  // 走一趟真解析器拿完整形状，而不是手写一个对象字面量：NfoData 有三十来个
+  // 字段，手写的那份将来加字段时不会报错，只会静默少一个键
+  const base = parseNfo('<movie><title>底座</title></movie>')!
+  const nfo = (over: Partial<NfoData> = {}): NfoData => ({ ...base, ...over })
+
+  await check('nfo 里没有观看痕迹 = null，不是 unwatched', () => {
+    // 这个区别决定入库那边「写不写这三列」。给 unwatched 的话，
+    // 一份根本没提过观看的 nfo 会宣称「他没看过」
+    assert.equal(nfoWatchState(nfo()), null)
+    assert.equal(nfoWatchState(null), null, '没有 nfo 也是 null，不该抛')
+  })
+
+  await check('playcount > 0 折算成看完', () => {
+    const w = nfoWatchState(nfo({ playcount: 2 }))
+    assert.equal(w?.watch_status, 'watched')
+  })
+
+  await check('只有断点没有播放次数 = 在看', () => {
+    const w = nfoWatchState(nfo({ resume_position_sec: 620 }))
+    assert.equal(w?.watch_status, 'watching')
+    assert.equal(w?.position_sec, 620)
+  })
+
+  await check('看完 + 有断点：状态取看完，位置照留', () => {
+    // 重看到一半的人两个都有值。库里存不下「看过几遍」，
+    // 那就保住信息量更大的那一半，位置不丢
+    const w = nfoWatchState(nfo({ playcount: 1, resume_position_sec: 300 }))
+    assert.equal(w?.watch_status, 'watched')
+    assert.equal(w?.position_sec, 300)
+  })
+
+  await check('不做「快到头就算看完」那种换算', () => {
+    // Kodi 自己有个 90% 阈值，但那是它的判断而不是它的记录。抄过来等于
+    // 我们替用户认定他看完了一部卡在 91% 的片子 —— v0.6 那条教训说的
+    // 「猜一个会过期的判断写进库」
+    const w = nfoWatchState(nfo({ resume_position_sec: 5340, resume_total_sec: 5400 }))
+    assert.equal(w?.watch_status, 'watching', '99% 也只是在看，没有 playcount 就不算看完')
+  })
+
+  await check('lastplayed 认得出 Kodi 那个形状，认不出时留 0', () => {
+    const ok = nfoWatchState(nfo({ playcount: 1, last_played: '2024-03-05 21:30:00' }))
+    assert.ok((ok?.watched_at ?? 0) > 0, 'Kodi 写的是「日期 空格 时间」，得认')
+    const bad = nfoWatchState(nfo({ playcount: 1, last_played: '前天晚上' }))
+    assert.equal(bad?.watched_at, 0, '认不出来要留 0，不能变成 1970 年跑到排序最前面')
+  })
+
+  /* -------------------- 入库：只认第一次 -------------------- */
+
+  await check('新建的集接受 nfo 带来的观看状态', () => {
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload([
+        ep(1, { watch_status: 'watched', position_sec: 0, watched_at: 1_700_000_000_000 }),
+        ep(2, { watch_status: 'watching', position_sec: 620 }),
+        ep(3)
+      ])
+    )
+    const list = listEpisodes(d as any, id)
+    assert.equal(list[0]!.watch_status, 'watched')
+    assert.equal(list[1]!.watch_status, 'watching')
+    assert.equal(list[1]!.position_sec, 620)
+    assert.equal(list[2]!.watch_status, 'unwatched', '没带状态的落到列默认值')
+    d.close()
+  })
+
+  await check('重扫不覆盖已存在的集的进度 —— 哪怕 nfo 说的不一样', () => {
+    // 这是这一段最要紧的一条。用户在抱一里标了看完，而 Kodi 那份 nfo
+    // 还写着 playcount=0；重扫时采信 nfo 就是把用户的账清零
+    const d = freshDb()
+    const { id } = insertVideo(d as any, seriesPayload([ep(1), ep(2)]))
+    const first = listEpisodes(d as any, id)
+    updateEpisode(d as any, first[0]!.id, { watch_status: 'watched', position_sec: 1400 })
+
+    // 第二趟：nfo 说这一集没看过（playcount 缺失 → 整组不带），
+    // 以及说另一集看过了
+    insertVideo(
+      d as any,
+      seriesPayload([
+        ep(1, { watch_status: 'unwatched', position_sec: 0 }),
+        ep(2, { watch_status: 'watched' })
+      ])
+    )
+    const after = listEpisodes(d as any, id)
+    assert.equal(after[0]!.watch_status, 'watched', '用户标的看完被 nfo 顶回去了')
+    assert.equal(after[0]!.position_sec, 1400, '播放位置也被顶回去了')
+    assert.equal(after[1]!.watch_status, 'unwatched', '已存在的集不接受 nfo 的新状态')
+    d.close()
+  })
+
+  await check('重扫照旧刷新集的标题和文件事实', () => {
+    // 上一条的反面。只验「进度没变」的话，一个「重扫什么都不写」的
+    // 实现也能全绿，而那会让改名、换片源在详情页上永远不更新
+    const d = freshDb()
+    const { id } = insertVideo(d as any, seriesPayload([ep(1, { title: '第 1 集' })]))
+    insertVideo(
+      d as any,
+      seriesPayload([ep(1, { title: '転がるロック', file_size: 2_000_000_000 })])
+    )
+    const list = listEpisodes(d as any, id)
+    assert.equal(list[0]!.title, '転がるロック')
+    assert.equal(list[0]!.file_size, 2_000_000_000)
+    d.close()
+  })
+
+  await check('watch_status 是脏值时落回 unwatched，不让 CHECK 炸在扫描中途', () => {
+    // 值一路来自磁盘上别人写的 xml。抛异常的话表现是「扫到某个目录就整趟失败」
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload([ep(1, { watch_status: 'wathcing' as any }), ep(2, { watch_status: '' as any })])
+    )
+    const list = listEpisodes(d as any, id)
+    assert.equal(list[0]!.watch_status, 'unwatched')
+    assert.equal(list[1]!.watch_status, 'unwatched')
+    d.close()
+  })
+
+  await check('负数和小数的播放位置被夹回整数秒', () => {
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload([ep(1, { watch_status: 'watching', position_sec: -5 }), ep(2, { watch_status: 'watching', position_sec: 12.7 })])
+    )
+    const list = listEpisodes(d as any, id)
+    assert.equal(list[0]!.position_sec, 0)
+    assert.equal(list[1]!.position_sec, 13)
+    d.close()
+  })
+
+  await check('导入的集状态会推到剧一级 —— 全看完就是看完', () => {
+    // 从别处导进来一整部看完的剧，侧栏那一格该是「看完」而不是「想看」
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload([ep(1, { watch_status: 'watched' }), ep(2, { watch_status: 'watched' })])
+    )
+    assert.equal(getVideo(d as any, id)!.watch_status, 'watched')
+    d.close()
+  })
+
+  await check('电影的观看状态落在 video_meta 上，也只认第一次', () => {
+    const d = freshDb()
+    const movie = (over: Record<string, unknown>): VideoPayload =>
+      ({
+        ...seriesPayload([]),
+        path: 'D:\\Movies\\Dune.mkv',
+        video_type: 'movie',
+        ...over
+      }) as VideoPayload
+
+    const { id } = insertVideo(d as any, movie({ watch_status: 'watched', position_sec: 300, last_watched_at: 1_700_000_000_000 }))
+    assert.equal(getVideo(d as any, id)!.watch_status, 'watched')
+    assert.equal(getVideo(d as any, id)!.position_sec, 300)
+
+    // 用户改成「弃」，重扫一遍不该被 nfo 顶回 watched
+    updateVideo(d as any, id, { watch_status: 'dropped' })
+    insertVideo(d as any, movie({ watch_status: 'watched', position_sec: 999 }))
+    assert.equal(getVideo(d as any, id)!.watch_status, 'dropped', '重扫顶掉了用户的判断')
+    assert.equal(getVideo(d as any, id)!.position_sec, 300, '播放位置也被顶掉了')
+    d.close()
+  })
+
+  await check('剧集不接受 payload 上的 watch_status —— 那一级是推出来的', () => {
+    // 硬写会被下一次 syncSeriesStatus 推翻，留着只会让人以为它有用
+    const d = freshDb()
+    const p = seriesPayload([ep(1)])
+    ;(p as any).watch_status = 'watched'
+    const { id } = insertVideo(d as any, p)
+    assert.equal(getVideo(d as any, id)!.watch_status, 'unwatched')
+    d.close()
+  })
+
+  /* -------------------- 点播放开哪一集 -------------------- */
+
+  await check('有断点的那一集优先', () => {
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload([
+        ep(1, { watch_status: 'watched' }),
+        ep(2, { watch_status: 'watching', position_sec: 620 }),
+        ep(3)
+      ])
+    )
+    assert.equal(resumeEpisode(d as any, id)!.episode, 2)
+    d.close()
+  })
+
+  await check('没有断点时开第一集没看完的', () => {
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload([ep(1, { watch_status: 'watched' }), ep(2, { watch_status: 'watched' }), ep(3), ep(4)])
+    )
+    assert.equal(resumeEpisode(d as any, id)!.episode, 3)
+    d.close()
+  })
+
+  await check('标过「不看了」的集被跳过', () => {
+    // 跳过的花絮特别篇常被这么标。跳到它上面是把用户刚做的判断当没看见
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload([ep(1, { watch_status: 'watched' }), ep(2, { watch_status: 'dropped' }), ep(3)])
+    )
+    assert.equal(resumeEpisode(d as any, id)!.episode, 3)
+    d.close()
+  })
+
+  await check('全看完了开第一集 —— 重看的人从头开始', () => {
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload([ep(1, { watch_status: 'watched' }), ep(2, { watch_status: 'watched' })])
+    )
+    assert.equal(resumeEpisode(d as any, id)!.episode, 1, '「没得播」比开第一集难用')
+    d.close()
+  })
+
+  await check('缺文件的集不会被挑中', () => {
+    // 播放器打不开一个不存在的文件。挑中它的表现是「点了播放，弹一句文件不在」
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload([ep(1, { watch_status: 'watched' }), ep(2, { path: '' }), ep(3)])
+    )
+    assert.equal(resumeEpisode(d as any, id)!.episode, 3)
+    d.close()
+  })
+
+  await check('一集文件都没有时给 null，不是抛', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, seriesPayload([ep(1, { path: '' }), ep(2, { path: '' })]))
+    assert.equal(resumeEpisode(d as any, id), null)
+    d.close()
+  })
+
+  await check('跨季接着看', () => {
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload([
+        ep(1, { watch_status: 'watched' }),
+        { ...ep(1), season: 2, episode: 1, path: 'D:\\TV\\孤独摇滚\\S02E01.mkv' }
+      ])
+    )
+    const target = resumeEpisode(d as any, id)!
+    assert.equal(target.season, 2)
+    assert.equal(target.episode, 1)
+    d.close()
   })
 }
 

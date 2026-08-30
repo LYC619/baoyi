@@ -1135,6 +1135,22 @@ export interface VideoScanResult {
   searches: number
 }
 
+/**
+ * 点一次播放的结果。
+ *
+ * 为什么带回 `item` 和 `episode`：打开文件这一下会把观看状态从「未看」
+ * 抬到「在看」（用户确实打开了它，这是事实），侧栏计数和详情页那个
+ * 「3/12 集」都得跟着动。让界面改完再查一趟的话，中间那一瞬两个数字对不上。
+ */
+export interface VideoPlayOutcome {
+  ok: boolean
+  /** 失败原因。`ok` 为 false 时一定非空，界面必须显示它 */
+  message: string
+  item: VideoItem | null
+  /** 剧集：实际开的那一集。电影恒为 null */
+  episode: Episode | null
+}
+
 export type Unsubscribe = () => void
 
 /** preload 暴露给渲染进程的完整 API */
@@ -1277,6 +1293,26 @@ export interface BaoyiApi {
     counts(): Promise<VideoCounts>
     /** 剧集选中目录，电影选中文件 */
     revealInFolder(id: string): Promise<void>
+    /**
+     * 在资源管理器里选中一个外挂字幕文件。
+     *
+     * 只认这个条目名下的字幕路径，别的路径一律返回 false —— 这个通道从
+     * 渲染进程过来，而底下那个 `showItemInFolder` 能打开任何位置。
+     */
+    revealSubtitle(id: string, target: string): Promise<boolean>
+    /**
+     * 交给系统默认播放器。电影开本体，剧集开「该接着看的那一集」。
+     *
+     * `ok` 为 false 时 `message` 一定有内容，**必须显示出来** ——
+     * 播放失败最容易被用户当成「点了没反应」。成功时 `item` / `episode`
+     * 带着新状态回来（未看 → 在看），界面不用再查一趟。
+     *
+     * 拿不到播放进度：外部播放器不回报任何东西。这是 v0.7 明确的取舍，
+     * 见 `v0.7-进度.md`，不是没做完。
+     */
+    play(id: string): Promise<VideoPlayOutcome>
+    /** 同上，指定某一集 */
+    playEpisode(episodeId: string): Promise<VideoPlayOutcome>
     /** 选影视目录，可多选。取消返回空数组 */
     pickDirectories(): Promise<string[]>
     /**

@@ -35,6 +35,7 @@ import {
   listEpisodes,
   listVideos,
   nextEpisode,
+  resumeEpisode,
   syncSeriesStatus,
   updateEpisode,
   restoreScrapedFields,
@@ -121,6 +122,129 @@ export function revealVideo(id: string): void {
   if (!existsSync(item.path)) return
   if (item.video_type === 'series') shell.openPath(item.path)
   else shell.showItemInFolder(item.path)
+}
+
+/* ------------------------------ 播放 ------------------------------ */
+
+/**
+ * 播放一个结果。`ok` 为 false 时 `message` 一定有内容 —— 界面直接显示它。
+ *
+ * 和 `revealVideo` 那几个 `return` 的区别是有意的：打开文件夹失败了用户
+ * 自己能看出来（资源管理器没弹出来），而播放失败很容易被当成「点了没反应」。
+ * v0.7 之前详情页上没有播放键，就是因为不想给一个点了没反应的按钮。
+ */
+export interface PlayOutcome {
+  ok: boolean
+  message: string
+  /** 播放后的条目（观看状态可能从「未看」变成了「在看」）。失败时是 null */
+  item: VideoItem | null
+  /** 剧集：实际开的那一集。电影和失败时是 null */
+  episode: Episode | null
+}
+
+/**
+ * 交给系统默认播放器。**这就是 v0.7「播放」的全部实现。**
+ *
+ * 待拍板那一处（外置 mpv + IPC 拿真实进度）没有走，理由记在
+ * `v0.7-进度.md`：v0.6 已经证明「猜一个会过期的判断写进库」比不写更糟，
+ * 而 mpv 那条路本机连 mpv 都没装，发出去等于没测过。默认播放器这条无论如何
+ * 都得有 —— 用 PotPlayer 的人不会为了进度条去换播放器。
+ *
+ * `shell.openPath` 的返回值是**空串表示成功**，出错时是一句错误描述。
+ * 这个约定反直觉，但它是 Electron 的，别「修」成 boolean。
+ */
+async function openWithPlayer(filePath: string): Promise<string> {
+  if (!filePath) return '这一条没有记下文件路径'
+  if (!existsSync(filePath)) return `文件不在了：${filePath}`
+  // 目录也能走到这儿（剧集的 path 是目录）。调用方保证传的是文件，
+  // 这里不再判一次 —— 判了也只能给同一句话
+  const err = await shell.openPath(filePath)
+  // 最常见的失败是没有关联播放器，Windows 给的原文是英文的，补一句中文
+  if (err) return `打不开：${err}（可能没有关联的播放器）`
+  return ''
+}
+
+/**
+ * 开一集，并把它标成「在看」。
+ *
+ * **只从 unwatched 改成 watching，其它状态一律不动。** 用户打开了这个文件是
+ * 一个确定的事实，所以从「未看」改过来是有依据的；而「他看完了没有」我们
+ * 不知道 —— 外部播放器不回报任何东西。标过 watched 的重看、标过 dropped 的
+ * 又点开一次，都不该被这一下悄悄改掉。
+ */
+export async function playVideoEpisode(episodeId: string): Promise<PlayOutcome> {
+  const d = getDb()
+  const ep = getEpisode(d, episodeId)
+  if (!ep) return { ok: false, message: '找不到这一集', item: null, episode: null }
+
+  const err = await openWithPlayer(ep.path)
+  if (err) return { ok: false, message: err, item: null, episode: ep }
+
+  const patch: Partial<Episode> = { watched_at: Date.now() }
+  if (ep.watch_status === 'unwatched') patch.watch_status = 'watching'
+  const updated = updateVideoEpisode(episodeId, patch)
+
+  return {
+    ok: true,
+    message: '',
+    item: getVideo(d, ep.resource_id),
+    episode: updated ?? ep
+  }
+}
+
+/**
+ * 在一个条目上点播放。电影开本体，剧集开「该接着看的那一集」。
+ *
+ * 剧集挑哪一集见 `db.ts` 的 `resumeEpisode`。挑集这件事放在库那一层而不是
+ * 界面上，是因为侧栏「在看」那一格将来也要能一键接着看 —— 两处各写一份
+ * 挑选规则，迟早出现「详情页开第 5 集、侧栏开第 3 集」。
+ */
+export async function playVideo(id: string): Promise<PlayOutcome> {
+  const d = getDb()
+  const item = getVideo(d, id)
+  if (!item) return { ok: false, message: '找不到这个条目', item: null, episode: null }
+
+  if (item.video_type === 'series') {
+    const ep = resumeEpisode(d, id)
+    if (!ep) {
+      return {
+        ok: false,
+        // 这句话得说清是「没文件」而不是「坏了」：TMDB 补出来的集表可能
+        // 有 16 集而磁盘上一个文件都没有，那时候详情页看着满满的
+        message: '这部剧在磁盘上还没有任何一集的文件',
+        item,
+        episode: null
+      }
+    }
+    return playVideoEpisode(ep.id)
+  }
+
+  const err = await openWithPlayer(item.path)
+  if (err) return { ok: false, message: err, item, episode: null }
+
+  // 电影的进度记在 video_meta 上，见 schema.ts。同样只从 unwatched 抬到 watching
+  const patch: Partial<VideoItem> = { last_watched_at: Date.now() }
+  if (item.watch_status === 'unwatched') patch.watch_status = 'watching'
+  return { ok: true, message: '', item: updateVideo(d, id, patch) ?? item, episode: null }
+}
+
+/**
+ * 在资源管理器里选中一个外挂字幕文件。
+ *
+ * 为什么要这个：字幕对不上的时候用户要做的事是去那个目录里换一个文件，
+ * 而外挂字幕可能和视频不在同一层（`Subs/` 子目录是常见摆法）。
+ * 详情页上把路径显示出来还不够 —— 那还得用户自己去翻。
+ *
+ * 只认这个条目自己名下的字幕路径，不接受任意路径：这个通道从渲染进程过来，
+ * 而 `showItemInFolder` 能打开任何位置。
+ */
+export function revealSubtitle(id: string, target: string): boolean {
+  const item = getVideo(getDb(), id)
+  if (!item) return false
+  const own = item.subtitle_tracks.some((t) => t.path && t.path === target)
+  if (!own || !existsSync(target)) return false
+  shell.showItemInFolder(target)
+  return true
 }
 
 /* ------------------------------ 扫描识别 ------------------------------ */

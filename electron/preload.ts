@@ -108,6 +108,10 @@ const api: BaoyiApi = {
     remove: (id: string) => ipcRenderer.invoke('video:remove', id),
     counts: () => ipcRenderer.invoke('video:counts'),
     revealInFolder: (id: string) => ipcRenderer.invoke('video:reveal', id),
+    revealSubtitle: (id: string, target: string) =>
+      ipcRenderer.invoke('video:reveal-subtitle', id, target),
+    play: (id: string) => ipcRenderer.invoke('video:play', id),
+    playEpisode: (episodeId: string) => ipcRenderer.invoke('video:play-episode', episodeId),
     pickDirectories: () => ipcRenderer.invoke('video:pick-dirs'),
     scan: (dirs: string[]) => ipcRenderer.invoke('video:scan', plain(dirs)),
     cancel: () => ipcRenderer.send('video:cancel'),

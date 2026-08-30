@@ -23,7 +23,9 @@ import {
   ImageDown,
   ImageOff,
   Loader2,
+  Play,
   Star,
+  Subtitles,
   Trash2
 } from 'lucide-vue-next'
 import EditableField from '@/components/ui/EditableField.vue'
@@ -301,6 +303,124 @@ async function reveal(): Promise<void> {
   await window.baoyi.video.revealInFolder(item.value.id)
 }
 
+/* ---------------------------- 播放 ---------------------------- */
+
+const playing = ref(false)
+/** 正在播的那一集，用来在季集表里高亮出「刚开的是这一集」 */
+const playingEpisode = ref('')
+
+/**
+ * 剧集点顶部播放会开哪一集。挑选规则和主进程里的 `resumeEpisode` 一致。
+ *
+ * 这里算一份是为了**把它写在按钮上**（「播放 S01E03」而不是光秃秃一个
+ * 「播放」）—— 一个不告诉你要开什么的播放键，在一部 40 集的剧上是个盲盒。
+ * 真正开哪一集由主进程定，两边不一致时按钮上的字会不对，所以这个规则
+ * 改了就得两边一起改。不在渲染进程里定夺是有意的：侧栏将来也要能一键接着看。
+ */
+const resumeTarget = computed<Episode | null>(() => {
+  if (item.value?.video_type !== 'series') return null
+  const withFile = episodes.value.filter((e) => e.path)
+  return (
+    withFile.find((e) => e.position_sec > 0 && e.watch_status !== 'watched') ??
+    withFile.find((e) => e.watch_status !== 'watched' && e.watch_status !== 'dropped') ??
+    withFile[0] ??
+    null
+  )
+})
+
+const playable = computed(() =>
+  item.value?.video_type === 'series' ? !!resumeTarget.value : !!item.value?.path
+)
+
+const playLabel = computed(() => {
+  const target = resumeTarget.value
+  return target ? `播放 ${episodeCode(target.season, target.episode)}` : '播放'
+})
+
+const playHint = computed(() => {
+  if (!item.value) return ''
+  if (item.value.video_type === 'series') {
+    const target = resumeTarget.value
+    if (!target) return '这部剧在磁盘上还没有任何一集的文件'
+    return `用系统默认播放器打开 ${episodeCode(target.season, target.episode)}${target.title ? ` ${target.title}` : ''}`
+  }
+  return item.value.path ? '用系统默认播放器打开' : '这一条没有记下文件路径'
+})
+
+/**
+ * 交给系统默认播放器。
+ *
+ * 成功后把那一集并回本地列表：主进程会把它从「未看」抬到「在看」
+ * （用户确实打开了它），而这一页手里那份 `episodes` 是自己查的，
+ * 不重新拿一趟的话季集表上那一行还写着「想看」。
+ */
+async function play(): Promise<void> {
+  if (!item.value || playing.value) return
+  playing.value = true
+  try {
+    if (item.value.video_type === 'series') {
+      const target = resumeTarget.value
+      if (!target) return
+      const updated = await store.playEpisode(target.id)
+      if (updated) {
+        mergeEpisode(updated)
+        playingEpisode.value = updated.id
+      }
+    } else {
+      const ok = await store.play(item.value.id)
+      if (ok) item.value = store.items.find((x) => x.id === props.id) ?? item.value
+    }
+  } catch (e) {
+    error(`打不开这个文件：${errorMessage(e)}`)
+  } finally {
+    playing.value = false
+  }
+}
+
+/** 单集行上的播放键 */
+async function playOne(e: Episode): Promise<void> {
+  if (playing.value || !e.path) return
+  playing.value = true
+  try {
+    const updated = await store.playEpisode(e.id)
+    if (updated) {
+      mergeEpisode(updated)
+      playingEpisode.value = updated.id
+    }
+  } catch (err) {
+    error(`打不开这个文件：${errorMessage(err)}`)
+  } finally {
+    playing.value = false
+  }
+}
+
+function mergeEpisode(updated: Episode): void {
+  const i = episodes.value.findIndex((x) => x.id === updated.id)
+  if (i >= 0) episodes.value[i] = updated
+  // 剧一级的状态可能跟着变了（第一集一开，整部剧就从「想看」进「在看」），
+  // 而那个值在 item 上，不在 episodes 里
+  item.value = store.items.find((x) => x.id === props.id) ?? item.value
+}
+
+/* ---------------------------- 字幕 ---------------------------- */
+
+/**
+ * 内嵌轨和外挂文件分开列。
+ *
+ * 这个区别对用户是有行动含义的：外挂字幕能换、能删、能自己改时间轴，
+ * 内嵌的做不到（得重新封装）。混在一行里显示的话，「字幕不对」的时候
+ * 用户不知道自己是不是有救。判据是 `path` 非空 / `index === -1`，
+ * 见 types 里 MediaTrack 的注释。
+ */
+const embeddedSubs = computed(() => (item.value?.subtitle_tracks ?? []).filter((t) => !t.path))
+const externalSubs = computed(() => (item.value?.subtitle_tracks ?? []).filter((t) => !!t.path))
+
+async function revealSub(target: string): Promise<void> {
+  if (!item.value) return
+  const ok = await window.baoyi.video.revealSubtitle(item.value.id, target)
+  if (!ok) error('这个字幕文件不在了')
+}
+
 function openUrl(url: string): void {
   if (url) window.open(url, '_blank')
 }
@@ -351,9 +471,21 @@ function copyPath(path: string): void {
 
         <div class="head__actions">
           <!--
-            没有「播放」按钮：播放和进度是 Step 7 的活。现在给一个能确实做到的
-            「打开所在文件夹」，而不是一个点了没反应的播放键
+            播放交给系统默认播放器。拿不到播放进度是明说的取舍（外部播放器
+            不回报任何东西，见 v0.7-进度.md），不是没做完 —— 所以按钮上
+            那句 title 直说「开哪一集」，不暗示它会跟着进度走
           -->
+          <!-- detail__play 不带样式，是给真机验证脚本的抓手：按 .btn--primary
+               选会在页面上多一个主按钮的那天悄悄选错 -->
+          <button
+            class="btn btn--primary detail__play"
+            :disabled="playing || !playable"
+            :title="playHint"
+            @click="play"
+          >
+            <Play :size="14" />
+            {{ playing ? '正在打开…' : playLabel }}
+          </button>
           <button class="btn btn--ghost" @click="reveal">
             <FolderOpen :size="14" />
             打开所在文件夹
@@ -533,7 +665,11 @@ function copyPath(path: string): void {
                     v-for="e in s.list"
                     :key="e.id"
                     class="ep"
-                    :class="{ 'ep--missing': !e.path, 'ep--watched': e.watch_status === 'watched' }"
+                    :class="{
+                      'ep--missing': !e.path,
+                      'ep--watched': e.watch_status === 'watched',
+                      'ep--playing': playingEpisode === e.id
+                    }"
                   >
                     <!-- 勾选框在最左：追剧时手指落点固定在同一列，不用每行找位置 -->
                     <button
@@ -544,6 +680,19 @@ function copyPath(path: string): void {
                     >
                       <Loader2 v-if="busyEpisode === e.id" :size="12" class="spin" />
                       <Check v-else-if="e.watch_status === 'watched'" :size="12" />
+                    </button>
+
+                    <!--
+                      播放键紧跟着勾选框：这两个是这一行上唯一的两个动作，
+                      而「开这一集」比「标这一集」更常用
+                    -->
+                    <button
+                      class="ep__play"
+                      :disabled="playing || !e.path"
+                      :title="e.path ? '用系统默认播放器打开这一集' : '这一集没有文件'"
+                      @click="playOne(e)"
+                    >
+                      <Play :size="12" />
                     </button>
 
                     <span class="ep__code mono">{{ episodeCode(e.season, e.episode) }}</span>
@@ -720,9 +869,10 @@ function copyPath(path: string): void {
                 <dt>音轨</dt>
                 <dd>{{ item.audio_tracks.map(trackText).join('，') }}</dd>
               </template>
-              <template v-if="item.subtitle_tracks.length > 0">
-                <dt>字幕</dt>
-                <dd>{{ item.subtitle_tracks.map(trackText).join('，') }}</dd>
+              <!-- 内嵌轨在这儿一行带过。外挂字幕单独一块，理由见下面那一节 -->
+              <template v-if="embeddedSubs.length > 0">
+                <dt>内嵌字幕</dt>
+                <dd>{{ embeddedSubs.map(trackText).join('，') }}</dd>
               </template>
               <dt>{{ isSeries ? '目录' : '文件' }}</dt>
               <dd>
@@ -739,6 +889,31 @@ function copyPath(path: string): void {
                 <dd>{{ formatBytes(item.file_size) }}</dd>
               </template>
             </dl>
+          </section>
+
+          <!--
+            外挂字幕单独一块，不和内嵌轨混在「规格」那一行里。
+            区别对用户有行动含义：外挂的能换、能删、能自己调时间轴，内嵌的做不到。
+            所以每一条给一个「打开所在位置」—— 字幕对不上的时候，用户要做的事
+            就是去那个目录里换一个文件，而字幕常常不和视频在同一层（Subs/ 子目录）。
+          -->
+          <section v-if="externalSubs.length > 0" class="panel">
+            <h2 class="sec-title">
+              外挂字幕
+              <span class="sec-title__count">{{ externalSubs.length }}</span>
+            </h2>
+            <ul class="subs">
+              <li v-for="sub in externalSubs" :key="sub.path" class="sub">
+                <Subtitles :size="13" class="sub__icon" />
+                <span class="sub__label truncate" :title="sub.path">
+                  {{ sub.label || sub.language || '字幕' }}
+                </span>
+                <span v-if="sub.codec" class="sub__codec mono">{{ sub.codec }}</span>
+                <button class="sub__act" title="在资源管理器里选中" @click="revealSub(sub.path)">
+                  <FolderOpen :size="12" />
+                </button>
+              </li>
+            </ul>
           </section>
         </div>
       </div>
@@ -1075,6 +1250,45 @@ function copyPath(path: string): void {
   opacity: 0.45;
 }
 
+/*
+ * 播放键平时是灰的，悬停整行才显形。
+ *
+ * 不常亮：一屏 40 行、每行一个亮着的三角，季集表就变成了一片图标而不是
+ * 一份进度表。而这一行本来要传达的是「看到哪儿了」。
+ */
+.ep__play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 4px;
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.ep:hover .ep__play {
+  opacity: 1;
+}
+.ep__play:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--hover-surface);
+}
+.ep__play:disabled {
+  cursor: default;
+  opacity: 0;
+}
+
+/* 刚点开的那一集留个记号：外部播放器不回报任何东西，这是界面上唯一
+   能说明「刚才那一下确实开了」的痕迹 */
+.ep--playing .ep__code {
+  color: var(--accent);
+}
+.ep--playing .ep__play {
+  opacity: 1;
+  color: var(--accent);
+}
+
 .ep__code {
   flex: none;
   width: 52px;
@@ -1200,6 +1414,61 @@ function copyPath(path: string): void {
   color: var(--text-sub);
 }
 .link:hover {
+  color: var(--accent);
+}
+
+/* --------------------------- 外挂字幕 --------------------------- */
+.subs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 4px;
+  border-radius: var(--radius-btn);
+  font-size: var(--fs-tag);
+}
+.sub:hover {
+  background: var(--hover-surface);
+}
+
+.sub__icon {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.sub__label {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-sub);
+}
+
+.sub__codec {
+  flex: none;
+  color: var(--text-faint);
+}
+
+/* 同季集表里的播放键：悬停才显形，一列常亮的图标会把这一块变成图标墙 */
+.sub__act {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.sub:hover .sub__act {
+  opacity: 1;
+}
+.sub__act:hover {
   color: var(--accent);
 }
 

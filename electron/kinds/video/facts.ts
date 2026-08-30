@@ -35,7 +35,7 @@
 
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import type { MediaTrack, VideoPart } from '../../../src/types'
+import type { MediaTrack, VideoPart, WatchStatus } from '../../../src/types'
 import type { VideoCandidate, VideoFile } from './scanner.ts'
 import { parseNfo, parseNfoEpisodes, type NfoData } from './nfo.ts'
 import { readContainerInfo, type ContainerInfo } from './mediainfo.ts'
@@ -54,6 +54,23 @@ export interface EpisodeFacts {
   duration_sec: number
   /** 首播日期的 Unix 秒。0 = 不知道 */
   air_date: number
+
+  /**
+   * 别家 nfo 记的观看状态，已经折算成抱一的形状。
+   *
+   * `null` = 那份 nfo 里没有任何观看痕迹（或者根本没有 nfo）。这和
+   * 「明确记着未看」不是一回事，所以不能用 `'unwatched'` 当零值 ——
+   * 入库那边要靠这个区别决定「写不写这三列」。折算规则见 `nfoWatchState`。
+   */
+  watch: NfoWatchState | null
+}
+
+/** nfo 里那笔账折算成抱一的三列。见 `nfoWatchState` */
+export interface NfoWatchState {
+  watch_status: WatchStatus
+  position_sec: number
+  /** Unix 毫秒。0 = nfo 里没写日期 */
+  watched_at: number
 }
 
 /**
@@ -117,8 +134,53 @@ export interface VideoFacts {
   /** 被判为花絮剔掉的文件 */
   extras: Array<{ path: string; kind: string }>
 
+  /**
+   * 电影从主 nfo 里折算出的观看状态。`null` = 没有痕迹。
+   *
+   * 剧集这里恒为 `null` —— 剧一级的状态是从集列表推出来的，见
+   * `db.ts` 的 `deriveSeriesStatus`。每一集自己的那笔账在 `episodes[].watch` 上。
+   */
+  watch: NfoWatchState | null
+
   /** 人类可读的判据，原样进 prompt */
   evidence: string[]
+}
+
+/**
+ * nfo 里的观看痕迹折算成抱一的三列。没有痕迹时给 `null`。
+ *
+ * `nfo.ts` 刻意不做这一步（「要不要采信、怎么合并，是入库策略要决定的事」），
+ * 这里就是那个策略。三条规则：
+ *
+ * 1. **`playcount > 0` = 看完。** 这是别家媒体中心明确记下的一笔账，
+ *    不是我们猜的 —— 和 v0.6 那个「启动器三秒退出就算玩过」不是一类东西。
+ * 2. **只有断点、没有播放次数 = 在看。** 断点是「播到一半退出去了」留下的，
+ *    这正好是 watching 的定义。
+ * 3. **断点位置照记，即使已经看完。** 看完一遍又从头开始重看的人，
+ *    nfo 里两个都有值。抱一的库存不下「看过几遍」，那就保住信息量更大的
+ *    那一半（看完），位置留着不丢。`deriveSeriesStatus` 只在一集都没看完时
+ *    才看 position_sec，所以这里同时给值不会把整部剧拽回「在看」。
+ *
+ * 结尾那个「快到头就算看完」的换算**故意没做**。Kodi 自己有个 90% 阈值，
+ * 但那是它的判断而不是它的记录：抄过来等于我们替用户认定他看完了一部
+ * 卡在 91% 的片子，而这正是 v0.6 那条教训说的「猜一个会过期的判断写进库」。
+ * 有 playcount 就用 playcount，没有就是在看。
+ */
+export function nfoWatchState(nfo: NfoData | null | undefined): NfoWatchState | null {
+  if (!nfo) return null
+  const playcount = Math.max(0, Math.round(Number(nfo.playcount) || 0))
+  const position = Math.max(0, Math.round(Number(nfo.resume_position_sec) || 0))
+  if (playcount === 0 && position === 0) return null
+
+  // `<lastplayed>2024-01-02 03:04:05</lastplayed>`，Kodi 写的是本地时间，
+  // 没有时区。Date.parse 认这个形状；认不出来就留 0（「不知道什么时候看的」，
+  // 而不是 1970 年 —— 那会跑到「最近看过」排序的最前面去）
+  const played = nfo.last_played ? Date.parse(nfo.last_played.replace(' ', 'T')) : NaN
+  return {
+    watch_status: playcount > 0 ? 'watched' : 'watching',
+    position_sec: position,
+    watched_at: Number.isFinite(played) && played > 0 ? played : 0
+  }
 }
 
 export function emptyFacts(): VideoFacts {
@@ -133,6 +195,7 @@ export function emptyFacts(): VideoFacts {
     audio_tracks: [], subtitle_tracks: [], parts: [],
     episodes: [], episode_files: 0, seasons: [],
     external_subtitles: [], images: [], nfo_files: [], extras: [],
+    watch: null,
     evidence: []
   }
 }
@@ -250,6 +313,9 @@ export function mergeFacts(
     f.studios = mergeList(nfo.studios)
     f.countries = mergeList(nfo.countries)
     f.status = nfo.status
+    // 只给电影。剧集的 tvshow.nfo 上也可能有 playcount，但剧一级的状态
+    // 由集列表推，写了会被 syncSeriesStatus 推翻，见字段上的注释
+    if (candidate.video_type === 'movie') f.watch = nfoWatchState(nfo)
   }
 
   /* -------- 技术事实 -------- */
@@ -308,7 +374,10 @@ export function mergeFacts(
       // 分卷的一集，大小是各卷之和
       file_size: ep.files.reduce((acc, x) => acc + x.size, 0),
       duration_sec: firstPositive(container?.duration_sec, (epNfo?.runtime_min ?? 0) * 60),
-      air_date: epNfo?.premiered_ts ?? 0
+      air_date: epNfo?.premiered_ts ?? 0,
+      // 每集自己的 nfo 自己的账。整部剧那份 tvshow.nfo 上的 playcount
+      // 不往这里借 —— 那是「这部剧看过几次」，摊到每一集上没有意义
+      watch: nfoWatchState(epNfo)
     })
   }
   f.episode_files = f.episodes.length

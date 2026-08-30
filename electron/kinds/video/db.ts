@@ -33,6 +33,22 @@ export interface EpisodePayload {
   file_size?: number
   duration_sec?: number
   air_date?: number
+
+  /**
+   * 别家 nfo 里记着的观看状态，**只在新建这一集时写，重扫时整组忽略**。
+   *
+   * 这一组和上面那些不是一类东西：上面是文件的事实，这一组是「Kodi 那边的
+   * 账」。第一次入库时采信它，是因为用户在别处已经看过了，抱一没有任何
+   * 理由把它显示成未看。而第二遍扫描时它就不能再作数了 —— 用户可能已经在
+   * 抱一里标过，nfo 那边的数字是旧的，覆盖过去就是 Step 6b 刚修掉的那个错
+   * 又从另一个入口长回来。
+   *
+   * 折算规则不在这一层，见 `nfo.ts` 文件里那三个字段的注释和
+   * `facts.ts` 的 `nfoWatchState`。
+   */
+  watch_status?: WatchStatus
+  position_sec?: number
+  watched_at?: number
 }
 
 export interface VideoPayload {
@@ -85,6 +101,18 @@ export interface VideoPayload {
 
   /** 剧集的集列表。电影传空数组 */
   episodes: EpisodePayload[]
+
+  /**
+   * 电影从别家 nfo 带过来的观看状态，**只在这条 resource 还不存在时写**。
+   *
+   * 和 `EpisodePayload` 上那一组同一个道理，只是落点不同：电影的进度记在
+   * `video_meta` 上（`schema.ts` 里写了「position_sec 在这里只对电影有意义」）。
+   * 剧集传这一组没有意义 —— 剧一级的状态由 `deriveSeriesStatus` 从集列表推，
+   * 硬写会被下一次 `syncSeriesStatus` 推翻。
+   */
+  watch_status?: WatchStatus
+  position_sec?: number
+  last_watched_at?: number
 }
 
 export interface VideoWriteOutcome {
@@ -205,6 +233,22 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
     ['douban_id', p.douban_id],
     ['douban_rating', p.douban_rating]
   ]
+  // 只在新建时写的一组：别家 nfo 记的观看状态。
+  //
+  // 它既不在 metaFields 里也不在 metaAlways 里，因为两组都会在重扫时写。
+  // 这一组的整个约定是「只认第一次」—— 第二遍扫描时用户可能已经在抱一里
+  // 标过了，而 nfo 那边的数字是旧的。
+  //
+  // 只对电影成立。剧集的 watch_status 由集列表推，见字段上的注释
+  const metaCreateOnly: Array<[string, string | number]> =
+    p.video_type === 'movie' && WATCH_STATUSES.includes(p.watch_status as WatchStatus)
+      ? [
+          ['watch_status', p.watch_status as WatchStatus],
+          ['position_sec', Math.max(0, Math.round(Number(p.position_sec) || 0))],
+          ['last_watched_at', Math.max(0, Math.round(Number(p.last_watched_at) || 0))]
+        ]
+      : []
+
   // 本地事实那一组，不受保护，见 PROTECTED_META_FIELDS 的注释
   const metaAlways: Array<[string, string | number]> = [
     ['duration_sec', p.duration_sec],
@@ -278,7 +322,7 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
        VALUES (?, 'video', ?, ?, ?, '', 'done', ${rCols.map(() => '?').join(', ')})`
     ).run(id, now, now, p.path, ...rCols.map(([, v]) => v))
 
-    const mCols = [...metaFields, ...metaAlways]
+    const mCols = [...metaFields, ...metaAlways, ...metaCreateOnly]
     d.prepare(
       `INSERT INTO video_meta
          (resource_id, linked_files, poster_path, fanart_path,
@@ -318,7 +362,9 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
  * 补集列表。返回这次**新建**了几集。
  *
  * 已存在的集只更新 title / path / file_size / duration_sec / air_date ——
- * 观看进度那三列碰不得，理由见 insertVideo。
+ * 观看进度那三列碰不得，理由见 insertVideo。**新建的集是唯一的例外**：
+ * 那三列会接受 payload 里带来的值（来自别家 nfo），因为一条还不存在的记录
+ * 上没有任何用户账可言。见 `EpisodePayload` 上那一组字段的注释。
  *
  * 不用 `INSERT ... ON CONFLICT DO UPDATE`：那样写更短，但 SQLite 的
  * `changes` 在 upsert 时对「插入」和「更新」都返回 1，就没法回报新增了几集。
@@ -332,9 +378,12 @@ export function upsertEpisodes(d: SqlDb, resourceId: string, list: EpisodePayloa
   )
   const ins = d.prepare(
     `INSERT INTO episode
-       (id, resource_id, season, episode, title, path, file_size, duration_sec, air_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, resource_id, season, episode, title, path, file_size, duration_sec, air_date,
+        watch_status, position_sec, watched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
+  // UPDATE 的列比 INSERT 少三个，是这个函数的全部要点：观看进度只在新建时接受
+  // 外来值，之后就归用户和 updateEpisode 管。别顺手把它们补齐成一样的列表
   const upd = d.prepare(
     `UPDATE episode SET title = ?, path = ?, file_size = ?, duration_sec = ?, air_date = ?
      WHERE id = ?`
@@ -355,6 +404,11 @@ export function upsertEpisodes(d: SqlDb, resourceId: string, list: EpisodePayloa
         row.id
       )
     } else {
+      // 状态过一遍白名单：这个值一路来自磁盘上别人写的 xml，
+      // 而那一列有 CHECK 约束，写进去一个没见过的词是整条 INSERT 抛异常
+      const status = WATCH_STATUSES.includes(e.watch_status as WatchStatus)
+        ? (e.watch_status as WatchStatus)
+        : 'unwatched'
       ins.run(
         randomUUID(),
         resourceId,
@@ -364,7 +418,10 @@ export function upsertEpisodes(d: SqlDb, resourceId: string, list: EpisodePayloa
         String(e.path ?? ''),
         Number(e.file_size) || 0,
         Number(e.duration_sec) || 0,
-        Number(e.air_date) || 0
+        Number(e.air_date) || 0,
+        status,
+        Math.max(0, Math.round(Number(e.position_sec) || 0)),
+        Math.max(0, Math.round(Number(e.watched_at) || 0))
       )
       added++
     }
@@ -565,6 +622,41 @@ export function nextEpisode(d: SqlDb, resourceId: string, season: number, episod
        ORDER BY season, episode LIMIT 1`
     )
     .get(resourceId, season, season, episode) as Row | undefined
+  return row ? rowToEpisode(row) : null
+}
+
+/**
+ * 在一部剧上点「播放」该开哪一集。没有一集有文件时给 `null`。
+ *
+ * 三档，顺序是想清楚的：
+ *
+ * 1. **有断点、还没看完的那一集**（`position_sec > 0` 且不是 watched）。
+ *    上次播到一半退出去了，接着看它。多集都有断点时取最靠前的 ——
+ *    倒着追剧的人是少数，而「最靠前」这个规则用户能自己预测出来。
+ * 2. **第一集没看完的**（不是 watched，也不是 dropped）。正常追剧就走这一档。
+ * 3. **全看完了 = 第一集**。重看一部剧的人从头开始，这比「没得播」有用。
+ *    这一档也兜住了「全标成 dropped」那种情况。
+ *
+ * `dropped` 在第二档里被排除掉：用户明确说过这一集不看了（跳过的花絮特别篇
+ * 常被这么标），点播放跳到它上面是把用户刚做的判断当没看见。但第三档不排除
+ * 它 —— 那时候已经没有别的候选了，开一集总比什么都不做好。
+ *
+ * 只找有文件的（`path != ''`）。缺文件的集在详情页上要露面（用户得知道
+ * 自己缺什么），但播放器打不开一个不存在的文件。
+ */
+export function resumeEpisode(d: SqlDb, resourceId: string): Episode | null {
+  const pick = (extra: string): Row | undefined =>
+    d
+      .prepare(
+        `SELECT * FROM episode WHERE resource_id = ? AND path != '' ${extra}
+         ORDER BY season, episode LIMIT 1`
+      )
+      .get(resourceId) as Row | undefined
+
+  const row =
+    pick(`AND position_sec > 0 AND watch_status != 'watched'`) ??
+    pick(`AND watch_status NOT IN ('watched', 'dropped')`) ??
+    pick('')
   return row ? rowToEpisode(row) : null
 }
 

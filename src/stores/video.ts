@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
-import type { VideoCounts, VideoItem, VideoQuery, VideoType, WatchStatus } from '@/types'
+import type { Episode, VideoCounts, VideoItem, VideoQuery, VideoType, WatchStatus } from '@/types'
 import { useToast } from '@/composables/useToast'
 import { createLatestGuard, errorMessage, isLocalPosterPath, plain } from '@/utils'
 
@@ -140,6 +140,38 @@ export const useVideoStore = defineStore('video', () => {
   }
 
   /**
+   * 交给系统默认播放器。剧集会自己挑「该接着看的那一集」。
+   *
+   * 失败要弹出来，这一条和 `fillPosters` 那个静默失败刚好相反：那是顺手补齐，
+   * 用户没按任何按钮；这是他刚点了播放，没反应就必须给个说法。
+   *
+   * 打开成功会把状态从「未看」抬到「在看」，所以要刷计数 —— 侧栏「在看」
+   * 那一格是唯一有行动含义的一格。
+   */
+  async function play(id: string): Promise<boolean> {
+    const r = await window.baoyi.video.play(id)
+    if (!r.ok) {
+      toastError(r.message || '打不开这个文件')
+      return false
+    }
+    merge(r.item)
+    void refreshCounts()
+    return true
+  }
+
+  /** 同上，指定某一集。返回改过的那一集，让详情页把它并回自己那份列表 */
+  async function playEpisode(episodeId: string): Promise<Episode | null> {
+    const r = await window.baoyi.video.playEpisode(episodeId)
+    if (!r.ok) {
+      toastError(r.message || '打不开这个文件')
+      return null
+    }
+    merge(r.item)
+    void refreshCounts()
+    return r.episode
+  }
+
+  /**
    * 给一批条目补海报。海报墙进来时跑一次。
    *
    * 串行而不是并发：这些请求多半要走用户配的反代，十几路并发打上去很容易被限速，
@@ -189,6 +221,8 @@ export const useVideoStore = defineStore('video', () => {
     update,
     restoreScraped,
     remove,
+    play,
+    playEpisode,
     fillPosters
   }
 })

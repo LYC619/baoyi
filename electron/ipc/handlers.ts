@@ -90,7 +90,10 @@ import {
   getVideoItem,
   listVideoEpisodes,
   listVideoItems,
+  playVideo,
+  playVideoEpisode,
   removeVideo,
+  revealSubtitle,
   revealVideo,
   scanVideos,
   setVideoPoster,
@@ -304,6 +307,14 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('video:remove', (_e, id: string) => removeVideo(id))
   ipcMain.handle('video:counts', () => videoCountsOf())
   ipcMain.handle('video:reveal', (_e, id: string) => revealVideo(id))
+  ipcMain.handle('video:reveal-subtitle', (_e, id: string, target: string) =>
+    revealSubtitle(id, target)
+  )
+  // 播放这两条都返回 { ok, message, item, episode }：失败时那句 message 要能
+  // 显示出来，成功时 item / episode 带着新的观看状态回去（未看 → 在看），
+  // 界面不用为了刷新那个状态再查一趟
+  ipcMain.handle('video:play', (_e, id: string) => playVideo(id))
+  ipcMain.handle('video:play-episode', (_e, episodeId: string) => playVideoEpisode(episodeId))
   ipcMain.handle('video:readiness', () => videoScanReadiness())
   ipcMain.handle('video:scan', (_e, dirs: string[]) =>
     scanVideos(dirs, (p) => send('video:progress', p))
