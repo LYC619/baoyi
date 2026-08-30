@@ -218,12 +218,12 @@ function parseCommonSceneQuality(
 
 function isModernSceneResolution(
   resolution?: Resolution,
-): resolution is Resolution.R1080P | Resolution.R2160P {
+): resolution is typeof Resolution.R1080P | typeof Resolution.R2160P {
   return resolution === Resolution.R1080P || resolution === Resolution.R2160P;
 }
 
 function createCommonSceneQuality(
-  source: Source.BLURAY | Source.WEBDL,
+  source: typeof Source.BLURAY | typeof Source.WEBDL,
   revision: Revision,
   resolution: Resolution,
 ): QualityModel {

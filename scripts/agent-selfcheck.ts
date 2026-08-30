@@ -190,6 +190,12 @@ import {
   splitTitle,
   titleRegion
 } from '../electron/kinds/video/filename.ts'
+import {
+  isExtraDir,
+  parseSeasonFolder,
+  scanVideoRoot,
+  stackParts
+} from '../electron/kinds/video/scanner.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -2087,6 +2093,7 @@ async function main(): Promise<void> {
   await linksAndCoverSection()
   await videoDataSection()
   await videoFilenameSection()
+  await videoScanSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -4865,5 +4872,197 @@ async function guessitCorpusChecks(): Promise<void> {
   })
 }
 
+
+/* ==================== 视频扫描 · v0.7 Step 3 ==================== */
+
+/**
+ * 造一棵真实的临时片库来跑 scanner。理由和游戏识别那一段一样：
+ * 这一整段全是「读磁盘之后怎么归堆」，用假的 fs mock 验它等于在验 mock 自己。
+ *
+ * 这棵树是照着真实片库里会出现的形状搭的，每一枝对着一条规则：
+ * 季目录 / 平铺季集 / 番剧字幕组 / 独占目录的电影 / CD 分卷 / 一个目录多部片 /
+ * 花絮目录 / 花絮后缀 / Specials 是第 0 季而不是花絮。
+ */
+async function videoScanSection(): Promise<void> {
+  console.log('\n视频扫描')
+
+  const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-vscan-'))
+  const mk = async (rel: string, bytes = 1024): Promise<string> => {
+    const full = path.join(base, rel)
+    await fsp.mkdir(path.dirname(full), { recursive: true })
+    await fsp.writeFile(full, Buffer.alloc(bytes))
+    return full
+  }
+
+  // 剧集：两季各两集，外加一个 Specials（第 0 季，不是花絮）
+  await mk('剧集/漫长的季节/Season 1/漫长的季节.S01E01.2023.1080p.WEB-DL.mkv')
+  await mk('剧集/漫长的季节/Season 1/漫长的季节.S01E02.2023.1080p.WEB-DL.mkv')
+  await mk('剧集/漫长的季节/Season 2/漫长的季节.S02E01.2023.1080p.WEB-DL.mkv')
+  // 故意放错位置：S02E05 待在 Season 1 目录里。真实片库里这种常有
+  await mk('剧集/漫长的季节/Season 1/漫长的季节.S02E05.2023.1080p.WEB-DL.mkv')
+  await mk('剧集/漫长的季节/Specials/漫长的季节.E01.mkv')
+  await mk('剧集/漫长的季节/poster.jpg')
+  await mk('剧集/漫长的季节/tvshow.nfo')
+
+  // 剧集：没有季目录，季集号全写在文件名里
+  await mk('剧集/The Glory/The.Glory.S01E01.1080p.NF.WEB-DL.x264-GRP.mkv')
+  await mk('剧集/The Glory/The.Glory.S01E02.1080p.NF.WEB-DL.x264-GRP.mkv')
+
+  // 番剧：字幕组前缀 + 绝对集号
+  await mk('番剧/葬送的芙莉莲/[SubsPlease] Sousou no Frieren - 11 (1080p) [1A2B3C4D].mkv')
+  await mk('番剧/葬送的芙莉莲/[SubsPlease] Sousou no Frieren - 12 (1080p) [5E6F7A8B].mkv')
+
+  // 电影：独占目录，带侧车，还带两种花絮
+  await mk('电影/沙丘 (2021)/沙丘.Dune.2021.2160p.BluRay.x265.mkv', 4096)
+  await mk('电影/沙丘 (2021)/沙丘.Dune.2021.2160p.BluRay.x265.chs.srt')
+  await mk('电影/沙丘 (2021)/poster.jpg')
+  await mk('电影/沙丘 (2021)/movie.nfo')
+  await mk('电影/沙丘 (2021)/沙丘-trailer.mkv')
+  await mk('电影/沙丘 (2021)/Featurettes/making-of.mkv')
+
+  // 电影：CD 分卷
+  await mk('电影/无间道/无间道.CD1.avi')
+  await mk('电影/无间道/无间道.CD2.avi')
+
+  // 一个目录里并列两部电影，各带同名字幕
+  await mk('散装/罗马.Roma.2018.1080p.WEB-DL.mkv')
+  await mk('散装/罗马.Roma.2018.1080p.WEB-DL.chs.srt')
+  await mk('散装/寄生虫.Parasite.2019.1080p.BluRay.mkv')
+  await mk('散装/寄生虫.Parasite.2019.1080p.BluRay.chs.srt')
+
+  const found = scanVideoRoot(base)
+  const byPath = (rel: string): any => found.find((c) => c.path === path.join(base, rel))
+
+  await check('季目录把两季收成一条，而不是两条剧', () => {
+    const hits = found.filter((c) => c.video_type === 'series' && c.title_zh === '漫长的季节')
+    assert.equal(hits.length, 1, `应该只有一条，实际 ${hits.length} 条`)
+    assert.equal(hits[0].path, path.join(base, '剧集/漫长的季节'))
+  })
+
+  await check('Specials 是第 0 季，不是花絮 —— 剔掉它就是实打实的丢数据', () => {
+    const s = byPath('剧集/漫长的季节')
+    const seasons = s.episodes.map((e: any) => e.season)
+    assert.ok(seasons.includes(0), `没收到第 0 季，实际季号 ${JSON.stringify(seasons)}`)
+    assert.deepEqual(
+      s.episodes.map((e: any) => `S${e.season}E${e.episode}`),
+      ['S0E1', 'S1E1', 'S1E2', 'S2E1', 'S2E5']
+    )
+  })
+
+  await check('文件名里的季号压过季目录 —— 放错位置的文件是真实存在的', () => {
+    const s = byPath('剧集/漫长的季节')
+    const misplaced = s.episodes.find((e: any) => e.episode === 5)
+    // 它躺在 Season 1 目录里，但文件名写的是 S02
+    assert.ok(misplaced.files[0].path.includes(`Season 1${path.sep}`))
+    assert.equal(misplaced.season, 2, '目录位置压过了文件名里明写的季号')
+
+    // 反过来那半边：Specials 里那个文件名没有季号，才用目录给的 0
+    const sp = s.episodes.find((e: any) => e.season === 0)
+    assert.equal(path.basename(sp.files[0].path), '漫长的季节.E01.mkv')
+  })
+
+  await check('没有季目录时，季集号从文件名来', () => {
+    const s = byPath('剧集/The Glory')
+    assert.equal(s.video_type, 'series')
+    assert.deepEqual(s.episodes.map((e: any) => `S${e.season}E${e.episode}`), ['S1E1', 'S1E2'])
+  })
+
+  await check('番剧的绝对集号成集，标题取目录名而不是罗马音', () => {
+    const s = byPath('番剧/葬送的芙莉莲')
+    assert.equal(s.video_type, 'series')
+    assert.equal(s.title_zh, '葬送的芙莉莲')
+    assert.deepEqual(s.episodes.map((e: any) => e.episode), [11, 12])
+  })
+
+  await check('独占目录的电影：路径取目录，年份从目录名补上', () => {
+    const m = byPath('电影/沙丘 (2021)')
+    assert.equal(m.video_type, 'movie')
+    assert.equal(m.title_zh, '沙丘')
+    assert.equal(m.year, 2021)
+    assert.equal(m.files.length, 1)
+  })
+
+  await check('花絮目录和花絮后缀都剔掉，但记下来不丢', () => {
+    const m = byPath('电影/沙丘 (2021)')
+    const names = m.extras.map((e: any) => path.basename(e.path)).sort()
+    assert.deepEqual(names, ['making-of.mkv', '沙丘-trailer.mkv'])
+    // 剔掉的东西不许混进正片
+    assert.ok(!m.files.some((f: any) => /trailer|making/i.test(f.name)))
+  })
+
+  await check('侧车按目录收齐：nfo / 海报 / 字幕各归各的', () => {
+    const m = byPath('电影/沙丘 (2021)')
+    assert.equal(m.sidecars.nfo.length, 1)
+    assert.equal(m.sidecars.images.length, 1)
+    assert.equal(m.sidecars.subtitles.length, 1)
+  })
+
+  await check('CD1/CD2 合成一条，两个文件按卷号排好', () => {
+    const m = byPath('电影/无间道')
+    assert.equal(m.video_type, 'movie')
+    assert.equal(m.files.length, 2)
+    assert.deepEqual(m.files.map((f: any) => f.part), [1, 2])
+  })
+
+  await check('一个目录里两部电影：各自一条，路径用文件不用目录', () => {
+    const loose = found.filter((c) => path.dirname(c.path) === path.join(base, '散装'))
+    assert.equal(loose.length, 2, `应该 2 条，实际 ${loose.length} 条`)
+    assert.ok(loose.every((c: any) => c.video_type === 'movie'))
+    // 路径必须是文件本身 —— 都用目录的话两部片会抢同一个全局唯一键
+    assert.ok(loose.every((c: any) => c.path.endsWith('.mkv')))
+  })
+
+  await check('目录里有多部片时，字幕只跟同名的那一部走', () => {
+    const roma = found.find((c) => c.title_zh === '罗马')!
+    const para = found.find((c) => c.title_zh === '寄生虫')!
+    assert.equal(roma.sidecars.subtitles.length, 1)
+    assert.equal(para.sidecars.subtitles.length, 1)
+    assert.ok(path.basename(roma.sidecars.subtitles[0]).startsWith('罗马'))
+    assert.ok(path.basename(para.sidecars.subtitles[0]).startsWith('寄生虫'))
+  })
+
+  await check('一部电影没有被认成剧 —— 这是最要命的那个错法', () => {
+    const movies = ['电影/沙丘 (2021)', '电影/无间道']
+    for (const rel of movies) {
+      const m = byPath(rel)
+      assert.equal(m.video_type, 'movie', `${rel} 被认成了 ${m.video_type}`)
+      assert.equal(m.episodes.length, 0)
+    }
+    assert.ok(found.filter((c) => path.dirname(c.path) === path.join(base, '散装')).every((c) => c.video_type === 'movie'))
+  })
+
+  await check('季目录名：S01 / Season 2 / 第三季 / Specials 都认得出来', () => {
+    assert.deepEqual(parseSeasonFolder('S01'), { season: 1, kind: 'marked' })
+    assert.deepEqual(parseSeasonFolder('Season 2'), { season: 2, kind: 'marked' })
+    assert.deepEqual(parseSeasonFolder('第三季'), { season: 3, kind: 'marked' })
+    assert.deepEqual(parseSeasonFolder('第十二季'), { season: 12, kind: 'marked' })
+    assert.deepEqual(parseSeasonFolder('Specials'), { season: 0, kind: 'marked' })
+  })
+
+  await check('四位数目录是年份不是季号，纯数字只当弱信号', () => {
+    assert.equal(parseSeasonFolder('2019'), null)
+    assert.deepEqual(parseSeasonFolder('3'), { season: 3, kind: 'numeric' })
+    // S01E01 是单集文件名，不是季目录
+    assert.equal(parseSeasonFolder('S01E01'), null)
+  })
+
+  await check('Specials 和 extras 不在花絮目录表里，trailers 在', () => {
+    assert.equal(isExtraDir('Specials'), false)
+    assert.equal(isExtraDir('Trailers'), true)
+    assert.equal(isExtraDir('花絮'), true)
+    assert.equal(isExtraDir('Season 1'), false)
+  })
+
+  await check('分卷只认 CD/DVD/DISC + 数字，Part N 不认', () => {
+    assert.deepEqual(stackParts('无间道.CD1'), { stem: '无间道', part: 1 })
+    assert.deepEqual(stackParts('Movie (DISC 2)'), { stem: 'Movie', part: 2 })
+    assert.equal(stackParts('Dune.Part.Two'), null)
+    assert.equal(stackParts('沙丘.2021.1080p'), null)
+    // 整个名字就是个卷号标记时不算分卷，否则 stem 会是空串
+    assert.equal(stackParts('CD1'), null)
+  })
+
+  await fsp.rm(base, { recursive: true, force: true })
+}
 
 void main()
