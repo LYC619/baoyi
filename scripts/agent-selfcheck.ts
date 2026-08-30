@@ -72,6 +72,7 @@ import {
   displayName,
   formatDuration,
   groupRounds,
+  iconUrl as iconUrlOf,
   isLocalPosterPath,
   logToText,
   LINK_TYPE_LABEL,
@@ -637,6 +638,25 @@ async function main(): Promise<void> {
     assert.equal(isManualIcon(id, 'b1946ac9-2492-4d3d-9b0e-000000000004.png'), false)
     // 前缀相同但不是同一个 id —— 必须严格等于，不能用 startsWith
     assert.equal(isManualIcon(id, `${id}-extra.png`), false)
+  })
+
+  await check('图标地址只按 basename 找文件 —— 协议那头防的是 ../ 穿越', () => {
+    // 和封面同一个约定：main.ts 的 baoyi:// 处理器拿 path.basename 兜底，
+    // 渲染进程这边的 iconUrl 也只取最后一段
+    assert.equal(iconUrlOf('C:\\Users\\x\\baoyi\\icons\\abc.png', 7), 'baoyi://icon/abc.png?v=7')
+    assert.equal(iconUrlOf('..\\..\\Windows\\System32\\evil.png', 1), 'baoyi://icon/evil.png?v=1')
+    assert.equal(iconUrlOf('', 1), '', '没图标时不该拼出一个指向 undefined 的地址')
+  })
+
+  await check('图标地址的版本号跟着 updated_at 走 —— 换图标功能上线后这一条是必需的', () => {
+    // 手动图标的文件名按条目 id 定，换一张之后 URL 一个字符都不变，Chromium 会
+    // 继续拿内存里那张旧图 —— 用户看到的是「点了没反应」。从前没这个问题是因为
+    // 图标从来不会被替换（sha1 命名 + 内容不变），换图标一上线这个前提就没了
+    const a = iconUrlOf('D:\\icons\\abc.png', 1000)
+    const b = iconUrlOf('D:\\icons\\abc.png', 2000)
+    assert.notEqual(a, b, '换图标之后 URL 必须变')
+    // 默认值也得带上 ?v=，否则「没传版本号」那条路又退回没有缓存破除的老样子
+    assert.match(iconUrlOf('D:\\icons\\abc.png'), /\?v=0$/)
   })
 
   console.log('\nagent loop')
