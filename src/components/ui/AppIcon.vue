@@ -2,14 +2,20 @@
 import { computed, ref, watch } from 'vue'
 import { displayName, iconUrl, type NamedEntry } from '@/utils'
 
-// 暂存条目（确认面板）和正式条目共用这个组件，所以只要求它真正用到的那几个字段
+// 暂存条目（确认面板）和正式条目共用这个组件，所以只要求它真正用到的那几个字段。
+// updated_at 可选：暂存条目没有这一列，而它只是用来破图片缓存的
 const props = withDefaults(
-  defineProps<{ item: NamedEntry & { icon_path: string }; size?: number }>(),
+  defineProps<{
+    item: NamedEntry & { icon_path: string; updated_at?: number }
+    size?: number
+  }>(),
   { size: 48 }
 )
 
 const failed = ref(false)
-const src = computed(() => iconUrl(props.item.icon_path))
+// 带上 updated_at 当版本号：换过图标的条目 updated_at 会被推到当下，
+// 于是 URL 变了、缓存自然破掉；没换过的仍然命中缓存
+const src = computed(() => iconUrl(props.item.icon_path, props.item.updated_at ?? 0))
 const initial = computed(() => displayName(props.item).trim().charAt(0) || '?')
 
 // 换了条目要重新给图标一次机会

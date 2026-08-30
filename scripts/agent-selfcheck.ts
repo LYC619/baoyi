@@ -41,6 +41,13 @@ import {
 import { planRoot, skippable } from '../electron/kinds/software/scanPlan.ts'
 import { countExes } from '../electron/kinds/software/exeCount.ts'
 import {
+  ICON_EXTS,
+  iconFileName,
+  iconSiblings,
+  isIconExt,
+  isManualIcon
+} from '../electron/kinds/software/icons.ts'
+import {
   defaultAction,
   defaultFolder,
   nestedInside,
@@ -574,6 +581,63 @@ async function main(): Promise<void> {
   })
 
   await fsp.rm(scanRoot, { recursive: true, force: true })
+
+  /* ------------------------------ 手动换图标 ------------------------------ */
+
+  // 自动提图标本来就会失败（getFileIcon 拿不到图时静默返回空串），所以手动指定是
+  // 那部分条目唯一的出路。这一节守的是「两套命名不许撞」和「重新识别别覆盖用户的图」。
+  console.log('\n软件图标 · 手动指定')
+
+  await check('图标认的格式和封面、海报是同一份名单', () => {
+    // kinds/ 之间不该互相 import，三份名单没有编译期保障，只能靠这一条盯着
+    assert.deepEqual(ICON_EXTS, COVER_EXTS)
+    assert.deepEqual(ICON_EXTS, POSTER_EXTS)
+    assert.ok(isIconExt('a.PNG') && isIconExt('图标.webp'))
+    assert.ok(!isIconExt('a.ico'), '.ico 是多尺寸容器，挑到 16×16 放大到 64px 比不换更难看')
+    assert.ok(!isIconExt('icon'), '没扩展名的不收')
+  })
+
+  await check('手动图标按条目 id 命名，认不出的扩展名退回 .png', () => {
+    assert.equal(iconFileName('abc', 'D:\\x\\logo.PNG'), 'abc.png')
+    assert.equal(iconFileName('abc', 'D:\\x\\logo.webp'), 'abc.webp')
+    assert.equal(iconFileName('abc', 'noext'), 'abc.png')
+    assert.equal(iconFileName('abc', 'a.svg'), 'abc.png', '不认的格式不能原样落到文件名上')
+  })
+
+  await check('换扩展名时清孤儿的名单覆盖所有认得的格式', () => {
+    const siblings = iconSiblings('abc')
+    assert.equal(siblings.length, ICON_EXTS.length)
+    for (const ext of ICON_EXTS) assert.ok(siblings.includes(`abc${ext}`), `${ext} 不在清理名单里`)
+    // 实际会写出来的那个名字必须在名单里，否则 dropManualIcons 漏删的正是当前这张
+    assert.ok(siblings.includes(iconFileName('abc', 'x.webp')))
+  })
+
+  await check('手动图标和自动提取的图标靠文件名就分得开', () => {
+    // 手动的是 <uuid>.<ext>，自动的是 <exe 路径的 sha1>.png。
+    // sha1 是 40 位纯十六进制，UUID 带连字符，撞不上 —— 所以不需要多一列 schema
+    const id = 'b1946ac9-2492-4d3d-9b0e-000000000001'
+    assert.equal(isManualIcon(id, `D:\\baoyi\\icons\\${id}.png`), true)
+    assert.equal(isManualIcon(id, `D:\\baoyi\\icons\\${id}.webp`), true)
+    const sha1 = 'da39a3ee5e6b4b0d3255bfef95601890afd80709'
+    assert.equal(isManualIcon(id, `D:\\baoyi\\icons\\${sha1}.png`), false, '自动提的那张不算手动')
+  })
+
+  await check('判「是不是手动」只看文件名，不看目录', () => {
+    // 图标目录的绝对路径跟着用户数据目录走（临时 profile、换过数据目录、打包前后
+    // 都不一样）。拿目录当判据的话，同一条记录换个 profile 就会从「手动」变「自动」
+    const id = 'b1946ac9-2492-4d3d-9b0e-000000000002'
+    assert.equal(isManualIcon(id, `C:\\另一个\\profile\\icons\\${id}.jpg`), true)
+    assert.equal(isManualIcon(id, `/home/u/.config/baoyi/icons/${id}.jpg`), true)
+  })
+
+  await check('空值和别人的 id 都不算手动', () => {
+    const id = 'b1946ac9-2492-4d3d-9b0e-000000000003'
+    assert.equal(isManualIcon(id, ''), false, '没图标时不该显示「重新提取」')
+    assert.equal(isManualIcon('', 'x.png'), false)
+    assert.equal(isManualIcon(id, 'b1946ac9-2492-4d3d-9b0e-000000000004.png'), false)
+    // 前缀相同但不是同一个 id —— 必须严格等于，不能用 startsWith
+    assert.equal(isManualIcon(id, `${id}-extra.png`), false)
+  })
 
   console.log('\nagent loop')
 

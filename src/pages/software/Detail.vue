@@ -8,6 +8,8 @@ import {
   ExternalLink,
   FolderInput,
   FolderOpen,
+  Image,
+  ImageOff,
   Loader2,
   Play,
   Sparkles,
@@ -201,6 +203,55 @@ async function copyPath(target: string): Promise<void> {
   }
 }
 
+/* -------------------------------- 图标 -------------------------------- */
+
+const iconBusy = ref(false)
+
+/**
+ * 换图标。主进程把图拷进 userData 再落库，所以拿回来的条目就是最终形态，
+ * 不用自己再 load 一次。
+ *
+ * 这条路的存在理由是自动提取会失败：`app.getFileIcon` 拿不到图时
+ * iconExtractor 静默返回空串，界面退回首字占位。命令行工具、老程序、
+ * 被壳套过的 exe 都常见这一路，对它们来说手动选图是唯一的出路。
+ */
+async function pickIcon(): Promise<void> {
+  if (!item.value || iconBusy.value) return
+  iconBusy.value = true
+  try {
+    const r = await window.baoyi.software.pickIcon(item.value.id)
+    if (!r) return // 用户取消了对话框
+    if (!r.ok) {
+      error(r.message)
+      return
+    }
+    if (r.item) item.value = r.item
+    // 卡片墙那边也要跟着换，否则退回去还是旧的
+    void store.load()
+    success(r.message)
+  } catch (err) {
+    error(`换图标失败：${errorMessage(err)}`)
+  } finally {
+    iconBusy.value = false
+  }
+}
+
+/** 重新从 exe 里提取图标。提不到就落到首字占位 —— 那本来就是它该有的样子 */
+async function refetchIcon(): Promise<void> {
+  if (!item.value || iconBusy.value) return
+  iconBusy.value = true
+  try {
+    const updated = await window.baoyi.software.clearIcon(item.value.id)
+    if (updated) item.value = updated
+    void store.load()
+    toast(updated?.icon_path ? '已重新提取图标' : '这个程序里提不出图标，已退回首字占位')
+  } catch (err) {
+    error(`重新提取失败：${errorMessage(err)}`)
+  } finally {
+    iconBusy.value = false
+  }
+}
+
 /* ------------------------------ 位置与链接 ------------------------------ */
 
 /**
@@ -303,7 +354,38 @@ async function dropLink(): Promise<void> {
         <!-- ------------------------------ 主列 ------------------------------ -->
         <div class="col col--main">
           <section class="hero panel">
-            <AppIcon :item="item" :size="64" />
+            <!--
+              图标本身就是换图标的入口，藏在别处等于没有。悬停才显形，
+              不占静态视觉重量。只有 64px，放不下游戏那边的文字按钮，所以只留图标
+            -->
+            <div class="hero__icon">
+              <AppIcon :item="item" :size="64" />
+              <div class="hero__iconActs">
+                <button
+                  class="hero__iconBtn"
+                  :disabled="iconBusy"
+                  :title="item.icon_path ? '换一张图标' : '选一张图标图片'"
+                  @click="pickIcon"
+                >
+                  <Loader2 v-if="iconBusy" :size="13" class="spin" />
+                  <Image v-else :size="13" />
+                </button>
+                <!--
+                  不区分「当前这张是手动的还是提取的」：那个判断的权威在主进程
+                  （kinds/software/icons.ts 的 isManualIcon），在渲染进程再写一份
+                  迟早走岔。「重新提取」两种情况下都说得通，也都是同一个动作
+                -->
+                <button
+                  v-if="item.icon_path"
+                  class="hero__iconBtn"
+                  :disabled="iconBusy"
+                  title="重新从程序里提取图标（会覆盖你手动选的那张）"
+                  @click="refetchIcon"
+                >
+                  <ImageOff :size="13" />
+                </button>
+              </div>
+            </div>
             <div class="hero__text">
               <div class="hero__names">
                 <input
@@ -640,6 +722,44 @@ async function dropLink(): Promise<void> {
   gap: 18px;
   align-items: flex-start;
   padding: 20px;
+}
+
+/* 悬停才出现：图标区平时该是图标，不是一块按钮面板 */
+.hero__icon {
+  position: relative;
+  flex: none;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.hero__iconActs {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 0;
+  background: rgb(0 0 0 / 0.62);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity var(--t-fast) ease;
+}
+.hero__icon:hover .hero__iconActs,
+.hero__iconActs:focus-within {
+  opacity: 1;
+}
+
+.hero__iconBtn {
+  display: flex;
+  align-items: center;
+  color: rgb(255 255 255 / 0.86);
+}
+.hero__iconBtn:hover {
+  color: #fff;
+}
+.hero__iconBtn:disabled {
+  opacity: 0.5;
 }
 
 .hero__text {

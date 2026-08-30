@@ -113,6 +113,8 @@ import {
   unlink
 } from '../kinds/software/organize'
 import { addSingleExe, cancelScan, scanDirectories } from '../kinds/software/scanner'
+import { ICON_EXTS } from '../kinds/software/icons'
+import { clearSoftwareIcon, setSoftwareIcon } from '../kinds/software/service'
 import { testSearch } from '../services/searchService'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
@@ -157,6 +159,25 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('software:reveal', (_e, id: string, launcherPath?: string) =>
     revealInFolder(id, launcherPath)
   )
+
+  /**
+   * 换图标。自动提取失败的条目（命令行工具、老程序）只有这一条路。
+   * 对话框的扩展名过滤器和真正执行校验的那份名单共用一个来源 ——
+   * 分开写迟早出现「选得进来但存不下去」。
+   */
+  ipcMain.handle('software:pick-icon', async (_e, id: string) => {
+    const win = getWindow()
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择图标图片（正方形效果最好）',
+      properties: ['openFile'],
+      filters: [{ name: '图片', extensions: ICON_EXTS.map((e) => e.slice(1)) }]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const outcome = setSoftwareIcon(id, result.filePaths[0])
+    return { ...outcome, item: outcome.ok ? getSoftware(id) : null }
+  })
+  ipcMain.handle('software:clear-icon', (_e, id: string) => clearSoftwareIcon(id))
 
   ipcMain.handle('software:add-manual', async () => {
     const win = getWindow()

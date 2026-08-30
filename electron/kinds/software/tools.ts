@@ -12,12 +12,14 @@ import type { Launcher, MoveRisk, RegisterPayload, SearchConfig } from '../../..
 import { readExternalActiveAt } from '../../services/activity'
 import { extractIcon } from '../../services/iconExtractor'
 import { countExes } from './exeCount'
+import { isManualIcon } from './icons.ts'
 import { readPeArch, readPeInfo } from './peReader'
 // skippable 和扫描时用的是同一份名单：同一棵目录树，扫描不进去的地方
 // agent 也不该为了数 exe 进去
 import { skippable } from './scanPlan'
 import { formatHits, search } from '../../services/searchService'
 import {
+  getSoftware,
   isSkipped,
   listCategories,
   registerSoftware,
@@ -284,7 +286,11 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
   if (ctx.direct) {
     const outcome = registerSoftware(payload, facts)
     if (!outcome) throw new Error('注册失败：没有可用的启动端')
-    if (icon) updateSoftware(outcome.id, { icon_path: icon })
+    // 用户亲手换过的图标不许覆盖。「重新识别」是针对**识别结果**的，
+    // 不是「把我调过的样子还原」—— 而自动提取的那张覆盖掉无所谓，它本来就是提的
+    const existing = getSoftware(outcome.id)
+    const manual = existing ? isManualIcon(outcome.id, existing.icon_path) : false
+    if (icon && !manual) updateSoftware(outcome.id, { icon_path: icon })
     ctx.onRegister?.({ name: nameZh, exe_path: outcome.exe_path, created: outcome.created })
     return registerReply(nameZh, primary, launchers, outcome.created ? '已注册' : '已更新', payload)
   }

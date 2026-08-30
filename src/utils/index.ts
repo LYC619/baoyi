@@ -33,11 +33,18 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-/** 图标走 baoyi:// 自定义协议，主进程只按文件名在图标目录里找 */
-export function iconUrl(iconPath: string): string {
+/**
+ * 图标走 baoyi:// 自定义协议，主进程只按文件名在图标目录里找。
+ *
+ * `?v=` 和封面那边同一个理由，而且是**换图标功能上线时才变成必需的**：手动图标的
+ * 文件名按条目 id 定（见 kinds/software/icons.ts 的 iconFileName），换一张之后
+ * URL 一个字符都不会变，Chromium 会继续拿内存里那张旧图 —— 用户看到的是「点了没反应」。
+ * 自动提取的那张按 exe 路径的 sha1 命名，内容也不会变，所以从前没有这个问题。
+ */
+export function iconUrl(iconPath: string, version = 0): string {
   if (!iconPath) return ''
   const name = iconPath.split(/[\\/]/).pop() ?? ''
-  return name ? `baoyi://icon/${encodeURIComponent(name)}` : ''
+  return name ? `baoyi://icon/${encodeURIComponent(name)}?v=${version}` : ''
 }
 
 /**

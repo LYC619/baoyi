@@ -1181,6 +1181,12 @@ export interface BaoyiApi {
     launch(id: string, launcherPath?: string): Promise<boolean>
     revealInFolder(id: string, launcherPath?: string): Promise<void>
     addManual(): Promise<SoftwareItem[]>
+    /** 用户取消对话框时返回 null，和 game.pickCover 一个约定 */
+    pickIcon(
+      id: string
+    ): Promise<{ ok: boolean; message: string; item: SoftwareItem | null } | null>
+    /** 撤掉手动图标，退回自动提取的那张（提不到才落到首字占位） */
+    clearIcon(id: string): Promise<SoftwareItem | null>
   }
   game: {
     list(query?: GameQuery): Promise<GameItem[]>
