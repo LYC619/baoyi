@@ -25,6 +25,13 @@
  *    题材走标签。
  *
  * 剩下的事都不该问它。
+ *
+ * ## 豆瓣那一段刻意写成「补充」
+ *
+ * `douban_search` 不是第四件事。提示词里它出现在「认定了是哪一部之后」，
+ * 而且反复说查不到没关系 —— 因为它一旦被当成识别手段，模型就会在认不出片名时
+ * 拿文件名去查豆瓣，那是在**用一个中文站的模糊搜索代替判断**，
+ * 而错的豆瓣链接比没有链接更糟：用户点进去看到的是另一部片。
  */
 
 import type { Category } from '../../../src/types'
@@ -45,7 +52,7 @@ export const IDENTIFY_VIDEO_SYSTEM = `你是「抱一」的影视识别 agent。
    **不要再搜索**。那个 id 是别的媒体中心刮削好写进 nfo 的，比你搜出来的准。
 2. 没有 id 时用 \`tmdb_search\` 搜。搜出来的候选带了分数和年份，挑一个。
 3. 挑不出来（候选都不像、或者一条都没搜到）时，{{search_hint}}
-4. 用 \`register_video\` 注册。确认这不是影视内容就用 \`skip_entry\` 跳过。
+4. {{douban_step}}用 \`register_video\` 注册。确认这不是影视内容就用 \`skip_entry\` 跳过。
 5. 处理完用一句话总结，**不要再调用任何工具**。
 
 ## 怎么搜 TMDB
@@ -118,10 +125,46 @@ export const IDENTIFY_VIDEO_SYSTEM = `你是「抱一」的影视识别 agent。
 
 const SEARCH_HINT_ON =
   '可以用 `web_search` 查一下（关键词用「片名 + 电影」或「片名 + 电视剧」，优先中文结果），' +
-  '查完再回来搜 TMDB。'
+  '查完再回来搜 TMDB。**联网搜索按次计费，同一个条目最多 3 次** —— ' +
+  '认不出来就承认认不出来，反复换词搜是在花用户的钱买同一批结果。'
 const SEARCH_HINT_OFF =
   '就**不填 tmdb_id 直接注册**，name_zh 用已知事实里的标题顶上，description 只写你确定的部分。' +
-  '本次运行没有开启联网搜索，没有 `web_search` 工具，不要尝试调用它。'
+  '本次运行没有开启联网搜索，没有 `web_search` 和 `douban_search` 工具，不要尝试调用它们。'
+
+/**
+ * 第 4 步的前缀。豆瓣走的是**同一个搜索服务商**，所以它和 `web_search`
+ * 共用一个开关 —— 关了搜索这两个工具一起消失，这里也就不能提它。
+ *
+ * 措辞上「已经认定是哪一部了的话」在前，是要把顺序钉死：先判断，再查豆瓣。
+ * 反过来的话模型会拿文件名去查豆瓣当识别手段用，见文件头的注释。
+ */
+const DOUBAN_STEP_ON =
+  '已经认定是哪一部了的话，用 `douban_search` 按**中文名**补一个豆瓣评分和条目链接' +
+  '（可选，查不到就跳过，不影响注册）。然后'
+const DOUBAN_STEP_OFF = ''
+
+/**
+ * 豆瓣的规则单独一节，只在有搜索时出现。
+ *
+ * 三件事必须说：它是补充不是识别手段、id 不能编、评分不用它填。
+ * 最后一条尤其要写明 —— 参数表里没有评分字段，但模型看不到参数表的「没有」，
+ * 它只会觉得「我知道这部片豆瓣 8.9」然后想办法把这个数塞进某个字段。
+ */
+const DOUBAN_NOTE = `
+## 关于豆瓣
+- \`douban_search\` 是**补充，不是识别手段**。先用已知事实和 TMDB 认出这是哪一部，
+  再拿确定的中文名去查它。认不出片名时**不要**拿文件名去查豆瓣蒙 ——
+  错的豆瓣链接比没有链接更糟，用户点进去看到的是另一部片。
+- 用**中文译名**查。豆瓣是中文站，拿英文原名查往往找不到条目页。
+- 剧集可以按「剧名 第二季」查：豆瓣的分季是独立条目，各有各的评分，匹配到分季更准。
+  （这和搜 TMDB 的规则**相反** —— TMDB 上一部剧是一个条目，不要带季号。）
+- **豆瓣评分不用你填**，参数表里也没有这个字段。你只要把 \`douban_id\` 填对，
+  系统自己按 id 从查询结果里取那个分。你自己记得的分数一律不要写进任何字段。
+- **不要编 douban_id。** 只填 \`douban_search\` 真实返回过的 id，编的会被丢弃。
+- 已知事实里有 TMDB / IMDB id 时那句「不要再搜索」说的是 TMDB，
+  豆瓣该不该查是独立的判断。
+- 查一次不行最多再查一次（去掉年份、换个译名），**第三次不要查了**。
+  同一个服务商同一批索引，换词序不会变出一个新条目页，而每次都在花用户的钱。`
 
 const NO_TMDB_NOTE = `
 ## 本次运行没有配置 TMDB
@@ -136,6 +179,10 @@ const NO_TMDB_NOTE = `
  * 就该按新的来。`withSearch` / `withTmdb` 必须和传给 `buildVideoTools` 的
  * 是同一对值，否则提示词会让模型去调一个没注册的工具，白烧一轮 ——
  * 软件那边踩过这个坑，游戏那边的注释里也记着。
+ *
+ * `withSearch` 管**两个**工具：`web_search` 和 `douban_search`。豆瓣走的是同一个
+ * 搜索服务商，所以没有第三个开关 —— 给它单独一个只会让用户在设置里多面对一个
+ * 不知道该不该开的东西，而它的答案永远和联网搜索那个一样。
  */
 export function fillVideoSystem(
   categories: Category[],
@@ -153,7 +200,9 @@ export function fillVideoSystem(
   let out = IDENTIFY_VIDEO_SYSTEM.replace('{{categories}}', cats)
     .replace('{{tags}}', tags)
     .replace('{{search_hint}}', withSearch ? SEARCH_HINT_ON : SEARCH_HINT_OFF)
+    .replace('{{douban_step}}', withSearch ? DOUBAN_STEP_ON : DOUBAN_STEP_OFF)
 
+  if (withSearch) out += DOUBAN_NOTE
   if (!withTmdb) out += NO_TMDB_NOTE
   return out
 }

@@ -948,7 +948,13 @@ export interface Episode {
 /** video_meta 那张表的形状。resource 的公共字段不在这里，见 VIDEO_VIEW_SQL */
 export interface VideoMeta {
   video_type: VideoType
-  /** 竖版 2:3 海报 / 横版背景图的本地路径。空串 = 还没有，界面退回首字占位 */
+  /**
+   * 竖版 2:3 海报。空串 = 还没有，界面退回首字占位。
+   *
+   * 两个阶段两种值：刮削时先落 TMDB 的相对路径（`/abc.jpg`），Step 6 下载完
+   * 覆盖成本地绝对路径。以 `/` 开头且不是本机路径的就是前者 —— 界面要么
+   * 拼上图片域名，要么当占位处理，不能直接塞进 `<img src>` 就完事。
+   */
   poster_path: string
   fanart_path: string
   /** 电影是一个点，剧集是区间的起点。0 表示不知道 */
@@ -981,6 +987,19 @@ export interface VideoMeta {
 
   tmdb_id: string
   imdb_id: string
+  /**
+   * 豆瓣条目 id（`movie.douban.com/subject/<id>/` 里那串数字）。
+   * 空串 = 没匹配上。条目页地址能从它拼出来，所以不单独存 URL。
+   */
+  douban_id: string
+  /**
+   * 豆瓣评分，十分制。0 = 没拿到，**不是零分**。
+   *
+   * 和上面的 rating 分开：rating 来自 TMDB 或 nfo，是第一手数据；这个来自
+   * 搜索服务商的摘要，可能是几个月前的快照。合成一个数之后，界面就没法
+   * 诚实地说这个分是哪儿来的了。
+   */
+  douban_rating: number
 }
 
 /**
@@ -1087,6 +1106,13 @@ export interface VideoScanResult {
   tokens: number
   /** 这次一共新建了几集。剧集库的「这次扫描有没有用」全靠它 */
   episodes: number
+  /**
+   * 这次真的走了几趟用户的搜索服务商（豆瓣查询 + web_search）。
+   *
+   * 按次计费的服务商靠它对账。**进程内缓存命中不计** —— 请求没发出去，
+   * 服务商那边也没扣。报一个比账单大的数只会制造疑惑。
+   */
+  searches: number
 }
 
 export type Unsubscribe = () => void

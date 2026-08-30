@@ -12,19 +12,27 @@
  * resource 会让海报墙变成一面重复海报，侧栏计数也失去意义（「未看 342」里
  * 有 300 个是同一部剧的不同集）。代价是多一张表，以及查询时要算集数。
  *
- * ## 没有 migrate 函数
+ * ## migrate 只做补列，而且不挂在版本号上
  *
- * 0.7 是视频模块的第一个版本，库里不存在需要搬动的视频数据。
- * `CREATE TABLE IF NOT EXISTS` 同时覆盖全新安装和从 0.6 升上来两条路 ——
- * 和 game 在 0.6 时的处境一样。SCHEMA_VERSION 推到 7 的作用是让
- * `initSchema` 那道 `from < SCHEMA_VERSION` 闸门把视频的内置标签装进去，
- * 以及给 `scripts/rollback-v7.ts` 一个可判断的版本号。
+ * 0.7 是视频模块的第一个版本，库里不存在需要搬动的视频数据 ——
+ * `CREATE TABLE IF NOT EXISTS` 同时覆盖全新安装和从 0.6 升上来两条路。
+ * SCHEMA_VERSION 推到 7 的作用是让 `initSchema` 那道 `from < SCHEMA_VERSION`
+ * 闸门把视频的内置标签装进去，以及给 `scripts/rollback-v7.ts` 一个可判断的版本号。
  *
- * 写一个空的 migrate 只是为了「显得有迁移」，那会让下一个读代码的人
- * 以为这里有需要小心的东西。
+ * 那之后 0.7 自己的开发过程中又加了两列（`douban_id` / `douban_rating`），
+ * 于是有了这个 migrate。它**只补列，并且靠「列在不在」判断，不看版本号** ——
+ * 理由是这两列是在 0.7 开发途中加的：已经装了 0.7 开发版的库版本号也是 7，
+ * 版本号闸门放不进去，而 `columnsOf().has()` 那道闸门下次启动就自己补上了。
+ * 公共层的 `categories.description` / `categories.kind` 用的是同一个写法。
+ *
+ * **没有为这两列提 SCHEMA_VERSION 到 8。** 8 的含义应该是「0.8 的库形状」，
+ * 拿它标记 0.7 开发中途的两个可空列，会让 rollback-v7 那句
+ * 「退回 0.6」和 rollback-v8 的界限说不清 —— 而这两列是纯增量，
+ * 有默认值，回滚时整张 video_meta 都被 drop 掉，没人需要知道它们存在过。
  */
 
 import type { KindSchema } from '../types.ts'
+import { columnsOf, objectType, type SqlDb } from '../../services/schema.ts'
 
 /**
  * 视频私有字段。
@@ -85,7 +93,17 @@ export const VIDEO_META_SQL = `
 
     -- 刮削来源的 id。留着是为了重新刮削时不用再猜一次是哪部片
     tmdb_id TEXT NOT NULL DEFAULT '',
-    imdb_id TEXT NOT NULL DEFAULT ''
+    imdb_id TEXT NOT NULL DEFAULT '',
+
+    -- 豆瓣 subject id。条目页地址能从它拼出来，所以不单独存 URL
+    douban_id TEXT NOT NULL DEFAULT '',
+    -- 豆瓣评分，十分制。0 = 没拿到，**不是零分**
+    --
+    -- 和上面的 rating 分开存，不是为了多存一个数：rating 来自 TMDB 或 nfo，
+    -- 这一列来自搜索服务商的摘要（见 douban.ts）—— 两个数的来源、时效、
+    -- 可信度都不一样。合并成一列之后界面上就只剩一个不知道打哪儿来的数字，
+    -- 而中文用户看影视评分时,「这是豆瓣的分」本身就是信息。
+    douban_rating REAL NOT NULL DEFAULT 0
   );
 `
 
@@ -176,6 +194,8 @@ export const VIDEO_VIEW_SQL = `
     COALESCE(m.linked_files, '[]') AS linked_files,
     COALESCE(m.tmdb_id, '') AS tmdb_id,
     COALESCE(m.imdb_id, '') AS imdb_id,
+    COALESCE(m.douban_id, '') AS douban_id,
+    COALESCE(m.douban_rating, 0) AS douban_rating,
     (SELECT COUNT(*) FROM episode e WHERE e.resource_id = r.id) AS episode_total,
     (SELECT COUNT(*) FROM episode e WHERE e.resource_id = r.id AND e.watch_status = 'watched')
       AS episode_watched,
@@ -200,8 +220,31 @@ export const VIDEO_INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_episode_resource ON episode(resource_id, season, episode);
 `
 
+/**
+ * 补 0.7 开发途中加的两列。见文件头「migrate 只做补列」。
+ *
+ * `from` 收下但不用：这两列的闸门是「列在不在」而不是版本号，理由同上。
+ * 幂等，每次启动都跑，列已经在就是空操作。
+ *
+ * 视图必须在这之后建 —— `initSchema` 已经是这个顺序（migrate → view），
+ * 而 `VIDEO_VIEW_SQL` 里 SELECT 了这两列：老库上如果先建视图，
+ * 会当场报 no such column，然后后面的语句连着 migrate 全都不跑。
+ */
+export function migrateVideo(d: SqlDb, from: number): void {
+  void from
+  if (objectType(d, 'video_meta') !== 'table') return
+  const cols = columnsOf(d, 'video_meta')
+  if (!cols.has('douban_id')) {
+    d.exec(`ALTER TABLE video_meta ADD COLUMN douban_id TEXT NOT NULL DEFAULT ''`)
+  }
+  if (!cols.has('douban_rating')) {
+    d.exec('ALTER TABLE video_meta ADD COLUMN douban_rating REAL NOT NULL DEFAULT 0')
+  }
+}
+
 export const videoSchema: KindSchema = {
   tables: VIDEO_META_SQL + EPISODE_SQL,
   view: VIDEO_VIEW_SQL,
-  indexes: VIDEO_INDEXES_SQL
+  indexes: VIDEO_INDEXES_SQL,
+  migrate: migrateVideo
 }

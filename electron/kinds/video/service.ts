@@ -114,6 +114,8 @@ function describeEvent(e: AgentEvent): string {
       return `识别出「${args.name_zh ?? '?'}」`
     case 'skip_entry':
       return `跳过（${args.reason ?? ''}）`
+    case 'douban_search':
+      return `查豆瓣「${args.title ?? ''}」`
     case 'web_search':
       return `联网搜索「${args.query ?? ''}」`
     default:
@@ -144,7 +146,8 @@ export async function scanVideos(
     skipped: 0,
     failed: 0,
     tokens: 0,
-    episodes: 0
+    episodes: 0,
+    searches: 0
   }
 
   const report = (p: Partial<VideoScanProgress>): void =>
@@ -212,6 +215,10 @@ export async function scanVideos(
       },
       onSkip: () => {
         result.skipped++
+      },
+      // 按次计费的服务商，这个数就是这次扫描的账单。缓存命中不计
+      onSearch: () => {
+        result.searches++
       }
     }
 

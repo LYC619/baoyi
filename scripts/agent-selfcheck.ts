@@ -134,6 +134,7 @@ import {
   steamCoverCandidates
 } from '../electron/kinds/game/covers.ts'
 import {
+  clearSearchCache,
   imageSearchAvailable,
   imageSearchWhyNot
 } from '../electron/services/searchService.ts'
@@ -222,6 +223,18 @@ import {
   mergeFacts,
   pickMainNfo
 } from '../electron/kinds/video/facts.ts'
+import {
+  cleanDoubanTitle,
+  doubanAvailable,
+  doubanQuery,
+  doubanSubjectId,
+  doubanUrl,
+  mapDoubanHit,
+  parseDoubanRating,
+  parseDoubanYear,
+  rankDoubanHits,
+  scoreDoubanCandidate
+} from '../electron/kinds/video/douban.ts'
 import { fillVideoSystem, videoCandidatePrompt } from '../electron/kinds/video/prompts.ts'
 import { buildVideoTools, limitVideoTags } from '../electron/kinds/video/tools.ts'
 import { VIDEO_CATEGORIES, VIDEO_TAGS } from '../electron/kinds/video/taxonomy.ts'
@@ -287,6 +300,46 @@ function mockModel(script: Scripted[]): { sent: any[]; restore: () => void } {
   }) as unknown as typeof fetch
 
   return { sent, restore: () => { globalThis.fetch = original } }
+}
+
+/**
+ * 把 fetch 换成一个固定 JSON 的假服务端。给只有一个端点的路子用
+ * （搜索服务商、豆瓣那条路）。返回 restore，**必须放在 finally 里调** ——
+ * 漏掉的话后面所有 check 都在这个假 fetch 上跑，失败原因会指向不相干的地方。
+ */
+function stubJson(body: unknown): () => void {
+  const original = globalThis.fetch
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    json: async () => body,
+    text: async () => JSON.stringify(body)
+  })) as unknown as typeof fetch
+  return () => { globalThis.fetch = original }
+}
+
+/**
+ * 按 URL 片段分路的假服务端。TMDB 这种一次交互要打好几个端点的场合用。
+ *
+ * 没配到的路径返回空对象而不是抛错：这个函数是给「验别的东西」用的脚手架，
+ * 让它对没预料到的请求硬失败只会把失败原因引到脚手架自己身上。
+ */
+function stubFetch(routes: Record<string, unknown>): () => void {
+  const original = globalThis.fetch
+  globalThis.fetch = (async (url: string) => {
+    const s = String(url)
+    const key = Object.keys(routes).find((k) => s.includes(k))
+    const body = key ? routes[key] : {}
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => body,
+      text: async () => JSON.stringify(body)
+    }
+  }) as unknown as typeof fetch
+  return () => { globalThis.fetch = original }
 }
 
 function echoTool(calls: Array<{ name: string; args: any }>): AgentTool {
@@ -2127,6 +2180,7 @@ async function main(): Promise<void> {
   await videoContainerSection()
   await videoTmdbSection()
   await videoFactsSection()
+  await videoDoubanSection()
   await videoIdentifySection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
@@ -2360,6 +2414,10 @@ async function videoDataSection(): Promise<void> {
     linked_files: [],
     tmdb_id: '693134',
     imdb_id: 'tt15239678',
+    douban_id: '',
+    douban_rating: 0,
+    poster_path: '',
+    fanart_path: '',
     episodes: [],
     ...over
   })
@@ -2612,6 +2670,110 @@ async function videoDataSection(): Promise<void> {
     assert.deepEqual(byYear, [2024, 1994, 0])
     const byRating = listVideos(d as any, { sort: 'rating' }).map((v) => v.rating)
     assert.deepEqual(byRating, [9.7, 8.7, 0])
+    d.close()
+  })
+
+  await check('只有豆瓣评分的片按分排序时不该被当成「没评分」', () => {
+    const d = freshDb()
+    insertVideo(d as any, moviePayload({ path: 'D:\\a.mkv', name_zh: 'A', rating: 9.7 }))
+    // TMDB 没刮到分，但豆瓣有 —— 卡片上用户看得见那个 8.1
+    insertVideo(
+      d as any,
+      moviePayload({ path: 'D:\\b.mkv', name_zh: 'B', rating: 0, douban_rating: 8.1 })
+    )
+    insertVideo(d as any, moviePayload({ path: 'D:\\c.mkv', name_zh: 'C', rating: 0 }))
+    const order = listVideos(d as any, { sort: 'rating' }).map((v) => v.name_zh)
+    // B 沉到底就是自相矛盾：界面显示 8.1，排序当它 0
+    assert.deepEqual(order, ['A', 'B', 'C'])
+    d.close()
+  })
+
+  await check('豆瓣两列存得住读得回，且和 rating 互不干扰', () => {
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      moviePayload({ rating: 8.7, douban_id: '1292052', douban_rating: 9.7 })
+    )
+    const v = getVideo(d as any, id)!
+    assert.equal(v.rating, 8.7, 'TMDB 的分不该被豆瓣的覆盖')
+    assert.equal(v.douban_id, '1292052')
+    assert.equal(v.douban_rating, 9.7)
+    // 没填时是 0 和空串，不是 null —— 界面拿 0 判断「没拿到」
+    const bare = getVideo(d as any, insertVideo(d as any, moviePayload({ path: 'D:\\z.mkv' })).id)!
+    assert.equal(bare.douban_id, '')
+    assert.equal(bare.douban_rating, 0)
+    d.close()
+  })
+
+  await check('重扫补进新集时，剧一级的「看完」要跟着退回「在看」', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, seriesPayload())
+    for (const e of listEpisodes(d as any, id)) {
+      if (e.path) updateEpisode(d as any, e.id, { watch_status: 'watched' })
+    }
+    // updateEpisode 不自己刷剧一级，由调用方刷（见 db.ts 的 syncSeriesStatus）
+    syncSeriesStatus(d as any, id)
+    assert.equal(getVideo(d as any, id)!.watch_status, 'watched')
+
+    // 用户下了后半季再扫一遍
+    const out = insertVideo(
+      d as any,
+      seriesPayload({
+        episodes: [
+          { season: 1, episode: 1, path: 'E:\\TV\\The Glory\\S01E01.mkv' },
+          { season: 1, episode: 2, path: 'E:\\TV\\The Glory\\S01E02.mkv' },
+          { season: 1, episode: 3, path: 'E:\\TV\\The Glory\\S01E03.mkv' },
+          { season: 1, episode: 4, path: 'E:\\TV\\The Glory\\S01E04.mkv' }
+        ]
+      })
+    )
+    assert.ok(out.episodesAdded > 0, '第 4 集是新的')
+    const v = getVideo(d as any, id)!
+    // 不退回的话：侧栏说「看完」，详情页的 2/4 说没看完，两个数字来自同一个库
+    assert.equal(v.watch_status, 'watching')
+    assert.equal(v.episode_watched, 2)
+    assert.equal(v.episode_total, 4)
+    d.close()
+  })
+
+  await check('集列表没变的重扫不动剧一级状态 —— 没有新事实就不该推翻用户的标记', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, seriesPayload())
+    // 用户没逐集标，直接在剧一级标了「看完」
+    updateVideo(d as any, id, { watch_status: 'watched' })
+    const out = insertVideo(d as any, seriesPayload())
+    assert.equal(out.episodesAdded, 0)
+    assert.equal(
+      getVideo(d as any, id)!.watch_status,
+      'watched',
+      '集数没变就没有新事实，按集列表重算一次只会把用户的标记推翻'
+    )
+    d.close()
+  })
+
+  await check('重扫不覆盖已有的海报和背景图', () => {
+    const d = freshDb()
+    // 第一次刮削落的是 TMDB 相对路径
+    const { id } = insertVideo(d as any, moviePayload({ poster_path: '/a.jpg', fanart_path: '/b.jpg' }))
+    assert.equal(getVideo(d as any, id)!.poster_path, '/a.jpg')
+
+    // Step 6 下载完把同一列改成本地路径（或者用户自己挑了一张）
+    updateVideo(d as any, id, { poster_path: 'C:\\cache\\poster.jpg' })
+    insertVideo(d as any, moviePayload({ poster_path: '/c.jpg', fanart_path: '/d.jpg' }))
+    const v = getVideo(d as any, id)!
+    // 覆盖回相对路径的话，界面拿它当本地文件读，结果是一面空白的海报墙
+    assert.equal(v.poster_path, 'C:\\cache\\poster.jpg')
+    assert.equal(v.fanart_path, '/b.jpg', '背景图同理')
+    d.close()
+  })
+
+  await check('海报为空时重扫要补上 —— 只护住已有的，不是从此不写', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, moviePayload({ poster_path: '', fanart_path: '' }))
+    insertVideo(d as any, moviePayload({ poster_path: '/late.jpg', fanart_path: '/late2.jpg' }))
+    const v = getVideo(d as any, id)!
+    assert.equal(v.poster_path, '/late.jpg')
+    assert.equal(v.fanart_path, '/late2.jpg')
     d.close()
   })
 
@@ -5948,6 +6110,183 @@ async function videoFactsSection(): Promise<void> {
   await fsp.rm(dir, { recursive: true, force: true })
 }
 
+/* ==================== 豆瓣 · v0.7 Step 5 ==================== */
+
+/**
+ * 豆瓣这条路的纯逻辑。
+ *
+ * 这条路不碰豆瓣的私有接口，走的是用户自己配的搜索服务商 + `site:` 查询
+ * （为什么这么选，见 douban.ts 的文件头）。代价是**返回的东西是外部输入**，
+ * 里面会混进影评站、盗版站、豆瓣自己的非条目页。所以这一节的重点不是
+ * 「能不能解出来」，而是**不该收的有没有被挡住**：
+ *
+ * 1. `doubanSubjectId` 是整道闸门，它判的是 host 而不是「串里有没有 douban」。
+ * 2. 评分必须带锚点词才认 —— 摘要里的评价人数、时长、年份都长得像评分。
+ */
+async function videoDoubanSection(): Promise<void> {
+  console.log('\n豆瓣 · 搜索服务商这条路')
+
+  const hit = (url: string, title = '肖申克的救赎 (豆瓣)', snippet = ''): any => ({
+    url,
+    title,
+    snippet
+  })
+
+  await check('subject id 只从真的豆瓣 host 上取 —— 判的是主机名不是「串里有 douban」', () => {
+    assert.equal(doubanSubjectId('https://movie.douban.com/subject/1292052/'), '1292052')
+    assert.equal(doubanSubjectId('https://m.douban.com/movie/subject/1292052/'), '1292052')
+    assert.equal(doubanSubjectId('https://movie.douban.com/subject/1292052/?from=search'), '1292052')
+    assert.equal(doubanSubjectId('http://douban.com/subject/1292052'), '1292052')
+
+    // 把别人的站伪装成豆瓣：正则一扫就过了，URL 解析过不去。
+    // 放过它的后果是把一个陌生站点的数字当豆瓣 id 存进用户的库
+    assert.equal(doubanSubjectId('https://evil.com/movie.douban.com/subject/1292052/'), '')
+    assert.equal(doubanSubjectId('https://movie.douban.com.evil.com/subject/1292052/'), '')
+    assert.equal(doubanSubjectId('https://fake-douban.com/subject/1292052/'), '')
+    // 非 http 协议：javascript: 和 file: 一律不认
+    assert.equal(doubanSubjectId('javascript:alert(1)//movie.douban.com/subject/1292052/'), '')
+  })
+
+  await check('豆瓣的非条目页不该被当成条目 —— 影人页、榜单、小组帖都会混进来', () => {
+    assert.equal(doubanSubjectId('https://movie.douban.com/celebrity/1054521/'), '')
+    assert.equal(doubanSubjectId('https://movie.douban.com/top250'), '')
+    assert.equal(doubanSubjectId('https://www.douban.com/group/topic/12345678/'), '')
+    // 条目自己的子页（影评、剧照）**照样认**：id 指的还是同一部片，
+    // 而 rankDoubanHits 按 id 去重，它会和条目页那条合成一条
+    assert.equal(doubanSubjectId('https://movie.douban.com/subject/1292052/reviews'), '1292052')
+    // id 太短不像 subject（豆瓣的 subject id 是 7-8 位）
+    assert.equal(doubanSubjectId('https://movie.douban.com/subject/12/'), '')
+    // 非字符串、空值不该抛
+    assert.equal(doubanSubjectId(null), '')
+    assert.equal(doubanSubjectId(12345), '')
+    assert.equal(doubanSubjectId(''), '')
+  })
+
+  await check('条目链接从 id 重拼，不带服务商的跟踪参数', () => {
+    assert.equal(doubanUrl('1292052'), 'https://movie.douban.com/subject/1292052/')
+    assert.equal(doubanUrl(''), '', '没有 id 时给空串，不是一个指向 /subject// 的坏链接')
+    // 移动版地址进来，存下去的是桌面版规范形状
+    const c = mapDoubanHit(hit('https://m.douban.com/movie/subject/1292052/?dt_dapp=1'))
+    assert.equal(c!.url, 'https://movie.douban.com/subject/1292052/')
+  })
+
+  await check('评分必须带锚点词才认 —— 评价人数和时长长得跟评分一样', () => {
+    assert.equal(parseDoubanRating('豆瓣评分 9.7'), 9.7)
+    assert.equal(parseDoubanRating('豆瓣评分：9.7'), 9.7)
+    assert.equal(parseDoubanRating('评分 8.1 / 10'), 8.1)
+    assert.equal(parseDoubanRating('9.7/10'), 9.7)
+    assert.equal(parseDoubanRating('8.5分'), 8.5)
+    assert.equal(parseDoubanRating('评分 10'), 10)
+
+    // 这一条是这个函数存在的理由：8.5 万人评价里的 8.5 恰好落在合法评分区间，
+    // 认错了在界面上看不出任何异常
+    assert.equal(parseDoubanRating('280.1万人评价'), 0)
+    assert.equal(parseDoubanRating('8.5万人评价'), 0)
+    assert.equal(parseDoubanRating('片长 120分钟'), 0)
+    assert.equal(parseDoubanRating('1994年上映'), 0)
+    assert.equal(parseDoubanRating('全 16 集'), 0)
+    assert.equal(parseDoubanRating('一部关于希望的电影'), 0)
+    assert.equal(parseDoubanRating(''), 0)
+    assert.equal(parseDoubanRating(null), 0)
+  })
+
+  await check('解不出评分返回 0，且 0 的意思是「没拿到」不是「零分」', () => {
+    // 越界的值不能当评分收下 —— 11.0 和 0.0 都不是豆瓣的十分制
+    assert.equal(parseDoubanRating('评分 11'), 0)
+    assert.equal(parseDoubanRating('评分 0'), 0)
+    // 多一位小数说明这不是豆瓣评分（豆瓣只给一位）
+    assert.equal(parseDoubanRating('评分 9.75'), 0)
+    // 摘要里没有评分的条目页照样是有效候选，只是 rating = 0
+    const c = mapDoubanHit(hit('https://movie.douban.com/subject/1292052/', '肖申克的救赎', '导演 弗兰克·德拉邦特'))
+    assert.ok(c, '没解出评分不该让整条候选作废 —— id 和片名照样拿到了')
+    assert.equal(c!.rating, 0)
+  })
+
+  await check('标题剥站点后缀，但留着英文原名 —— 同名译名靠它分开', () => {
+    assert.equal(cleanDoubanTitle('肖申克的救赎 (豆瓣)'), '肖申克的救赎')
+    assert.equal(cleanDoubanTitle('豆瓣电影: 肖申克的救赎'), '肖申克的救赎')
+    assert.equal(cleanDoubanTitle('肖申克的救赎 - 豆瓣电影'), '肖申克的救赎')
+    assert.equal(cleanDoubanTitle('沙丘 Dune (2021) - 豆瓣'), '沙丘 Dune (2021)')
+    assert.equal(
+      cleanDoubanTitle('无间道 Infernal Affairs'),
+      '无间道 Infernal Affairs',
+      '英文原名要留着'
+    )
+    assert.equal(cleanDoubanTitle('   '), '')
+  })
+
+  await check('年份只认有边界的四位数 —— 2160p 里的 2160 不是年份', () => {
+    assert.equal(parseDoubanYear('沙丘 (2021)'), 2021)
+    assert.equal(parseDoubanYear('2021年上映'), 2021)
+    assert.equal(parseDoubanYear('剧情 / 1994 / 美国'), 1994)
+    assert.equal(parseDoubanYear('2160p 蓝光原盘'), 0)
+    assert.equal(parseDoubanYear('全 1080 天'), 0)
+    assert.equal(parseDoubanYear('无年份'), 0)
+  })
+
+  await check('不是条目页的结果一律落成 null —— 服务商不认 site: 时靠这道闸门', () => {
+    // 服务商把 site: 当普通词处理时，返回的就是这种东西
+    assert.equal(mapDoubanHit(hit('https://www.zhihu.com/question/12345')), null)
+    assert.equal(mapDoubanHit(hit('https://movie.douban.com/celebrity/1054521/')), null)
+    assert.equal(mapDoubanHit(hit('https://evil.com/movie.douban.com/subject/1292052/')), null)
+    // 是条目页但标题洗完是空的：留不下有意义的片名，不收
+    assert.equal(mapDoubanHit(hit('https://movie.douban.com/subject/1292052/', '豆瓣电影')), null)
+  })
+
+  await check('候选按 subject id 去重，桌面版和移动版两条的摘要要合起来', () => {
+    // 一条带评分不带年份，另一条反过来 —— 丢掉后来的那条就等于丢掉半份信息
+    const list = rankDoubanHits(
+      [
+        hit('https://movie.douban.com/subject/1292052/', '肖申克的救赎', '豆瓣评分 9.7'),
+        hit('https://m.douban.com/movie/subject/1292052/', '肖申克的救赎 The Shawshank Redemption', '剧情 / 1994 / 美国')
+      ],
+      { title: '肖申克的救赎', year: 1994 }
+    )
+    assert.equal(list.length, 1, '同一个 subject 只该留一条')
+    assert.equal(list[0].rating, 9.7)
+    assert.equal(list[0].year, 1994)
+    // 标题取更长的那个：短的那条通常是被服务商截断的
+    assert.equal(list[0].title, '肖申克的救赎 The Shawshank Redemption')
+  })
+
+  await check('打分只用来排序：年份对得上的排前面，差太远的往后掉', () => {
+    const list = rankDoubanHits(
+      [
+        // 同名但年份差 40 年 —— 老版翻拍，不是用户手上这一部
+        hit('https://movie.douban.com/subject/1111111/', '沙丘 Dune (1984)', '豆瓣评分 7.0 / 1984年'),
+        hit('https://movie.douban.com/subject/2222222/', '沙丘 Dune (2021)', '豆瓣评分 7.9 / 2021年')
+      ],
+      { title: '沙丘', year: 2021 }
+    )
+    assert.equal(list[0].id, '2222222', '年份对得上的该排第一')
+    assert.equal(list.length, 2, '排后面不等于丢掉 —— 取舍留给模型')
+  })
+
+  await check('查询词把 site: 放前面，不夹带「电影」这类形态词', () => {
+    assert.equal(doubanQuery('肖申克的救赎', 1994), 'site:movie.douban.com 肖申克的救赎 1994')
+    assert.equal(doubanQuery('肖申克的救赎'), 'site:movie.douban.com 肖申克的救赎')
+    assert.equal(doubanQuery('肖申克的救赎', 0), 'site:movie.douban.com 肖申克的救赎')
+    assert.ok(!doubanQuery('黑暗荣耀', 2022).includes('电视剧'))
+    assert.equal(doubanQuery('   '), '', '没有片名就不该发出一个只有 site: 的查询')
+  })
+
+  await check('豆瓣的开关就是联网搜索的开关，没有第二个配置项', () => {
+    const base = { api_key: 'k', endpoint: '', enabled: true }
+    assert.equal(doubanAvailable({ ...base, provider: 'bing' } as any), true)
+    // 「不额外联网」时这条路自动关掉
+    assert.equal(doubanAvailable({ ...base, provider: 'model_builtin' } as any), false)
+    assert.equal(doubanAvailable({ ...base, provider: 'bing', enabled: false } as any), false)
+    assert.equal(doubanAvailable({ ...base, provider: 'bing', api_key: '' } as any), false)
+  })
+
+  await check('评分越界或标题不像时，打分函数不抛 —— 外部输入什么形状都有', () => {
+    assert.equal(typeof scoreDoubanCandidate({ title: '', year: 0, rating: 0 }, { title: '', year: 0 }), 'number')
+    const exact = scoreDoubanCandidate({ title: '沙丘', year: 2021, rating: 7.9 }, { title: '沙丘', year: 2021 })
+    const off = scoreDoubanCandidate({ title: '沙丘', year: 1984, rating: 7.0 }, { title: '沙丘', year: 2021 })
+    assert.ok(exact > off)
+  })
+}
+
 /* ==================== 视频识别 · v0.7 Step 5 ==================== */
 
 /**
@@ -6248,6 +6587,269 @@ async function videoIdentifySection(): Promise<void> {
     const reg = tools.find((t) => t.name === 'register_video')!
     await assert.rejects(() => reg.execute({ summary: 'x', category: '华语' }))
     await assert.rejects(() => reg.execute({ name_zh: '   ', summary: 'x', category: '华语' }))
+  })
+
+  /* -------- 两套 id 空间不许互相顶替 -------- */
+  await check('电影 id 不许当剧集 id 用 —— TMDB 的两套编号各自独立', async () => {
+    const d = new DatabaseSync(':memory:')
+    initSchema(d as any, KINDS)
+
+    // 这一条要 TMDB 开着才验得到：ledger 里得先有那个电影 id
+    const restore = stubFetch({
+      // 模型先按电影搜了一次，拿到 438631
+      '/search/movie': { results: [{ id: 438631, title: 'Dune', release_date: '2021-10-22' }] },
+      '/search/tv': { results: [] }
+    })
+    try {
+      const tools = buildVideoTools(
+        mkCtx({
+          db: d as any,
+          facts: { ...facts, video_type: 'series' as const },
+          tmdbConfig: { api_key: 'k', api_domain: '', image_domain: '', enabled: true }
+        }) as any,
+        ['欧美'],
+        false,
+        true
+      )
+      await tools.find((t) => t.name === 'tmdb_search')!.execute({ query: 'Dune', type: 'movie' })
+
+      // 然后把这个**电影** id 填进一个剧集条目
+      const out = await tools.find((t) => t.name === 'register_video')!.execute({
+        name_zh: '沙丘', summary: 'x', category: '欧美', tmdb_id: 438631
+      })
+
+      const row = d.prepare('SELECT tmdb_id FROM video_meta').get() as any
+      // 退回另一个形态去找的话，年份、简介、imdb_id 全从那部电影抄过来，
+      // 而那个电影 id 还被写进 tmdb_id —— 下次刷新按剧集去查它，查到的是别人
+      assert.equal(row.tmdb_id, '', '电影 id 不该落到剧集条目上')
+      assert.ok(out.includes('438631'), '要把这个 id 说出来')
+      assert.ok(out.includes('两套') || out.includes('独立'), '要说清是两套 id 空间，否则模型只会再编一个')
+    } finally {
+      restore()
+    }
+    d.close()
+  })
+
+  /* -------- 豆瓣：工具形状 -------- */
+  await check('豆瓣工具跟着联网搜索的开关走，没有第五个布尔', () => {
+    const on = buildVideoTools(mkCtx(), ['华语'], true, true).map((t) => t.name)
+    assert.ok(on.includes('douban_search'))
+    assert.ok(on.includes('web_search'), '两个搜索工具同一个闸门')
+
+    // 关搜索时两个一起消失 —— 只关一个会让提示词和工具集对不上
+    const off = buildVideoTools(mkCtx(), ['华语'], false, true).map((t) => t.name)
+    assert.ok(!off.includes('douban_search'))
+    assert.ok(!off.includes('web_search'))
+  })
+
+  await check('register_video 收 douban_id 但不收豆瓣评分 —— 分不是模型填的', () => {
+    const tool = buildVideoTools(mkCtx(), ['华语'], true, true).find((t) => t.name === 'register_video')!
+    const props = Object.keys((tool.parameters as any).properties)
+    assert.ok(props.includes('douban_id'))
+    // 让模型填分就是请它编一个：它没有任何途径知道豆瓣给某部片打了几分
+    for (const bad of ['douban_rating', 'rating', 'douban_url']) {
+      assert.ok(!props.includes(bad), `register_video 不该收 ${bad}`)
+    }
+
+    // 关搜索时 douban_id 也该消失：查不到就没有合法来源，留着只会被编
+    const offProps = Object.keys(
+      (buildVideoTools(mkCtx(), ['华语'], false, true).find((t) => t.name === 'register_video')!
+        .parameters as any).properties
+    )
+    assert.ok(!offProps.includes('douban_id'))
+  })
+
+  /* -------- 豆瓣：编出来的 id 必须被拦住 -------- */
+  await check('编出来的 douban_id 被丢掉 —— 错的豆瓣链接比没有链接更糟', async () => {
+    const d = new DatabaseSync(':memory:')
+    initSchema(d as any, KINDS)
+
+    const tools = buildVideoTools(mkCtx({ db: d as any }) as any, ['欧美'], true, false)
+    const out = await tools.find((t) => t.name === 'register_video')!.execute({
+      name_zh: '沙丘',
+      summary: 'x',
+      category: '欧美',
+      // 一次 douban_search 都没查过，这个 id 无从得来
+      douban_id: '1292052'
+    })
+
+    const row = d.prepare('SELECT douban_id, douban_rating FROM video_meta').get() as any
+    const res = d.prepare('SELECT official_url FROM resource').get() as any
+    assert.equal(row.douban_id, '', '没查过的 douban_id 不能落库')
+    assert.equal(row.douban_rating, 0)
+    assert.ok(!res.official_url.includes('douban'), '连带的条目链接也不该出现')
+    assert.ok(out.includes('1292052'), '要把编的那个 id 说出来')
+    d.close()
+  })
+
+  await check('豆瓣评分从查询结果里取，不从模型的参数里取', async () => {
+    const d = new DatabaseSync(':memory:')
+    initSchema(d as any, KINDS)
+    clearSearchCache()
+
+    // Tavily 形状的假响应，摘要里带评分
+    const restore = stubJson({
+      results: [
+        {
+          title: '肖申克的救赎 The Shawshank Redemption (豆瓣)',
+          url: 'https://movie.douban.com/subject/1292052/',
+          content: '豆瓣评分 9.7 / 1994年 / 美国 / 剧情'
+        }
+      ]
+    })
+    try {
+      const tools = buildVideoTools(
+        mkCtx({
+          db: d as any,
+          searchConfig: { provider: 'tavily' as const, api_key: 'k', endpoint: '', enabled: true }
+        }) as any,
+        ['欧美'],
+        true,
+        false
+      )
+      const found = await tools.find((t) => t.name === 'douban_search')!.execute({
+        title: '肖申克的救赎', year: 1994
+      })
+      assert.ok(found.includes('1292052'))
+      assert.ok(found.includes('9.7'), '查询结果里要把分报给模型看，但那不是让它填回来')
+
+      await tools.find((t) => t.name === 'register_video')!.execute({
+        name_zh: '肖申克的救赎',
+        summary: 'x',
+        category: '欧美',
+        douban_id: '1292052',
+        // 模型顺手编一个分 —— 参数表里没有这个键，register 不读
+        douban_rating: 3.2
+      })
+
+      const row = d.prepare('SELECT douban_id, douban_rating FROM video_meta').get() as any
+      const res = d.prepare('SELECT official_url FROM resource').get() as any
+      assert.equal(row.douban_id, '1292052', '查过的 id 该收下')
+      assert.equal(row.douban_rating, 9.7, '分该来自摘要，不是模型说的 3.2')
+      // 没有 TMDB 主页时，豆瓣条目页就是这个条目唯一的官方链接
+      assert.equal(res.official_url, 'https://movie.douban.com/subject/1292052/')
+    } finally {
+      restore()
+      clearSearchCache()
+    }
+    d.close()
+  })
+
+  await check('豆瓣的分不覆盖 TMDB 的分 —— 一手数据和摘要快照分开存', async () => {
+    const d = new DatabaseSync(':memory:')
+    initSchema(d as any, KINDS)
+    clearSearchCache()
+
+    const restore = stubJson({
+      results: [
+        {
+          title: '沙丘 Dune (豆瓣)',
+          url: 'https://movie.douban.com/subject/3820120/',
+          content: '豆瓣评分 7.9'
+        }
+      ]
+    })
+    try {
+      const tools = buildVideoTools(
+        mkCtx({
+          db: d as any,
+          searchConfig: { provider: 'tavily' as const, api_key: 'k', endpoint: '', enabled: true }
+        }) as any,
+        ['欧美'],
+        true,
+        false
+      )
+      await tools.find((t) => t.name === 'douban_search')!.execute({ title: '沙丘' })
+      await tools.find((t) => t.name === 'register_video')!.execute({
+        name_zh: '沙丘', summary: 'x', category: '欧美', douban_id: '3820120'
+      })
+      const row = d.prepare('SELECT rating, douban_rating FROM video_meta').get() as any
+      // rating 是 TMDB 那一列，这次没配 TMDB 所以是 0；豆瓣的分不该顺手填进去
+      assert.equal(row.rating, 0, '豆瓣的分不能占掉 TMDB 那一列')
+      assert.equal(row.douban_rating, 7.9)
+    } finally {
+      restore()
+      clearSearchCache()
+    }
+    d.close()
+  })
+
+  await check('搜索次数按真的发出去的请求算，缓存命中不计', async () => {
+    clearSearchCache()
+    let searches = 0
+    const restore = stubJson({
+      results: [
+        { title: '黑暗荣耀 (豆瓣)', url: 'https://movie.douban.com/subject/35465232/', content: '豆瓣评分 7.8' }
+      ]
+    })
+    try {
+      const tools = buildVideoTools(
+        mkCtx({
+          searchConfig: { provider: 'tavily' as const, api_key: 'k', endpoint: '', enabled: true },
+          onSearch: () => { searches++ }
+        }) as any,
+        ['日韩'],
+        true,
+        false
+      )
+      const douban = tools.find((t) => t.name === 'douban_search')!
+      await douban.execute({ title: '黑暗荣耀', year: 2022 })
+      assert.equal(searches, 1)
+
+      // 同一部剧的第二季查的是同一个剧名 —— 服务商那边只扣了一次，
+      // 报成两次会让用户拿着一个比账单大的数去质疑服务商
+      await douban.execute({ title: '黑暗荣耀', year: 2022 })
+      assert.equal(searches, 1, '缓存命中不该计入搜索次数')
+    } finally {
+      restore()
+      clearSearchCache()
+    }
+  })
+
+  await check('豆瓣查询有上限 —— 按次计费的东西不能由模型无限点', async () => {
+    clearSearchCache()
+    let searches = 0
+    const restore = stubJson({ results: [] })
+    try {
+      const tools = buildVideoTools(
+        mkCtx({
+          searchConfig: { provider: 'tavily' as const, api_key: 'k', endpoint: '', enabled: true },
+          onSearch: () => { searches++ }
+        }) as any,
+        ['华语'],
+        true,
+        false
+      )
+      const douban = tools.find((t) => t.name === 'douban_search')!
+      // 每次换个片名，避开缓存
+      const outs: string[] = []
+      for (const t of ['甲', '乙', '丙', '丁']) outs.push(await douban.execute({ title: t }))
+
+      assert.ok(searches <= 2, `豆瓣查询该封顶在 2 次，实际发出 ${searches} 次`)
+      // 撞上限要说出来，不能静默返回空 —— 静默的话模型只会一直重试
+      const last = outs[outs.length - 1]
+      assert.ok(last.includes('不要再查'), `撞上限那次要明确叫停，实际回的是：${last.slice(0, 60)}`)
+      // 而且要告诉它「留空是可以接受的答案」，否则它会转头去编一个 id
+      assert.ok(last.includes('留空'))
+    } finally {
+      restore()
+      clearSearchCache()
+    }
+  })
+
+  await check('提示词里的豆瓣那段跟着开关走，且占位符不留残迹', () => {
+    const on = fillVideoSystem(VIDEO_CATEGORIES, VIDEO_TAGS, true, true)
+    assert.ok(!on.includes('{{'), '占位符全填掉')
+    assert.ok(on.includes('douban_search'))
+    assert.ok(on.includes('中文名'), '要说清按中文名查 —— 用英文名在豆瓣上搜不到')
+
+    const off = fillVideoSystem(VIDEO_CATEGORIES, VIDEO_TAGS, false, true)
+    assert.ok(!off.includes('{{'))
+    // 关搜索时不能提到一个不存在的工具，但要说清它不存在
+    assert.ok(off.includes('没有 `web_search` 和 `douban_search`'))
+    // 步骤编号不能因为豆瓣那段被抽掉而断档
+    for (const n of ['1.', '2.', '3.', '4.', '5.']) assert.ok(off.includes(n), `步骤 ${n} 不见了`)
+    assert.ok(!/^\s*4\.\s*$/m.test(off), '空替换留下了一个光秃秃的「4.」')
   })
 
   db.close()

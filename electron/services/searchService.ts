@@ -27,6 +27,23 @@ export function clearSearchCache(): void {
   cache.clear()
 }
 
+/** 缓存键。`search` 和 `searchCached` 共用，免得两边的归一规则各自漂 */
+function cacheKey(query: string, cfg: SearchConfig): string {
+  return `${cfg.provider}::${query.trim().toLowerCase()}`
+}
+
+/**
+ * 这个查询已经在缓存里了吗 —— 也就是「再问一次不会真的发请求、不花钱」。
+ *
+ * 给按次计费对账用：调用方在搜之前问一句，命中就不计入本次扫描的搜索次数。
+ * 不做这个判断的话，同一部剧的多季（每季是一个独立条目，查的是同一个剧名）
+ * 会被报成好几次搜索，而服务商那边只扣了一次 —— 报出来的账单比真实的多，
+ * 用户拿它去对账只会更糊涂。
+ */
+export function searchCached(query: string, cfg: SearchConfig): boolean {
+  return cache.has(cacheKey(query, cfg))
+}
+
 function trimSnippet(raw: unknown): string {
   if (typeof raw !== 'string') return ''
   return raw.replace(/\s+/g, ' ').trim().slice(0, MAX_SNIPPET)
@@ -162,7 +179,7 @@ export async function search(query: string, cfg: SearchConfig): Promise<SearchHi
   if (!q) return []
   if (!searchAvailable(cfg)) return []
 
-  const key = `${cfg.provider}::${q.toLowerCase()}`
+  const key = cacheKey(q, cfg)
   const hit = cache.get(key)
   if (hit) return hit
 

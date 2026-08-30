@@ -99,7 +99,8 @@ makeDb()
     file_size: 100, year: 2024, end_year: 0, rating: 8, duration_sec: 100,
     resolution: '1080p', video_codec: 'H264', source: 'WEB-DL', release_group: '',
     audio_tracks: [], subtitle_tracks: [], parts: [], linked_files: [],
-    tmdb_id: '', imdb_id: '', episodes: []
+    tmdb_id: '', imdb_id: '', douban_id: '', douban_rating: 0,
+    poster_path: '', fanart_path: '', episodes: []
   })
   d.close()
 

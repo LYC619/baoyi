@@ -63,6 +63,25 @@ export interface VideoPayload {
   linked_files: LinkedFile[]
   tmdb_id: string
   imdb_id: string
+  douban_id: string
+  /** 豆瓣评分。0 = 没拿到，和 rating 分开存，见 schema.ts */
+  douban_rating: number
+  /**
+   * TMDB 上的海报相对路径（`/abc.jpg`），**不是本地文件路径**。
+   *
+   * 刮削时顺手存下来。下载图片是 Step 6 的活（要缓存目录、要主机白名单，
+   * 见 game/covers.ts 那一套），但**相对路径是刮削时白拿的** ——
+   * 不存的话 Step 6 得为每个条目重新取一次 TMDB 详情，才能拿回这一步
+   * 手里已经有的东西。落在 poster_path 上，Step 6 下载完覆盖成本地路径。
+   */
+  poster_path: string
+  /**
+   * 同上，横版背景图的 TMDB 相对路径。
+   *
+   * 和海报一起存而不是只存海报：两个都在同一份详情响应里，只存一个的话
+   * Step 6 为了另一个还得把详情重取一遍 —— 那就等于没省。
+   */
+  fanart_path: string
 
   /** 剧集的集列表。电影传空数组 */
   episodes: EpisodePayload[]
@@ -81,10 +100,15 @@ export const VIDEO_TYPES: VideoType[] = ['movie', 'series']
 /**
  * 以 path 作唯一键：同一部片反复识别是更新，不是再开一条。
  *
- * 更新时只覆盖识别/刮削认出来的字段。**观看状态、播放位置、海报一律不动** ——
+ * 更新时只覆盖识别/刮削认出来的字段。**观看状态和播放位置一律不动** ——
  * 它们是用户看出来的账，重新刮削一次不该把它清零。这条规则在 0.6 的
  * insertGame 上已经立过，视频这边更要紧：一部 60 集的剧重扫一遍把
  * watch_status 打回 unwatched，用户就得重新标 60 次。
+ *
+ * 海报和背景图**只在空的时候写**（`CASE WHEN poster_path = ''`）：刮削这一步
+ * 落进去的是 TMDB 的相对路径，Step 6 下载完会把同一列改成本地路径，
+ * 而用户也可能自己挑过一张。重扫时无条件覆盖就会把这两种都打回相对路径 ——
+ * 界面拿它当本地文件去读，结果是一面空白的海报墙。`linked_files` 同理。
  *
  * 集列表走 UPSERT（唯一键是 resource_id + season + episode）：
  * 补进新发现的集、更新已有集的文件路径和时长，但不动那一集的
@@ -120,7 +144,9 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
     JSON.stringify(p.subtitle_tracks),
     JSON.stringify(p.parts),
     p.tmdb_id,
-    p.imdb_id
+    p.imdb_id,
+    p.douban_id,
+    p.douban_rating
   ]
 
   const existing = d.prepare('SELECT id FROM resource WHERE path = ?').get(p.path) as
@@ -148,9 +174,12 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
          video_type = ?, year = ?, end_year = ?, rating = ?, duration_sec = ?,
          resolution = ?, video_codec = ?, source = ?, release_group = ?,
          audio_tracks = ?, subtitle_tracks = ?, parts = ?, tmdb_id = ?, imdb_id = ?,
-         linked_files = CASE WHEN linked_files IN ('[]', '') THEN ? ELSE linked_files END
+         douban_id = ?, douban_rating = ?,
+         linked_files = CASE WHEN linked_files IN ('[]', '') THEN ? ELSE linked_files END,
+         poster_path = CASE WHEN poster_path = '' THEN ? ELSE poster_path END,
+         fanart_path = CASE WHEN fanart_path = '' THEN ? ELSE fanart_path END
        WHERE resource_id = ?`
-    ).run(...metaCols, JSON.stringify(p.linked_files), id)
+    ).run(...metaCols, JSON.stringify(p.linked_files), p.poster_path, p.fanart_path, id)
   } else {
     id = randomUUID()
     created = true
@@ -165,12 +194,30 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
       `INSERT INTO video_meta
          (resource_id, video_type, year, end_year, rating, duration_sec,
           resolution, video_codec, source, release_group,
-          audio_tracks, subtitle_tracks, parts, tmdb_id, imdb_id, linked_files)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, ...metaCols, JSON.stringify(p.linked_files))
+          audio_tracks, subtitle_tracks, parts, tmdb_id, imdb_id,
+          douban_id, douban_rating, linked_files, poster_path, fanart_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, ...metaCols, JSON.stringify(p.linked_files), p.poster_path, p.fanart_path)
   }
 
   const episodesAdded = upsertEpisodes(d, id, p.episodes)
+
+  // 集数变了就把剧一级的状态重算一遍。
+  //
+  // 上面刻意不动 watch_status，这里又改它，看着矛盾，其实是两回事：那边
+  // 拒绝的是「把用户的账清零」，这里做的是「让它和集列表对上」。
+  //
+  // 不重算的话有一个必然出现的错：一部在播的剧，用户看完手上那 8 集
+  //（状态 watched），下了后半季再扫一遍 —— upsertEpisodes 补进 8 集未看，
+  // 而剧一级还写着「看完」。侧栏说看完了，详情页的 8/16 说没看完，
+  // 两个数字来自同一个库却对不上。视图里那几个 episode_* 现算就是为了
+  // 避免这类不一致，watch_status 是真列，得自己补这一刀。
+  //
+  // **只在真的补进新集时重算**（`episodesAdded > 0`）：集列表没变的重扫
+  // 不该动它，那种情况下没有任何新事实，重算只会把用户在剧一级上做过的
+  // 标记按集列表推翻一次。
+  if (episodesAdded > 0) syncSeriesStatus(d, id)
+
   return { id, created, episodesAdded }
 }
 
@@ -300,6 +347,8 @@ function rowToVideo(row: Row): VideoItem {
     linked_files: jsonArray<LinkedFile>(row.linked_files),
     tmdb_id: String(row.tmdb_id ?? ''),
     imdb_id: String(row.imdb_id ?? ''),
+    douban_id: String(row.douban_id ?? ''),
+    douban_rating: Number(row.douban_rating) || 0,
     episode_total: Number(row.episode_total) || 0,
     episode_watched: Number(row.episode_watched) || 0,
     episode_present: Number(row.episode_present) || 0
@@ -335,7 +384,20 @@ const VIDEO_ORDER: Record<NonNullable<VideoQuery['sort']>, string> = {
   // year 为 0（不知道年份）的沉到底，不要浮在 2026 前面
   year: 'CASE WHEN year = 0 THEN 1 ELSE 0 END, year DESC, created_at DESC',
   added: 'created_at DESC',
-  rating: 'CASE WHEN rating = 0 THEN 1 ELSE 0 END, rating DESC, created_at DESC'
+  /**
+   * 按分排序时 TMDB 分优先、豆瓣分兜底。
+   *
+   * 两列都是十分制（tmdb.ts 的 toRating 和豆瓣摘要都按十分制归一），
+   * 混在一个排序键里不会出现 8.5 和 85 挨着的事。不兜底的话，一部只
+   * 刮到豆瓣分的片会被当成「没评分」沉到底 —— 用户明明在卡片上看得见
+   * 那个 8.1，排序却把它当 0，这种自相矛盾比排得不够准更难解释。
+   *
+   * TMDB 优先而不是取两者最大值：最大值会让排序变成「哪个网站给分高」的
+   * 排名，同一部片换个数据源就上下窜。固定主源，另一个只在主源缺失时顶上。
+   */
+  rating:
+    'CASE WHEN COALESCE(NULLIF(rating, 0), douban_rating) = 0 THEN 1 ELSE 0 END, ' +
+    'COALESCE(NULLIF(rating, 0), douban_rating) DESC, created_at DESC'
 }
 
 export function listVideos(d: SqlDb, query: VideoQuery = {}): VideoItem[] {
@@ -481,7 +543,8 @@ const VIDEO_META_COLUMNS = new Set([
   'video_type', 'poster_path', 'fanart_path', 'year', 'end_year', 'rating',
   'watch_status', 'position_sec', 'duration_sec', 'last_watched_at',
   'resolution', 'video_codec', 'source', 'release_group',
-  'audio_tracks', 'subtitle_tracks', 'parts', 'linked_files', 'tmdb_id', 'imdb_id'
+  'audio_tracks', 'subtitle_tracks', 'parts', 'linked_files', 'tmdb_id', 'imdb_id',
+  'douban_id', 'douban_rating'
 ])
 
 function toColumn(key: string, value: unknown): string | number {
