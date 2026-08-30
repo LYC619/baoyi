@@ -852,10 +852,16 @@ async function exportMarkdown(): Promise<void> {
 }
 
 async function reset(mode: 'library' | 'all'): Promise<void> {
+  // 文案必须把「游戏也会清」写出来。0.6 那版只说「软件条目」而代码只清 software，
+  // 两边是对上的；现在改成清全部品类，文案不跟着改就成了一句谎话
+  const shared =
+    `会清掉：全部软件条目和游戏条目、待识别目录、整理记录、图标缓存、游戏封面。\n` +
+    `不会删除磁盘上的任何实际文件 —— 软件和游戏本体都还在原处。\n` +
+    `存档备份也一份不删，备份记录一并留着，不然你就再也找不到那些文件了。`
   const warning =
     mode === 'library'
-      ? `清空所有软件条目、待识别目录、整理记录和图标缓存，重新开始识别。\n\n保留：API Key、搜索配置、扫描目录、自定义分类、识别日志。\n不会删除磁盘上的任何实际软件文件 —— 但已经整理过的文件夹会留在整理后的位置，整理记录清掉之后就无法再自动撤销了。\n\n确认继续？`
-      : `恢复出厂：连 API Key、搜索配置、扫描目录、自定义分类、识别日志、整理记录一起清空，并重新走一遍引导流程。\n\n不会删除磁盘上的任何实际软件文件，但整理记录清掉之后就无法再自动撤销整理了。\n\n确认继续？`
+      ? `清空识别数据，重新开始识别。\n\n${shared}\n\n保留：API Key、搜索配置、扫描目录、自定义分类、识别日志。\n已经整理过的文件夹会留在整理后的位置，整理记录清掉之后就无法再自动撤销了。\n\n确认继续？`
+      : `恢复出厂：连 API Key、搜索配置、扫描目录、自定义分类、识别日志、整理记录一起清空，并重新走一遍引导流程。\n\n${shared}\n整理记录清掉之后就无法再自动撤销整理了。\n\n确认继续？`
   if (!window.confirm(warning)) return
 
   resetting.value = true
@@ -876,8 +882,13 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
     testResult.value = null
     searchResult.value = null
 
+    // 保留的存档备份只在真有的时候提 —— 一句「保留 0 份备份」只会让人愣一下
+    const kept = summary.saveBackupsKept
+      ? `；保留 ${summary.saveBackupsKept} 份存档备份`
+      : ''
     success(
-      `已清空 ${summary.software} 个软件条目、${summary.units} 个目录记录、${summary.icons} 个图标缓存`
+      `已清空 ${summary.software} 个软件条目、${summary.games} 个游戏条目、` +
+        `${summary.units} 个目录记录、${summary.icons} 个图标、${summary.covers} 张封面${kept}`
     )
   } catch (err) {
     // 不给反馈的话，失败看起来和成功一模一样 —— 按钮变回可点，什么都没发生
@@ -1706,12 +1717,17 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             <h2 class="sec-head">统计</h2>
             <ul v-if="stats" class="tally">
               <li><b>{{ stats.software }}</b><span>软件条目</span></li>
+              <li><b>{{ stats.games }}</b><span>游戏条目</span></li>
               <li><b>{{ formatBytes(stats.dbBytes) }}</b><span>数据库</span></li>
               <li><b>{{ stats.icons }}</b><span>图标缓存</span></li>
               <li><b>{{ formatBytes(stats.iconBytes) }}</b><span>图标占用</span></li>
+              <li><b>{{ stats.covers }}</b><span>游戏封面</span></li>
+              <li><b>{{ formatBytes(stats.coverBytes) }}</b><span>封面占用</span></li>
             </ul>
             <p v-if="stats" class="hint hint--block">
               另有 {{ stats.units }} 条目录记录、{{ stats.logs }} 条识别日志。
+              封面和图标分开算 —— 图标是缓存，重新识别就能再取；封面是你亲手指的图，
+              只在清空条目时才会跟着走。
             </p>
           </section>
 

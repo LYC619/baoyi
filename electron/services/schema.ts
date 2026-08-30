@@ -22,7 +22,7 @@ import type { Category, TagSource } from '../../src/types'
  * 0.4 要再换一次分类体系，没有列可以拿来当标记了。于是显式记一个数字，
  * 存在 settings 表里（下划线开头的键不会出现在 AppSettings 里，见 getSettings）。
  */
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 export const SCHEMA_KEY = '_schema'
 
 /* --------------------------- 最小 SQL 接口 --------------------------- */

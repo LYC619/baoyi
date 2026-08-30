@@ -107,6 +107,24 @@ export const ENGINE_SAVE_RULES: EngineSaveRule[] = [
     engine: 'QSP',
     in_game: ['save\\', 'saves\\'],
     note: 'QSP 这类文字冒险引擎一律就地存档。'
+  },
+  {
+    engine: 'Adobe AIR',
+    where: ['%APPDATA%\\<应用 id>\\Local Store'],
+    note:
+      'AIR 的 File.applicationStorageDirectory 在 Windows 上就是这里，末尾那个 Local Store ' +
+      '是引擎写死的。<应用 id> 是 META-INF\\AIR\\application.xml 里 <id> 那个值（形如 ' +
+      'com.厂商.游戏名），**不是**游戏的显示名 —— 拿显示名去拼基本必空。读那个 xml 比猜快。'
+  },
+  {
+    engine: 'Flash',
+    where: ['%APPDATA%\\Macromedia\\Flash Player\\#SharedObjects'],
+    in_game: ['save\\', 'saves\\'],
+    note:
+      '独立播放器跑的 Flash 游戏把进度存成 LSO（.sol 文件），落在 #SharedObjects 下面 ' +
+      '一层随机名目录里，再往下按域名 / localhost 分。随机那一段猜不出来，所以直接备 ' +
+      '#SharedObjects 整个目录 —— 它一并把所有 Flash 游戏的存档都带上了，宁可多备也别空备。' +
+      'AIR 打包的那种不走这儿，走 Adobe AIR 那条规则。'
   }
 ]
 

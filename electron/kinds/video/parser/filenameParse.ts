@@ -1,0 +1,107 @@
+import { type Channels, parseAudioChannels } from './audioChannels.ts';
+import { type AudioCodec, parseAudioCodec } from './audioCodec.ts';
+import { isComplete } from './complete.ts';
+import { type Edition, parseEdition } from './edition.ts';
+import { parseGroup } from './group.ts';
+import { type Language, parseLanguageInfo } from './language.ts';
+import { parseQuality, type QualityModifier, type Revision } from './quality.ts';
+import type { Resolution } from './resolution.ts';
+import { parseSeason, type Season } from './season/index.ts';
+import type { Source } from './source.ts';
+import { parseTitleAndYear } from './title/index.ts';
+import { removeEmpty } from './utils.ts';
+import { parseVideoCodec, type VideoCodec } from './videoCodec.ts';
+
+type ParsedTvInfo = Omit<Season, 'releaseTitle' | 'seriesTitle'>;
+
+interface BaseParsed {
+  title: string;
+  year: string | null;
+  edition: Edition;
+  resolution?: Resolution;
+  sources: Source[];
+  videoCodec?: VideoCodec;
+  audioCodec?: AudioCodec;
+  audioChannels?: Channels;
+  modifier?: QualityModifier;
+  group: string | null;
+  revision: Revision;
+  languages: Language[];
+  multi?: boolean;
+  complete?: boolean;
+}
+
+export type ParsedMovie = BaseParsed;
+export type ParsedShow = ParsedTvInfo & BaseParsed & { isTv: true };
+export type ParsedFilename = ParsedMovie | ParsedShow;
+
+/**
+ * @param name release / file name
+ * @param isTV
+ */
+export function filenameParse(name: string, isTv = false): ParsedFilename {
+  // Compute once and share with sub-parsers to avoid 3 redundant calls
+  const titleAndYear = parseTitleAndYear(name);
+  const parsedTitle = titleAndYear.title;
+
+  let title: ParsedFilename['title'] = '';
+  let year: ParsedFilename['year'] = null;
+
+  if (!isTv) {
+    title = titleAndYear.title;
+    year = titleAndYear.year;
+  }
+
+  const edition = parseEdition(name, parsedTitle);
+  const { codec: videoCodec } = parseVideoCodec(name);
+  const { codec: audioCodec } = parseAudioCodec(name);
+  const { channels: audioChannels } = parseAudioChannels(name);
+  const group = parseGroup(name, parsedTitle);
+  const { languages, multi } = parseLanguageInfo(name, parsedTitle);
+  const quality = parseQuality(name, videoCodec);
+  const complete = isComplete(name);
+
+  const result: BaseParsed = {
+    title,
+    year,
+    resolution: quality.resolution,
+    sources: quality.sources,
+    videoCodec,
+    audioCodec,
+    audioChannels,
+    modifier: quality.modifier ?? undefined,
+    revision: quality.revision,
+    group,
+    edition,
+    languages,
+    multi,
+    complete,
+  };
+
+  if (isTv) {
+    const season = parseSeason(name);
+    if (season !== null) {
+      const seasonResult: ParsedTvInfo = {
+        seasons: season.seasons,
+        episodeNumbers: season.episodeNumbers,
+        ...(season.remainder ? { remainder: season.remainder } : {}),
+        airDate: season.airDate,
+        fullSeason: season.fullSeason,
+        isPartialSeason: season.isPartialSeason,
+        isMultiSeason: season.isMultiSeason,
+        isSeasonExtra: season.isSeasonExtra,
+        isSpecial: season.isSpecial,
+        seasonPart: season.seasonPart,
+      };
+
+      return {
+        ...result,
+        title: season.seriesTitle ?? title,
+        ...seasonResult,
+        isTv: true,
+      };
+    }
+  }
+
+  return removeEmpty(result);
+}

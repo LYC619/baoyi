@@ -164,6 +164,32 @@ import {
   MIN_SESSION_SEC
 } from '../electron/kinds/game/session.ts'
 import { isDriveRoot, nestedInside as nestedInsideShared } from '../electron/services/fstree.ts'
+import {
+  deleteVideo,
+  deriveSeriesStatus,
+  getVideo,
+  insertVideo,
+  listEpisodes,
+  listVideos,
+  nextEpisode,
+  syncSeriesStatus,
+  updateEpisode,
+  updateVideo,
+  videoCounts,
+  type VideoPayload
+} from '../electron/kinds/video/db.ts'
+import {
+  cnNumber,
+  detectExtra,
+  parseAnimeEpisode,
+  parseCnSeasonEpisode,
+  parseLatinSeasonEpisode,
+  parsePart,
+  parseVideoName,
+  parseYear,
+  splitTitle,
+  titleRegion
+} from '../electron/kinds/video/filename.ts'
 
 const CONFIG = { api_url: 'http://localhost/v1', api_key: 'test', model: 'fake', enabled: true }
 
@@ -1843,11 +1869,17 @@ async function main(): Promise<void> {
     assert.equal(soft.length, before, `软件分类条数变了：${before} -> ${soft.length}`)
     assert.ok(soft.some((c) => c.name === '我的自建分类'), '自建分类必须还在，且还归软件')
 
+    // 名单从 KINDS 推，不写死品类名 —— 写死的话每加一个品类这条就假失败一次，
+    // 而它真正要守的是「有标签落在所有已注册品类之外」
+    const known = KINDS.map((k) => k.kind)
+    const placeholders = known.map(() => '?').join(',')
     const orphan = (
-      d.prepare(`SELECT COUNT(*) AS n FROM tags WHERE kind NOT IN ('software','game')`).get() as any
+      d
+        .prepare(`SELECT COUNT(*) AS n FROM tags WHERE kind NOT IN (${placeholders})`)
+        .get(...known) as any
     ).n
-    assert.equal(orphan, 0, '不该有落在两个品类之外的标签')
-    assert.equal(schemaVersion(d as any), 6)
+    assert.equal(orphan, 0, `不该有落在 ${known.join('/')} 之外的标签`)
+    assert.equal(schemaVersion(d as any), SCHEMA_VERSION)
     d.close()
   })
 
@@ -1913,10 +1945,10 @@ async function main(): Promise<void> {
     d.close()
   })
 
-  await check('0.4 的老库能一路迁到 6，自建分类照样还在', () => {
+  await check('0.4 的老库能一路迁到当前版本，自建分类照样还在', () => {
     const d = makeV4Db()
     initSchema(d as any, KINDS)
-    assert.equal(schemaVersion(d as any), 6)
+    assert.equal(schemaVersion(d as any), SCHEMA_VERSION)
     assert.equal((d.prepare('SELECT COUNT(*) AS n FROM resource').get() as any).n, 3)
     // 0.4 -> 6 会走 rebuildCategories（from < 4 不成立，这里 from = 4，所以不走）
     const names = (d.prepare(`SELECT name FROM categories WHERE kind = 'software'`).all() as any[])
@@ -2019,18 +2051,32 @@ async function main(): Promise<void> {
     assert.ok(gameKind.defaultTags.length > 0, '标签池也要由模块自己提供')
   })
 
-  await check('两个品类的内置词表不重叠 —— 重叠就说明有一边归错了', () => {
-    const softCats = new Set(softwareKind.defaultCategories.map((c) => c.name))
-    const gameCats = gameKind.defaultCategories.map((c) => c.name)
-    // 「其他」是两边共有的兜底格子，其余不该撞
-    const shared = gameCats.filter((n) => softCats.has(n))
-    assert.deepEqual(shared, ['其他'], `除了「其他」不该有共有分类，实际：${shared.join(',')}`)
-    const softTags = new Set(softwareKind.defaultTags)
-    const dupTags = gameKind.defaultTags.filter((t) => softTags.has(t))
-    assert.deepEqual(dupTags, [], `内置标签重叠：${dupTags.join(',')}`)
+  // 遍历 KINDS 而不是写死两个品类：0.7 加视频时这一条原本会漏掉新品类，
+  // 而它守的恰恰是「加品类时词表撞车」——最容易在加第三个品类时发生的事
+  await check('各品类的内置词表两两不重叠 —— 重叠就说明有一边归错了', () => {
+    for (const a of KINDS) {
+      for (const b of KINDS) {
+        if (a.kind >= b.kind) continue
+        const aCats = new Set(a.defaultCategories.map((c) => c.name))
+        // 「其他」是各品类共有的兜底格子，其余不该撞
+        const shared = b.defaultCategories.map((c) => c.name).filter((n) => aCats.has(n))
+        assert.deepEqual(
+          shared,
+          ['其他'],
+          `${a.kind} 和 ${b.kind} 除了「其他」不该有共有分类，实际：${shared.join(',')}`
+        )
+        const aTags = new Set(a.defaultTags)
+        const dupTags = b.defaultTags.filter((t) => aTags.has(t))
+        assert.deepEqual(dupTags, [], `${a.kind} 和 ${b.kind} 内置标签重叠：${dupTags.join(',')}`)
+      }
+    }
     // id 全局唯一：categories 的主键是 id，撞了会 INSERT OR REPLACE 把对方顶掉
-    const ids = [...softwareKind.defaultCategories, ...gameKind.defaultCategories].map((c) => c.id)
+    const ids = KINDS.flatMap((k) => k.defaultCategories.map((c) => c.id))
     assert.equal(new Set(ids).size, ids.length, `分类 id 撞了：${ids.join(',')}`)
+    // 品类 id 本身也得唯一 —— 两个模块同名的话，kindByName 只找得到第一个，
+    // 而另一个的私有表会建在同一个 kind 值下，两边的条目从此互相污染
+    const kinds = KINDS.map((k) => k.kind)
+    assert.equal(new Set(kinds).size, kinds.length, `品类 id 撞了：${kinds.join(',')}`)
   })
 
   await gameIdentifySection()
@@ -2039,9 +2085,583 @@ async function main(): Promise<void> {
   await playSessionSection()
   await engineRulesSection()
   await linksAndCoverSection()
+  await videoDataSection()
+  await videoFilenameSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
+}
+
+/* ==================== 视频数据层 · v0.7 Step 1 ==================== */
+
+/**
+ * 迁移 6 -> 7 和视频读写层。
+ *
+ * 这一段的重量全在「0.6 的真实库升上来之后，原有数据一条不少」——
+ * 0.7 是本项目第一次在库里已经有两个品类的情况下加第三个，而
+ * initSchema 里那几道闸门（rebuildCategories、seedTags）历史上都出过
+ * 「下一次提版本时误伤」的事。
+ */
+async function videoDataSection(): Promise<void> {
+  console.log('\n视频数据层 · 迁移与读写')
+
+  const { DatabaseSync } = await import('node:sqlite')
+
+  /**
+   * 造一张 0.6 形状的库：软件和游戏都有真实数据，版本号停在 6。
+   *
+   * 直接用 initSchema 建 0.6 的结构是做不到的 —— 它现在会建 7 的结构。
+   * 所以这里手搭 0.6 那几张表，和 makeV4Db 一个路子。
+   */
+  function makeV6Db(): InstanceType<typeof DatabaseSync> {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    d.exec(`
+      CREATE TABLE resource (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'software',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        path TEXT NOT NULL UNIQUE, icon_path TEXT, file_name TEXT NOT NULL,
+        file_size INTEGER DEFAULT 0, source_dir TEXT DEFAULT '',
+        name_zh TEXT DEFAULT '', name_en TEXT DEFAULT '', summary TEXT DEFAULT '',
+        description TEXT DEFAULT '', category TEXT DEFAULT '其他', tags TEXT DEFAULT '[]',
+        official_url TEXT DEFAULT '', ai_status TEXT DEFAULT 'pending',
+        why_choose TEXT DEFAULT '', use_cases TEXT DEFAULT '', notes TEXT DEFAULT '',
+        alternatives TEXT DEFAULT '[]', mastery_level TEXT DEFAULT 'new',
+        last_used_at INTEGER DEFAULT 0, use_count INTEGER DEFAULT 0, is_archived INTEGER DEFAULT 0,
+        external_active_at INTEGER DEFAULT 0
+      );
+      CREATE TABLE software_meta (
+        resource_id TEXT PRIMARY KEY REFERENCES resource(id) ON DELETE CASCADE,
+        file_description TEXT DEFAULT '', company TEXT DEFAULT '', version TEXT DEFAULT '',
+        launchers TEXT DEFAULT '[]', is_portable INTEGER DEFAULT NULL,
+        move_risk TEXT DEFAULT 'unknown', link_target TEXT DEFAULT ''
+      );
+      CREATE TABLE game_meta (
+        resource_id TEXT PRIMARY KEY REFERENCES resource(id) ON DELETE CASCADE,
+        cover_path TEXT DEFAULT '', background_path TEXT DEFAULT '',
+        play_status TEXT NOT NULL DEFAULT 'unplayed',
+        total_playtime_sec INTEGER NOT NULL DEFAULT 0, last_played_at INTEGER NOT NULL DEFAULT 0,
+        save_paths TEXT NOT NULL DEFAULT '[]', linked_files TEXT NOT NULL DEFAULT '[]'
+      );
+      CREATE TABLE save_backups (
+        id TEXT PRIMARY KEY, resource_id TEXT NOT NULL, save_path TEXT NOT NULL,
+        backup_dir TEXT NOT NULL, size_bytes INTEGER NOT NULL DEFAULT 0,
+        file_count INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+      );
+      CREATE TABLE categories (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'software', name TEXT NOT NULL,
+        description TEXT DEFAULT '', icon TEXT DEFAULT '', sort_order INTEGER DEFAULT 0
+      );
+      CREATE TABLE tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL DEFAULT 'software',
+        name TEXT NOT NULL, source TEXT DEFAULT 'ai', created_at INTEGER NOT NULL,
+        UNIQUE(kind, name)
+      );
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE identify_logs (
+        id TEXT PRIMARY KEY, dir TEXT NOT NULL, label TEXT DEFAULT '', kind TEXT DEFAULT 'unit',
+        status TEXT NOT NULL, summary TEXT DEFAULT '', registered INTEGER DEFAULT 0,
+        rounds INTEGER DEFAULT 0, duration_ms INTEGER DEFAULT 0, tokens INTEGER DEFAULT 0,
+        stop_reason TEXT DEFAULT '', events TEXT DEFAULT '[]', created_at INTEGER NOT NULL
+      );
+      CREATE TABLE organize_plans (
+        id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, root TEXT NOT NULL,
+        undone_at INTEGER DEFAULT 0, steps TEXT DEFAULT '[]'
+      );
+      CREATE TABLE identification_reports (
+        id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, processed INTEGER DEFAULT 0,
+        registered INTEGER DEFAULT 0, skipped INTEGER DEFAULT 0, failed INTEGER DEFAULT 0,
+        duration_ms INTEGER DEFAULT 0, tokens INTEGER DEFAULT 0, searches INTEGER DEFAULT 0,
+        entries TEXT DEFAULT '[]'
+      );
+    `)
+
+    // 一个软件、一个游戏，都带用户攒出来的东西
+    d.prepare(
+      `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name, name_zh,
+         category, tags, notes, use_count, mastery_level)
+       VALUES ('s1', 'software', 1, 2, 'C:\\T\\a.exe', 'a.exe', '甲软件', '开发工具', '["开源"]',
+         '我的软件备注', 7, 'proficient')`
+    ).run()
+    d.prepare('INSERT INTO software_meta (resource_id, is_portable) VALUES (?, ?)').run('s1', null)
+    d.prepare(
+      `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name, name_zh,
+         category, tags, notes)
+       VALUES ('g1', 'game', 1, 2, 'D:\\G\\game.exe', 'game.exe', '乙游戏', 'RPG', '["魂系"]',
+         '我的游戏备注')`
+    ).run()
+    d.prepare(
+      `INSERT INTO game_meta (resource_id, play_status, total_playtime_sec, cover_path, save_paths)
+       VALUES ('g1', 'playing', 7200, 'C:\\covers\\g1.jpg', '[{"path":"D:\\\\S","verified_at":9}]')`
+    ).run()
+
+    // 用户自建的分类和标签，两个品类各一
+    d.prepare(
+      `INSERT INTO categories (id, kind, name, sort_order) VALUES ('u1', 'software', '我的软件分类', 9)`
+    ).run()
+    d.prepare(
+      `INSERT INTO categories (id, kind, name, sort_order) VALUES ('u2', 'game', '我的游戏分类', 9)`
+    ).run()
+    d.prepare(
+      `INSERT INTO tags (kind, name, source, created_at) VALUES ('software', '我的标签', 'user', 1)`
+    ).run()
+    d.prepare(`INSERT INTO settings (key, value) VALUES ('_schema', '6')`).run()
+    return d
+  }
+
+  await check('6 -> 7 迁完，软件和游戏的数据一条不少', () => {
+    const d = makeV6Db()
+    initSchema(d as any, KINDS)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM resource').get() as any).n, 2)
+    const s = d.prepare('SELECT * FROM software WHERE id = ?').get('s1') as any
+    assert.equal(s.notes, '我的软件备注')
+    assert.equal(s.use_count, 7)
+    assert.equal(s.is_portable, null, '「还没判断过」必须仍是 NULL')
+    const g = d.prepare('SELECT * FROM game WHERE id = ?').get('g1') as any
+    assert.equal(g.play_status, 'playing', '游玩状态不该被这次迁移碰到')
+    assert.equal(g.total_playtime_sec, 7200, '游玩时长不该被清零')
+    assert.equal(g.cover_path, 'C:\\covers\\g1.jpg', '封面路径不能丢')
+    assert.equal(JSON.parse(g.save_paths)[0].path, 'D:\\S')
+    assert.equal(schemaVersion(d as any), SCHEMA_VERSION)
+    d.close()
+  })
+
+  await check('6 -> 7 迁完，用户自建的分类和标签必须还在', () => {
+    const d = makeV6Db()
+    initSchema(d as any, KINDS)
+    const names = (d.prepare('SELECT name FROM categories').all() as any[]).map((r) => r.name)
+    // rebuildCategories 那颗雷：闸门写成「版本号小于当前」的话，6 -> 7 会再跑
+    // 一次 DELETE FROM categories，两个品类的自建分类当场没
+    assert.ok(names.includes('我的软件分类'), `软件自建分类被清了：${names.join(',')}`)
+    assert.ok(names.includes('我的游戏分类'), `游戏自建分类被清了：${names.join(',')}`)
+    const tags = (d.prepare('SELECT name FROM tags').all() as any[]).map((r) => r.name)
+    assert.ok(tags.includes('我的标签'), '用户手建的标签被清了')
+    d.close()
+  })
+
+  await check('6 -> 7 装上视频的分类和内置标签，且带对 kind', () => {
+    const d = makeV6Db()
+    initSchema(d as any, KINDS)
+    const cats = (
+      d.prepare(`SELECT name FROM categories WHERE kind = 'video' ORDER BY sort_order`).all() as any[]
+    ).map((r) => r.name)
+    assert.deepEqual(cats, ['华语', '欧美', '日韩', '动画', '纪录片', '综艺', '其他'])
+    const tags = (
+      d.prepare(`SELECT name, source FROM tags WHERE kind = 'video'`).all() as any[]
+    )
+    assert.ok(tags.length >= 12, `视频内置标签没装进去，只有 ${tags.length} 个`)
+    // 内置标签必须以 user 落库才进 prompt 的标签池，落成 ai 就等于没装
+    assert.ok(tags.every((t) => t.source === 'user'), '内置标签该以 source=user 落库')
+    // 关键：视频的分类不该跑到软件或游戏的侧栏去
+    const soft = (
+      d.prepare(`SELECT name FROM categories WHERE kind = 'software'`).all() as any[]
+    ).map((r) => r.name)
+    assert.ok(!soft.includes('华语'), '视频分类漏进了软件侧')
+    d.close()
+  })
+
+  await check('迁移是幂等的：连跑三遍不出错，也不重复装分类', () => {
+    const d = makeV6Db()
+    initSchema(d as any, KINDS)
+    const after1 = (d.prepare('SELECT COUNT(*) AS n FROM categories').get() as any).n
+    initSchema(d as any, KINDS)
+    initSchema(d as any, KINDS)
+    const after3 = (d.prepare('SELECT COUNT(*) AS n FROM categories').get() as any).n
+    assert.equal(after3, after1, '重复跑把分类装了两遍')
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM resource').get() as any).n, 2)
+    d.close()
+  })
+
+  await check('全新安装：video 视图和 episode 表都建得出来', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    assert.equal(objectType(d as any, 'video'), 'view')
+    assert.equal(objectType(d as any, 'video_meta'), 'table')
+    assert.equal(objectType(d as any, 'episode'), 'table')
+    assert.equal(schemaVersion(d as any), 7)
+    d.close()
+  })
+
+  /* --------------------------- 读写层 --------------------------- */
+
+  /** 一个装好 0.7 结构的空库 */
+  function freshDb(): InstanceType<typeof DatabaseSync> {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    return d
+  }
+
+  const moviePayload = (over: Partial<VideoPayload> = {}): VideoPayload => ({
+    path: 'D:\\Movies\\Dune.2024.mkv',
+    video_type: 'movie',
+    name_zh: '沙丘：第二部分',
+    name_en: 'Dune: Part Two',
+    summary: '厄崔迪家族的复仇之路',
+    description: '',
+    category: '欧美',
+    tags: ['科幻', '冒险'],
+    official_url: '',
+    source_dir: 'D:\\Movies',
+    file_size: 78_400_000_000,
+    year: 2024,
+    end_year: 0,
+    rating: 8.7,
+    duration_sec: 9960,
+    resolution: '2160p',
+    video_codec: 'HEVC',
+    source: 'WEB-DL',
+    release_group: '',
+    audio_tracks: [{ index: 0, language: 'en', label: '杜比全景声', codec: 'TrueHD', path: '' }],
+    subtitle_tracks: [{ index: -1, language: 'zh', label: '简中', codec: 'SRT', path: 'D:\\Movies\\Dune.srt' }],
+    parts: [],
+    linked_files: [],
+    tmdb_id: '693134',
+    imdb_id: 'tt15239678',
+    episodes: [],
+    ...over
+  })
+
+  const seriesPayload = (over: Partial<VideoPayload> = {}): VideoPayload => ({
+    ...moviePayload(),
+    path: 'E:\\TV\\The Glory',
+    video_type: 'series',
+    name_zh: '黑暗荣耀',
+    name_en: 'The Glory',
+    category: '日韩',
+    tags: ['悬疑'],
+    source_dir: 'E:\\TV',
+    year: 2022,
+    end_year: 2023,
+    rating: 9.1,
+    episodes: [
+      { season: 1, episode: 1, title: '漆黑的开场', path: 'E:\\TV\\The Glory\\S01E01.mkv', duration_sec: 3480 },
+      { season: 1, episode: 2, title: '欢迎来到我的地狱', path: 'E:\\TV\\The Glory\\S01E02.mkv', duration_sec: 3360 },
+      // 第 3 集库里知道有，磁盘上没文件 —— path 空串是有意义的状态
+      { season: 1, episode: 3, title: '她到底是谁', path: '' }
+    ],
+    ...over
+  })
+
+  await check('电影入库：一条 resource + 一行 video_meta，视图读得回来', () => {
+    const d = freshDb()
+    const out = insertVideo(d as any, moviePayload())
+    assert.ok(out.created)
+    assert.equal(out.episodesAdded, 0, '电影不该产生集')
+    const v = getVideo(d as any, out.id)!
+    assert.equal(v.name_zh, '沙丘：第二部分')
+    assert.equal(v.video_type, 'movie')
+    assert.equal(v.year, 2024)
+    assert.equal(v.rating, 8.7)
+    assert.equal(v.resolution, '2160p')
+    assert.equal(v.audio_tracks[0].label, '杜比全景声')
+    assert.equal(v.subtitle_tracks[0].path, 'D:\\Movies\\Dune.srt')
+    assert.equal(v.tmdb_id, '693134')
+    assert.equal(v.episode_total, 0)
+    d.close()
+  })
+
+  await check('剧集入库：一条 resource + N 行 episode，缺文件的集也在', () => {
+    const d = freshDb()
+    const out = insertVideo(d as any, seriesPayload())
+    assert.equal(out.episodesAdded, 3)
+    const v = getVideo(d as any, out.id)!
+    assert.equal(v.video_type, 'series')
+    assert.equal(v.episode_total, 3, '缺文件的集也要计入总数')
+    assert.equal(v.episode_present, 2, '磁盘上真有文件的是 2 集')
+    assert.equal(v.episode_watched, 0)
+    const eps = listEpisodes(d as any, out.id)
+    assert.equal(eps.length, 3)
+    assert.equal(eps[2].path, '', '第 3 集该是缺文件状态')
+    assert.equal(eps[0].title, '漆黑的开场')
+    d.close()
+  })
+
+  await check('重扫同一部片是更新而不是再开一条', () => {
+    const d = freshDb()
+    const a = insertVideo(d as any, moviePayload())
+    const b = insertVideo(d as any, moviePayload({ name_zh: '沙丘 2', rating: 8.9 }))
+    assert.equal(a.id, b.id)
+    assert.equal(b.created, false)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM resource').get() as any).n, 1)
+    const v = getVideo(d as any, a.id)!
+    assert.equal(v.name_zh, '沙丘 2', '识别出来的字段该被更新')
+    assert.equal(v.rating, 8.9)
+    d.close()
+  })
+
+  await check('重新刮削不动观看状态、播放位置和海报 —— 那是用户看出来的账', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, moviePayload())
+    updateVideo(d as any, id, {
+      watch_status: 'watched',
+      position_sec: 5000,
+      poster_path: 'C:\\covers\\v1.jpg',
+      notes: '我的备注'
+    })
+    insertVideo(d as any, moviePayload({ name_zh: '沙丘 2' }))
+    const v = getVideo(d as any, id)!
+    assert.equal(v.watch_status, 'watched', '重新刮削把观看状态打回去了')
+    assert.equal(v.position_sec, 5000, '播放位置被清了')
+    assert.equal(v.poster_path, 'C:\\covers\\v1.jpg', '海报被清了')
+    assert.equal(v.notes, '我的备注')
+    d.close()
+  })
+
+  await check('补后半季：新集补进来，已看过的集进度一点不动', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, seriesPayload())
+    const eps = listEpisodes(d as any, id)
+    updateEpisode(d as any, eps[0].id, { watch_status: 'watched', position_sec: 3480 })
+    updateEpisode(d as any, eps[1].id, { watch_status: 'watching', position_sec: 900 })
+
+    // 第 3 集下到了，另外多了两集
+    const out = insertVideo(
+      d as any,
+      seriesPayload({
+        episodes: [
+          { season: 1, episode: 1, title: '漆黑的开场', path: 'E:\\TV\\The Glory\\S01E01.mkv', duration_sec: 3480 },
+          { season: 1, episode: 2, title: '欢迎来到我的地狱', path: 'E:\\TV\\The Glory\\S01E02.mkv', duration_sec: 3360 },
+          { season: 1, episode: 3, title: '她到底是谁', path: 'E:\\TV\\The Glory\\S01E03.mkv', duration_sec: 3480 },
+          { season: 1, episode: 4, title: '慢慢渗透', path: 'E:\\TV\\The Glory\\S01E04.mkv' },
+          { season: 2, episode: 1, title: '第二季开场', path: 'E:\\TV\\The Glory\\S02E01.mkv' }
+        ]
+      })
+    )
+    assert.equal(out.episodesAdded, 2, '该只新增 2 集（E04 和 S02E01）')
+    const after = listEpisodes(d as any, id)
+    assert.equal(after.length, 5)
+    assert.equal(after[0].watch_status, 'watched', '看完的集被打回未看了')
+    assert.equal(after[0].position_sec, 3480)
+    assert.equal(after[1].position_sec, 900, '在看的集进度丢了')
+    // 原先缺文件的第 3 集，路径该补上
+    assert.equal(after[2].path, 'E:\\TV\\The Glory\\S01E03.mkv')
+    d.close()
+  })
+
+  await check('季集唯一：同一季同一集反复入库不长出重复行', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, seriesPayload())
+    insertVideo(d as any, seriesPayload())
+    insertVideo(d as any, seriesPayload())
+    assert.equal(listEpisodes(d as any, id).length, 3, '集列表每扫一次长一倍')
+    d.close()
+  })
+
+  await check('整部剧的状态从集列表推出来，不让用户再点一次', () => {
+    // 一集都没碰 = 未看
+    assert.equal(
+      deriveSeriesStatus([
+        { path: 'a', watch_status: 'unwatched', position_sec: 0 } as any,
+        { path: 'b', watch_status: 'unwatched', position_sec: 0 } as any
+      ]),
+      'unwatched'
+    )
+    // 有一集播过一点 = 在看
+    assert.equal(
+      deriveSeriesStatus([
+        { path: 'a', watch_status: 'unwatched', position_sec: 120 } as any,
+        { path: 'b', watch_status: 'unwatched', position_sec: 0 } as any
+      ]),
+      'watching'
+    )
+    // 全看完 = 看完
+    assert.equal(
+      deriveSeriesStatus([
+        { path: 'a', watch_status: 'watched', position_sec: 0 } as any,
+        { path: 'b', watch_status: 'watched', position_sec: 0 } as any
+      ]),
+      'watched'
+    )
+    // 缺文件的集不参与判断：手上这两集看完了就算看完，
+    // 否则一部还没播完的剧永远到不了「看完」
+    assert.equal(
+      deriveSeriesStatus([
+        { path: 'a', watch_status: 'watched', position_sec: 0 } as any,
+        { path: 'b', watch_status: 'watched', position_sec: 0 } as any,
+        { path: '', watch_status: 'unwatched', position_sec: 0 } as any
+      ]),
+      'watched'
+    )
+    // 一集文件都没有：推不出状态，返回 null 而不是硬说「未看」
+    assert.equal(deriveSeriesStatus([{ path: '', watch_status: 'unwatched' } as any]), null)
+  })
+
+  await check('用户标了「弃」之后，推导不许把它改回「在看」', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, seriesPayload())
+    const eps = listEpisodes(d as any, id)
+    updateEpisode(d as any, eps[0].id, { watch_status: 'watched' })
+    updateVideo(d as any, id, { watch_status: 'dropped' })
+    syncSeriesStatus(d as any, id)
+    // 看了 8 集不看了和「在看」在数据上分不出来，只能由用户说 ——
+    // 推导覆盖掉它，用户那个决定就永远保不住
+    assert.equal(getVideo(d as any, id)!.watch_status, 'dropped')
+    d.close()
+  })
+
+  await check('剧一级状态跟着集变：标完最后一集自动变「看完」', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, seriesPayload())
+    for (const e of listEpisodes(d as any, id)) {
+      if (e.path) updateEpisode(d as any, e.id, { watch_status: 'watched' })
+    }
+    syncSeriesStatus(d as any, id)
+    assert.equal(getVideo(d as any, id)!.watch_status, 'watched')
+    assert.equal(getVideo(d as any, id)!.episode_watched, 2)
+    d.close()
+  })
+
+  await check('自动连播跳过缺文件的集，且能跨季', () => {
+    const d = freshDb()
+    const { id } = insertVideo(
+      d as any,
+      seriesPayload({
+        episodes: [
+          { season: 1, episode: 1, path: 'a.mkv' },
+          // 第 2 集缺文件，连播该跳过它 —— 不跳就停在黑屏上，用户以为播放器坏了
+          { season: 1, episode: 2, path: '' },
+          { season: 1, episode: 3, path: 'c.mkv' },
+          { season: 2, episode: 1, path: 'd.mkv' }
+        ]
+      })
+    )
+    const n1 = nextEpisode(d as any, id, 1, 1)!
+    assert.equal(n1.episode, 3, '缺文件的第 2 集该被跳过')
+    const n2 = nextEpisode(d as any, id, 1, 3)!
+    assert.equal(n2.season, 2, '该跨季接上 S02E01')
+    assert.equal(n2.episode, 1)
+    // 最后一集之后没有下一集，返回 null 而不是绕回第一集
+    assert.equal(nextEpisode(d as any, id, 2, 1), null)
+    d.close()
+  })
+
+  await check('筛选：类型 / 观看状态 / 分类 / 标签 / 关键词各自命中', () => {
+    const d = freshDb()
+    insertVideo(d as any, moviePayload())
+    insertVideo(d as any, seriesPayload())
+    assert.equal(listVideos(d as any, { type: 'movie' }).length, 1)
+    assert.equal(listVideos(d as any, { type: 'series' }).length, 1)
+    assert.equal(listVideos(d as any, { category: '日韩' }).length, 1)
+    assert.equal(listVideos(d as any, { tag: '科幻' }).length, 1)
+    assert.equal(listVideos(d as any, { status: 'unwatched' }).length, 2)
+    // 中英文标题都要搜得到 —— 规格明确要求
+    assert.equal(listVideos(d as any, { keyword: '沙丘' }).length, 1)
+    assert.equal(listVideos(d as any, { keyword: 'Glory' }).length, 1)
+    assert.equal(listVideos(d as any, { keyword: '不存在的片' }).length, 0)
+    d.close()
+  })
+
+  await check('标签筛选带引号匹配，「剧情」不该命中「剧情向」', () => {
+    const d = freshDb()
+    insertVideo(d as any, moviePayload({ path: 'D:\\a.mkv', tags: ['剧情'] }))
+    insertVideo(d as any, moviePayload({ path: 'D:\\b.mkv', tags: ['剧情向'] }))
+    assert.equal(listVideos(d as any, { tag: '剧情' }).length, 1)
+    d.close()
+  })
+
+  await check('排序：年份和评分为 0 的沉到底，不浮在最前面', () => {
+    const d = freshDb()
+    insertVideo(d as any, moviePayload({ path: 'D:\\a.mkv', year: 2024, rating: 8.7 }))
+    insertVideo(d as any, moviePayload({ path: 'D:\\b.mkv', year: 0, rating: 0 }))
+    insertVideo(d as any, moviePayload({ path: 'D:\\c.mkv', year: 1994, rating: 9.7 }))
+    // 「不知道年份」不是「公元 0 年」，排序时它该在最后而不是最前
+    const byYear = listVideos(d as any, { sort: 'year' }).map((v) => v.year)
+    assert.deepEqual(byYear, [2024, 1994, 0])
+    const byRating = listVideos(d as any, { sort: 'rating' }).map((v) => v.rating)
+    assert.deepEqual(byRating, [9.7, 8.7, 0])
+    d.close()
+  })
+
+  await check('计数：类型和观看状态都是闭集，没有的那个是 0 不是不存在', () => {
+    const d = freshDb()
+    insertVideo(d as any, moviePayload())
+    insertVideo(d as any, seriesPayload())
+    const c = videoCounts(d as any)
+    assert.equal(c.all, 2)
+    assert.equal(c.type.movie, 1)
+    assert.equal(c.type.series, 1)
+    assert.equal(c.status.unwatched, 2)
+    assert.equal(c.status.watched, 0, '一个都没有的状态该是 0 而不是缺键')
+    assert.equal(c.status.dropped, 0)
+    assert.ok(c.categories.some((x) => x.name === '日韩' && x.count === 1))
+    assert.ok(c.tags.some((x) => x.name === '科幻'))
+    d.close()
+  })
+
+  await check('删条目：集和 meta 跟着走，磁盘上的文件不碰', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, seriesPayload())
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM episode').get() as any).n, 3)
+    deleteVideo(d as any, id)
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM resource').get() as any).n, 0)
+    assert.equal(
+      (d.prepare('SELECT COUNT(*) AS n FROM episode').get() as any).n,
+      0,
+      'episode 该靠 CASCADE 跟着删'
+    )
+    assert.equal((d.prepare('SELECT COUNT(*) AS n FROM video_meta').get() as any).n, 0)
+    d.close()
+  })
+
+  await check('更新走白名单：渲染进程递来的野键进不了 SQL', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, moviePayload())
+    // 这两个键一个是不存在的列、一个是主键，都不该被拼进 UPDATE
+    const v = updateVideo(d as any, id, { id: 'hacked', bogus_col: 1 } as any)
+    assert.equal(v!.id, id, 'id 被改掉了')
+    // 视图现算的三个计数写不进去，也不该报错
+    updateVideo(d as any, id, { episode_total: 99 } as any)
+    assert.equal(getVideo(d as any, id)!.episode_total, 0)
+    d.close()
+  })
+
+  await check('CHECK 约束拦得住闭集外的值', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, moviePayload())
+    assert.throws(
+      () =>
+        d
+          .prepare('UPDATE video_meta SET watch_status = ? WHERE resource_id = ?')
+          .run('wathcing', id),
+      /CHECK/i,
+      '拼错的状态被静默收下了，那条记录会从界面上消失'
+    )
+    assert.throws(
+      () => d.prepare('UPDATE video_meta SET video_type = ? WHERE resource_id = ?').run('movei', id),
+      /CHECK/i
+    )
+    d.close()
+  })
+
+  await check('JSON 列坏掉时退回空数组，不让整个视频库打不开', () => {
+    const d = freshDb()
+    const { id } = insertVideo(d as any, moviePayload())
+    d.prepare('UPDATE video_meta SET audio_tracks = ?, parts = ? WHERE resource_id = ?').run(
+      '{坏掉的不是数组}',
+      'null',
+      id
+    )
+    const v = getVideo(d as any, id)!
+    assert.deepEqual(v.audio_tracks, [])
+    assert.deepEqual(v.parts, [])
+    d.close()
+  })
+
+  await check('三个品类的 path 共用一个全局唯一键，同一个目录不会被认领两次', () => {
+    const d = freshDb()
+    insertVideo(d as any, moviePayload({ path: 'D:\\X\\same.mkv' }))
+    // 磁盘只有一块。同一个路径被两个品类各自认领一次的话，整理模块搬动它时
+    // 另一个模块的记录会当场失效 —— 这个约束在 resource 表上，不在品类层
+    assert.throws(() => {
+      d.prepare(
+        `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name)
+         VALUES ('dup', 'game', 1, 2, 'D:\\X\\same.mkv', 'same.mkv')`
+      ).run()
+    }, /UNIQUE/i)
+    d.close()
+  })
 }
 
 /* ==================== 游戏识别 · Step 3 ==================== */
@@ -3326,8 +3946,71 @@ async function engineRulesSection(): Promise<void> {
     // scanner 认出 GameMaker 却没有对应规则时，evidence 里那句「GameMaker 引擎」
     // 就成了一条模型用不上的线索 —— 它得自己回去猜位置，这一层等于没做
     const engines = ENGINE_SAVE_RULES.map((r) => r.engine)
-    for (const word of ['Unity', 'Unreal', 'RPG Maker', 'GameMaker', "Ren'Py", 'Godot', 'KiriKiri', 'QSP', 'NW.js']) {
+    for (const word of ['Unity', 'Unreal', 'RPG Maker', 'GameMaker', "Ren'Py", 'Godot', 'KiriKiri', 'QSP', 'NW.js', 'Adobe AIR', 'Flash']) {
       assert.ok(engines.includes(word), `scanner 认得 ${word}，但规则表里没有它的存档位置`)
+    }
+  })
+
+  await check('规则表里每个引擎，scanner 都真能认出来 —— 光有规则没有指纹等于没做', async () => {
+    // 上面那条只比对一份手抄的词表，抄漏了它也不会响。这一条真去建目录、
+    // 真跑 inspectDir，断言 evidence 里出现了引擎名。Flash/AIR 那两条就是这么补上的：
+    // 先只加了规则，指纹没加，规则永远等不到人来用它
+    const fp: Record<string, (d: string) => Promise<void>> = {
+      Unity: async (d) => {
+        await fsp.mkdir(path.join(d, 'Game_Data'), { recursive: true })
+      },
+      Unreal: async (d) => {
+        await fsp.mkdir(path.join(d, 'Engine'), { recursive: true })
+      },
+      'RPG Maker': async (d) => {
+        await fsp.writeFile(path.join(d, 'RGSS301.dll'), 'x')
+      },
+      GameMaker: async (d) => {
+        await fsp.writeFile(path.join(d, 'data.win'), 'x')
+      },
+      "Ren'Py": async (d) => {
+        await fsp.mkdir(path.join(d, 'renpy'), { recursive: true })
+      },
+      Godot: async (d) => {
+        await fsp.writeFile(path.join(d, 'game.pck'), 'x')
+      },
+      KiriKiri: async (d) => {
+        await fsp.writeFile(path.join(d, 'data.xp3'), 'x')
+      },
+      QSP: async (d) => {
+        await fsp.writeFile(path.join(d, 'game.qsp'), 'x')
+      },
+      'NW.js': async (d) => {
+        await fsp.writeFile(path.join(d, 'nw.dll'), 'x')
+      },
+      'Adobe AIR': async (d) => {
+        await fsp.writeFile(path.join(d, 'Adobe AIR.dll'), 'x')
+      },
+      Flash: async (d) => {
+        await fsp.writeFile(path.join(d, 'game.swf'), 'x')
+      }
+    }
+
+    const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'baoyi-fp-'))
+    try {
+      for (const rule of ENGINE_SAVE_RULES) {
+        const build = fp[rule.engine]
+        assert.ok(build, `规则表里有 ${rule.engine}，但这条自检没给它准备指纹样本`)
+        const dir = path.join(base, rule.engine.replace(/[^\w]/g, '_'))
+        await fsp.mkdir(dir, { recursive: true })
+        // inspectDir 要求目录里有 exe 才当候选，主程序名不影响引擎判断
+        await fsp.writeFile(path.join(dir, 'game.exe'), 'x')
+        await build(dir)
+
+        const got = inspectDir(dir, base)
+        assert.ok(got, `${rule.engine} 的样本目录没被 inspectDir 当成候选`)
+        assert.ok(
+          got.evidence.some((e) => e.includes(rule.engine)),
+          `scanner 没在 evidence 里报出 ${rule.engine}，规则表里那条永远等不到人用：${JSON.stringify(got.evidence)}`
+        )
+      }
+    } finally {
+      await fsp.rm(base, { recursive: true, force: true })
     }
   })
 
@@ -3832,6 +4515,353 @@ async function playSessionSection(): Promise<void> {
     assert.equal(out.counted, false, '负数不该过门槛')
     assert.equal(out.total_playtime_sec, 1800, '总时长倒退了')
     d.close()
+  })
+}
+
+/* ==================== 文件名解析 · v0.7 Step 2 ==================== */
+
+/**
+ * 文件名解析器。
+ *
+ * 两部分：手写用例表（永远跑）+ guessit 语料（有参考副本时才跑）。
+ *
+ * 手写那部分是真正的回归网 —— 它进版本库，任何机器上都跑得到，
+ * 每一条对应一个曾经踩过的坑。语料那部分在 `.recover/` 里，被 gitignore
+ * 挡在版本库外，所以它只能是「有就多验一层」，缺了不能算失败。
+ *
+ * 语料用「命中数不低于某个下限」而不是「全对」来断言。guessit 认的东西
+ * 比这里多（集名、语言、日期、法语西语的季集词），而这一层刻意不认
+ * 一部分它认的（裸数字 scene 编号 —— 见 hasSeriesMarker 的注释）。
+ * 下限卡住的是「不许退步」，不是「必须追平 guessit」。
+ */
+async function videoFilenameSection(): Promise<void> {
+  console.log('\n文件名解析')
+
+  await check('中文标题不被季集模式吃掉 —— 上游的 \\W 分隔符会把它切成一个字', () => {
+    const r = parseVideoName('漫长的季节.S01E05.2023.2160p.WEB-DL.H265.mp4')
+    assert.equal(r.title_zh, '漫长的季节')
+    assert.equal(r.season, 1)
+    assert.deepEqual(r.episodes, [5])
+    assert.equal(r.year, 2023)
+  })
+
+  await check('带年份的电影不会被 scene 编号规则拆成剧集', () => {
+    // 上游有一条 four-digit-scene-numbering 模式会把 2024 读成 S20E24，
+    // 每部带年份的电影都会变成剧集
+    const r = parseVideoName('Dune.Part.Two.2024.2160p.WEB-DL.x265-GRP.mkv')
+    assert.equal(r.season, null)
+    assert.deepEqual(r.episodes, [])
+    assert.equal(r.absolute_episode, null)
+    assert.equal(r.looks_like_series, false)
+    assert.equal(r.year, 2024)
+    assert.equal(r.title_en, 'Dune Part Two')
+  })
+
+  await check('片名里的四位数不会被当成年份', () => {
+    // 取标题区之后的最后一个年份：2049 是片名的一部分
+    assert.equal(parseYear('Blade.Runner.2049.2017.2160p.mkv'), 2017)
+    assert.equal(parseYear('2012.2009.1080p.BluRay.mkv'), 2009)
+    // 分辨率里的四位数也不是年份，大小写的 x 都要挡
+    assert.equal(parseYear('Apotheosis_1920x1080.mp4'), 0)
+    assert.equal(parseYear('Pirates.2008.FRENCH.1920X1080.h264.mkv'), 2008)
+    // 紧跟在字母后面的四位数不是年份（BT2020 是色域标记）
+    assert.equal(parseYear('Life of Pi 2012 2160p BluRay BT2020 DTSHD.mkv'), 2012)
+    // 括号里的年份最明确，优先
+    assert.equal(parseYear('某片(2019).1080p.mkv'), 2019)
+  })
+
+  await check('明写的 SxxExx 压得住其他模式', () => {
+    // 上游在这条上会去匹配 `Part.1` 而给出 E1
+    const r = parseVideoName('Adventure.Time.S08E16.Elements.Part.1.Skyhooks.720p.WEB-DL.mkv')
+    assert.equal(r.season, 8)
+    assert.deepEqual(r.episodes, [16])
+    // S06xE01、S013E18、S01Extras 这几种上游直接给 null
+    assert.equal(parseLatinSeasonEpisode('The Office - S06xE01.avi')?.season, 6)
+    assert.deepEqual(parseLatinSeasonEpisode('The Office - S06xE01.avi')?.episodes, [1])
+    assert.equal(parseLatinSeasonEpisode('CSI.S013E18.Sheltered.720p.mkv')?.season, 13)
+    assert.equal(parseLatinSeasonEpisode('My.Name.Is.Earl.S01Extras.avi')?.season, 1)
+    // 一个文件里多集：S01E02E03
+    assert.deepEqual(parseLatinSeasonEpisode('Show.S01E02E03.mkv')?.episodes, [2, 3])
+  })
+
+  await check('中文季集标记不被降级成绝对集号', () => {
+    // `第01集` 是明确的第 1 集，降成绝对集号会让它排不进任何一季
+    const a = parseVideoName('狂飙.第01集.1080p.mkv')
+    assert.deepEqual(a.episodes, [1])
+    assert.equal(a.absolute_episode, null)
+    assert.equal(a.title_zh, '狂飙')
+
+    const b = parseVideoName('权力的游戏.第二季.第05集.1080p.mkv')
+    assert.equal(b.season, 2)
+    assert.deepEqual(b.episodes, [5])
+    assert.equal(b.absolute_episode, null)
+
+    assert.deepEqual(parseCnSeasonEpisode('某剧.第十二季.第二十集.mkv'), { season: 12, episode: 20 })
+    assert.deepEqual(parseCnSeasonEpisode('某剧.第3话.mkv'), { season: null, episode: 3 })
+  })
+
+  await check('中文数字转阿拉伯数字，1-99', () => {
+    assert.equal(cnNumber('一'), 1)
+    assert.equal(cnNumber('十'), 10)
+    assert.equal(cnNumber('十二'), 12)
+    assert.equal(cnNumber('二十'), 20)
+    assert.equal(cnNumber('二十三'), 23)
+    assert.equal(cnNumber('05'), 5)
+    // 认不出来给 0，调用方拿 `|| null` 兜住
+    assert.equal(cnNumber('甲'), 0)
+    assert.equal(cnNumber(''), 0)
+  })
+
+  await check('番剧的裸集号只在有字幕组前缀时才认', () => {
+    // 集号在标题后面
+    assert.equal(parseAnimeEpisode('[SubsPlease] Frieren - 12 (1080p) [F1A2B3C4].mkv'), 12)
+    assert.equal(parseAnimeEpisode('[Figmentos] Monster 34 - At the End of Darkness [781219F1].mkv'), 34)
+    // 集号后面紧跟下划线（`\w` 含下划线，所以边界不能用 \b）
+    assert.equal(parseAnimeEpisode('[Evil-Saizen]_Laughing_Salesman_14_[DVD][1C98686A].mkv'), 14)
+    // 集号在标题前面
+    assert.equal(parseAnimeEpisode('[DeadFish] 01 - Tari Tari [BD][720p][AAC].mp4'), 1)
+    // 中间夹着规格方括号块
+    assert.equal(parseAnimeEpisode('[aprm] [BD][1080p] Nagi no Asukara 08 [4D102B7C].mkv'), 8)
+    // 没有字幕组前缀就不认 —— 裸数字规则会毁掉 `Se7en`、`2012` 这类片名
+    assert.equal(parseAnimeEpisode('Bleach - 313.mkv'), null)
+    // 方括号里的数字不是集号
+    assert.equal(parseAnimeEpisode('[XCT] Persepolis [H264+Aac-128(Fr-Eng)+ST(Fr-Eng)].mkv'), null)
+    // 裸数字后面直接跟技术标记的，那个数字是片名的一部分
+    assert.equal(parseAnimeEpisode('[h265 - hevc] transformers 2 1080p french ac3 6ch.mkv'), null)
+  })
+
+  await check('番剧集号排在上游那张表前面', () => {
+    // 合集文件 `02-03` 的首集号是 2，上游给 3
+    const r = parseVideoName('[ShinBunBu-Subs] Bleach - 02-03 (CX 1280x720 x264 AAC).mkv')
+    assert.equal(r.absolute_episode, 2)
+    assert.equal(r.season, null, '绝对集号不带季信息，硬填 1 会和真第一季撞车')
+  })
+
+  await check('NxNN 那个形状：季集、赛季年、像素尺寸得分开', () => {
+    assert.equal(parseLatinSeasonEpisode('The Sopranos - [05x07] - In Camelot.mp4')?.season, 5)
+    assert.equal(parseLatinSeasonEpisode('2x05 - Pure Laine.avi')?.season, 2)
+    // 体育赛事拿年份当季号
+    assert.equal(parseLatinSeasonEpisode('MotoGP.2016x03.USA.Race.1080p')?.season, 2016)
+    // 像素尺寸不是季集
+    assert.equal(parseLatinSeasonEpisode('Apotheosis_1920x1080.mp4'), null)
+    assert.equal(parseLatinSeasonEpisode('[Doremi].Precure.[1280x720].mkv'), null)
+    // 长宽比也不是
+    assert.equal(parseLatinSeasonEpisode('Movie.16x9.aspect.mkv'), null)
+    // 四位数开头再跟 1-2 位数的是日期
+    assert.equal(parseLatinSeasonEpisode('Something.2008x12.13-FlexGet'), null)
+    // 但一位数季号后面跟的 `.18` 是集名，不是日期
+    assert.equal(parseLatinSeasonEpisode('The.Mentalist.2x21.18-5-4.HDTV.avi')?.season, 2)
+  })
+
+  await check('「Season」是片名里的词时不算季标记', () => {
+    // 后面跟着括号年份的是电影
+    assert.equal(parseLatinSeasonEpisode('Open Season 2 (2008) - Bluray-1080p.mkv'), null)
+    // 拼出来的 Season 后面跟四位数，那是年份 —— guessit 自己的语料也标了 -season
+    assert.equal(parseLatinSeasonEpisode('Show.Name.Season.2025.1080p.WEB-DL.mkv'), null)
+    // 正常的整季包照认，复数形式也认
+    assert.equal(parseLatinSeasonEpisode('Show.Season.2.1080p.mkv')?.season, 2)
+    assert.equal(parseLatinSeasonEpisode('Something Seasons 4 Complete')?.season, 4)
+    assert.equal(parseLatinSeasonEpisode('三体.Three-Body.2023.S01.2160p.mkv')?.full_season, true)
+  })
+
+  await check('分辨率、片源、发布组只报文件名字面写了的', () => {
+    // 上游会从 `.mkv` 扩展名猜出 WEBDL + 720p —— Radarr 需要一个画质做下载
+    // 决策，猜一个比没有强；这里恰好相反，第 4 步能从容器里读出真值
+    const a = parseVideoName('某电影.2020.花絮.mkv')
+    assert.equal(a.resolution, '')
+    assert.equal(a.source, '')
+    // `WEB-DL` 的 DL 不是发布组
+    assert.equal(parseVideoName('流浪地球2.2023.2160p.WEB-DL.mkv').release_group, '')
+    // `-sample` 也不是
+    assert.equal(parseVideoName('Movie.2019.1080p-sample.mkv').release_group, '')
+    // 真写了的照报
+    const b = parseVideoName('The.Glory.S01E03.1080p.NF.WEB-DL.x264-GRP.mkv')
+    assert.equal(b.resolution, '1080p')
+    assert.equal(b.source, 'WEBDL')
+    assert.equal(b.release_group, 'GRP')
+  })
+
+  await check('花絮预告样片认得出来，中英文都要认', () => {
+    assert.deepEqual(detectExtra('某电影.2020.花絮.mkv'), { is_extra: true, kind: 'featurette' })
+    assert.deepEqual(detectExtra('Movie.2019.1080p-sample.mkv'), { is_extra: true, kind: 'sample' })
+    assert.equal(detectExtra('某片.预告片.mp4').is_extra, true)
+    assert.equal(detectExtra('Movie.Behind.the.Scenes.mkv').kind, 'featurette')
+    assert.equal(detectExtra('Movie.Deleted.Scenes.mkv').kind, 'deleted')
+    assert.equal(detectExtra('[组] 某番 NCOP1 [CRC].mkv').kind, 'opening')
+    // 正片不该被误判
+    assert.equal(detectExtra('The.Glory.S01E03.1080p.WEB-DL.mkv').is_extra, false)
+    assert.equal(detectExtra('漫长的季节.S01E05.2023.mkv').is_extra, false)
+  })
+
+  await check('分卷只认 CD/DISC/DVD + 数字，不认 Part N', () => {
+    assert.equal(parsePart('Interstellar.2014.1080p.BluRay.x264.CD1.avi'), 1)
+    assert.equal(parsePart('Movie.2014.DISC2.mkv'), 2)
+    // `Dune: Part Two` 的 Part 是片名的一部分，认成分卷会把两部电影合成一条
+    assert.equal(parsePart('Dune.Part.Two.2024.2160p.mkv'), null)
+    assert.equal(parsePart('Harry.Potter.Part.1.2010.mkv'), null)
+  })
+
+  await check('中英双名拆得开，片名里的数字跟着中文走', () => {
+    assert.deepEqual(splitTitle(titleRegion('三体.Three-Body.2023.S01.2160p.mkv')), {
+      zh: '三体',
+      en: 'Three-Body'
+    })
+    assert.deepEqual(splitTitle(titleRegion('灌篮高手.THE.FIRST.SLAM.DUNK.2022.BluRay.mkv')), {
+      zh: '灌篮高手',
+      en: 'THE FIRST SLAM DUNK'
+    })
+    // 按 token 分组而不是按第一个非 CJK 字符切：`流浪地球2` 的 2 是片名的一部分
+    assert.deepEqual(splitTitle(titleRegion('流浪地球2.2023.2160p.WEB-DL.mkv')), {
+      zh: '流浪地球2',
+      en: ''
+    })
+  })
+
+  await check('标题在第一个技术标记处结束，按位置不按优先级', () => {
+    // 年份在前和分辨率在前都该切出同一个标题
+    assert.equal(titleRegion('沙丘.2024.2160p.mkv').trim(), '沙丘')
+    assert.equal(titleRegion('沙丘.2160p.2024.mkv').trim(), '沙丘')
+    // `2012` 这种纯数字片名不能被年份规则切光
+    assert.equal(titleRegion('2012.2009.1080p.BluRay.mkv').trim(), '2012')
+    // 字幕组前缀和结尾 CRC 都剥掉
+    assert.equal(titleRegion('[SubsPlease] Frieren - 12 (1080p) [F1A2B3C4].mkv').trim(), 'Frieren')
+    // 中文字幕标记也是切点（`\b` 在 CJK 两侧不成立，所以那条不能带 \b）
+    assert.equal(titleRegion('某剧.中英双字.1080p.mkv').trim(), '某剧')
+  })
+
+  await check('hintSeries 只放开季集解析，不凭空造季号', () => {
+    // 扫描器知道「这个文件在一个有 12 个同名文件的目录里」时传 true
+    const hinted = parseVideoName('new.girl.117.hdtv-lol.mp4', true)
+    assert.equal(hinted.season, 1)
+    assert.deepEqual(hinted.episodes, [17])
+    // 不传就不认 —— 这个形状和电影的 `Movie.2019` 分不开
+    const bare = parseVideoName('new.girl.117.hdtv-lol.mp4')
+    assert.equal(bare.season, null)
+    // hint 为 true 但文件名里真没有季集信息时，只标记「看起来是剧集」，
+    // 不编一个季号出来
+    const nothing = parseVideoName('某片.2020.1080p.mkv', true)
+    assert.equal(nothing.season, null)
+    assert.deepEqual(nothing.episodes, [])
+    assert.equal(nothing.looks_like_series, true)
+  })
+
+  await guessitCorpusChecks()
+}
+
+/**
+ * guessit 的 yml 测试语料。
+ *
+ * 语料在 `.recover/v07-refs/` 下，被 gitignore 挡在版本库外（GPL/LGPL 的
+ * 参考物只读不抄，见 electron/kinds/video/parser/ORIGIN.md）。所以这一段
+ * 缺了参考副本就跳过，不能算失败 —— 别的机器上没有那个目录。
+ */
+async function guessitCorpusChecks(): Promise<void> {
+  const dir = path.resolve('.recover/v07-refs/guessit-develop/guessit/test')
+  if (!fs.existsSync(dir)) {
+    console.log('  - guessit 语料不在本地（.recover/ 不进版本库），跳过')
+    return
+  }
+
+  const yaml = await import('js-yaml')
+
+  interface Corpus {
+    file: string
+    cases: Array<{ name: string; want: Record<string, unknown> }>
+  }
+
+  const load = (file: string): Corpus => {
+    // json: true 允许重复键（语料里同一个文件名出现过两次），后者覆盖前者
+    const doc = yaml.default.load(fs.readFileSync(path.join(dir, file), 'utf8'), {
+      json: true
+    }) as Record<string, unknown>
+    const cases: Corpus['cases'] = []
+    for (const [key, value] of Object.entries(doc ?? {})) {
+      if (key === '__default__' || !value || typeof value !== 'object') continue
+      // guessit 喂的是整条路径，这一层只收文件名 —— 目录信息由扫描器另外给
+      cases.push({ name: path.basename(key.replace(/\\/g, '/')), want: value as Record<string, unknown> })
+    }
+    return { file, cases }
+  }
+
+  /** 语料里 season/episode 可能是单值也可能是数组，取第一个 */
+  const first = (v: unknown): number | null => {
+    if (typeof v === 'number') return v
+    if (Array.isArray(v) && typeof v[0] === 'number') return v[0]
+    return null
+  }
+
+  const corpora = ['episodes.yml', 'movies.yml', 'various.yml'].map(load)
+
+  /**
+   * 命中数下限。这些数字是 2026-08-30 实测值，留了几条余量。
+   *
+   * 卡的是「不许退步」。差距那部分是刻意不认的（裸数字 scene 编号）
+   * 和不打算认的（法语 Saison、西语 Temporada 之类的季集词）。
+   */
+  const FLOOR: Record<string, { season: number; episode: number; year: number }> = {
+    'episodes.yml': { season: 305, episode: 348, year: 36 },
+    'movies.yml': { season: 0, episode: 0, year: 164 },
+    'various.yml': { season: 72, episode: 75, year: 51 }
+  }
+
+  for (const { file, cases } of corpora) {
+    await check(`${file}：季集年份命中数不低于下限（${cases.length} 条语料）`, () => {
+      let season = 0
+      let episode = 0
+      let year = 0
+      for (const c of cases) {
+        const got = parseVideoName(c.name)
+        const wantSeason = first(c.want.season)
+        const wantEp = first(c.want.episode)
+        if (wantSeason !== null && got.season === wantSeason) season++
+        if (wantEp !== null && (got.episodes[0] === wantEp || got.absolute_episode === wantEp)) episode++
+        if (typeof c.want.year === 'number' && got.year === c.want.year) year++
+      }
+      const floor = FLOOR[file]
+      assert.ok(season >= floor.season, `季号命中 ${season}，低于下限 ${floor.season}`)
+      assert.ok(episode >= floor.episode, `集号命中 ${episode}，低于下限 ${floor.episode}`)
+      assert.ok(year >= floor.year, `年份命中 ${year}，低于下限 ${floor.year}`)
+    })
+  }
+
+  await check('一条电影语料都不许被认成剧集', () => {
+    // 这是这一段里唯一的零容忍断言。漏认一部剧，用户在确认面板里改一下就好；
+    // 错认一部电影，它的年份变成季号，海报墙上多出「24/0 集」，
+    // 而用户完全看不出为什么
+    const wrong: string[] = []
+    for (const { cases } of corpora) {
+      for (const c of cases) {
+        if (first(c.want.season) !== null || first(c.want.episode) !== null) continue
+        if (c.want.type === 'episode') continue
+        // guessit 有一批只断言单个属性的用例（`options: -T "..."`、只测字幕语言），
+        // 它们没有 season 键不代表「这是电影」
+        if ('options' in c.want || '-season' in c.want || '-episode' in c.want) continue
+        if (!('title' in c.want)) continue
+        const got = parseVideoName(c.name)
+        if (got.season !== null || got.episodes.length > 0 || got.absolute_episode !== null) {
+          wrong.push(`${c.name} -> S${got.season} E[${got.episodes}] abs=${got.absolute_episode}`)
+        }
+      }
+    }
+    assert.deepEqual(wrong, [], `被错认成剧集：\n  ${wrong.join('\n  ')}`)
+  })
+
+  await check('hintSeries 打开后命中率明显更高 —— 扫描器靠它补目录上下文', () => {
+    // 各语料里「传了 hint 比不传多认出多少条」。这条守的是 hint 这个入口
+    // 真的有用：如果哪天 hint 被接反或被无视，这里会掉到 0
+    let gained = 0
+    for (const { cases } of corpora) {
+      for (const c of cases) {
+        const wantEp = first(c.want.episode)
+        if (wantEp === null) continue
+        const bare = parseVideoName(c.name)
+        const hinted = parseVideoName(c.name, true)
+        const hitBare = bare.episodes[0] === wantEp || bare.absolute_episode === wantEp
+        const hitHint = hinted.episodes[0] === wantEp || hinted.absolute_episode === wantEp
+        if (!hitBare && hitHint) gained++
+      }
+    }
+    assert.ok(gained >= 40, `hint 只多认出 ${gained} 条，太少了，怀疑没接上`)
   })
 }
 

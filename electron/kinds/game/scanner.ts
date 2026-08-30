@@ -167,6 +167,13 @@ function engineEvidence(dir: string, l: Listing): string[] {
   else if (has('nw.dll')) found.push('NW.js 打包的程序')
   if (l.exts.has('.xp3')) found.push('KiriKiri 引擎（有 .xp3）')
   if (l.exts.has('.qsp')) found.push('QSP 引擎（文字冒险 / 互动小说）')
+  // Adobe AIR 和 Flash 分开报：两者存档位置完全不同（AIR 走 %APPDATA%\<应用 id>\Local
+  // Store，Flash 走 Macromedia 那套 LSO），合成一条会让模型分不清该验哪个。
+  // 一个目录同时命中两条是正常的 —— AIR 打包的 Flash 游戏本来就两样都有
+  if (l.dirs.has('adobe air') || has('adobe air.dll') || has('adl.exe')) {
+    found.push('Adobe AIR 打包的程序（有 Adobe AIR\\ 或 Adobe AIR.dll / adl.exe）')
+  }
+  if (l.exts.has('.swf')) found.push('Flash 内容（有 .swf）')
   if (l.exts.has('.unity3d')) found.push('Unity 资源包（.unity3d）')
 
   // 自带存档目录：既是「这是游戏」的旁证，也直接是 detect_save_path 的第一个候选

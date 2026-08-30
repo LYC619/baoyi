@@ -626,20 +626,31 @@ export interface AIResult {
 /** 清空数据后回报清掉了些什么 */
 export interface ResetSummary {
   software: number
+  games: number
   units: number
   icons: number
+  covers: number
+  /**
+   * 保留下来的存档备份记录数 —— 这一项是「没清掉多少」而不是「清掉多少」。
+   * 磁盘上那些备份文件一个都没动，记录留着才找得到它们。
+   */
+  saveBackupsKept: number
   settingsCleared: boolean
 }
 
 /** 设置页「数据管理」上展示的用量 */
 export interface DataStats {
   software: number
+  games: number
   units: number
   logs: number
   /** 数据库占用字节数，含还没落盘的 WAL */
   dbBytes: number
   icons: number
   iconBytes: number
+  /** 封面和图标分开报：存留策略不同，但都占磁盘 */
+  covers: number
+  coverBytes: number
 }
 
 /* ------------------------------ 目录整理 ------------------------------ */
@@ -845,6 +856,185 @@ export interface SearchCallRecord {
   ms: number
   /** 哪个目录触发的 */
   label: string
+}
+
+/* ------------------------------ 视频品类 ------------------------------ */
+
+/**
+ * 一条视频记录是什么形态。
+ *
+ * 番剧不单列一种：它的**命名语法**和美剧不一样（见 kinds/video/parser），但
+ * 「一部剧下面 N 集」这个形状完全相同。分成三种只会让每个查询都要判三次，
+ * 而真正的差别在解析器里，不在数据结构里。
+ */
+export type VideoType = 'movie' | 'series'
+
+/**
+ * 观看状态。四态闭集，库里有 CHECK 约束兜着（见 kinds/video/schema.ts）。
+ *
+ * 和游戏的 PlayStatus 同构，理由也一样 —— 但对视频更硬：「掌握」一部电影
+ * 基本就等于「看完了」，所以这一列承担了游戏那边 mastery_level 的角色。
+ * dropped（弃）留着不是为了对称：一部 60 集的剧看到第 8 集放弃，和「在看」
+ * 是两件事，混在一起会让「在看」那个格子永远清不空。
+ */
+export type WatchStatus = 'unwatched' | 'watching' | 'watched' | 'dropped'
+
+/**
+ * 一部电影的一个文件。
+ *
+ * 存在的理由是分卷：`Movie.CD1.avi` / `Movie.CD2.avi` 是一部电影，
+ * 拆成两条记录会让海报墙出现两张同样的海报。多版本（1080p 和 4K、
+ * 导演剪辑版和上映版）复用同一个形状 —— v0.7 不为它单独建模。
+ *
+ * 剧集不用这个：单集进 episode 表，那里有季集号可以排序。
+ */
+export interface VideoPart {
+  path: string
+  /** 展示名，如「CD1」「4K 版」。空串时界面上退回文件名 */
+  label: string
+  file_size: number
+  duration_sec: number
+}
+
+/** 一条音轨或字幕轨。内嵌轨道来自容器元数据，外挂字幕来自同目录的 .srt / .ass */
+export interface MediaTrack {
+  /** 容器里的轨道序号。外挂字幕恒为 -1 —— 它不在容器里 */
+  index: number
+  /** 'zh' / 'en' / ''，读不出来就是空串 */
+  language: string
+  /** 界面上显示的那行字，如「简中」「杜比全景声」 */
+  label: string
+  codec: string
+  /** 外挂字幕的文件路径；内嵌轨道为空串 */
+  path: string
+}
+
+/**
+ * 剧集的一集。
+ *
+ * 独立成表而不是塞进 JSON 列：一部剧可以有几百集，而「这一集看到哪儿了」
+ * 「这一集文件在不在」都是要按集查询和更新的。JSON 列每次改一集都要
+ * 读出整个数组、改一个元素、写回去 —— 两个窗口同时播两集就会互相覆盖。
+ *
+ * path 允许为空串：那表示**库里知道有这一集，但磁盘上没有文件**。
+ * 这不是脏数据，是详情页那一列「在 / 缺」的来源 —— TMDB 说这季 16 集，
+ * 用户手上只有 8 个文件，缺的那 8 集该露面，否则用户不知道自己缺什么。
+ */
+export interface Episode {
+  id: string
+  resource_id: string
+  season: number
+  episode: number
+  title: string
+  /** 空串 = 缺文件 */
+  path: string
+  file_size: number
+  duration_sec: number
+  watch_status: WatchStatus
+  /** 上次播到第几秒。下次打开跳回这里 */
+  position_sec: number
+  /** 最后一次看它的时刻，0 表示没看过 */
+  watched_at: number
+  /** 首播日期（TMDB 给的），0 表示不知道 */
+  air_date: number
+}
+
+/** video_meta 那张表的形状。resource 的公共字段不在这里，见 VIDEO_VIEW_SQL */
+export interface VideoMeta {
+  video_type: VideoType
+  /** 竖版 2:3 海报 / 横版背景图的本地路径。空串 = 还没有，界面退回首字占位 */
+  poster_path: string
+  fanart_path: string
+  /** 电影是一个点，剧集是区间的起点。0 表示不知道 */
+  year: number
+  /** 剧集的完结年份。0 = 电影，或者还在播 */
+  end_year: number
+  /** 十分制。0 表示还没刮到评分，不是「评分为零」 */
+  rating: number
+  watch_status: WatchStatus
+  /**
+   * 电影播到第几秒。剧集的进度记在 episode 行上 ——
+   * 一部剧没有「整部剧播到哪一秒」这种东西。
+   */
+  position_sec: number
+  duration_sec: number
+  last_watched_at: number
+
+  /** 以下几项来自文件名解析和容器元数据，是**本地事实**，不是模型猜的 */
+  resolution: string
+  video_codec: string
+  source: string
+  release_group: string
+  audio_tracks: MediaTrack[]
+  subtitle_tracks: MediaTrack[]
+
+  /** 电影的文件。剧集恒为空数组 —— 它的文件在 episode 表里 */
+  parts: VideoPart[]
+  /** 外挂字幕、NFO、海报原图之类。复用游戏那边的形状 */
+  linked_files: LinkedFile[]
+
+  tmdb_id: string
+  imdb_id: string
+}
+
+/**
+ * 视频视图（VIDEO_VIEW_SQL）的一行。
+ *
+ * 和 GameItem 一样刻意不复用 SoftwareItem，理由见那边的注释。
+ * 三个 episode_* 计数在视图里现算 —— 它们要出现在海报墙的每张卡片上
+ * （「3/12 集」），存成列就要在每次改一集观看状态时同步更新两张表，
+ * 而视频库是百级规模，子查询的代价可以忽略。
+ */
+export interface VideoItem extends VideoMeta {
+  id: string
+  created_at: number
+  updated_at: number
+  /**
+   * 电影：默认那个文件的路径。剧集：整部剧的目录。
+   * 同时是 resource.path 那个全局唯一键
+   */
+  path: string
+  file_name: string
+  file_size: number
+  source_dir: string
+  name_zh: string
+  name_en: string
+  summary: string
+  description: string
+  category: string
+  tags: string[]
+  official_url: string
+  notes: string
+  is_archived: boolean
+
+  /** 这部剧一共几集（含缺文件的）。电影恒为 0 */
+  episode_total: number
+  /** 看完了几集 */
+  episode_watched: number
+  /** 磁盘上真有文件的几集。和 total 的差就是「缺」的数量 */
+  episode_present: number
+}
+
+export interface VideoQuery {
+  keyword?: string
+  type?: VideoType
+  category?: string
+  tag?: string
+  status?: WatchStatus
+  /** 归档区和正常区互斥，和另两个品类同一个约定 */
+  group?: 'all' | 'archived'
+  sort?: 'name' | 'year' | 'added' | 'rating'
+}
+
+export interface VideoCounts {
+  all: number
+  archived: number
+  /** 电影 / 剧集各有几部。闭集 */
+  type: Record<VideoType, number>
+  /** 四个观看状态各有几个。闭集，缺的那个是 0 不是不存在 */
+  status: Record<WatchStatus, number>
+  categories: Array<{ name: string; count: number }>
+  tags: Array<{ name: string; count: number }>
 }
 
 export type Unsubscribe = () => void

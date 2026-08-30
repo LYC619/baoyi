@@ -1785,31 +1785,43 @@ function fileSize(file: string): number {
  *
  * 库大小要把 -wal 算进去：journal_mode 是 WAL，刚写进去还没 checkpoint 的数据
  * 全在 wal 文件里，只报 baoyi.db 会明显偏小，看起来像是数据没存上。
+ *
+ * 封面单独一栏，和图标并列。它们在**存留策略**上是两回事（图标是缓存，随时可重建；
+ * 封面是用户亲手指的资产），但在「占了多少磁盘」这个问题上是同一回事 ——
+ * 0.6 只统计图标，于是封面攒了多少空间在界面上完全看不到。
  */
+function dirUsage(dir: string): { count: number; bytes: number } {
+  let count = 0
+  let bytes = 0
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      count++
+      bytes += fileSize(path.join(dir, name))
+    }
+  } catch {
+    /* 目录还没建起来，当作空 —— 第一次运行时图标和封面目录都还不存在 */
+  }
+  return { count, bytes }
+}
+
 export function dataStats(): DataStats {
   const d = getDb()
   const one = (sql: string) => (d.prepare(sql).get() as { n: number }).n
   const dbFile = path.join(app.getPath('userData'), 'baoyi.db')
 
-  let icons = 0
-  let iconBytes = 0
-  const dir = iconsDir()
-  try {
-    for (const name of fs.readdirSync(dir)) {
-      icons++
-      iconBytes += fileSize(path.join(dir, name))
-    }
-  } catch {
-    /* 图标目录还没建起来，当作 0 */
-  }
+  const icons = dirUsage(iconsDir())
+  const covers = dirUsage(coversDir())
 
   return {
     software: one('SELECT COUNT(*) AS n FROM software'),
+    games: one('SELECT COUNT(*) AS n FROM game'),
     units: one('SELECT COUNT(*) AS n FROM scan_units'),
     logs: one('SELECT COUNT(*) AS n FROM identify_logs'),
     dbBytes: fileSize(dbFile) + fileSize(`${dbFile}-wal`),
-    icons,
-    iconBytes
+    icons: icons.count,
+    iconBytes: icons.bytes,
+    covers: covers.count,
+    coverBytes: covers.bytes
   }
 }
 
@@ -1817,14 +1829,17 @@ export function dataStats(): DataStats {
 
 export interface ResetSummary {
   software: number
+  games: number
   units: number
   icons: number
+  covers: number
+  /** 保留下来的存档备份记录数。磁盘上那些备份文件一个都没动，见下面的注释 */
+  saveBackupsKept: number
   settingsCleared: boolean
 }
 
-/** 清空图标缓存目录，返回删掉的文件数 */
-function clearIcons(): number {
-  const dir = iconsDir()
+/** 清空一个目录里的文件，返回删掉的个数。删不掉的跳过，不让一个占用中的文件挡住整次重置 */
+function wipeDir(dir: string, whenBusy: string): number {
   let n = 0
   try {
     for (const name of fs.readdirSync(dir)) {
@@ -1832,41 +1847,83 @@ function clearIcons(): number {
         fs.unlinkSync(path.join(dir, name))
         n++
       } catch {
-        /* 图标可能正被渲染进程占用，删不掉就留着，下次识别会覆盖 */
+        void whenBusy /* 正被渲染进程占用，删不掉就留着 */
       }
     }
   } catch {
-    /* 目录不存在，当作没有图标 */
+    /* 目录不存在，当作里面没东西 */
   }
   return n
+}
+
+/** 清空图标缓存目录，返回删掉的文件数 */
+function clearIcons(): number {
+  return wipeDir(iconsDir(), '下次识别会覆盖')
+}
+
+/**
+ * 清空封面目录，返回删掉的文件数。
+ *
+ * **这不等于把封面当缓存看。** `clearIcons()` 可以随时调用，因为图标能重新提取；
+ * 封面不能，它是用户亲手指的一张图。这个函数只在 `resetData()` 里调用，
+ * 而且只因为同一次操作正在把每一条游戏记录一起删掉 ——
+ * 封面文件名是 `<游戏 id>.<后缀>`，而 id 是重置时生成的 uuid，重扫一遍不会再生成同一个。
+ * 也就是说这些文件在记录消失的那一刻就已经没有任何代码路径能读到它们了，
+ * 留着不是「保住了用户的资产」，是在磁盘上攒一堆永远打不开的图。
+ *
+ * 反过来说，`clearIcons()` 至今没有、以后也不该碰 `coversDir()` ——
+ * 「清空图标缓存」是个能单独发生的动作，那时候游戏记录还在，封面还读得到。
+ */
+function clearCovers(): number {
+  return wipeDir(coversDir(), '下次换封面会覆盖')
 }
 
 /**
  * 重置识别数据。
  *
- * mode = 'library'：只清软件条目、待识别目录、整理记录和图标缓存，
+ * mode = 'library'：清掉全部品类的条目、待识别目录、整理记录、图标缓存和封面，
  *   保留 API Key、搜索配置、扫描目录和自定义分类 —— 反复调 prompt 重测时用这个。
  * mode = 'all'：连设置和分类一起清掉，等于恢复出厂，会重新走引导流程。
  *
  * 两种模式都只动抱一自己的数据库，绝不碰你磁盘上的任何实际软件文件 ——
  * 已经整理过的文件夹留在整理后的位置，只是抱一不再记得它们原来在哪。
+ *
+ * **0.6 到 0.7 之间改掉的一件事**：原先这里限定 `kind = 'software'`，注释写的理由是
+ * 「以后有了游戏、视频，『清空软件库』不该顺手把它们也清了」。那个理由针对的是一个
+ * 并不存在的按钮 —— 这两个入口在全局设置页里，写的是「清空识别数据」和「恢复出厂」，
+ * 没有一个是「清空软件库」。结果是用户点了「恢复出厂」、对话框说了会清空、
+ * 走完引导之后游戏库里那些条目一条不少地站在原地。
+ * 一个和界面说法不符的行为比少一个功能糟得多，所以改成清全部品类。
+ * 真要做「只清当前模块」，那是给 resetData 加一个 kind 参数、并且按钮上得写清楚，
+ * 不是靠这里悄悄限定一个品类。
  */
 export function resetData(mode: 'library' | 'all'): ResetSummary {
   const d = getDb()
 
-  const software = (d.prepare('SELECT COUNT(*) AS n FROM software').get() as { n: number }).n
-  const units = (d.prepare('SELECT COUNT(*) AS n FROM scan_units').get() as { n: number }).n
+  const count = (sql: string) => (d.prepare(sql).get() as { n: number }).n
+  const software = count('SELECT COUNT(*) AS n FROM software')
+  const games = count('SELECT COUNT(*) AS n FROM game')
+  const units = count('SELECT COUNT(*) AS n FROM scan_units')
+  // 先数下来，因为下面刻意不删它 —— 报给用户的是「留了多少」，不是「清了多少」
+  const saveBackupsKept = count('SELECT COUNT(*) AS n FROM save_backups')
 
   const tx = d.transaction(() => {
-    // 打在 resource 上，software_meta 靠 CASCADE 跟着走。这里刻意只清 software
-    // 那一类 —— 以后有了游戏、视频，「清空软件库」不该顺手把它们也清了。
-    d.prepare(`DELETE FROM resource WHERE kind = 'software'`).run()
+    // 打在 resource 上，各品类的私有表（software_meta / game_meta）靠 CASCADE 跟着走。
+    // 不带 WHERE：所有品类一起清，理由见上面那段注释。
+    //
+    // save_backups 刻意**不在**这里 —— 它没有外键，所以这句 DELETE 碰不到它，
+    // 而这正是当初不给它建外键的目的：那张表不是日志而是索引，每行的 backup_dir
+    // 指向磁盘上一份真实存在的存档拷贝。删掉记录不会删掉那些文件，
+    // 只会让用户再也找不到它们。「用户重置了抱一」不等于「用户愿意扔掉存档备份」。
+    // 代价是留下一批孤儿行，等「孤儿备份清理」那一屏再回收；
+    // 在那之前至少要让用户知道它们还在，所以 saveBackupsKept 进了 ResetSummary。
+    d.prepare('DELETE FROM resource').run()
     d.prepare('DELETE FROM scan_units').run()
     d.prepare('DELETE FROM pending_software').run()
     d.prepare('DELETE FROM skip_list').run()
     // 没被认可过的 AI 标签跟着识别数据一起清；用户建的和确认过的是资产，留着。
-    // 限定 kind 的理由和上面那句 DELETE FROM resource 一样：这是「清空软件库」
-    d.prepare(`DELETE FROM tags WHERE source = 'ai' AND kind = 'software'`).run()
+    // 不再限定 kind：条目全清了，哪个品类的 AI 标签都一样没了主人
+    d.prepare(`DELETE FROM tags WHERE source = 'ai'`).run()
     // 整理记录跟着软件条目一起清。0.3 时这里刻意留着它（「文件夹还在磁盘上，
     // 清掉记录等于让用户永远失去搬回去的办法」），但留下来的记录里 software_id
     // 全都指向已经不存在的条目 —— 撤销时找不到关联软件，整理页也只能显示一串空条目。
@@ -1890,6 +1947,7 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
   if (mode === 'all') seedDefaults(d, KINDS)
 
   const icons = clearIcons()
+  const covers = clearCovers()
 
   // 删完把 WAL 落盘并把文件收缩回去，不然 db 文件不会变小
   try {
@@ -1899,7 +1957,7 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
     /* 收缩失败不影响数据已被清空这个事实 */
   }
 
-  return { software, units, icons, settingsCleared: mode === 'all' }
+  return { software, games, units, icons, covers, saveBackupsKept, settingsCleared: mode === 'all' }
 }
 
 export function closeDb(): void {
