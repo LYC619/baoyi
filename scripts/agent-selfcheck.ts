@@ -266,6 +266,7 @@ import {
 } from '../electron/kinds/video/douban.ts'
 import { fillVideoSystem, videoCandidatePrompt } from '../electron/kinds/video/prompts.ts'
 import { buildVideoTools, limitVideoTags } from '../electron/kinds/video/tools.ts'
+import { normalizeTag, parseHentaiName } from '../electron/kinds/video/hentai/filename.ts'
 import {
   HENTAI_CATEGORY,
   HENTAI_CATEGORY_ID,
@@ -2367,6 +2368,7 @@ async function main(): Promise<void> {
   await videoUserEditedSection()
   await videoPlaybackSection()
   await hentaiCategorySection()
+  await hentaiFilenameSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -8036,6 +8038,197 @@ async function hentaiCategorySection(): Promise<void> {
       .all()
     assert.deepEqual(after, before, '迁移越界改到隔壁品类了')
     d.close()
+  })
+}
+
+/* ================= 里番文件名解析 · v0.8 Step 3 ================= */
+
+/**
+ * 守的是 v0.8-计划.md 第四节那张实测表：共用解析器认得清晰度和 `第N話`/`EPN`，
+ * 不认 `＃N` / `#N` / `ROUND N`，而且失败是连锁的 ——
+ * 集号没认出来，标题的切割点就往后跑，`[中文字幕]` 被当成标题吃进去。
+ */
+async function hentaiFilenameSection(): Promise<void> {
+  console.log('\n里番文件名解析 · v0.8 Step 3')
+
+  const p = parseHentaiName
+
+  /* -------- 用户给的两个真样本，逐字段断言 -------- */
+
+  await check('真样本一：＃2 + 方括号 + 清晰度，四项都要对', () => {
+    const r = p('OVAピュアピュア ぺろぺろ プリンセス ＃2 [中文字幕]_720P')
+    // OVA 贴在片名前面没有空格，站上的标题就叫这个，别拆走
+    assert.equal(r.title_zh, 'OVAピュアピュア ぺろぺろ プリンセス')
+    assert.equal(r.title_en, '', '集号不该漏进 title_en')
+    assert.equal(r.absolute_episode, 2)
+    assert.equal(r.resolution, '720p')
+    assert.deepEqual(r.site_tags, ['中文字幕', '720p'])
+  })
+
+  await check('真样本二：ROUND1 认得出来，全角！留在片名里', () => {
+    const r = p('寝取られファイター ヤリっちんぐ！ ROUND1 [中文字幕]_720P')
+    assert.equal(r.title_zh, '寝取られファイター ヤリっちんぐ！')
+    assert.equal(r.title_en, '')
+    assert.equal(r.absolute_episode, 1)
+    assert.equal(r.resolution, '720p')
+    assert.deepEqual(r.site_tags, ['中文字幕', '720p'])
+  })
+
+  /* -------- 六个集号模式 -------- */
+
+  await check('＃2（全角井号）', () => assert.equal(p('作品 ＃2 _720P').absolute_episode, 2))
+  await check('#12（半角井号）', () => assert.equal(p('ものすごい #12 _480P').absolute_episode, 12))
+  await check('＃１２（全角井号 + 全角数字）', () =>
+    assert.equal(p('作品 ＃１２ _720P').absolute_episode, 12))
+  await check('ROUND1（紧挨着）', () => assert.equal(p('作品 ROUND1 _720P').absolute_episode, 1))
+  await check('ROUND 1（带空格）', () => assert.equal(p('作品 ROUND 1 _720P').absolute_episode, 1))
+  await check('ROUND　3（全角空格）', () =>
+    assert.equal(p('作品 ROUND　3 _720P').absolute_episode, 3))
+  await check('第3話（日文話）', () => assert.equal(p('巨乳女教師 第3話 _1080P').absolute_episode, 3))
+  await check('第3话（简体话）', () => assert.equal(p('巨乳女教師 第3话 _1080P').absolute_episode, 3))
+  await check('EP5 / ep5 大小写都认', () => {
+    assert.equal(p('なにわ EP5 _720P').absolute_episode, 5)
+    assert.equal(p('なにわ ep5 _720P').absolute_episode, 5)
+  })
+
+  await check('集号一律落在 absolute_episode，不占季也不占 episodes', () => {
+    // 站上「ROUND1」「＃2」是作品内的序号，不挂在任何一季下面。
+    // 硬填 season=1 会和将来真有分季的作品撞车
+    const r = p('作品 ROUND1 _720P')
+    assert.equal(r.season, null)
+    assert.deepEqual(r.episodes, [])
+    assert.equal(r.full_season, false)
+    assert.equal(r.looks_like_series, true)
+  })
+
+  await check('认不出集号时 looks_like_series 是 false', () => {
+    const r = p('作品名だけ_1080P')
+    assert.equal(r.absolute_episode, null)
+    assert.equal(r.looks_like_series, false)
+  })
+
+  /* -------- 剥标记 -------- */
+
+  await check('多个方括号连排，顺序按文件名上的先后', () => {
+    const r = p('なにわ EP5 [中文字幕][无修正]_720P')
+    assert.equal(r.title_zh, 'なにわ')
+    assert.deepEqual(r.site_tags, ['中文字幕', '無碼', '720p'])
+  })
+
+  await check('只有清晰度没有集号', () => {
+    const r = p('作品名だけ_1080P')
+    assert.equal(r.title_zh, '作品名だけ')
+    assert.equal(r.resolution, '1080p')
+    assert.deepEqual(r.site_tags, ['1080p'])
+  })
+
+  await check('只有集号没有清晰度', () => {
+    const r = p('マニアック ROUND 3')
+    assert.equal(r.title_zh, 'マニアック')
+    assert.equal(r.absolute_episode, 3)
+    assert.equal(r.resolution, '')
+    assert.deepEqual(r.site_tags, [])
+  })
+
+  await check('四档清晰度都认，240p 共用解析器不认也要补上', () => {
+    for (const q of ['240', '480', '720', '1080']) {
+      const r = p(`作品 ＃1 _${q}P`)
+      assert.equal(r.resolution, `${q}p`, `${q}P 没认出来`)
+      assert.ok(r.site_tags.includes(`${q}p`), `${q}p 没进标签`)
+    }
+  })
+
+  await check('扩展名剥掉，不影响集号和标记', () => {
+    const r = p('なにわ ep5 [AI解碼]_720P.mp4')
+    assert.equal(r.title_zh, 'なにわ')
+    assert.equal(r.absolute_episode, 5)
+    assert.deepEqual(r.site_tags, ['AI解碼', '720p'])
+  })
+
+  /* -------- 别名表 -------- */
+
+  await check('别名表：无修正 / 無修正 / 無碼 / uncensored 归到同一个 key', () => {
+    // 文件名里常见简体「无修正」，站方 key 是繁体「無碼」—— 靠字面相等对不上
+    for (const w of ['无修正', '無修正', '无码', '無碼', 'uncensored', 'UNCENSORED']) {
+      assert.equal(normalizeTag(w), '無碼', `${w} 没归到「無碼」`)
+    }
+  })
+
+  await check('别名表对不上的原样留着，不硬归到某个站方 key', () => {
+    // 归错了之后，用户在界面上看到的是一个他没写过、也不知道打哪儿来的词
+    assert.equal(normalizeTag('第二部'), '第二部')
+    assert.deepEqual(p('作品 ＃1 [某个没见过的词]_720P').site_tags, ['某个没见过的词', '720p'])
+  })
+
+  /* -------- 不该被当成集号的东西 -------- */
+
+  await check('标题里本来就带数字，不当集号', () => {
+    // 光秃秃一个数字没有标记，`巨乳女教師2` 不该被拆成「巨乳女教師」第 2 集
+    const r = p('巨乳女教師2 [中文字幕]_1080P')
+    assert.equal(r.absolute_episode, null)
+    assert.equal(r.title_zh, '巨乳女教師2')
+  })
+
+  await check('全角数字属于片名时原样留着，不被抹成半角', () => {
+    // 全角只在匹配集号的时候抹平。抹进片名里，刮削搜索就和站上的标题对不上了
+    const r = p('巨乳女教師２ [中文字幕]_1080P')
+    assert.equal(r.title_zh, '巨乳女教師２')
+    assert.equal(r.absolute_episode, null)
+  })
+
+  await check('标题里带 # 但后面不是数字，不当集号', () => {
+    const r = p('C#入門 [中文字幕]')
+    assert.equal(r.absolute_episode, null)
+    assert.equal(r.title_zh, 'C#入門')
+  })
+
+  await check('多处命中时取最靠后的那个，不留半截在标题里', () => {
+    // 片名里本来就有 `ROUND 1` 的时候，按模式表的顺序挑会切错地方，
+    // 剩下的 `＃12` 会漏进 title_en —— 看着像解析器在乱码
+    const r = p('ROUND 1 テスト ＃１２ _240P')
+    assert.equal(r.absolute_episode, 12)
+    assert.ok(!`${r.title_zh}${r.title_en}`.includes('12'), '切剩的集号漏进标题了')
+  })
+
+  /* -------- is_special -------- */
+
+  await check('is_special 一律 false，含计划里推测会误判的那个写法', () => {
+    // 注意：这是护栏不是在修一个观察到的错。v0.8-计划.md 原先推测
+    // `ピュアピュア OVA ＃2` 会被共用规则判成特别篇，实测四种写法全是 false
+    //（共用解析器只在真有季集标记时才跑上游的 parseSeason），计划里那句已更正。
+    // 钉死它是因为这条路径不该依赖那个巧合 —— 上游哪天覆盖面变宽，
+    // 一整批里番会悄悄挪到第 0 季去，在库里和正片分家
+    for (const n of [
+      'ピュアピュア OVA ＃2 [中文字幕]_720P',
+      'OVAピュアピュア ぺろぺろ プリンセス ＃2 [中文字幕]_720P',
+      'ピュアピュア OVA 第3話 _720P',
+      'Pure Pure OVA EP5'
+    ]) {
+      assert.equal(p(n).is_special, false, `${n} 被判成特别篇了`)
+    }
+  })
+
+  await check('共用解析器在这个写法上确实还没判特别篇 —— 变了要知道', () => {
+    // 上面那条把 is_special 钉死了，于是它挡不住上游行为变化。
+    // 这一条盯的是上游本身：哪天它开始认 OVA，这里会先红，
+    // 而不是等到用户发现半个片库挪进了第 0 季
+    assert.equal(parseVideoName('ピュアピュア OVA ＃2 [中文字幕]_720P').is_special, false)
+    assert.equal(parseVideoName('ピュアピュア OVA S01E02').is_special, false)
+  })
+
+  await check('技术事实仍旧交给共用解析器，没有第二张正则表', () => {
+    const r = p('作品 ＃1 [中文字幕] 1080p.WEB-DL.x265-ABC.mkv')
+    assert.equal(r.resolution, '1080p')
+    assert.equal(r.source, 'WEBDL')
+    assert.equal(r.video_codec, 'x265')
+  })
+
+  await check('空串和纯扩展名不炸', () => {
+    for (const n of ['', '.mkv', '   ']) {
+      const r = p(n)
+      assert.equal(r.absolute_episode, null)
+      assert.deepEqual(r.site_tags, [])
+    }
   })
 }
 
