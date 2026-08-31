@@ -22,6 +22,7 @@
     "rollback-v5": "node --experimental-strip-types --no-warnings scripts/rollback-v5.ts",
     "rollback-v6": "node --experimental-strip-types --no-warnings scripts/rollback-v6.ts",
     "rollback-v7": "node --experimental-strip-types --no-warnings scripts/rollback-v7.ts",
+    "rollback-v8": "node --experimental-strip-types --no-warnings scripts/rollback-v8.ts",
     "verify-rollback-v7": "node --experimental-strip-types --no-warnings scripts/verify-rollback-v7.ts",
     "verify-packaged": "node --experimental-strip-types --no-warnings scripts/verify-packaged.ts",
     "inspect": "set ELECTRON_RUN_AS_NODE=1&& electron scripts/inspect-db.cjs",

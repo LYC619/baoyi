@@ -266,7 +266,12 @@ import {
 } from '../electron/kinds/video/douban.ts'
 import { fillVideoSystem, videoCandidatePrompt } from '../electron/kinds/video/prompts.ts'
 import { buildVideoTools, limitVideoTags } from '../electron/kinds/video/tools.ts'
-import { VIDEO_CATEGORIES, VIDEO_TAGS } from '../electron/kinds/video/taxonomy.ts'
+import {
+  HENTAI_CATEGORY,
+  HENTAI_CATEGORY_ID,
+  VIDEO_CATEGORIES,
+  VIDEO_TAGS
+} from '../electron/kinds/video/taxonomy.ts'
 import {
   acceptPosterUrl,
   // 和 game/covers.ts 的同名函数重名，这里换个名字进来。两份实现刻意保持一致，
@@ -2361,6 +2366,7 @@ async function main(): Promise<void> {
   await videoPosterSection()
   await videoUserEditedSection()
   await videoPlaybackSection()
+  await hentaiCategorySection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -2513,13 +2519,15 @@ async function videoDataSection(): Promise<void> {
     d.close()
   })
 
-  await check('6 -> 7 装上视频的分类和内置标签，且带对 kind', () => {
+  await check('6 -> 8 装上视频的分类和内置标签，且带对 kind', () => {
     const d = makeV6Db()
     initSchema(d as any, KINDS)
     const cats = (
       d.prepare(`SELECT name FROM categories WHERE kind = 'video' ORDER BY sort_order`).all() as any[]
     ).map((r) => r.name)
-    assert.deepEqual(cats, ['华语', '欧美', '日韩', '动画', '纪录片', '综艺', '其他'])
+    // 0.6 的库里视频分类一条都没有，走的是 seedCategories 那条路，一次装齐八条 ——
+    // 「里番」是 0.8 加的，兜底装的就该是新版的完整一套
+    assert.deepEqual(cats, ['华语', '欧美', '日韩', '动画', '纪录片', '综艺', '里番', '其他'])
     const tags = (
       d.prepare(`SELECT name, source FROM tags WHERE kind = 'video'`).all() as any[]
     )
@@ -2553,7 +2561,7 @@ async function videoDataSection(): Promise<void> {
     assert.equal(objectType(d as any, 'video'), 'view')
     assert.equal(objectType(d as any, 'video_meta'), 'table')
     assert.equal(objectType(d as any, 'episode'), 'table')
-    assert.equal(schemaVersion(d as any), 7)
+    assert.equal(schemaVersion(d as any), SCHEMA_VERSION)
     d.close()
   })
 
@@ -7548,12 +7556,12 @@ async function videoUserEditedSection(): Promise<void> {
     d.close()
   })
 
-  await check('没有为这一列提 SCHEMA_VERSION', () => {
-    // 和 douban_id / douban_rating 同一个判断（见 kinds/video/schema.ts 文件头）：
-    // 8 的含义该是「0.8 的库形状」。拿它标记 0.7 开发途中的一个可空列，
-    // 会让 rollback-v7 那句「退回 0.6」和将来 rollback-v8 的界限说不清。
-    // 闸门是 columnsOf().has()，下次启动自己补上
-    assert.equal(SCHEMA_VERSION, 7, '这一列不该动版本号，闸门是「列在不在」')
+  await check('user_edited 没有单独提版本号，8 是留给 0.8 的分类的', () => {
+    // 这一列的闸门是 columnsOf().has()，不是版本号（见 kinds/video/schema.ts 文件头）。
+    // 0.8 把版本号推到 8，标记的是「视频分类多了『里番』一格」——
+    // 两件事共用一个数字的话，rollback-v7 那句「退回 0.6」和 rollback-v8
+    // 的界限就说不清了
+    assert.equal(SCHEMA_VERSION, 8, '0.8 的库形状是 8')
   })
 }
 
@@ -7886,6 +7894,147 @@ async function videoPlaybackSection(): Promise<void> {
     const target = resumeEpisode(d as any, id)!
     assert.equal(target.season, 2)
     assert.equal(target.episode, 1)
+    d.close()
+  })
+}
+
+/* ================= 里番分类迁移 · v0.8 Step 2 ================= */
+
+/**
+ * 守的是 v0.8-计划.md 第三节那个坑：`seedCategories` 是兜底不是同步，
+ * 往 VIDEO_CATEGORIES 里加一条对**老库无效**，而失效链条一声不吭
+ * （分类不在表里 → 工具的 enum 里没有 → 模型没法归类 → 侧栏那格永不出现）。
+ *
+ * 这一节全部用 node:sqlite 驱动 electron/services/schema.ts 本身，
+ * 和应用启动时跑的是同一份代码。
+ */
+async function hentaiCategorySection(): Promise<void> {
+  console.log('\n里番分类迁移 · v0.8 Step 2')
+
+  const { DatabaseSync } = await import('node:sqlite')
+
+  /** 造一个「装过 0.7 的老库」：七条视频分类，其他排在 7，版本号 7 */
+  const oldDb = (): InstanceType<typeof DatabaseSync> => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    // 从 0.8 的形状退回 0.7 的形状 —— 比手搭一份 0.7 的建表 SQL 可靠，
+    // 那份 SQL 会和真实历史悄悄漂移
+    d.exec(`DELETE FROM categories WHERE id = '${HENTAI_CATEGORY_ID}'`)
+    d.exec(`UPDATE categories SET sort_order = 7 WHERE id = 'video-other'`)
+    d.exec(`UPDATE settings SET value = '7' WHERE key = '_schema'`)
+    return d
+  }
+
+  const cats = (d: InstanceType<typeof DatabaseSync>): Record<string, any>[] =>
+    d
+      .prepare(`SELECT id, name, description, icon, sort_order FROM categories WHERE kind = 'video'`)
+      .all() as Record<string, any>[]
+  const byId = (d: InstanceType<typeof DatabaseSync>, id: string): Record<string, any> | undefined =>
+    cats(d).find((c) => c.id === id)
+
+  await check('老库升上来之后里番在表里，且「其他」排在最后', () => {
+    const d = oldDb()
+    assert.equal(byId(d, HENTAI_CATEGORY_ID), undefined, '前置条件：老库里确实没有它')
+
+    initSchema(d as any, KINDS)
+
+    const h = byId(d, HENTAI_CATEGORY_ID)
+    assert.ok(h, '里番没进老库 —— 侧栏那格永远不会出现，而且不报任何错')
+    assert.equal(h!.name, HENTAI_CATEGORY)
+    const other = byId(d, 'video-other')!
+    assert.ok(
+      other.sort_order > h!.sort_order,
+      `兜底那格该排在里番后面，实际 其他=${other.sort_order} 里番=${h!.sort_order}`
+    )
+    assert.equal(schemaVersion(d as any), 8, '版本号该跟着推上去')
+    d.close()
+  })
+
+  await check('全新安装和迁移长出同一个库', () => {
+    // 两条路各装一遍分类（seedCategories / migrateHentaiCategory），
+    // 结果不一致的话，用户升级上来看到的和干净装出来的是两个应用
+    const fresh = new DatabaseSync(':memory:')
+    fresh.exec('PRAGMA foreign_keys = ON')
+    initSchema(fresh as any, KINDS)
+
+    const migrated = oldDb()
+    initSchema(migrated as any, KINDS)
+
+    const key = (rows: Record<string, any>[]): string =>
+      JSON.stringify(rows.slice().sort((a, b) => a.sort_order - b.sort_order))
+    assert.equal(key(cats(migrated)), key(cats(fresh)), '两条路长出两种库')
+    assert.equal(cats(fresh).length, VIDEO_CATEGORIES.length)
+    fresh.close()
+    migrated.close()
+  })
+
+  await check('迁移幂等：连跑两次不会插重、不会把排序推到 9', () => {
+    const d = oldDb()
+    initSchema(d as any, KINDS)
+    const after1 = cats(d)
+    initSchema(d as any, KINDS)
+    initSchema(d as any, KINDS)
+    assert.deepEqual(cats(d), after1, '再启动两次，分类表就该纹丝不动')
+    d.close()
+  })
+
+  await check('用户改过的分类行不被覆盖', () => {
+    // 迁移只插新行、只按 id 和旧值条件改 sort_order。
+    // 用 INSERT OR REPLACE 顺手「同步一下」的话，这里的「杂项」会变回「其他」——
+    // 那是替用户撤销一次决定
+    const d = oldDb()
+    d.exec(`UPDATE categories SET name = '杂项', icon = 'box' WHERE id = 'video-other'`)
+
+    initSchema(d as any, KINDS)
+
+    const other = byId(d, 'video-other')!
+    assert.equal(other.name, '杂项', '用户改的名字被出厂值覆盖了')
+    assert.equal(other.icon, 'box')
+    assert.equal(other.sort_order, 8, '名字保住的同时，排序还是要挪')
+    d.close()
+  })
+
+  await check('用户删掉了「其他」时不炸，也不无中生有把它插回来', () => {
+    const d = oldDb()
+    d.exec(`DELETE FROM categories WHERE id = 'video-other'`)
+
+    initSchema(d as any, KINDS)
+
+    assert.equal(byId(d, 'video-other'), undefined, '删掉的分类不该自己长回来')
+    assert.ok(byId(d, HENTAI_CATEGORY_ID), '里番照样要进去')
+    d.close()
+  })
+
+  await check('视频分类被全删光的库交给 seedCategories 兜底，迁移不重复插', () => {
+    const d = oldDb()
+    d.exec(`DELETE FROM categories WHERE kind = 'video'`)
+
+    initSchema(d as any, KINDS)
+
+    assert.equal(cats(d).length, VIDEO_CATEGORIES.length, '兜底该把八条一次装齐')
+    assert.equal(
+      cats(d).filter((c) => c.id === HENTAI_CATEGORY_ID).length,
+      1,
+      '两条路都插了一遍 —— 里番出现了两次'
+    )
+    d.close()
+  })
+
+  await check('软件和游戏的分类没被碰到', () => {
+    // 迁移的 WHERE 里带着 kind = 'video'。漏掉它的话，软件那边也有一条
+    // 「其他」，它的 sort_order 会跟着被挪走
+    const d = oldDb()
+    const before = d
+      .prepare(`SELECT id, name, sort_order FROM categories WHERE kind != 'video' ORDER BY id`)
+      .all()
+
+    initSchema(d as any, KINDS)
+
+    const after = d
+      .prepare(`SELECT id, name, sort_order FROM categories WHERE kind != 'video' ORDER BY id`)
+      .all()
+    assert.deepEqual(after, before, '迁移越界改到隔壁品类了')
     d.close()
   })
 }

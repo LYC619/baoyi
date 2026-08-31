@@ -12,7 +12,7 @@
  * resource 会让海报墙变成一面重复海报，侧栏计数也失去意义（「未看 342」里
  * 有 300 个是同一部剧的不同集）。代价是多一张表，以及查询时要算集数。
  *
- * ## migrate 只做补列，而且不挂在版本号上
+ * ## migrate 里两种闸门，各管各的
  *
  * 0.7 是视频模块的第一个版本，库里不存在需要搬动的视频数据 ——
  * `CREATE TABLE IF NOT EXISTS` 同时覆盖全新安装和从 0.6 升上来两条路。
@@ -20,19 +20,23 @@
  * 闸门把视频的内置标签装进去，以及给 `scripts/rollback-v7.ts` 一个可判断的版本号。
  *
  * 那之后 0.7 自己的开发过程中又加了两列（`douban_id` / `douban_rating`），
- * 于是有了这个 migrate。它**只补列，并且靠「列在不在」判断，不看版本号** ——
+ * 于是有了这个 migrate。补列这部分**只补列，并且靠「列在不在」判断，不看版本号** ——
  * 理由是这两列是在 0.7 开发途中加的：已经装了 0.7 开发版的库版本号也是 7，
  * 版本号闸门放不进去，而 `columnsOf().has()` 那道闸门下次启动就自己补上了。
  * 公共层的 `categories.description` / `categories.kind` 用的是同一个写法。
  *
- * **没有为这两列提 SCHEMA_VERSION 到 8。** 8 的含义应该是「0.8 的库形状」，
- * 拿它标记 0.7 开发中途的两个可空列，会让 rollback-v7 那句
- * 「退回 0.6」和 rollback-v8 的界限说不清 —— 而这两列是纯增量，
- * 有默认值，回滚时整张 video_meta 都被 drop 掉，没人需要知道它们存在过。
+ * **当时没有为这两列提 SCHEMA_VERSION 到 8**，因为 8 的含义应该留给「0.8 的库形状」：
+ * 拿它标记 0.7 开发中途的两个可空列，会让 rollback-v7 那句「退回 0.6」和
+ * rollback-v8 的界限说不清 —— 而这两列是纯增量，有默认值，回滚时整张 video_meta
+ * 都被 drop 掉，没人需要知道它们存在过。
+ *
+ * 0.8 兑现了那个含义：版本号 7 -> 8，标记的是「视频分类多了『里番』一格」。
+ * 它走的是版本号闸门而不是列闸门，理由见 `migrateHentaiCategory` 上的注释。
  */
 
 import type { KindSchema } from '../types.ts'
 import { columnsOf, objectType, type SqlDb } from '../../services/schema.ts'
+import { HENTAI_CATEGORY_ID, VIDEO_CATEGORIES } from './taxonomy.ts'
 
 /**
  * 视频私有字段。
@@ -230,10 +234,10 @@ export const VIDEO_INDEXES_SQL = `
 `
 
 /**
- * 补 0.7 开发途中加的三列。见文件头「migrate 只做补列」。
+ * 补 0.7 开发途中加的三列，外加 0.8 那条分类迁移。见文件头「两种闸门」。
  *
- * `from` 收下但不用：这几列的闸门是「列在不在」而不是版本号，理由同上。
- * 幂等，每次启动都跑，列已经在就是空操作。
+ * `from` 只喂给 `migrateHentaiCategory`：补列那几步的闸门是「列在不在」
+ * 而不是版本号，理由同上。补列部分幂等，每次启动都跑，列已经在就是空操作。
  *
  * 视图必须在这之后建 —— `initSchema` 已经是这个顺序（migrate → view），
  * 而 `VIDEO_VIEW_SQL` 里 SELECT 了这几列：老库上如果先建视图，
@@ -252,8 +256,61 @@ export const VIDEO_INDEXES_SQL = `
  * 是因为前者对 0.7 开发版的库也成立 —— 那些库的列早就补上了，
  * 缺的恰恰只有视图。
  */
+/**
+ * 0.8 的那一条分类：往老库里补「里番」，并把「其他」挪到它后面。
+ *
+ * ## 为什么需要这一段 —— `VIDEO_CATEGORIES` 喂不到老库
+ *
+ * `seedCategories` 是**兜底**不是同步：它判的是「这个 kind 一条分类都没有吗」，
+ * 装过 0.7 的库里视频分类有七条，于是直接 return —— 第八条永远进不去。
+ * 而失效链条一声不吭：分类不在表里 → `listCategories` 读不到 →
+ * `register_video` 那个工具的 category enum 里没有「里番」→ 模型没有合法途径
+ * 把片子归过去 → `GROUP BY category` 数不出这一格 → 侧栏永远不出现。
+ * 开发机上永远看不见，因为开发时反复删库重来，走的全是全新安装那条路。
+ *
+ * 所以这一段挂在版本号上（`from < 8`），和上面那三列的「看列在不在」不同：
+ * 分类是数据不是结构，没有 `columnsOf` 那种可以反复问的现成判据，
+ * 而「表里有没有这一行」不能当闸门 —— 用户删掉「里番」之后不该每次启动都长回来。
+ *
+ * ## 两条路不重叠
+ *
+ * 全新安装 `from` 是 0，此时视频分类一条都没有，这里不动手，
+ * 由 initSchema 末尾的 `seedCategories` 一次装齐八条。
+ * 用户把视频分类全删光的库同理 —— 交给兜底，这里不重复插。
+ *
+ * ## 不用 INSERT OR REPLACE
+ *
+ * `insertCategories` 用的是 `INSERT OR REPLACE`，拿它顺手「更新一下其他」
+ * 会把用户可能改过的 name / description / icon 一起覆盖回出厂值，
+ * 那是替用户撤销一次决定。这里只插新行（冲突就不管），
+ * 只按 id 和旧值条件改排序 —— 于是连跑两次也不会插出第二行或把排序推到 9。
+ */
+function migrateHentaiCategory(d: SqlDb, from: number): void {
+  if (from >= 8) return
+
+  const has = d
+    .prepare(`SELECT COUNT(*) AS n FROM categories WHERE kind = 'video'`)
+    .get() as { n: number }
+  if (has.n === 0) return
+
+  const c = VIDEO_CATEGORIES.find((x) => x.id === HENTAI_CATEGORY_ID)
+  if (!c) return
+  d.prepare(
+    `INSERT INTO categories (id, kind, name, description, icon, sort_order)
+     VALUES (?, 'video', ?, ?, ?, ?)
+     ON CONFLICT(id) DO NOTHING`
+  ).run(c.id, c.name, c.description ?? '', c.icon ?? '', c.sort_order)
+
+  // 只在它还停在 0.7 那个位置时挪。用户自己删掉「其他」的库这里是 0 行，不炸
+  d.prepare(
+    `UPDATE categories SET sort_order = 8
+     WHERE id = 'video-other' AND kind = 'video' AND sort_order = 7`
+  ).run()
+}
+
 export function migrateVideo(d: SqlDb, from: number): void {
-  void from
+  migrateHentaiCategory(d, from)
+
   if (objectType(d, 'video_meta') !== 'table') return
   const cols = columnsOf(d, 'video_meta')
   if (!cols.has('douban_id')) {

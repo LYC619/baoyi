@@ -23,6 +23,16 @@ import type { Category } from '../../../src/types'
 /** 归不进任何分类时的落脚点。它也是分类表里真实存在的一条，不是特殊值 */
 export const VIDEO_FALLBACK_CATEGORY = '其他'
 
+/**
+ * 里番那一格。0.8 加的，是视频的第八个分类，不是第四种资源类型。
+ *
+ * 单独导出成常量而不是就地写字符串：这四个字后面还要出现在文件名解析器和
+ * hanime 通道的判据里（「这条该不该走那条刮削通道」看的就是它），
+ * 三处各写一遍字面量，改一次名字就漏一处。
+ */
+export const HENTAI_CATEGORY_ID = 'video-hentai'
+export const HENTAI_CATEGORY = '里番'
+
 export const VIDEO_CATEGORIES: Category[] = [
   {
     id: 'video-cn',
@@ -67,11 +77,20 @@ export const VIDEO_CATEGORIES: Category[] = [
     sort_order: 6
   },
   {
+    id: HENTAI_CATEGORY_ID,
+    name: HENTAI_CATEGORY,
+    description: '成人动画作品',
+    icon: 'flame',
+    sort_order: 7
+  },
+  {
     id: 'video-other',
     name: VIDEO_FALLBACK_CATEGORY,
     description: '还没归类，或自建分类之前的临时存放',
     icon: 'inbox',
-    sort_order: 7
+    // 兜底那格一直排在最后。0.8 插进「里番」时它从 7 挪到 8 ——
+    // 老库里这一挪要靠 migrateVideo 单独走一次，见那边的注释
+    sort_order: 8
   }
 ]
 
