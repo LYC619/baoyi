@@ -2072,7 +2072,14 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               <dd class="mono">{{ info?.node ?? '—' }}</dd>
               <dt>Vue</dt>
               <dd class="mono">{{ vueVersion }}</dd>
+              <dt>分发方式</dt>
+              <dd>{{ info?.portable ? '绿色版（数据在程序旁边）' : '装机版（数据在 AppData）' }}</dd>
             </dl>
+            <p v-if="info?.portable" class="hint">
+              整个文件夹可以直接拷走，库和封面海报都跟着 <code>data\</code> 走。
+              删掉 <code>绿色版.txt</code> 会让抱一改用 AppData，届时 <code>data\</code>
+              里的数据不会自动搬过去。
+            </p>
           </section>
 
           <section class="panel">

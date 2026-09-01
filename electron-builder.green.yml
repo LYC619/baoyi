@@ -1,0 +1,23 @@
+# 绿色版（免安装）打包配置 —— 在基础配置上只改两处：目标换成 zip、多带一个标记文件。
+#
+# **为什么必须是单独一份配置，而不是往 win.target 里再加一个 zip。**
+# 标记文件（`绿色版.txt`）决定运行时把数据写到哪。`extraFiles` 是全局的，
+# 一份配置里同时出 nsis 和 zip，标记会**同时进两个产物**。那时装机版的行为变成：
+# 装到 `C:\Program Files\` → 目录不可写 → 退回 AppData（对的）；但用户改装到
+# `D:\抱一\` → 可写 → 数据落在安装目录旁边。
+#
+# 后者不算崩，但它是装机版不该有的行为：卸载不会带走数据，而且和「装了的程序
+# 数据在 AppData」这个预期不一致。一个开关管两种分发方式，迟早会在某台机器上
+# 选错边 —— 所以从源头分开。
+extends: ./electron-builder.yml
+
+win:
+  icon: resources/icon.ico
+  target:
+    - target: zip
+      arch: [x64]
+
+# 落到 exe 同级。`initPortable()` 认的就是这个位置
+extraFiles:
+  - from: resources/绿色版.txt
+    to: 绿色版.txt

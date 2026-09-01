@@ -105,6 +105,7 @@ import {
 } from '../kinds/video/service'
 import { POSTER_EXTS } from '../kinds/video/posters'
 import { testTmdb } from '../kinds/video/tmdb'
+import { isPortable } from '../services/portable'
 import { normalizeProxyRules, reapplyProxy, resolveProxyFor } from '../services/proxy'
 import {
   materialize,
@@ -129,7 +130,11 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     version: app.getVersion(),
     electron: process.versions.electron,
     chrome: process.versions.chrome,
-    node: process.versions.node
+    node: process.versions.node,
+    // 绿色版跑起来和装机版长得一模一样，唯一的区别是数据在哪。不给个地方看，
+    // 用户没法判断「我的库到底在 exe 旁边还是在 AppData」——
+    // 那个疑问在升级和搬机器的时候一定会出现
+    portable: isPortable()
   }))
 
   ipcMain.handle('app:copy', (_e, text: string) => {

@@ -5,7 +5,14 @@ import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc/handlers'
 import { finalizeGameSessions } from './kinds/game/service'
 import { closeDb, coversDir, getSettings, iconsDir, postersDir } from './services/database'
+import { initPortable } from './services/portable'
 import { initProxy } from './services/proxy'
+
+// **必须排在最前面，不能挪进 whenReady。** 绿色版要把 userData 指到 exe 旁边，
+// 而下面的 requestSingleInstanceLock 会在 userData 里建锁文件、createWindow 会
+// getSettings() 顺手开库 —— 晚一步，这两样就先落在旧位置了，表现是「绿色版旁边
+// 有个空 data/，真数据还在 %APPDATA%」
+initPortable()
 
 const APP_ROOT = path.join(__dirname, '..')
 const RENDERER_DIST = path.join(APP_ROOT, 'dist')

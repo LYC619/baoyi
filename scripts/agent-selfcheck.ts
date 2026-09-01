@@ -279,6 +279,8 @@ import {
 import { hanimeChannel } from '../electron/kinds/video/hentai/channel.ts'
 // 从 proxy-rules 而不是 proxy 进 —— 后者顶层 import electron，纯 Node 下加载即崩
 import { normalizeProxyRules } from '../electron/services/proxy-rules.ts'
+// 同理：portable.ts 顶层 import electron，只能进 portable-rules
+import { decidePortable, PORTABLE_MARKERS } from '../electron/services/portable-rules.ts'
 import {
   MAX_HANIME_FETCHES,
   hanimeDetail,
@@ -2390,6 +2392,7 @@ async function main(): Promise<void> {
   await hentaiFilenameSection()
   await hanimeChannelSection()
   await proxySection()
+  await portableSection()
   await hideHentaiSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
@@ -8965,6 +8968,114 @@ async function proxySection(): Promise<void> {
     // 在这儿重写一遍校验只会和 Chromium 的规则打架，且必然漏
     assert.equal(normalizeProxyRules('socks5://127.0.0.1:999999'), 'socks5://127.0.0.1:999999')
     assert.equal(normalizeProxyRules('nonsense://x'), 'nonsense://x')
+  })
+}
+
+/* ==================== 绿色版判据 · v0.8 ==================== */
+
+/**
+ * `decidePortable` 这一个纯函数。真接线（`app.setPath` 到底改没改 userData）
+ * 由 `verify-portable.cjs` 在真 Electron 下验。
+ *
+ * 这一节的重量全在**三条不该进绿色版模式的路**上：开发模式、没标记、目录不可写。
+ * 三条里任何一条判错的后果都不是报错，而是**数据写到了意料之外的地方** ——
+ * 开发时写进 node_modules（`npm ci` 会清掉）、装机版写到安装目录旁边
+ * （卸载不带走）、只读介质上直接开不了库。
+ */
+async function portableSection(): Promise<void> {
+  console.log('\n绿色版判据 · v0.8（纯函数；接线由 verify-portable.cjs 验）')
+
+  const join = (...p: string[]) => p.join('\\')
+  const yes = () => true
+  const no = () => false
+
+  await check('开发模式一律不认标记 —— 否则数据会写进 node_modules', () => {
+    // 开发时 process.execPath 指向 node_modules/electron/dist/electron.exe，
+    // 真按它算数据就落在 node_modules 里，而 npm ci 会把那儿整个删掉
+    const d = decidePortable(false, 'C:\\repo\\node_modules\\electron\\dist', yes, yes, join)
+    assert.equal(d.portable, false)
+    assert.ok(d.portable === false && d.reason.includes('开发模式'))
+  })
+
+  await check('打包了 + 有标记 + 可写 = 绿色版，数据落在 exe 旁边的 data', () => {
+    const d = decidePortable(true, 'D:\\抱一', yes, yes, join)
+    assert.equal(d.portable, true)
+    assert.equal(d.portable === true && d.dataDir, 'D:\\抱一\\data')
+  })
+
+  await check('两个标记名都认（中文那个给人看，ASCII 那个防编码出岔）', () => {
+    for (const marker of PORTABLE_MARKERS) {
+      const exists = (p: string) => p === `D:\\抱一\\${marker}`
+      const d = decidePortable(true, 'D:\\抱一', exists, yes, join)
+      assert.equal(d.portable, true, `${marker} 没被认出来`)
+    }
+  })
+
+  await check('没标记就是装机版 —— 数据留在 AppData', () => {
+    const d = decidePortable(true, 'C:\\Program Files\\抱一', no, yes, join)
+    assert.equal(d.portable, false)
+    assert.ok(d.portable === false && d.reason.includes('没有标记'))
+  })
+
+  await check('有标记但目录不可写：退回默认目录，不硬来', () => {
+    // 解压到 Program Files、或从只读介质跑。硬来的话开库抛 SQLITE_CANTOPEN，
+    // 用户看到的是「应用打不开」，而真因是装的位置不对
+    const d = decidePortable(true, 'C:\\Program Files\\抱一', yes, no, join)
+    assert.equal(d.portable, false)
+    assert.ok(d.portable === false && d.reason.includes('不可写'), d.portable === false ? d.reason : '')
+    // 理由里要带上那个目录，否则用户没法知道该往哪儿看
+    assert.ok(d.portable === false && d.reason.includes('C:\\Program Files\\抱一'))
+  })
+
+  await check('不可写的判断只在有标记时才做 —— 装机版不该被它影响', () => {
+    // 没标记时 writable 返回什么都无所谓，结论都是「没有标记文件」。
+    // 反过来写（先判可写）会让装机版在只读目录下报出一句和它无关的理由
+    const d = decidePortable(true, 'C:\\Program Files\\抱一', no, no, join)
+    assert.ok(d.portable === false && d.reason.includes('没有标记'))
+  })
+
+  /*
+   * 这一条不验判据，验的是**别处有没有绕过它**。
+   *
+   * 绿色版能成立的全部前提是「所有数据路径都从 `app.getPath('userData')` 算」。
+   * 哪天有人加第六个数据目录时直接拼了 `process.env.APPDATA`，绿色版就开始漏
+   * 东西 —— 而漏法极安静：库、封面、海报跟着文件夹走了，那一样没走。表现是
+   * 「整个文件夹拷到另一台机器，大部分正常，某一样是空的」，在开发机上永远
+   * 看不见（两个位置都在同一台机器上，照样读得到）。
+   *
+   * 所以这里直接扫源文件。静态检查在这件事上比运行时断言强：运行时只能看见
+   * 被调到的那几个函数，扫源文件能看见**所有**写法。
+   */
+  await check('没有第二处数据根 —— 所有数据目录都从 getPath(userData) 算', () => {
+    const src = fs.readFileSync(
+      new URL('../electron/services/database.ts', import.meta.url),
+      'utf-8'
+    )
+    // 硬拼环境变量是最可能的绕过方式
+    for (const bad of ['process.env.APPDATA', 'process.env.LOCALAPPDATA', 'process.env.USERPROFILE']) {
+      assert.ok(!src.includes(bad), `database.ts 里出现了 ${bad}，绿色版会从这儿漏数据`)
+    }
+    // 五个数据位置必须都在 getPath('userData') 上。数一下：少于 5 说明有人
+    // 把某一处挪走了，这条断言就该重看（而不是把数字调小）
+    const hits = src.match(/app\.getPath\(['"]userData['"]\)/g) ?? []
+    assert.ok(
+      hits.length >= 5,
+      `database.ts 里只有 ${hits.length} 处 getPath('userData')，原本是 5 处（库/icons/covers/posters/save-backups）`
+    )
+  })
+
+  await check('绿色版的重定向排在建锁和开库之前', () => {
+    // 顺序是硬要求，且**错了不报错**：晚一步，单实例锁会先在旧 userData 里建出来、
+    // createWindow 里那次 getSettings() 会顺手把库开在旧位置，结果是绿色版旁边
+    // 一个空 data\、真数据还在 AppData。这种顺序约束没法用运行时断言表达，
+    // 只能钉住源码里的相对位置
+    const src = fs.readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf-8')
+    const init = src.indexOf('initPortable()')
+    const lock = src.indexOf('.requestSingleInstanceLock')
+    const ready = src.indexOf('app.whenReady()')
+    assert.ok(init > 0, 'main.ts 里没有 initPortable() —— 绿色版根本没接上')
+    assert.ok(lock > 0 && init < lock, 'initPortable() 必须排在 requestSingleInstanceLock 之前')
+    assert.ok(ready > 0 && init < ready, 'initPortable() 必须排在 whenReady 之前，不能挪进回调里')
   })
 }
 

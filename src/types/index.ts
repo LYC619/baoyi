@@ -804,6 +804,11 @@ export interface AppInfo {
   electron: string
   chrome: string
   node: string
+  /**
+   * 这次是不是绿色版（数据在 exe 旁边的 `data\` 里，不在 AppData）。
+   * 开发时恒为 false —— 判据要求 `app.isPackaged`
+   */
+  portable: boolean
 }
 
 /* ------------------------------ 识别日志 ------------------------------ */

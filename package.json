@@ -36,7 +36,8 @@
     "postinstall": "electron-builder install-app-deps",
     "dist": "npm run build && electron-builder",
     "dist:dir": "npm run build && electron-builder --dir",
-    "build-save-manifest": "node --experimental-strip-types --no-warnings scripts/build-save-manifest.ts"
+    "build-save-manifest": "node --experimental-strip-types --no-warnings scripts/build-save-manifest.ts",
+    "dist:portable": "npm run build && electron-builder --dir --config.extends=electron-builder.yml --config.extends=./electron-builder.portable.yml --config.directories.output=release/0.8.0-portable"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",

@@ -1,0 +1,34 @@
+# 绿色版专用配置（合并到 electron-builder.yml 之上）
+#
+#   npx electron-builder --config.extends=electron-builder.yml --config.extends=./electron-builder.portable.yml
+#
+# 只改三件事：
+#  1. 往产物里塞标记文件（判据认它 → 进绿色版模式 → 数据在 exe 旁边）
+#  2. target 换成 dir（免安装包；不走 NSIS）
+#  3. 输出目录加后缀，避免和 NSIS 产物争抢同一个 win-unpacked
+
+appId: com.baoyi.app.portable
+
+directories:
+  output: release/0.8.0-portable
+
+extraFiles:
+  # 两个标记文件，存在即标志绿色版。portable-rules.ts 里 PORTABLE_MARKERS 列的
+  # 谁就得填谁，一个不能少、一个不能多，否则判据会漏或者误判。
+  #
+  # 两个理由：中文那个给人看（点开一个免安装包，里面有个中文文件名能猜出「噢
+  # 这是绿色版」）；ASCII 那个防编码出岔（Windows 文件名能用任何 codepage，
+  # 压缩包工具 / 网盘客户端 / 跨系统拷贝的任何一环搞错编码就会让文件名变成
+  # 乱码或消失，而判据只认字面量）。
+  #
+  # extraFiles 放在 exe 旁边，extraResources 放在 resources/ 里 —— 判据看的是
+  # exe 同级，所以必须用 extraFiles。
+  - from: resources/portable-marker.txt
+    to: 绿色版.txt
+  - from: resources/portable-marker.txt
+    to: portable.txt
+
+win:
+  target:
+    - target: dir
+      arch: [x64]
