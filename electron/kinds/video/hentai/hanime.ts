@@ -64,6 +64,32 @@ export function clearHanimeCache(): void {
 }
 
 /**
+ * 取页用哪个 fetch。默认 `globalThis.fetch`，主进程会换成 Electron 的
+ * `net.fetch`（见 `electron/services/proxy.ts`）。
+ *
+ * ## 为什么非得能换
+ *
+ * 主进程里的 `globalThis.fetch` 是 **Node 的 undici**，它不看
+ * `session.setProxy`，也不看 `--proxy-server` —— 配了代理却不生效，
+ * 表现是「代理设置没保存」，很难往这儿想。只有走 Chromium 网络栈的
+ * `net.fetch` 才吃 session 上那份代理配置。
+ *
+ * 而这个文件不能直接 `import { net } from 'electron'`：`npm run selfcheck` 和
+ * `verify-hentai-e2e` 都在**纯 Node** 下跑，一 import 就崩在加载阶段。
+ * 于是留一个注入点：主进程注入，脚本不注入、照旧走 `globalThis.fetch`
+ * （e2e 正是靠替掉它来喂 fixture 的）。
+ *
+ * 类型用 `typeof globalThis.fetch`，因为 `net.fetch` 和它签名兼容，
+ * 注入端不用包一层适配。
+ */
+let injected: typeof globalThis.fetch | null = null
+
+/** 传 `null` 恢复默认。主进程在代理配置变化时会重新注入 */
+export function setHanimeFetch(f: typeof globalThis.fetch | null): void {
+  injected = f
+}
+
+/**
  * Cloudflare 挑战页的特征。
  *
  * 挑战页是 200 + 一段 JS，不是 403 —— 所以只能看内容。这几个标记里
@@ -102,7 +128,10 @@ async function getHtml(url: string, budget: HanimeBudget): Promise<string> {
   }
   budget.used += 1
 
-  const res = await fetch(url, {
+  // 注入的优先。**每次都重新读** `injected` 而不是在模块顶层取一次 ——
+  // 注入发生在主进程 ready 之后，而这个模块可能更早被 import
+  const doFetch = injected ?? globalThis.fetch
+  const res = await doFetch(url, {
     headers: {
       'User-Agent': UA,
       // 站方是繁体中文站。不带这个头有时会拿到简体或日文版式，class 名一样但文本不同

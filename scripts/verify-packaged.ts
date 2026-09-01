@@ -18,10 +18,19 @@
  * 这一路**只读不写**，可以反复跑。用临时 profile 是为了不碰真库
  * （新 profile 会被引导页拦住，所以先 patch onboarded 再重载）。
  */
+// 这个脚本原先一个 import 都没有，全靠 fetch / WebSocket 这些全局。
+// 读 package.json 需要 fs，所以这是它的第一个 import
+import fs from 'node:fs'
+
 const PORT = 9222
 let seq = 0
 const pending = new Map<number, (r: any) => void>()
 const loadWaiters: (() => void)[] = []
+
+/** 产物该报的版本号。读 package.json，别写死 —— 见下面那条断言的注释 */
+const PKG_VERSION: string = JSON.parse(
+  fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8')
+).version
 
 function connect(): Promise<WebSocket> {
   return new Promise(async (resolve, reject) => {
@@ -98,7 +107,14 @@ async function main(): Promise<void> {
   // 原生模块留在 asar 里的话，这里直接抛，而不是返回一个空结果
   const info = await evalJs(ws, `return await window.baoyi.app.info()`)
   assert('app.info() 通了', !!info, JSON.stringify(info))
-  assert('版本号是 0.7.0', info?.version === '0.7.0', String(info?.version))
+  // 期望值从 package.json 读，不写死 —— 写死的那个每次发版都要有人记得改，
+  // 忘了改的代价是「打包验证红一条」，而红的不是产物的毛病。
+  // 和 seed 那个写死 `_schema !== '7'` 的闸门同一类（见 v0.8-进度.md）
+  assert(
+    `版本号是 ${PKG_VERSION}`,
+    info?.version === PKG_VERSION,
+    `产物报 ${info?.version}，package.json 是 ${PKG_VERSION}`
+  )
 
   // data.stats() 会真查七八张表并数图标/封面/海报目录。它返回得出来，
   // 就说明建表和迁移在打包环境里整个跑通了 —— 原生模块加载不了的话这里直接抛

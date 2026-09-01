@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc/handlers'
 import { finalizeGameSessions } from './kinds/game/service'
 import { closeDb, coversDir, getSettings, iconsDir, postersDir } from './services/database'
+import { initProxy } from './services/proxy'
 
 const APP_ROOT = path.join(__dirname, '..')
 const RENDERER_DIST = path.join(APP_ROOT, 'dist')
@@ -104,6 +105,9 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     registerFileProtocol()
     registerIpcHandlers(getWindow)
+    // 代理不 await：它只影响联网刮削，拦住建窗口不值得。里面自己吞异常 ——
+    // 填错一个代理地址不该变成「应用打不开」
+    void initProxy(() => getSettings().proxy)
     createWindow()
 
     app.on('activate', () => {

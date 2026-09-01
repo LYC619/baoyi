@@ -105,6 +105,7 @@ import {
 } from '../kinds/video/service'
 import { POSTER_EXTS } from '../kinds/video/posters'
 import { testTmdb } from '../kinds/video/tmdb'
+import { normalizeProxyRules, reapplyProxy, resolveProxyFor } from '../services/proxy'
 import {
   materialize,
   previewOrganize,
@@ -418,7 +419,19 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   /* ------------------------------ 设置 ------------------------------ */
   ipcMain.handle('settings:get', () => getSettings())
-  ipcMain.handle('settings:patch', (_e, patch: Partial<AppSettings>) => patchSettings(patch))
+  ipcMain.handle('settings:patch', async (_e, patch: Partial<AppSettings>) => {
+    const next = patchSettings(patch)
+    // 代理改了就当场铺下去，不用重启。只在这个键真出现在 patch 里时动 ——
+    // 别的设置保存一次就顺手重设一遍代理，会把正在进行的连接掐掉
+    if ('proxy' in patch) await reapplyProxy(next.proxy)
+    return next
+  })
+  // 诊断用：让设置页能问「这个地址实际走哪条代理」。填错代理最常见的现象是
+  // 「看着保存了但没生效」，而这一条能当场分辨是规则没铺上还是目标本身不通
+  ipcMain.handle('settings:proxy-status', async (_e, url?: string) => ({
+    rules: normalizeProxyRules(getSettings().proxy),
+    resolved: await resolveProxyFor(String(url || 'https://hanime1.me/'))
+  }))
 
   /* ------------------------------ 扫描 ------------------------------ */
   ipcMain.handle('scan:pick-dir', async () => {

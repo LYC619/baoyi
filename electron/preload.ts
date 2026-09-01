@@ -152,7 +152,8 @@ const api: BaoyiApi = {
   },
   settings: {
     getAll: () => ipcRenderer.invoke('settings:get'),
-    patch: (patch: Partial<AppSettings>) => ipcRenderer.invoke('settings:patch', plain(patch))
+    patch: (patch: Partial<AppSettings>) => ipcRenderer.invoke('settings:patch', plain(patch)),
+    proxyStatus: (url?: string) => ipcRenderer.invoke('settings:proxy-status', url)
   },
   scan: {
     pickDirectory: () => ipcRenderer.invoke('scan:pick-dir'),
