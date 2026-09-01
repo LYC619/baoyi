@@ -8,6 +8,7 @@
  */
 
 import type { AgentEvent, AgentStopReason, AIConfig } from '../../../src/types'
+import { timeAsync } from '../timing.ts'
 
 export type { AgentEvent, AgentStopReason }
 
@@ -229,7 +230,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 
     let turn: ChatTurn
     try {
-      turn = await requestTurn(config, messages, tools, signal)
+      turn = await timeAsync(`LLM 第 ${turns} 轮`, () => requestTurn(config, messages, tools, signal))
     } catch (err) {
       if (signal?.aborted || (err as Error)?.name === 'AbortError') {
         return { stopReason: 'aborted', error: '', turns, tokens, text }

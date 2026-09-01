@@ -11,6 +11,7 @@ import path from 'node:path'
 import type { Launcher, MoveRisk, RegisterPayload, SearchConfig } from '../../../src/types'
 import { readExternalActiveAt } from '../../services/activity'
 import { extractIcon } from '../../services/iconExtractor'
+import { timeAsync, timeSync } from '../../services/timing.ts'
 import { countExes } from './exeCount'
 import { isManualIcon } from './icons.ts'
 import { readPeArch, readPeInfo } from './peReader'
@@ -94,11 +95,13 @@ async function listDirectory(ctx: ToolContext, args: any): Promise<string> {
   for (const entry of entries.slice(0, LIST_LIMIT)) {
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      const { count, truncated, visited } = await countExes(full, {
-        maxDepth: COUNT_MAX_DEPTH,
-        maxEntries: budget,
-        skip: skippable
-      })
+      const { count, truncated, visited } = await timeAsync(`countExes ${entry.name}`, () =>
+        countExes(full, {
+          maxDepth: COUNT_MAX_DEPTH,
+          maxEntries: budget,
+          skip: skippable
+        })
+      )
       budget = Math.max(0, budget - visited)
       // 带 `+` 是在说「至少这么多，没数完」。别把下界写成确切值 ——
       // agent 拿这个数决定要不要进去，「0 个 exe」和「没数完」对它是两回事
@@ -284,7 +287,7 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
   const icon = (await extractIcon(primary.path)) ?? ''
 
   if (ctx.direct) {
-    const outcome = registerSoftware(payload, facts)
+    const outcome = timeSync(`registerSoftware ${nameZh}`, () => registerSoftware(payload, facts))
     if (!outcome) throw new Error('注册失败：没有可用的启动端')
     // 用户亲手换过的图标不许覆盖。「重新识别」是针对**识别结果**的，
     // 不是「把我调过的样子还原」—— 而自动提取的那张覆盖掉无所谓，它本来就是提的
@@ -300,7 +303,9 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
     return `「${nameZh}」（${primary.path}）之前已被用户标记为不注册，本次不再收录。继续处理这个目录里的其他程序。`
   }
 
-  const outcome = stagePending(payload, facts, ctx.unitDir, icon)
+  const outcome = timeSync(`stagePending ${nameZh}`, () =>
+    stagePending(payload, facts, ctx.unitDir, icon)
+  )
   if (!outcome) throw new Error('暂存失败：没有可用的启动端')
   ctx.onRegister?.({ name: nameZh, exe_path: outcome.exe_path, created: outcome.created })
   return registerReply(nameZh, primary, launchers, '已记录（待用户确认）', payload)

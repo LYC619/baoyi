@@ -7,6 +7,7 @@ import { finalizeGameSessions } from './kinds/game/service'
 import { closeDb, coversDir, getSettings, iconsDir, postersDir } from './services/database'
 import { initPortable } from './services/portable'
 import { initProxy } from './services/proxy'
+import { startHeartbeat } from './services/timing.ts'
 
 // **必须排在最前面，不能挪进 whenReady。** 绿色版要把 userData 指到 exe 旁边，
 // 而下面的 requestSingleInstanceLock 会在 userData 里建锁文件、createWindow 会
@@ -110,6 +111,8 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
+    // 默认是空操作，只有带 BAOYI_TIMING=1 起才真的跑
+    startHeartbeat()
     registerFileProtocol()
     registerIpcHandlers(getWindow)
     // 代理不 await：它只影响联网刮削，拦住建窗口不值得。里面自己吞异常 ——

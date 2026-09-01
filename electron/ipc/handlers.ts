@@ -118,11 +118,15 @@ import { addSingleExe, cancelScan, scanDirectories } from '../kinds/software/sca
 import { ICON_EXTS } from '../kinds/software/icons'
 import { clearSoftwareIcon, setSoftwareIcon } from '../kinds/software/service'
 import { testSearch } from '../services/searchService'
+import { countIpcSend } from '../services/timing.ts'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
   const send = (channel: string, payload: unknown) => {
     const win = getWindow()
-    if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+    if (win && !win.isDestroyed()) {
+      countIpcSend(channel, payload)
+      win.webContents.send(channel, payload)
+    }
   }
 
   /* ------------------------------ 应用 ------------------------------ */

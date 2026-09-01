@@ -40,6 +40,7 @@ import {
 } from '../electron/services/taxonomy.ts'
 import { planRoot, skippable } from '../electron/kinds/software/scanPlan.ts'
 import { countExes } from '../electron/kinds/software/exeCount.ts'
+import { parseVersionResource } from '../electron/kinds/software/peReader.ts'
 import {
   ICON_EXTS,
   iconFileName,
@@ -609,6 +610,134 @@ async function main(): Promise<void> {
   })
 
   await fsp.rm(scanRoot, { recursive: true, force: true })
+
+  /* --------------------------- 读 exe 的版本资源 --------------------------- */
+
+  // 这一节和上一节守的是同一件事：界面别卡死。v0.8.0 上点「开始识别」弹「抱一 未响应」，
+  // 根因是 resedit 的 VS_VERSIONINFO 解析器按 String 条目**自报的 wValueLength**
+  // 算下一条的位置，真实文件里那个数对不上时游标原地打转 —— 纯同步死循环，
+  // 不抛错所以 catch 不到，没有 await 所以事件循环一次都轮不到，主进程就此停摆。
+  //
+  // 现在自己走 VS_VERSIONINFO（peReader.ts 里 parseVersionResource），
+  // 按每个节点自报的 wLength 前进，游标不严格变大就收手。下面喂的是构造出来的畸形
+  // 二进制 —— 真 exe 进不了 selfcheck，但触发那个 bug 的形状能原样搭出来。
+  console.log('\n软件识别 · 读 exe 的版本资源')
+
+  const align4 = (n: number): number => (n + 3) & ~3
+  const wide = (s: string): Buffer => Buffer.from(s + '\0', 'utf16le')
+
+  /** 按 VS_VERSIONINFO 的节点格式拼一段。wLength / wValueLength 可以手写成假的，畸形用例要的就是这个 */
+  function verNode(o: {
+    key: string
+    value?: Buffer
+    wType?: number
+    wValueLength?: number
+    wLength?: number
+    children?: Buffer[]
+  }): Buffer {
+    const key = wide(o.key)
+    const value = o.value ?? Buffer.alloc(0)
+    // 兄弟节点之间要 4 字节对齐，补在前一条后面
+    const children = Buffer.concat(
+      (o.children ?? []).map((c) => Buffer.concat([c, Buffer.alloc(align4(c.length) - c.length)]))
+    )
+    const valueStart = align4(6 + key.length)
+    const childStart = align4(valueStart + value.length)
+    const buf = Buffer.alloc(childStart + children.length)
+    const wType = o.wType ?? 1
+    buf.writeUInt16LE(o.wLength ?? buf.length, 0)
+    buf.writeUInt16LE(o.wValueLength ?? (wType === 1 ? value.length / 2 : value.length), 2)
+    buf.writeUInt16LE(wType, 4)
+    key.copy(buf, 6)
+    value.copy(buf, valueStart)
+    children.copy(buf, childStart)
+    return buf
+  }
+
+  /** VS_FIXEDFILEINFO：52 字节，签名 + 版本号，剩下的字段这里用不到 */
+  function fixedInfo(ms: number, ls: number): Buffer {
+    const b = Buffer.alloc(52)
+    b.writeUInt32LE(0xfeef04bd, 0)
+    b.writeUInt32LE(ms, 8)
+    b.writeUInt32LE(ls, 12)
+    return b
+  }
+
+  const versionRoot = (strings: Buffer[], fixed = fixedInfo(0x0005_0000, 0x1388_0000)): Buffer =>
+    verNode({
+      key: 'VS_VERSION_INFO',
+      value: fixed,
+      wType: 0,
+      children: [
+        verNode({
+          key: 'StringFileInfo',
+          children: [verNode({ key: '080404b0', children: strings })]
+        })
+      ]
+    })
+
+  await check('String 条目自报的 wValueLength 短了，值和后面的兄弟都不能丢', () => {
+    // Waves.exe 的真实形状：CompanyName 自报 26，值区实际占 28 个 wchar。
+    // 旧解析器据此算下一条的位置，落在真正的下一条之前 4 字节，从此原地打转。
+    const info = parseVersionResource(
+      versionRoot([
+        verNode({ key: 'CompanyName', value: wide('ESS Earth Sciences Pty Ltd'), wValueLength: 26 }),
+        verNode({ key: 'FileDescription', value: wide('Waves') }),
+        verNode({ key: 'FileVersion', value: wide('5.0.5000') })
+      ])
+    )
+    assert.equal(info.company, 'ESS Earth Sciences Pty Ltd', '短报的那条不能被截断')
+    assert.equal(info.file_description, 'Waves', '它后面的兄弟不能被吃掉')
+    assert.equal(info.version, '5.0.5000')
+  })
+
+  await check('wLength 自报 0 的畸形节点：收手，不是原地打转', () => {
+    // 死循环的直接护栏。真转起来这条会挂着不返回 —— selfcheck 卡住本身就是失败信号
+    const info = parseVersionResource(
+      versionRoot([
+        verNode({ key: 'ProductName', value: wide('никогда'), wLength: 0 }),
+        verNode({ key: 'CompanyName', value: wide('Acme') })
+      ])
+    )
+    assert.equal(info.version, '5.0.5000.0', '固定信息块照样读得到')
+  })
+
+  await check('wType 写 0 的 String 照样当文本读', () => {
+    // vc_redist.x64.exe 八条全写 0，值却都是正常文本，Windows 也照样按文本读出来。
+    // StringFileInfo 底下的条目按定义就是字符串，那个标志不可信
+    const info = parseVersionResource(
+      versionRoot([
+        verNode({ key: 'ProductName', value: wide('VC++ Redistributable'), wType: 0 }),
+        verNode({ key: 'CompanyName', value: wide('Microsoft Corporation'), wType: 0 })
+      ])
+    )
+    assert.equal(info.product_name, 'VC++ Redistributable')
+    assert.equal(info.company, 'Microsoft Corporation')
+  })
+
+  await check('值里看不见的方向标记和零宽字符要清掉', () => {
+    // dpinst64.exe 的 FileDescription 前面挂着两个 U+200E，肉眼和正常的一模一样，
+    // 直接进库就变成搜不着、对不上的脏数据
+    const info = parseVersionResource(
+      versionRoot([
+        verNode({ key: 'FileDescription', value: wide('‎‎Driver Package Installer') }),
+        verNode({ key: 'ProductName', value: wide('﻿Driver Package​') })
+      ])
+    )
+    assert.equal(info.file_description, 'Driver Package Installer')
+    assert.equal(info.product_name, 'Driver Package')
+  })
+
+  await check('没有 FileVersion 时退回固定信息块里的版本号', () => {
+    const info = parseVersionResource(versionRoot([verNode({ key: 'CompanyName', value: wide('Acme') })]))
+    assert.equal(info.version, '5.0.5000.0', '四段全要，末尾的 0 也是版本号的一部分')
+  })
+
+  await check('不是 VS_VERSION_INFO 就当读不到，别硬猜', () => {
+    const info = parseVersionResource(verNode({ key: '不认识', value: wide('x') }))
+    assert.equal(info.company, '')
+    assert.equal(info.version, '')
+  })
 
   /* ------------------------------ 手动换图标 ------------------------------ */
 

@@ -20,6 +20,7 @@
     "verify-video-seed": "node --experimental-strip-types --no-warnings scripts/verify-video-seed.ts",
     "verify-video": "node --experimental-strip-types --no-warnings scripts/verify-video-cdp.ts",
     "verify-hentai-e2e": "node --experimental-strip-types --no-warnings scripts/verify-hentai-e2e.ts",
+    "verify-identify": "node --experimental-strip-types --no-warnings scripts/verify-identify-cdp.ts",
     "rollback-v5": "node --experimental-strip-types --no-warnings scripts/rollback-v5.ts",
     "rollback-v6": "node --experimental-strip-types --no-warnings scripts/rollback-v6.ts",
     "rollback-v7": "node --experimental-strip-types --no-warnings scripts/rollback-v7.ts",
