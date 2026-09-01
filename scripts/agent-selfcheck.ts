@@ -276,6 +276,7 @@ import {
   toVideoCode,
   watchUrl
 } from '../electron/kinds/video/hentai/selectors.ts'
+import { hanimeChannel } from '../electron/kinds/video/hentai/channel.ts'
 import {
   MAX_HANIME_FETCHES,
   hanimeDetail,
@@ -8655,6 +8656,146 @@ async function hanimeChannelSection(): Promise<void> {
     const b = newBudget()
     assert.equal(await hanimeDetail('', b), null)
     assert.equal(b.used, 0)
+  })
+
+  /* -------------------- 通道判据 -------------------- */
+
+  await check('判据一：分类已经是里番就走这条通道', () => {
+    // 用户手改过的分类受永久保护，所以这个事实读一次就够 ——
+    // 这也是「通道依赖分类、分类依赖识别」那个环的断点
+    assert.equal(hanimeChannel('随便什么名字.mkv', HENTAI_CATEGORY), 'category')
+    assert.equal(hanimeChannel('作品名だけ.mkv', '里番'), 'category')
+  })
+
+  await check('判据二：文件名形状像', () => {
+    for (const n of [
+      'OVAピュアピュア ぺろぺろ プリンセス ＃2 [中文字幕]_720P',
+      '寝取られファイター ヤリっちんぐ！ ROUND1 [中文字幕]_720P',
+      'ものすごい #12 _480P',
+      '巨乳女教師 第3話 [无修正]_1080P.mkv'
+    ]) {
+      assert.equal(hanimeChannel(n), 'filename', `${n} 该命中文件名判据`)
+    }
+  })
+
+  await check('判据二不该被普通片库命中', () => {
+    // 挂错的代价是模型多两个搜不到东西的工具（可恢复），
+    // 漏挂的代价是这条片子永远刮不到（不可恢复）——
+    // 所以判据偏松。但松也不能松到把整个动画库和普通片库都圈进来
+    for (const n of [
+      '漫长的季节.S01E05.2023.2160p.WEB-DL.mp4',
+      'Dune.Part.Two.2024.2160p.WEB-DL.x265-GRP.mkv',
+      '[SubsPlease] Frieren - 12 (1080p).mkv',
+      '孤独摇滚 第3話 [简繁内封]_1080P.mkv',
+      '权力的游戏.第二季.第05集.mp4',
+      '某部电影 1080p.mkv'
+    ]) {
+      assert.equal(hanimeChannel(n), '', `${n} 不该命中 —— 它会给整个片库挂上 hanime 工具`)
+    }
+  })
+
+  await check('第N話 / EPN 单独出现不算判据 —— 普通番剧也这么写', () => {
+    // 这两种写法共用解析器本来就认，拿它们当判据会把整个动画库圈进来
+    assert.equal(hanimeChannel('某番剧 第3話.mkv'), '')
+    assert.equal(hanimeChannel('某番剧 EP5.mkv'), '')
+    // 但和站方标记一起出现就算
+    assert.equal(hanimeChannel('某作品 第3話 [无修正].mkv'), 'filename')
+  })
+
+  await check('清晰度单独出现不算判据', () => {
+    // 普通片库的文件名上到处都是 _1080P，拿它当判据等于给整个库都挂上工具
+    assert.equal(hanimeChannel('某部片_1080P.mkv'), '')
+    assert.equal(hanimeChannel('某部片_720P.mkv'), '')
+  })
+
+  /* -------------------- 工具挂载 -------------------- */
+
+  // 一份最小上下文。TMDB 和搜索都关着 —— 这一节只验工具形状和核对逻辑，
+  // 一次网络请求都不该发出去
+  const hCtx = (over: Record<string, unknown> = {}): any => ({
+    facts: {
+      ...emptyFacts(),
+      video_type: 'movie' as const,
+      path: 'D:\\H\\巨乳女教師 第1話 [无修正]_1080P.mkv',
+      dir: 'D:\\H',
+      title_zh: '巨乳女教師',
+      resolution: '1080p'
+    },
+    db: null,
+    tagPool: ['巨乳'],
+    searchConfig: { provider: 'model_builtin' as const, api_key: '', endpoint: '', enabled: false },
+    tmdbConfig: { api_key: '', api_domain: '', image_domain: '', enabled: false },
+    ...over
+  })
+
+  await check('withHanime 关着时这两个工具不出现', () => {
+    // 和 withTmdb / withSearch 同一个约定：prompt 里那段话和工具表必须一致，
+    // 否则模型会去调一个没注册的工具，白烧一轮
+    const names = buildVideoTools(hCtx(), ['里番'], true, true, false).map((t) => t.name)
+    assert.ok(!names.includes('hanime_search'))
+    assert.ok(!names.includes('hanime_detail'))
+  })
+
+  await check('withHanime 开着时两个工具都在，register_video 多一个 hanime_id', () => {
+    const tools = buildVideoTools(hCtx(), ['里番'], true, true, true)
+    const names = tools.map((t) => t.name)
+    assert.ok(names.includes('hanime_search'))
+    assert.ok(names.includes('hanime_detail'))
+    const props = Object.keys(
+      (tools.find((t) => t.name === 'register_video')!.parameters as any).properties
+    )
+    assert.ok(props.includes('hanime_id'))
+
+    // 关掉时这个字段也该消失：没有查询工具就没有合法来源，留着只会被编
+    const offProps = Object.keys(
+      (buildVideoTools(hCtx(), ['里番'], true, true, false).find(
+        (t) => t.name === 'register_video'
+      )!.parameters as any).properties
+    )
+    assert.ok(!offProps.includes('hanime_id'))
+  })
+
+  await check('prompt 里那段话跟着判据变，且不会两段同时出现', () => {
+    const cats = [{ id: 'video-hentai', name: HENTAI_CATEGORY, description: '', icon: '', sort_order: 7 }]
+    const off = fillVideoSystem(cats as any, ['巨乳'], true, true, '')
+    const byCat = fillVideoSystem(cats as any, ['巨乳'], true, true, 'category')
+    const byName = fillVideoSystem(cats as any, ['巨乳'], true, true, 'filename')
+
+    assert.ok(!off.includes('hanime'), '判据没命中时不该提 hanime')
+    assert.ok(byCat.includes('这一条是里番'), '分类判据该用确定的说法')
+    assert.ok(!byCat.includes('看起来像里番'), '两段不该同时出现')
+    assert.ok(byName.includes('看起来像里番'), '文件名判据该用推测的说法')
+    assert.ok(
+      byName.includes('那说明这个判断错了'),
+      '靠猜的那条必须留一句退路，否则模型会硬塞并反复重搜'
+    )
+    // 两种说法都要带上共用那段（标签可用、不要编 id、不要合并集）
+    for (const s of [byCat, byName]) {
+      assert.ok(s.includes('不要编 hanime_id'))
+      assert.ok(s.includes('不要把同系列的集合并成一条'))
+    }
+  })
+
+  await check('编出来的 hanime_id 被丢掉', async () => {
+    // 编一个的后果是详情页上一个指向别的作品的链接，而用户没法判断它是错的：
+    // 点进去看到另一部片，只会以为是站方改了内容
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    const ctx = hCtx({ db: d as any })
+    const tool = buildVideoTools(ctx, ['里番'], true, true, true).find(
+      (t) => t.name === 'register_video'
+    )!
+    const out = await tool.execute({
+      name_zh: '巨乳女教師',
+      summary: 'x',
+      category: HENTAI_CATEGORY,
+      hanime_id: 99999
+    })
+    const row = d.prepare('SELECT hanime_id FROM video_meta').get() as any
+    assert.equal(row.hanime_id, '', '没查过的 hanime_id 不能落库')
+    assert.ok(String(out).includes('99999'), '要把编的那个回灌给模型，别静默丢掉')
+    d.close()
   })
 }
 

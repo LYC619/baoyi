@@ -41,8 +41,10 @@ import {
   restoreScrapedFields,
   updateVideo,
   videoCounts,
+  videoCategoryOf,
   videosUnder
 } from './db.ts'
+import { hanimeChannel } from './hentai/channel.ts'
 import { scanVideoRoot, type VideoCandidate } from './scanner.ts'
 import { buildFacts } from './facts.ts'
 import { fillVideoSystem, videoCandidatePrompt } from './prompts.ts'
@@ -341,8 +343,17 @@ export async function scanVideos(
   const pool = tagPool('video')
   const categories = listCategories('video')
   const categoryNames = categories.map((c) => c.name)
-  const system = fillVideoSystem(categories, pool, withSearch, withTmdb)
   const db = getDb()
+
+  // 系统提示按条目现拼，不再是整次扫描一份。
+  //
+  // 里番通道的判据是**逐条**的（这一条的分类、这一条的文件名），而 prompt 里
+  // 那段话必须和真正挂上去的工具表一致 —— 一份 prompt 配两种工具表的话，
+  // 模型会去调一个没注册的工具，白烧一轮。软件那边踩过这个坑。
+  //
+  // 代价是每个条目多做一次字符串拼接。相比一次模型往返，这可以忽略
+  const systemFor = (reason: '' | 'category' | 'filename'): string =>
+    fillVideoSystem(categories, pool, withSearch, withTmdb, reason)
 
   for (const [i, c] of candidates.entries()) {
     if (signal.aborted) break
@@ -372,11 +383,18 @@ export async function scanVideos(
       }
     }
 
+    // 走不走里番通道。两条判据：库里已有的分类（用户手改过的永久保护，
+    // 所以读一次就够）、文件名形状。见 hentai/channel.ts
+    const hanimeReason = hanimeChannel(path.basename(c.path), videoCategoryOf(db, c.path))
+    if (hanimeReason) {
+      report({ current: c.path, processed: i, log: `走 hanime 通道（${hanimeReason}）` })
+    }
+
     const run = await runAgent({
       config: settings.ai,
-      system,
+      system: systemFor(hanimeReason),
       user: videoCandidatePrompt(facts, videosUnder(db, facts.dir)),
-      tools: buildVideoTools(ctx, categoryNames, withSearch, withTmdb),
+      tools: buildVideoTools(ctx, categoryNames, withSearch, withTmdb, hanimeReason !== ''),
       maxTurns: MAX_TURNS,
       signal,
       onEvent: (e) => report({ current: c.path, processed: i, log: describeEvent(e) })

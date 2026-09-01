@@ -166,6 +166,49 @@ const DOUBAN_NOTE = `
 - 查一次不行最多再查一次（去掉年份、换个译名），**第三次不要查了**。
   同一个服务商同一批索引，换词序不会变出一个新条目页，而每次都在花用户的钱。`
 
+/**
+ * 里番通道那一段。只在判据命中时拼进去。
+ *
+ * 分两种说法，因为两条判据的确定性不一样：分类已经是「里番」是用户手改过的
+ * 事实（分类受永久保护），而文件名形状只是启发式。后者要留一句「搜不到就是猜错了」，
+ * 否则模型会硬把一部普通动画塞进这条通道，然后因为搜不到而反复重搜。
+ */
+const HANIME_NOTE_CATEGORY = `
+## 这一条是里番，走 hanime 通道
+这条目的分类已经是「里番」（用户定过或之前识别过），所以：
+- **不要用 TMDB 或豆瓣**。那两个站上没有这类作品，搜了只会浪费轮次，
+  或者更糟 —— 匹配到一部同名的普通动画，把整条刮成另一部片。
+- 用 \`hanime_search\` 按**作品名**搜。作品名是去掉集号（＃2 / ROUND1 / 第3話）
+  和方括号标记（[中文字幕] / [无修正]）之后剩下的那部分。已知事实里的标题
+  已经是解析过的，直接用它。
+- 找到之后用 \`hanime_detail\` 取站方标签和简介，把 id 填进 \`register_video\`
+  的 \`hanime_id\`。
+- **分类保持「里番」**，不要改成「动画」。`
+
+const HANIME_NOTE_FILENAME = `
+## 这个文件名看起来像里番
+文件名上有里番的特征（＃N / ROUND N 这类集号，或 [中文字幕] [无修正] 这类标记），
+所以给了你 \`hanime_search\` / \`hanime_detail\` 两个工具。
+- **先判断，再搜**。看已知事实里的标题：像日本成人动画就走 hanime 通道，
+  分类填「里番」。
+- 如果 \`hanime_search\` 搜不到，**那说明这个判断错了** —— 不要反复重搜，
+  回到 TMDB 那条正常路径，分类按它真实的样子填。
+- 走 hanime 通道时不要同时查 TMDB 和豆瓣：那两个站上没有这类作品。`
+
+const HANIME_NOTE_COMMON = `
+## 关于 hanime
+- **站方标签直接可用**。它们是这个站自己的分类词（巨乳、女教師、無碼、中文字幕…），
+  比你造的词准。但仍旧受标签规则约束：优先用标签池里已有的，新增最多 2 个。
+- **不要编 hanime_id。** 只填 \`hanime_search\` / \`hanime_detail\` 真实返回过的，
+  编的会被丢弃。
+- 站上一部作品的多集是**各自独立的条目**，每集有自己的 id。你只负责手上这一个
+  文件对应的那一集，**不要把同系列的集合并成一条** —— 别的集是别的文件，
+  它们会各自走一次识别。
+- 取页次数有限（比 TMDB 更紧）。搜一次不行就换一次写法，**不要第三次** ——
+  这个站有防护，请求太密会连不上，而代价落在用户的网络上。
+- 搜不到、解析不出来、或者取页失败，都**不是错误** —— 不填 \`hanime_id\`
+  直接 \`register_video\`，条目照样完整。`
+
 const NO_TMDB_NOTE = `
 ## 本次运行没有配置 TMDB
 没有 \`tmdb_search\` / \`tmdb_detail\` / \`tmdb_find\` 这三个工具，不要尝试调用。
@@ -188,7 +231,9 @@ export function fillVideoSystem(
   categories: Category[],
   pool: string[],
   withSearch = true,
-  withTmdb = true
+  withTmdb = true,
+  /** '' = 不挂里番通道；'category' / 'filename' = 判据命中的原因，见 hentai/channel.ts */
+  hanimeReason: '' | 'category' | 'filename' = ''
 ): string {
   const cats = categories.length
     ? categories.map((c) => `  · ${c.name}${c.description ? ` —— ${c.description}` : ''}`).join('\n')
@@ -204,6 +249,9 @@ export function fillVideoSystem(
 
   if (withSearch) out += DOUBAN_NOTE
   if (!withTmdb) out += NO_TMDB_NOTE
+  // 里番那两段排在最后：判据命中时它说的话要压过上面 TMDB / 豆瓣那些通用规则
+  if (hanimeReason === 'category') out += HANIME_NOTE_CATEGORY + HANIME_NOTE_COMMON
+  else if (hanimeReason === 'filename') out += HANIME_NOTE_FILENAME + HANIME_NOTE_COMMON
   return out
 }
 

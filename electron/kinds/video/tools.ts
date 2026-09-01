@@ -44,6 +44,14 @@ import {
   tmdbSeasonEpisodes,
   type TmdbDetail
 } from './tmdb.ts'
+import {
+  MAX_HANIME_FETCHES,
+  hanimeDetail,
+  hanimeSearch,
+  newBudget,
+  type HanimeBudget
+} from './hentai/hanime.ts'
+import { watchUrl, type HanimeDetail, type HanimeHit } from './hentai/selectors.ts'
 
 /** 一次识别最多搜几次 TMDB。上限在 prompt 里也写了一遍，这里是执行它的那一半 */
 const MAX_TMDB_SEARCHES = 4
@@ -422,6 +430,7 @@ async function register(
   ctx: VideoToolContext,
   ledger: TmdbLedger,
   doubanLedger: DoubanLedger,
+  hanimeLedger: HanimeLedger,
   args: any
 ): Promise<string> {
   const f = ctx.facts
@@ -475,6 +484,17 @@ async function register(
     if (!douban) rejectedDouban = claimedDouban
   }
 
+  /* -------- hanime_id 核对：只收这次真的查过的 -------- */
+  // 编一个出来的后果是详情页上一个指向别的作品的链接，而用户没法判断它是错的：
+  // 点进去看到另一部片，只会以为是站方改了内容
+  const claimedHanime = idOf(args?.hanime_id)
+  let hanimeId = ''
+  let rejectedHanime = ''
+  if (claimedHanime) {
+    if (hanimeLedger.has(claimedHanime)) hanimeId = claimedHanime
+    else rejectedHanime = claimedHanime
+  }
+
   /* -------- 集列表 -------- */
   let episodes: EpisodePayload[] = f.video_type === 'series' ? localEpisodes(f) : []
   let episodeNote = ''
@@ -500,7 +520,9 @@ async function register(
     tags: limitVideoTags(args?.tags, new Set(ctx.tagPool)),
     // 官网都没有时退到豆瓣条目页：对中文用户来说，那个页面比一个 404 的
     // 官方站有用得多 —— 演职员、短评、同类推荐都在那儿
-    official_url: url || detail?.homepage || doubanUrl(douban?.id ?? ''),
+    // 里番排在豆瓣后面：豆瓣上没有这类作品，所以有 hanime_id 的时候
+    // 前两个来源基本都是空的，顺序不产生冲突
+    official_url: url || detail?.homepage || doubanUrl(douban?.id ?? '') || watchUrl(hanimeId),
     source_dir: f.dir,
     file_size: f.parts.reduce((a, p) => a + p.file_size, 0) ||
       f.episodes.reduce((a, e) => a + e.file_size, 0),
@@ -527,6 +549,7 @@ async function register(
     imdb_id: detail?.imdb_id || f.imdb_id,
     douban_id: douban?.id ?? '',
     douban_rating: douban?.rating ?? 0,
+    hanime_id: hanimeId,
     // 相对路径，不是本地文件。下载是 Step 6 的活，但这两个值在这次刮削的
     // 详情响应里白拿 —— 不存的话 Step 6 得为每个条目把详情重取一遍
     poster_path: detail?.poster_path ?? '',
@@ -575,6 +598,12 @@ async function register(
     lines.push(
       `你填的 douban_id ${rejectedDouban} 没有出现在任何一次豆瓣查询结果里，已被忽略。` +
         '只能填 douban_search 真实返回过的 id。'
+    )
+  }
+  if (rejectedHanime) {
+    lines.push(
+      `你填的 hanime_id ${rejectedHanime} 没有出现在任何一次 hanime 查询结果里，已被忽略。` +
+        '只能填 hanime_search / hanime_detail 真实返回过的 id。'
     )
   }
   if (rejectedId) {
@@ -701,17 +730,142 @@ async function doDouban(
   ].join('\n')
 }
 
+/* ============================== hanime ============================== */
+
+/**
+ * 这次识别里 hanime 查过的候选，按 videoCode 记。
+ *
+ * 和 `TmdbLedger` / `DoubanLedger` 同一个用途：`register_video` 只收
+ * **真的查过**的 id。模型编一个 videoCode 出来的后果是详情页上一个
+ * 指向别的作品的链接，而用户没法判断它是错的 —— 他点进去看到另一部片，
+ * 只会以为是站方改了内容。
+ */
+type HanimeLedger = Map<string, HanimeHit | HanimeDetail>
+
+function describeHanimeHits(list: HanimeHit[]): string[] {
+  return list.map((h, i) => {
+    const mins = h.durationSec > 0 ? `${Math.round(h.durationSec / 60)} 分钟` : '时长未知'
+    return `${i + 1}. ${h.title}　[id ${h.videoCode}]　${mins}\n    ${watchUrl(h.videoCode)}`
+  })
+}
+
+/**
+ * 这两个函数不收 `ctx`：hanime 没有 key 要配、不走用户的搜索服务商，
+ * 所以既不需要读配置也不需要报账（`ctx.onSearch` 是给按次计费的服务商用的）。
+ * 加一个用不上的参数只会让人以为这条通道也在花用户的钱。
+ */
+async function doHanimeSearch(
+  ledger: HanimeLedger,
+  budget: HanimeBudget,
+  args: any
+): Promise<string> {
+  const query = str(args?.query, 120)
+  if (!query) throw new Error('query 不能为空')
+
+  let list: HanimeHit[]
+  try {
+    list = await hanimeSearch(query, budget, { limit: 10 })
+  } catch (err) {
+    // 取页失败不该拖垮识别。这里把原文带出去 —— hanime.ts 已经把
+    // 「挑战页」「403/503」「预算用完」分成了三句不同的话，
+    // 而这三种的下一步动作完全不同（换网络 / 等一会儿 / 别再搜了）
+    return (
+      `搜 hanime「${query}」失败：${err instanceof Error ? err.message : String(err)}\n` +
+      '不要重复同一次搜索。按已知事实 register_video，不填 hanime_id。'
+    )
+  }
+
+  if (list.length === 0) {
+    return (
+      `hanime 上没搜到「${query}」。\n` +
+      '可以换一次：去掉集号和方括号里的标记，只用作品名；或者试日文原名。\n' +
+      '**这条通道是可选的** —— 搜不到就按已知事实 register_video，不填 hanime_id。'
+    )
+  }
+
+  for (const h of list) ledger.set(h.videoCode, h)
+
+  return [
+    `hanime 候选 ${list.length} 条（站方顺序，**不是匹配度排序**）：`,
+    ...describeHanimeHits(list),
+    '',
+    '确认是哪一条就用它的 id 调 hanime_detail 取标签和简介，' +
+      '然后把 id 填进 register_video 的 hanime_id。' +
+      '一条都不像就不填 —— 错的链接比没有链接更糟。'
+  ].join('\n')
+}
+
+async function doHanimeDetail(
+  ledger: HanimeLedger,
+  budget: HanimeBudget,
+  args: any
+): Promise<string> {
+  const id = idOf(args?.hanime_id)
+  if (!id) throw new Error('hanime_id 得是站上那串纯数字')
+
+  let detail: HanimeDetail | null
+  try {
+    detail = await hanimeDetail(id, budget)
+  } catch (err) {
+    return (
+      `取 hanime 详情（id ${id}）失败：${err instanceof Error ? err.message : String(err)}\n` +
+      '按已知事实 register_video，不填 hanime_id。'
+    )
+  }
+
+  if (!detail || (!detail.title && detail.tags.length === 0)) {
+    return (
+      `id ${id} 那个页面解析不出内容。可能是 id 不对，也可能是站方改版了。\n` +
+      '不填 hanime_id 直接 register_video。'
+    )
+  }
+
+  ledger.set(detail.videoCode || id, detail)
+
+  const bits = [
+    `hanime 详情（id ${detail.videoCode || id}）：`,
+    `标题：${detail.title || '（没解出来）'}`,
+    detail.chineseTitle ? `中文名：${detail.chineseTitle}` : '',
+    detail.artist ? `厂牌 / 作者：${detail.artist}` : '',
+    detail.tags.length > 0 ? `站方标签：${detail.tags.join('、')}` : '站方标签：（没解出来）',
+    detail.introduction ? `简介：${detail.introduction.slice(0, 600)}` : '',
+    detail.seriesName ? `系列：${detail.seriesName}` : '',
+    detail.episodes.length > 0
+      ? `同系列 ${detail.episodes.length} 集：${detail.episodes.map((e) => e.title || e.videoCode).join('、')}`
+      : ''
+  ].filter(Boolean)
+
+  return [
+    ...bits,
+    '',
+    '**站方标签可以直接用**，它们是这个站自己的分类词，比你造的词准。' +
+      '但仍旧受标签规则约束：优先用标签池里已有的，新增最多 2 个。',
+    detail.episodes.length > 1
+      ? '**同系列的集不要合并成一条**。你只负责手上这一个文件对应的那一集 —— ' +
+        '别的集是别的文件，它们会各自走一次识别。'
+      : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 /* ============================== 工具定义 ============================== */
 
 export function buildVideoTools(
   ctx: VideoToolContext,
   categoryNames: string[],
   withSearch: boolean,
-  withTmdb: boolean
+  withTmdb: boolean,
+  withHanime = false
 ): AgentTool[] {
   // 每个条目一份新账本和新计数：模型不能靠上一部片查过的 id 蒙混过关
   const ledger: TmdbLedger = new Map()
   const doubanLedger: DoubanLedger = new Map()
+  const hanimeLedger: HanimeLedger = new Map()
+  // hanime 的预算不按「次数」记在 counter 上而是一个 budget 对象：
+  // 搜索和详情共用同一份上限，因为限制它们的是同一件事（别被盾盯上），
+  // 不是两份不同的额度
+  const hanimeBudget = newBudget()
   const searchCounter = { n: 0 }
   // 豆瓣和 web_search 各自计数，但两个都是用户的搜索额度。分开数是因为
   // 两个上限不同用途也不同，报给用户的那个数在 ctx.onSearch 上汇总
@@ -829,11 +983,23 @@ export function buildVideoTools(
                     '没查豆瓣或者没匹配上就不填。豆瓣评分不用你填，系统按这个 id 自己取。'
                 }
               }
+            : {}),
+          // 关掉这条通道时这个字段也跟着消失：没有 hanime_search 就没有合法来源，
+          // 留着只会被编出来。和 douban_id 同一个处理
+          ...(withHanime
+            ? {
+                hanime_id: {
+                  type: 'number',
+                  description:
+                    'hanime 的 id。**必须是 hanime_search / hanime_detail 真实返回过的**，' +
+                    '编的会被丢弃。没搜到或者不像就不填。'
+                }
+              }
             : {})
         },
         required: ['name_zh', 'summary', 'category']
       },
-      execute: (args) => register(ctx, ledger, doubanLedger, args)
+      execute: (args) => register(ctx, ledger, doubanLedger, hanimeLedger, args)
     },
     {
       name: 'skip_entry',
@@ -847,6 +1013,51 @@ export function buildVideoTools(
       execute: (args) => skip(ctx, args)
     }
   )
+
+  // 里番通道。挂载条件不是「用户配了什么」而是「这一条看起来是不是里番」——
+  // hanime 是免费公开页面，没有 key 要配，所以没有可用性可判
+  if (withHanime) {
+    tools.push(
+      {
+        name: 'hanime_search',
+        description:
+          `按作品名搜 hanime1.me，返回候选（带 id、标题、时长）。**里番专用通道** —— ` +
+          `搜索和取详情合起来最多 ${MAX_HANIME_FETCHES} 次。` + +
+          'TMDB 和豆瓣上没有这类作品，所以对里番这是唯一能拿到数据的地方。' +
+          '用**作品名**搜，不要带集号（＃2 / ROUND1）和方括号里的标记（[中文字幕]）—— ' +
+          '那些不是名字的一部分，带上会搜不到。日文原名比中文译名准，站上的标题多数是日文。',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: '作品名。去掉集号和标记，日文原名优先'
+            }
+          },
+          required: ['query']
+        },
+        execute: (args) => doHanimeSearch(hanimeLedger, hanimeBudget, args)
+      },
+      {
+        name: 'hanime_detail',
+        description:
+          '按 hanime id 取详情：站方标签、简介、中文名、厂牌、同系列的集。' +
+          '先用 hanime_search 确定是哪一条，再用它的 id 调这个。' +
+          '站方标签是这个站自己的分类词，比你自己造的准。',
+        parameters: {
+          type: 'object',
+          properties: {
+            hanime_id: {
+              type: 'number',
+              description: 'hanime_search 返回的那串纯数字 id'
+            }
+          },
+          required: ['hanime_id']
+        },
+        execute: (args) => doHanimeDetail(hanimeLedger, hanimeBudget, args)
+      }
+    )
+  }
 
   if (withSearch) {
     tools.push(

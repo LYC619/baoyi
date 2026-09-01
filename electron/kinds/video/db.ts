@@ -454,6 +454,23 @@ export function videosUnder(d: SqlDb, dir: string): Array<{ name: string; path: 
   return rows.map((r) => ({ name: r.name_zh || r.name_en || r.file_name, path: r.path }))
 }
 
+/**
+ * 这条路径上已有条目的分类。空串 = 库里还没有它。
+ *
+ * 给刮削通道判据用（见 `hentai/channel.ts`）：用户手改过的分类是**永久保护**的
+ * （`category` 在 PROTECTED_RESOURCE_FIELDS 里），所以「这一条已经是里番」
+ * 这个事实读一次就够，不用每次重新猜。
+ *
+ * 只查 `resource`，不走 `video` 视图 —— 视图里 JOIN 了 video_meta 和三个
+ * 子查询统计集数，而这里只要一列。识别每个条目都会调它一次。
+ */
+export function videoCategoryOf(d: SqlDb, path: string): string {
+  const row = d
+    .prepare(`SELECT category FROM resource WHERE kind = 'video' AND path = ?`)
+    .get(String(path ?? '')) as { category?: string } | undefined
+  return String(row?.category ?? '')
+}
+
 /* ================================ 读 ================================ */
 
 type Row = Record<string, any>
