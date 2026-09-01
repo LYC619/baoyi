@@ -182,7 +182,8 @@ export const PROTECTED_FIELD_LABEL: Record<string, string> = {
   tmdb_id: 'TMDB id',
   imdb_id: 'IMDb id',
   douban_id: '豆瓣 id',
-  douban_rating: '豆瓣评分'
+  douban_rating: '豆瓣评分',
+  hanime_id: 'hanime id'
 }
 
 /** 游戏卡片 / 详情页打头的名字。中文名优先，都没有就退回主程序文件名 */

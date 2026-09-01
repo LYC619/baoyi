@@ -109,6 +109,18 @@ export const VIDEO_META_SQL = `
     -- 而中文用户看影视评分时,「这是豆瓣的分」本身就是信息。
     douban_rating REAL NOT NULL DEFAULT 0,
 
+    -- hanime 的 videoCode，纯数字字符串。0.8 加的。
+    --
+    -- 地位和 tmdb_id 完全一样：有它，重新刮削就是一次精确查询（/watch?v=<它>）
+    -- 而不是重新按名字搜一遍 —— 里番的名字里全角半角、＃N、站方繁体标题
+    -- 混在一起，按名字重搜每次都可能落到不同的候选上。
+    -- （这段注释里刻意不用反引号：整个 VIDEO_META_SQL 是模板字符串，
+    --   反引号会把它提前截断，而报错位置指向的是几十行之外）
+    --
+    -- 存成 TEXT 而不是 INTEGER：它是站方 URL 里的一个标识符，不参与算术，
+    -- 而 tmdb_id / douban_id 也都是 TEXT。前导零真出现时 INTEGER 会吃掉它。
+    hanime_id TEXT NOT NULL DEFAULT '',
+
     -- 用户在界面上改过哪些字段，JSON 字符串数组，如 '["category","name_zh"]'。
     -- 重扫时这些字段跳过不写，见 db.ts 的 PROTECTED_* 两张名单。
     --
@@ -208,6 +220,7 @@ export const VIDEO_VIEW_SQL = `
     COALESCE(m.imdb_id, '') AS imdb_id,
     COALESCE(m.douban_id, '') AS douban_id,
     COALESCE(m.douban_rating, 0) AS douban_rating,
+    COALESCE(m.hanime_id, '') AS hanime_id,
     COALESCE(m.user_edited, '[]') AS user_edited,
     (SELECT COUNT(*) FROM episode e WHERE e.resource_id = r.id) AS episode_total,
     (SELECT COUNT(*) FROM episode e WHERE e.resource_id = r.id AND e.watch_status = 'watched')
@@ -322,9 +335,22 @@ export function migrateVideo(d: SqlDb, from: number): void {
   if (!cols.has('user_edited')) {
     d.exec(`ALTER TABLE video_meta ADD COLUMN user_edited TEXT NOT NULL DEFAULT '[]'`)
   }
+  // 0.8 加的。走「列在不在」而不是版本号，理由同上面那三列 ——
+  // 而且它得和下面那道视图闸门配套：列补上了视图也必须跟着重建
+  if (!cols.has('hanime_id')) {
+    d.exec(`ALTER TABLE video_meta ADD COLUMN hanime_id TEXT NOT NULL DEFAULT ''`)
+  }
 
-  if (objectType(d, 'video') === 'view' && !columnsOf(d, 'video').has('user_edited')) {
-    d.exec('DROP VIEW video')
+  // 视图缺任何一个新列就撤掉，让 initSchema 紧接着按新定义重建。
+  //
+  // 这里判的是**两列都在不在**，不是只判 user_edited：0.8 之前装过的库
+  // 视图里有 user_edited 但没有 hanime_id，只判前者的话这种库不会重建视图，
+  // 而 getVideo 是从视图读的 —— 每条的 hanime_id 都是 undefined，
+  // 详情页上那个链接永远不出现，重刮也永远走不了精确查询那条路。
+  // 且不报任何错，因为 SQL 层面视图本身是合法的
+  if (objectType(d, 'video') === 'view') {
+    const v = columnsOf(d, 'video')
+    if (!v.has('user_edited') || !v.has('hanime_id')) d.exec('DROP VIEW video')
   }
 }
 

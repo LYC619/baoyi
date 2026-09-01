@@ -83,6 +83,14 @@ export interface VideoPayload {
   /** 豆瓣评分。0 = 没拿到，和 rating 分开存，见 schema.ts */
   douban_rating: number
   /**
+   * hanime 的 videoCode。空串 = 没刮到或不是里番。地位同 tmdb_id。
+   *
+   * 可选：0.8 才加的，而这个 payload 有十来处构造点（扫描器、nfo、自检、
+   * 回滚验证脚本）。要求它等于让每一处都写一遍 `hanime_id: ''`，
+   * 而那些地方没有一处知道 hanime 是什么。
+   */
+  hanime_id?: string
+  /**
    * TMDB 上的海报相对路径（`/abc.jpg`），**不是本地文件路径**。
    *
    * 刮削时顺手存下来。下载图片是 Step 6 的活（要缓存目录、要主机白名单，
@@ -156,7 +164,7 @@ export const PROTECTED_RESOURCE_FIELDS = [
 ] as const
 export const PROTECTED_META_FIELDS = [
   'video_type', 'year', 'end_year', 'rating',
-  'tmdb_id', 'imdb_id', 'douban_id', 'douban_rating'
+  'tmdb_id', 'imdb_id', 'douban_id', 'douban_rating', 'hanime_id'
 ] as const
 
 /** 两张名单合起来。界面上「这个字段被保护着」的判断用它 */
@@ -231,7 +239,13 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
     ['tmdb_id', p.tmdb_id],
     ['imdb_id', p.imdb_id],
     ['douban_id', p.douban_id],
-    ['douban_rating', p.douban_rating]
+    ['douban_rating', p.douban_rating],
+    // 0.8 加的，所以是可选字段 —— 这里补默认值而不是让 VideoPayload 要求它。
+    //
+    // 不补的话 undefined 会一路走到 stmt.run()，报的是
+    // 「Provided value cannot be bound to SQLite parameter 13」——
+    // 一句不提哪个字段的错，而它会在**每一次入库**上炸，不只是里番那条路
+    ['hanime_id', p.hanime_id ?? '']
   ]
   // 只在新建时写的一组：别家 nfo 记的观看状态。
   //
@@ -499,6 +513,7 @@ function rowToVideo(row: Row): VideoItem {
     imdb_id: String(row.imdb_id ?? ''),
     douban_id: String(row.douban_id ?? ''),
     douban_rating: Number(row.douban_rating) || 0,
+    hanime_id: String(row.hanime_id ?? ''),
     user_edited: parseUserEdited(row.user_edited),
     episode_total: Number(row.episode_total) || 0,
     episode_watched: Number(row.episode_watched) || 0,
@@ -730,7 +745,7 @@ export const VIDEO_META_COLUMNS = new Set([
   'watch_status', 'position_sec', 'duration_sec', 'last_watched_at',
   'resolution', 'video_codec', 'source', 'release_group',
   'audio_tracks', 'subtitle_tracks', 'parts', 'linked_files', 'tmdb_id', 'imdb_id',
-  'douban_id', 'douban_rating'
+  'douban_id', 'douban_rating', 'hanime_id'
 ])
 
 function toColumn(key: string, value: unknown): string | number {

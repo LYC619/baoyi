@@ -7575,12 +7575,13 @@ async function videoUserEditedSection(): Promise<void> {
     d.close()
   })
 
-  await check('user_edited 没有单独提版本号，8 是留给 0.8 的分类的', () => {
-    // 这一列的闸门是 columnsOf().has()，不是版本号（见 kinds/video/schema.ts 文件头）。
-    // 0.8 把版本号推到 8，标记的是「视频分类多了『里番』一格」——
-    // 两件事共用一个数字的话，rollback-v7 那句「退回 0.6」和 rollback-v8
-    // 的界限就说不清了
-    assert.equal(SCHEMA_VERSION, 8, '0.8 的库形状是 8')
+  await check('user_edited 和 hanime_id 都不靠版本号，闸门是「列在不在」', () => {
+    // 这两列的闸门是 columnsOf().has()，不是版本号（见 kinds/video/schema.ts 文件头）。
+    // 版本号在 0.8 里推了两次，各自标记一件能回滚的事：
+    //   8 = 视频分类多了「里番」一格（rollback-v8 撤这个）
+    //   9 = video_meta 多了 hanime_id 列（rollback-v9 撤这个）
+    // 一个数字标两件事的话，两个回滚脚本的界限就说不清了
+    assert.equal(SCHEMA_VERSION, 9, '0.8 收尾时的库形状是 9')
   })
 }
 
@@ -7966,7 +7967,7 @@ async function hentaiCategorySection(): Promise<void> {
       other.sort_order > h!.sort_order,
       `兜底那格该排在里番后面，实际 其他=${other.sort_order} 里番=${h!.sort_order}`
     )
-    assert.equal(schemaVersion(d as any), 8, '版本号该跟着推上去')
+    assert.equal(schemaVersion(d as any), SCHEMA_VERSION, '版本号该跟着推上去')
     d.close()
   })
 
@@ -8037,6 +8038,98 @@ async function hentaiCategorySection(): Promise<void> {
       1,
       '两条路都插了一遍 —— 里番出现了两次'
     )
+    d.close()
+  })
+
+  await check('hanime_id：新库建表就有，视图里也读得到', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    assert.ok(columnsOf(d as any, 'video_meta').has('hanime_id'))
+    assert.ok(columnsOf(d as any, 'video').has('hanime_id'), '视图里没有它，getVideo 就读不到')
+    d.close()
+  })
+
+  await check('hanime_id：老库补上列之后，视图必须跟着重建', () => {
+    // 这一条挡的和 user_edited 那条同源，但它挡的是**第二次**踩：
+    // 0.8 中途装过的库视图里有 user_edited、没有 hanime_id。
+    // 那道闸门原先只判 user_edited，于是这种库不会重建视图 ——
+    // 而 getVideo 从视图读，每条 hanime_id 都是 undefined，
+    // 详情页那个链接永远不出现，重刮也永远走不了精确查询。且不报错
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+
+    // 造出「0.8 中途那种库」：表里有列，视图是少一列的旧定义
+    d.exec('DROP VIEW video')
+    d.exec(`
+      CREATE VIEW video AS
+      SELECT r.id, r.created_at, r.updated_at, r.path, r.file_name, r.file_size,
+             r.source_dir, r.name_zh, r.name_en, r.summary, r.description,
+             r.category, r.tags, r.official_url, r.ai_status, r.notes, r.is_archived,
+             m.video_type, m.poster_path, m.fanart_path, m.year, m.end_year, m.rating,
+             m.watch_status, m.position_sec, m.duration_sec, m.last_watched_at,
+             m.resolution, m.video_codec, m.source, m.release_group,
+             m.audio_tracks, m.subtitle_tracks, m.parts, m.linked_files,
+             m.tmdb_id, m.imdb_id, m.douban_id, m.douban_rating, m.user_edited,
+             0 AS episode_total, 0 AS episode_watched, 0 AS episode_present
+      FROM resource r LEFT JOIN video_meta m ON m.resource_id = r.id
+      WHERE r.kind = 'video'
+    `)
+    assert.ok(columnsOf(d as any, 'video').has('user_edited'), '前置条件：旧视图有 user_edited')
+    assert.ok(!columnsOf(d as any, 'video').has('hanime_id'), '前置条件：旧视图缺 hanime_id')
+
+    initSchema(d as any, KINDS)
+    assert.ok(
+      columnsOf(d as any, 'video').has('hanime_id'),
+      '视图没重建 —— hanime_id 读出来会是 undefined，而库结构看着是对的'
+    )
+    d.close()
+  })
+
+  await check('hanime_id：存得住读得回，且受重扫保护', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    const { id } = insertVideo(d as any, {
+      path: 'D:\\H\\巨乳女教師 第1話_1080P.mkv',
+      video_type: 'movie',
+      name_zh: '巨乳女教師',
+      name_en: '',
+      summary: 'x',
+      description: '',
+      category: HENTAI_CATEGORY,
+      tags: [],
+      official_url: '',
+      source_dir: 'D:\\H',
+      file_size: 1,
+      year: 0,
+      end_year: 0,
+      rating: 0,
+      duration_sec: 0,
+      resolution: '1080p',
+      video_codec: '',
+      source: '',
+      release_group: '',
+      audio_tracks: [],
+      subtitle_tracks: [],
+      parts: [],
+      linked_files: [],
+      tmdb_id: '',
+      imdb_id: '',
+      douban_id: '',
+      douban_rating: 0,
+      hanime_id: '86994',
+      poster_path: '',
+      fanart_path: '',
+      watch_status: 'unwatched',
+      episodes: []
+    } as any)
+    assert.equal(getVideo(d as any, id)!.hanime_id, '86994')
+
+    // 在保护名单里：用户改了它是在说「你匹配错作品了」，
+    // 不保护的话下次重扫按错的 id 又把整条刮一遍
+    assert.ok(PROTECTED_META_FIELDS.includes('hanime_id' as any))
     d.close()
   })
 

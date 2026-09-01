@@ -1010,6 +1010,11 @@ export interface VideoMeta {
    * 诚实地说这个分是哪儿来的了。
    */
   douban_rating: number
+  /**
+   * hanime 的 videoCode（`hanime1.me/watch?v=<它>` 里那串数字）。
+   * 空串 = 没刮到，或这条不是里番。地位同 `tmdb_id`：有它就能精确重刮。
+   */
+  hanime_id: string
 }
 
 /**
