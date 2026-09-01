@@ -15,6 +15,17 @@
 import { DatabaseSync } from 'node:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
+import { SCHEMA_VERSION } from '../electron/services/schema.ts'
+import { HENTAI_CATEGORY } from '../electron/kinds/video/taxonomy.ts'
+import { SEED_VIDEOS, SEED_HENTAI } from './lib/video-seed-data.ts'
+
+// 声明在 lib/video-seed-data.ts，CDP 那一路要从同一份声明算期望值。
+// 这一条断言把「那个文件里的字面量」和「主进程真正用的常量」钉在一起 ——
+// 分类名要是改了而那边没跟上，这里先炸，而不是等真机验证红一片
+if (SEED_HENTAI !== HENTAI_CATEGORY) {
+  console.error(`分类名对不上：seed 数据写的是 ${SEED_HENTAI}，taxonomy 里是 ${HENTAI_CATEGORY}`)
+  process.exit(1)
+}
 
 const profile = process.argv[2]
 if (!profile) {
@@ -31,9 +42,18 @@ if (!fs.existsSync(dbFile)) {
 const db = new DatabaseSync(dbFile)
 db.exec('PRAGMA foreign_keys = ON')
 
+/**
+ * 版本闸门读的是 `SCHEMA_VERSION` 而不是写死的数字。
+ *
+ * 原先写死 `!== '7'`，于是库升到 9 之后这个脚本直接拒绝开工 —— 表现是
+ * 「真机验证做不了」，而真正的原因只是闸门本身过期了。写死的那个数字每次
+ * 迁移都要有人记得改，而忘了改的代价是**验证路径先坏掉**，最需要它的时候。
+ */
 const schema = (db.prepare(`SELECT value FROM settings WHERE key = '_schema'`).get() as any)?.value
-if (String(schema ?? '') !== '7') {
-  console.error(`库版本是 ${schema}，不是 7 —— 这个 profile 没跑过 v0.7 迁移`)
+if (String(schema ?? '') !== String(SCHEMA_VERSION)) {
+  console.error(
+    `库版本是 ${schema}，不是 ${SCHEMA_VERSION} —— 这个 profile 没跑完迁移，先空跑一次应用`
+  )
   process.exit(1)
 }
 
@@ -56,70 +76,6 @@ const PNG_1X1 = Buffer.from(
   'base64'
 )
 
-interface SeedVideo {
-  id: string
-  name: string
-  type: 'movie' | 'series'
-  /** '' = 没海报（验首字占位）；'local' = 真图；'tmdb' = 相对路径（验它被挡掉） */
-  poster: '' | 'local' | 'tmdb'
-  status: 'unwatched' | 'watching' | 'watched' | 'dropped'
-  category: string
-  tags: string
-  year: number
-  rating: number
-  doubanRating: number
-  duration: number
-  archived?: boolean
-  /** path 指向 profile 里那个真文件，用来验「真的调起了播放器」。见 PLAYABLE */
-  playable?: boolean
-}
-
-const VIDEOS: SeedVideo[] = [
-  // 有本地海报 + 在看 —— 墙上和侧栏都要能看见
-  {
-    id: 'vid-0001', name: '沙丘', type: 'movie', poster: 'local', status: 'watching',
-    category: '欧美', tags: '科幻,史诗', year: 2021, rating: 7.9, doubanRating: 7.7, duration: 9300
-  },
-  // 只有 TMDB 相对路径 —— 界面必须退回首字占位，不能是一张破图
-  {
-    id: 'vid-0002', name: '奥本海默', type: 'movie', poster: 'tmdb', status: 'unwatched',
-    category: '欧美', tags: '传记', year: 2023, rating: 8.1, doubanRating: 8.9, duration: 10800
-  },
-  // 一张海报都没有 + 只有豆瓣分（验排序回落）
-  {
-    id: 'vid-0003', name: '钢的琴', type: 'movie', poster: '', status: 'watched',
-    category: '华语', tags: '文艺', year: 2010, rating: 0, doubanRating: 8.4, duration: 6300
-  },
-  // 剧集，有季集表，看了一部分 —— 详情页的重心在这条上
-  {
-    id: 'vid-0004', name: '黑暗荣耀', type: 'series', poster: 'local', status: 'watching',
-    category: '日韩', tags: '悬疑,复仇', year: 2022, rating: 8.1, doubanRating: 8.9, duration: 0
-  },
-  // 剧集但没有季集表 —— 验那块「没刮到季集表」的解释面板
-  {
-    id: 'vid-0005', name: '某部没刮到的剧', type: 'series', poster: '', status: 'unwatched',
-    category: '日韩', tags: '', year: 0, rating: 0, doubanRating: 0, duration: 0
-  },
-  // 弃 —— 侧栏那一格的空心点
-  {
-    id: 'vid-0006', name: '半途而废的片', type: 'movie', poster: '', status: 'dropped',
-    category: '欧美', tags: '', year: 2015, rating: 5.2, doubanRating: 0, duration: 5400
-  },
-  // 归档 —— 侧栏的归档区只在有归档时出现
-  {
-    id: 'vid-0007', name: '收进箱底的片', type: 'movie', poster: '', status: 'watched',
-    category: '华语', tags: '', year: 2008, rating: 7.0, doubanRating: 7.1, duration: 7200,
-    archived: true
-  },
-  // Step 7：唯一一条 path 指向**真实存在**的文件（见下面 PLAYABLE）。
-  // 别的条目路径都是 D:\假影视\... ，点播放只能验到「文件不在了」那一支；
-  // 而「真的调起了播放器 + 状态从未看抬到在看」这一段得有个真文件才验得到
-  {
-    id: 'vid-0008', name: '能真打开的片', type: 'movie', poster: '', status: 'unwatched',
-    category: '欧美', tags: '', year: 2019, rating: 6.5, doubanRating: 0, duration: 3600,
-    playable: true
-  }
-]
 
 /**
  * 那个真文件：profile 里的一个 .txt。
@@ -151,7 +107,7 @@ const SUBS = ['沙丘.简体.srt', '沙丘.英文.ass'].map((name) => {
   return p
 })
 
-for (const v of VIDEOS) {
+for (const v of SEED_VIDEOS) {
   const isSeries = v.type === 'series'
   // 剧集的 path 是目录、file_name 是目录名；电影的 path 是文件
   const dir = `D:\\假影视\\${v.name}`
@@ -170,7 +126,10 @@ for (const v of VIDEOS) {
     'D:\\假影视',
     v.name,
     `${v.name}的简介。这一段是假的，用来验详情页那块简介排版。`,
-    v.category, v.tags,
+    v.category,
+    // JSON 数组字符串，和 `insertVideo` 写进去的形状一致（`JSON.stringify(p.tags)`）。
+    // 铺成 `'科幻,史诗'` 的话读出来是空数组 —— 详见 SeedVideo.tags 的注释
+    JSON.stringify(v.tags),
     v.archived ? 1 : 0
   )
 
@@ -194,19 +153,26 @@ for (const v of VIDEOS) {
         ]
       : []
 
+  // 里番不给 tmdb_id / douban_id：那两个站上本来就没有这类条目，给了就等于
+  // 铺了一份现实里不会出现的数据，验出来的按钮组合也是假的
+  const isHentai = v.category === HENTAI_CATEGORY
+
   db.prepare(
     `INSERT INTO video_meta
        (resource_id, video_type, poster_path, year, rating, watch_status,
         duration_sec, resolution, video_codec, source, release_group,
-        audio_tracks, subtitle_tracks, tmdb_id, douban_id, douban_rating)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        audio_tracks, subtitle_tracks, tmdb_id, douban_id, douban_rating, hanime_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     v.id, v.type, posterPath, v.year, v.rating, v.status, v.duration,
     isSeries ? '' : '1080p', isSeries ? '' : 'AVC', isSeries ? '' : 'BLURAY',
     isSeries ? '' : 'GROUP',
     JSON.stringify([{ index: 0, language: 'zh', label: '国语 5.1', codec: 'DTS', path: '' }]),
     JSON.stringify(subtitleTracks),
-    v.year ? '438631' : '', v.doubanRating ? '3820120' : '', v.doubanRating
+    isHentai ? '' : v.year ? '438631' : '',
+    isHentai ? '' : v.doubanRating ? '3820120' : '',
+    v.doubanRating,
+    v.hanimeId ?? ''
   )
 }
 
@@ -251,6 +217,8 @@ console.log(
   JSON.stringify(
     {
       videos: n(`SELECT COUNT(*) AS n FROM video`),
+      hentai: n(`SELECT COUNT(*) AS n FROM video WHERE category = '${HENTAI_CATEGORY}'`),
+      withHanimeId: n(`SELECT COUNT(*) AS n FROM video WHERE hanime_id != ''`),
       movies: n(`SELECT COUNT(*) AS n FROM video WHERE video_type = 'movie'`),
       series: n(`SELECT COUNT(*) AS n FROM video WHERE video_type = 'series'`),
       archived: n(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 1`),

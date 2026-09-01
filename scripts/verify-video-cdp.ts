@@ -1,19 +1,20 @@
 /**
  * 真机验 v0.7 Step 6 / 6b / 7：海报墙渲染、`baoyi://poster/` 那条协议、季集列表、
  * 观看状态、「改过的字段」那块面板，以及播放和字幕。
+ * v0.8 加了【十】：里番那一格、hanime 按钮、点标签筛选。
  *
  * 用法（先 npm run build，profile 里先铺好数据）：
  *   npx electron . --user-data-dir=<临时 profile> --remote-debugging-port=9222
  *   node --experimental-strip-types scripts/verify-video-cdp.ts <临时 profile>
  *
  * **这一路不可重跑。** 【六】把 11 集标成看完、【七】删掉 vid-0001 的海报、
- * 【八】改了 vid-0006 两栏又撤掉保护、【十】把 vid-0008 从未看推成在看 —— 都是真
+ * 【八】改了 vid-0006 两栏又撤掉保护、【十一】把 vid-0008 从未看推成在看 —— 都是真
  * 写库。第二遍跑的时候起点全不对，会红上一堆，而那些红是上一遍自己留下的，不是
  * 回归。要重跑就删掉整个 profile
  * 重铺：空跑一次应用建表 → verify-video-seed → 重启应用 → 这个脚本。
  *
  * 顺序上有两处是绑死的，挪之前先读注释：【五】必须在【六】之前（标记会把断点
- * 那一层验没了），【十】必须在所有 DOM 断言之后（记事本抢焦点）。
+ * 那一层验没了），【十一】必须在所有 DOM 断言之后（记事本抢焦点）。
  *
  * **为什么这一路非真机不可。** 五道闸门验的全是纯逻辑。它们看不见：
  * `<img src="baoyi://poster/...">` 到底解出来没有（协议注册、白名单目录、
@@ -27,14 +28,15 @@
  * - reload 后立刻 evaluate 会撞上 document.body 还是 null，必须等 load 事件。
  * - window.confirm 是真模态，不自动点掉 evaluate 永不返回。
  *
- * **【十】会真弹一个记事本出来**，脚本在同一节里立刻杀掉它，不留到最后：记事本
+ * **【十一】会真弹一个记事本出来**，脚本在同一节里立刻杀掉它，不留到最后：记事本
  * 抢走前台会把 Electron 窗口的 rAF 掐掉，之后的页面查询看起来像是卡死（v0.6 记过
- * 这个坑）。它后面还有一节要跳页读 innerText（【十一】），靠的就是那次杀干净。
+ * 这个坑）。它后面还有一节要跳页读 innerText（【十二】），靠的就是那次杀干净。
  */
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { SEED_EXPECT, SEED_HENTAI, SEED_VIDEOS } from './lib/video-seed-data.ts'
 
 const profile = process.argv[2]
 if (!profile) {
@@ -203,12 +205,21 @@ async function main(): Promise<void> {
   )
   console.log('  墙:', JSON.stringify(wall))
 
-  // 铺了 8 条，其中 1 条归档 —— 默认视图不该带归档的
-  assert('墙上是 7 张卡（归档的不在默认视图里）', wall.cards === 7, `拿到 ${wall.cards}`)
-  assert('有 2 张卡带真图（沙丘 + 黑暗荣耀）', wall.imgs === 2, `拿到 ${wall.imgs}`)
+  // 期望值从 seed 的**声明**算（见 lib/video-seed-data.ts 顶部注释），不写死数字：
+  // 铺的数据一改，写死的那些会集体过期，而过期的表现是验证脚本自己红一片
   assert(
-    '那 2 张图真的解出来了 —— 这一条是 baoyi://poster 协议的唯一硬证据',
-    wall.decoded === 2,
+    `墙上是 ${SEED_EXPECT.live} 张卡（归档的不在默认视图里）`,
+    wall.cards === SEED_EXPECT.live,
+    `拿到 ${wall.cards}`
+  )
+  assert(
+    `有 ${SEED_EXPECT.realPosters} 张卡带真图`,
+    wall.imgs === SEED_EXPECT.realPosters,
+    `拿到 ${wall.imgs}`
+  )
+  assert(
+    `那 ${SEED_EXPECT.realPosters} 张图真的解出来了 —— 这一条是 baoyi://poster 协议的唯一硬证据`,
+    wall.decoded === SEED_EXPECT.realPosters,
     `解出来 ${wall.decoded} 张，src=${JSON.stringify(wall.srcs)}`
   )
   assert(
@@ -216,7 +227,11 @@ async function main(): Promise<void> {
     wall.srcs.every((s: string) => /^baoyi:\/\/poster\/vid-\d+\.png\?v=\d+$/.test(s)),
     JSON.stringify(wall.srcs)
   )
-  assert('剩下 5 张退回首字占位', wall.initials === 5, `拿到 ${wall.initials}`)
+  assert(
+    `剩下 ${SEED_EXPECT.initials} 张退回首字占位`,
+    wall.initials === SEED_EXPECT.initials,
+    `拿到 ${wall.initials}`
+  )
   assert(
     'TMDB 相对路径那条没拼成图片地址（否则是一张永久破图）',
     !wall.srcs.some((s: string) => s.includes('wPRcNZ4Q1Rk')),
@@ -235,11 +250,20 @@ async function main(): Promise<void> {
   assert('侧栏有「在看」', side.hasWatching === true)
   assert('侧栏有「弃」', side.hasDropped === true)
   assert('有归档条目时才出现归档区', side.hasArchiveSection === true)
-  assert('counts.all 是 7（不含归档）', side.counts.all === 7, `拿到 ${side.counts.all}`)
-  assert('counts.archived 是 1', side.counts.archived === 1, `拿到 ${side.counts.archived}`)
   assert(
-    'counts 里电影 5 / 剧集 2（归档那部电影不计）',
-    side.counts.type.movie === 5 && side.counts.type.series === 2,
+    `counts.all 是 ${SEED_EXPECT.live}（不含归档）`,
+    side.counts.all === SEED_EXPECT.live,
+    `拿到 ${side.counts.all}`
+  )
+  assert(
+    `counts.archived 是 ${SEED_EXPECT.archived}`,
+    side.counts.archived === SEED_EXPECT.archived,
+    `拿到 ${side.counts.archived}`
+  )
+  assert(
+    `counts 里电影 ${SEED_EXPECT.movies} / 剧集 ${SEED_EXPECT.series}（归档那部电影不计）`,
+    side.counts.type.movie === SEED_EXPECT.movies &&
+      side.counts.type.series === SEED_EXPECT.series,
     `movie=${side.counts.type.movie} series=${side.counts.type.series}`
   )
   // 闭集：四个观看状态一个都不能缺，缺的那个是 0 而不是 undefined。
@@ -251,6 +275,17 @@ async function main(): Promise<void> {
     ),
     JSON.stringify(side.counts.status)
   )
+  // v0.8 补的一条。v0.7 的 seed 把 tags 铺成了逗号分隔的字符串，而那一列存的是
+  // JSON 数组 —— 于是 counts.tags 一直是空的，侧栏那段 v-if 从来没渲染过，
+  // 而当时没有任何一条断言看过标签，所以一路绿着。补上这条，塌了会立刻现形
+  assert(
+    `侧栏标签区拿到 ${SEED_EXPECT.tagNames.length} 个标签（seed 的 tags 真被解出来了）`,
+    Array.isArray(side.counts.tags) && side.counts.tags.length === SEED_EXPECT.tagNames.length,
+    `拿到 ${JSON.stringify((side.counts.tags ?? []).map((t: any) => t.name))}`
+  )
+  // detail 那一栏在通过时也会打出来（assert 的既有行为），所以写成实测值而不是
+  // 「没渲染」这类结论 —— 否则绿灯旁边跟着一句像是失败的话
+  assert('标签区出现在页面上', side.text.includes('标签'), `页面含「标签」=${side.text.includes('标签')}`)
 
   console.log('\n【四】详情页 · 剧集的季集列表')
   await goto(ws, '#/video/vid-0004')
@@ -519,7 +554,171 @@ async function main(): Promise<void> {
   )
   assert('不认这条资源的字幕路径被挡掉了', foreign === false, `返回 ${JSON.stringify(foreign)}`)
 
-  console.log('\n【十】真调起播放器（会弹记事本，随后杀掉）')
+  console.log(`\n【十】里番这一格 + hanime 按钮 + 点标签筛选（v0.8）`)
+  // 排在【十一】记事本之前：那一节抢焦点，之后的 DOM 查询不可靠
+  await goto(ws, '#/video')
+  const hentaiSide = await evalJs(
+    ws,
+    `for (let i = 0; i < 40; i++) {
+       if (document.querySelectorAll('.row').length > 0) break
+       await new Promise((r) => setTimeout(r, 200))
+     }
+     const rows = [...document.querySelectorAll('.row')]
+     const row = rows.find((r) => r.querySelector('.row__label')?.textContent?.trim() === '${SEED_HENTAI}')
+     const counts = await window.baoyi.video.counts()
+     return {
+       present: !!row,
+       count: row?.querySelector('.row__count')?.textContent?.trim() ?? '',
+       inCounts: (counts.categories ?? []).find((c) => c.name === '${SEED_HENTAI}')?.count ?? -1,
+       cats: (counts.categories ?? []).map((c) => c.name)
+     }`
+  )
+  console.log('  里番格:', JSON.stringify(hentaiSide))
+  // 这一条是第三节那个「界面免费」说法的**唯一**真机证据：Sidebar 那段 v-for
+  // 是通用的，所以只要分类行进了库、有条目挂着，这一格就该自己长出来
+  assert(`侧栏长出了「${SEED_HENTAI}」这一格（没写界面代码）`, hentaiSide.present === true, JSON.stringify(hentaiSide.cats))
+  assert(
+    `那一格的计数是 ${SEED_EXPECT.hentai}`,
+    hentaiSide.count === String(SEED_EXPECT.hentai),
+    `显示 ${JSON.stringify(hentaiSide.count)}`
+  )
+  assert(
+    `counts.categories 里也是 ${SEED_EXPECT.hentai}`,
+    hentaiSide.inCounts === SEED_EXPECT.hentai,
+    `拿到 ${hentaiSide.inCounts}`
+  )
+
+  const hentaiWall = await evalJs(
+    ws,
+    `const rows = [...document.querySelectorAll('.row')]
+     const row = rows.find((r) => r.querySelector('.row__label')?.textContent?.trim() === '${SEED_HENTAI}')
+     row.click()
+     for (let i = 0; i < 40; i++) {
+       await new Promise((r) => setTimeout(r, 200))
+       const n = document.querySelectorAll('.card').length
+       if (n > 0 && n <= ${SEED_EXPECT.hentai}) break
+     }
+     return {
+       cards: document.querySelectorAll('.card').length,
+       names: [...document.querySelectorAll('.card__name')].map((e) => e.textContent.trim()),
+       heading: document.querySelector('h1')?.textContent?.trim() ?? ''
+     }`
+  )
+  console.log('  筛后的墙:', JSON.stringify(hentaiWall))
+  // 点侧栏那一格是**同页**筛选（store.select 改 query 再 load），不走路由，
+  // 所以不受「窗口被遮住时路由过渡冻住」那条限制
+  assert(
+    `点里番只剩 ${SEED_EXPECT.hentai} 张卡`,
+    hentaiWall.cards === SEED_EXPECT.hentai,
+    `拿到 ${hentaiWall.cards}：${JSON.stringify(hentaiWall.names)}`
+  )
+  const hentaiNames = SEED_VIDEOS.filter((v) => v.category === SEED_HENTAI && !v.archived).map((v) => v.name)
+  assert(
+    '筛出来的正是那两条，没混进别的分类',
+    hentaiNames.every((n) => hentaiWall.names.includes(n)) &&
+      hentaiWall.names.length === hentaiNames.length,
+    `期望 ${JSON.stringify(hentaiNames)}，拿到 ${JSON.stringify(hentaiWall.names)}`
+  )
+
+  // 详情页：刮到条目号的那条
+  await goto(ws, '#/video/vid-0009')
+  const withId = await evalJs(
+    ws,
+    `// 等的是 .tag 而不是 .btn：按钮在页头，标签面板在下面，先到的是按钮，
+     // 拿它当就绪信号会在标签还没挂上的时候就去查
+     for (let i = 0; i < 40; i++) {
+       if (document.querySelectorAll('.tag').length > 0) break
+       await new Promise((r) => setTimeout(r, 200))
+     }
+     const btns = [...document.querySelectorAll('.btn')]
+     const find = (label) => btns.find((b) => b.textContent.trim() === label)
+     const h = find('hanime')
+     const tags = [...document.querySelectorAll('.tag')]
+     return {
+       hanime: !!h,
+       hanimeTitle: h?.getAttribute('title') ?? '',
+       tmdbDisabled: find('TMDB')?.disabled ?? null,
+       doubanDisabled: find('豆瓣')?.disabled ?? null,
+       tagLabels: tags.map((t) => t.textContent.trim()),
+       clickableTags: tags.filter((t) => t.classList.contains('tag--clickable')).length,
+       tagIsButton: tags.filter((t) => t.tagName === 'BUTTON').length
+     }`
+  )
+  console.log('  有 id 的:', JSON.stringify(withId))
+  assert('刮到条目号时 hanime 按钮在', withId.hanime === true)
+  assert(
+    'hanime 按钮指向 watch?v=86994',
+    withId.hanimeTitle.includes('watch?v=86994'),
+    `title=${JSON.stringify(withId.hanimeTitle)}`
+  )
+  // 里番在 TMDB / 豆瓣上没有条目，那两个按钮该是常驻置灰。三个按钮并排时行为
+  // 各不相同（两个置灰 + 一个隐藏），这一条钉住的就是「不一致是故意的」
+  assert('TMDB 按钮置灰（里番没有 TMDB 条目）', withId.tmdbDisabled === true, `disabled=${withId.tmdbDisabled}`)
+  assert('豆瓣按钮置灰', withId.doubanDisabled === true, `disabled=${withId.doubanDisabled}`)
+  assert('标签渲染出来了', withId.tagLabels.includes('巨乳'), JSON.stringify(withId.tagLabels))
+  assert(
+    '标签是可点的 button，不是 span —— 不然点了没反应',
+    withId.tagIsButton > 0 && withId.clickableTags === withId.tagIsButton,
+    `button=${withId.tagIsButton} clickable=${withId.clickableTags}`
+  )
+
+  // 点标签这一步**拆成两半验**，因为它走 router.push，而窗口被遮住时应用内
+  // 路由过渡会被冻住（见文件头）——那是驱动环境的限制，不是功能的缺陷。
+  // 于是：点击这一半只验「跳了，且跳对了地方」（读 hash），筛选那一半直接问
+  // 数据源要结果。两半合起来是完整的链路，且都不依赖那个会被冻住的过渡
+  const tagClick = await evalJs(
+    ws,
+    `const tag = [...document.querySelectorAll('.tag')].find((t) => t.textContent.trim() === '巨乳')
+     tag.click()
+     await new Promise((r) => setTimeout(r, 600))
+     const byTag = await window.baoyi.video.list({ tag: '巨乳' })
+     return {
+       hash: location.hash,
+       byTag: byTag.map((v) => v.name_zh),
+       hanimeIds: byTag.map((v) => v.hanime_id)
+     }`
+  )
+  console.log('  点标签:', JSON.stringify(tagClick))
+  assert(
+    '点标签跳回了海报墙',
+    /#\/video\/?(\?|$)/.test(tagClick.hash),
+    `hash=${JSON.stringify(tagClick.hash)}`
+  )
+  assert(
+    '「巨乳」筛出 2 条 —— 筛的是标签，不是碰巧只有它自己',
+    tagClick.byTag.length === 2,
+    JSON.stringify(tagClick.byTag)
+  )
+  // hanime_id 一路穿过视图、IPC、序列化到了渲染进程。少了 COALESCE 或
+  // rowToVideo 漏一列，这里会是 undefined 而不是空串
+  assert(
+    'hanime_id 穿过 IPC 到了界面（一条有值一条空串，都不是 undefined）',
+    tagClick.hanimeIds.includes('86994') && tagClick.hanimeIds.includes(''),
+    JSON.stringify(tagClick.hanimeIds)
+  )
+
+  // 详情页：没刮到条目号的那条 —— v-if 的另一半
+  await goto(ws, '#/video/vid-0010')
+  const noId = await evalJs(
+    ws,
+    `for (let i = 0; i < 40; i++) {
+       if (document.querySelectorAll('.btn').length > 0) break
+       await new Promise((r) => setTimeout(r, 200))
+     }
+     const btns = [...document.querySelectorAll('.btn')]
+     return {
+       hanime: btns.some((b) => b.textContent.trim() === 'hanime'),
+       hasPlay: btns.some((b) => b.textContent.includes('播放') || b.textContent.includes('打开')),
+       text: document.body.innerText.includes('hanime')
+     }`
+  )
+  console.log('  没 id 的:', JSON.stringify(noId))
+  assert('没刮到条目号时 hanime 按钮不出现', noId.hanime === false)
+  assert('页面上也没有 hanime 字样残留', noId.text === false)
+  // 别的按钮还在 —— 证明上一条不是因为整页没渲染出来
+  assert('同一页别的按钮照常渲染（排除「整页空」这种假绿）', noId.hasPlay === true)
+
+  console.log('\n【十一】真调起播放器（会弹记事本，随后杀掉）')
   // 这一节必须排在所有 DOM 断言之后，理由见文件头。
   // vid-0008 的路径指着 profile 里一个真的 .txt：验的是 shell.openPath 这一步
   // 真的走通了，而那取决于系统有没有关联程序 —— 假 mkv 验不了这个
@@ -544,7 +743,7 @@ async function main(): Promise<void> {
     `item.watch_status=${launched.item?.watch_status}`
   )
 
-  console.log('\n【十一】统计面板认得影视')
+  console.log('\n【十二】统计面板认得影视')
   await goto(ws, '#/settings?tab=data')
   const stats = await evalJs(
     ws,
@@ -561,12 +760,46 @@ async function main(): Promise<void> {
   console.log('  stats:', JSON.stringify(stats.stats))
   assert('设置页有「影视条目」行', stats.hasVideoRow === true)
   assert('设置页有「影视海报」行', stats.hasPosterRow === true)
-  assert('stats.videos 是 8（含归档）', stats.stats.videos === 8, `拿到 ${stats.stats.videos}`)
+  assert(
+    `stats.videos 是 ${SEED_EXPECT.total}（含归档）`,
+    stats.stats.videos === SEED_EXPECT.total,
+    `拿到 ${stats.stats.videos}`
+  )
   assert('stats.episodes 是 16', stats.stats.episodes === 16, `拿到 ${stats.stats.episodes}`)
 
-  console.log('\n【十二】库里的实况 —— 不信应用自己的汇报')
+  console.log('\n【十三】库里的实况 —— 不信应用自己的汇报')
   const db = new DatabaseSync(path.join(profile, 'baoyi.db'))
   const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n
+
+  // 上面那些期望值是从 seed 的**声明**算出来的，所以还差一环：万一 seed 自己
+  // 少插了一条，声明和渲染会一起少而彼此吻合，断言就变成空转。这三条直接数表，
+  // 把「声明」和「库里真有什么」对上，那一环就补齐了
+  assert(
+    `resource 表里 ${SEED_EXPECT.total} 条影视 —— seed 声明的都真插进去了`,
+    n(`SELECT COUNT(*) AS n FROM resource WHERE kind = 'video'`) === SEED_EXPECT.total,
+    `拿到 ${n(`SELECT COUNT(*) AS n FROM resource WHERE kind = 'video'`)}`
+  )
+  assert(
+    `库里 ${SEED_EXPECT.hentai} 条里番`,
+    n(`SELECT COUNT(*) AS n FROM resource WHERE category = '${SEED_HENTAI}'`) === SEED_EXPECT.hentai,
+    `拿到 ${n(`SELECT COUNT(*) AS n FROM resource WHERE category = '${SEED_HENTAI}'`)}`
+  )
+  assert(
+    `hanime_id 有值的是 ${SEED_EXPECT.withHanimeId} 条`,
+    n(`SELECT COUNT(*) AS n FROM video_meta WHERE hanime_id != ''`) === SEED_EXPECT.withHanimeId,
+    `拿到 ${n(`SELECT COUNT(*) AS n FROM video_meta WHERE hanime_id != ''`)}`
+  )
+  // 分类行本身在不在（迁移那一步的产物）。侧栏那一格是 GROUP BY 数出来的，
+  // 所以就算这一行缺了、只要有条目挂着，界面上也看得见 —— 两件事得分开验
+  assert(
+    'categories 表里有 video-hentai 这一行（迁移插进去的）',
+    n(`SELECT COUNT(*) AS n FROM categories WHERE id = 'video-hentai' AND kind = 'video'`) === 1
+  )
+  assert(
+    '「其他」被挪到了 sort_order 8，兜底那格还在最后',
+    n(`SELECT COUNT(*) AS n FROM categories WHERE id = 'video-other' AND sort_order = 8`) === 1
+  )
+
   assert('episode 表 16 行', n(`SELECT COUNT(*) AS n FROM episode`) === 16)
   assert(
     '标完的 11 集写进库了',
