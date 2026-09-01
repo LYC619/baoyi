@@ -94,10 +94,28 @@ try {
 const cats = one(`SELECT COUNT(*) AS n FROM categories WHERE kind = 'video'`)
 console.log(`\n已退回 0.7 结构：${cats} 个视频分类，版本号 ${schemaVersion(d as any)}`)
 
-// 0.7 的表和视图必须完好 —— 这一版没碰它们，回滚也不该碰
-const intact = one(
-  `SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('video_meta', 'episode', 'video')`
+/**
+ * 0.7 那两张**表**必须完好 —— 这一版没碰它们，回滚也不该碰。
+ *
+ * `video` 视图**单独看**，不和表算在一起：`rollback-v9` 会故意把它 drop 掉
+ * （它引用着 `hanime_id`），靠下次启动 `initSchema` 重建。所以 v9 → v8 连着跑
+ * 完之后视图本来就不在，这是预期的。
+ *
+ * 原先三个对象一起数、缺一个就报「0.7 的表或视图不见了」，于是那条链跑完会在
+ * 一次干净的回滚后面跟一句像是数据没了的话 —— 而真实情况是视图会自己长回来。
+ * 报警要能区分「表丢了」（真出事）和「视图不在」（下次启动就有），
+ * 否则它就是在教用户忽略报警。
+ */
+const tables = one(
+  `SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name IN ('video_meta', 'episode')`
 )
-console.log(intact === 3 ? '0.7 的表和视图完好。' : '警告：0.7 的表或视图不见了。')
+console.log(tables === 2 ? '0.7 的两张表完好。' : '警告：0.7 的表不见了。')
+
+const hasView = one(`SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'view' AND name = 'video'`)
+console.log(
+  hasView === 1
+    ? 'video 视图在。'
+    : 'video 视图不在（rollback-v9 撤过它，下次启动会重建，不用管）。'
+)
 
 d.close()
