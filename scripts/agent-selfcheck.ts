@@ -8776,6 +8776,122 @@ async function hanimeChannelSection(): Promise<void> {
     }
   })
 
+  /* -------------------- 侧栏 / 海报墙 / 详情页 -------------------- */
+
+  await check('侧栏那一格和海报墙筛选是白拿的 —— 不需要界面代码', () => {
+    // v0.8-计划.md 第三节说「加一条分类，侧栏入口和筛选同时就有」。
+    // 那句话对**界面**成立（这一条验它），对**老库**不成立（迁移那一节验它）。
+    // 两件事分开验，因为它们当初是被混成一句话才出的错
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+
+    const base = {
+      video_type: 'movie' as const,
+      name_en: '', description: '', official_url: '', source_dir: 'D:\\H',
+      file_size: 1, year: 0, end_year: 0, rating: 0, duration_sec: 0,
+      resolution: '', video_codec: '', source: '', release_group: '',
+      audio_tracks: [], subtitle_tracks: [], parts: [], linked_files: [],
+      tmdb_id: '', imdb_id: '', douban_id: '', douban_rating: 0,
+      poster_path: '', fanart_path: '', watch_status: 'unwatched', episodes: []
+    }
+    insertVideo(d as any, {
+      ...base, path: 'D:\\H\\a.mkv', name_zh: '巨乳女教師', summary: 'x',
+      category: HENTAI_CATEGORY, tags: ['巨乳', '女教師'], hanime_id: '86994'
+    } as any)
+    insertVideo(d as any, {
+      ...base, path: 'D:\\H\\b.mkv', name_zh: '寝取られファイター', summary: 'x',
+      category: HENTAI_CATEGORY, tags: ['巨乳'], hanime_id: '86995'
+    } as any)
+    insertVideo(d as any, {
+      ...base, path: 'D:\\M\\c.mkv', name_zh: '沙丘', summary: 'x',
+      category: '欧美', tags: ['科幻']
+    } as any)
+
+    // 侧栏那个 v-for 遍历的就是这个数组
+    const cats = videoCounts(d as any).categories
+    assert.deepEqual(
+      cats.find((c) => c.name === HENTAI_CATEGORY),
+      { name: HENTAI_CATEGORY, count: 2 },
+      '侧栏拿不到这一格'
+    )
+
+    // 点一下侧栏 = store.select({kind:'category'}) -> q.category -> 这个查询
+    const only = listVideos(d as any, { category: HENTAI_CATEGORY } as any).map((v: any) => v.name_zh)
+    assert.deepEqual(only.sort(), ['寝取られファイター', '巨乳女教師'].sort())
+    assert.deepEqual(
+      listVideos(d as any, { category: '欧美' } as any).map((v: any) => v.name_zh),
+      ['沙丘'],
+      '筛里番不该影响别的分类'
+    )
+    d.close()
+  })
+
+  await check('库里没有里番时那一格不出现 —— 「没有就不显示」是白拿的隐私', () => {
+    // 分类是开集，侧栏那段是 v-if="categories.length > 0" + 后端只返回有条目的分类。
+    // 所以不需要做「隐藏成人内容」的开关：库里没有就看不见
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    assert.deepEqual(videoCounts(d as any).categories, [])
+    d.close()
+  })
+
+  await check('详情页点标签 = 按标签筛选，站方标签和 TMDB 题材词走同一条路', () => {
+    // 站方标签（巨乳、女教師）和 TMDB 题材词（科幻）在库里是同一张标签表，
+    // 没有理由让它们的点击行为不一样
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    const base = {
+      video_type: 'movie' as const,
+      name_en: '', description: '', official_url: '', source_dir: 'D:\\H',
+      file_size: 1, year: 0, end_year: 0, rating: 0, duration_sec: 0,
+      resolution: '', video_codec: '', source: '', release_group: '',
+      audio_tracks: [], subtitle_tracks: [], parts: [], linked_files: [],
+      tmdb_id: '', imdb_id: '', douban_id: '', douban_rating: 0,
+      poster_path: '', fanart_path: '', watch_status: 'unwatched', episodes: []
+    }
+    insertVideo(d as any, {
+      ...base, path: 'D:\\H\\a.mkv', name_zh: '巨乳女教師', summary: 'x',
+      category: HENTAI_CATEGORY, tags: ['巨乳', '女教師']
+    } as any)
+    insertVideo(d as any, {
+      ...base, path: 'D:\\M\\c.mkv', name_zh: '沙丘', summary: 'x',
+      category: '欧美', tags: ['科幻']
+    } as any)
+
+    assert.deepEqual(
+      listVideos(d as any, { tag: '女教師' } as any).map((v: any) => v.name_zh),
+      ['巨乳女教師']
+    )
+    assert.deepEqual(
+      listVideos(d as any, { tag: '科幻' } as any).map((v: any) => v.name_zh),
+      ['沙丘']
+    )
+    d.close()
+  })
+
+  await check('hanime_id 一路读到详情页读得到的那个形状', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    insertVideo(d as any, {
+      video_type: 'movie' as const, path: 'D:\\H\\a.mkv', name_zh: 'x', name_en: '',
+      summary: 'x', description: '', category: HENTAI_CATEGORY, tags: [], official_url: '',
+      source_dir: 'D:\\H', file_size: 1, year: 0, end_year: 0, rating: 0, duration_sec: 0,
+      resolution: '', video_codec: '', source: '', release_group: '',
+      audio_tracks: [], subtitle_tracks: [], parts: [], linked_files: [],
+      tmdb_id: '', imdb_id: '', douban_id: '', douban_rating: 0, hanime_id: '86994',
+      poster_path: '', fanart_path: '', watch_status: 'unwatched', episodes: []
+    } as any)
+    // 详情页那个按钮的 v-if 判的就是这个值非空
+    const row = listVideos(d as any, { category: HENTAI_CATEGORY } as any)[0] as any
+    assert.equal(row.hanime_id, '86994')
+    assert.equal(watchUrl(row.hanime_id), 'https://hanime1.me/watch?v=86994')
+    d.close()
+  })
+
   await check('编出来的 hanime_id 被丢掉', async () => {
     // 编一个的后果是详情页上一个指向别的作品的链接，而用户没法判断它是错的：
     // 点进去看到另一部片，只会以为是站方改了内容

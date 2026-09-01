@@ -151,6 +151,20 @@ async function clearPoster(): Promise<void> {
 
 /* ---------------------------- 保存 ---------------------------- */
 
+/**
+ * 点一个标签 = 回海报墙，只看挂着这个标签的作品。
+ *
+ * 顺序要紧：先 `select` 再 `push`。反过来的话海报墙会先用上一次的筛选条件
+ * 渲染一帧，然后跳变 —— 用户看到的是「点了标签，先闪一下全部，再筛好」。
+ *
+ * 这条路对里番和普通片一视同仁 —— 站方标签（巨乳、女教師）和 TMDB 题材词
+ * （悬疑、科幻）在库里是同一张标签表，没有理由让它们的点击行为不一样。
+ */
+function filterByTag(tag: string): void {
+  store.select({ kind: 'tag', value: tag })
+  void router.push({ name: 'video-home' })
+}
+
 /** 走 store 而不是直接调 IPC：海报墙和侧边栏计数要跟着一起更新 */
 async function save(patch: Partial<VideoItem>): Promise<void> {
   if (!item.value) return
@@ -434,6 +448,17 @@ const tmdbUrl = computed(() => {
 const doubanUrl = computed(() =>
   item.value?.douban_id ? `https://movie.douban.com/subject/${item.value.douban_id}/` : ''
 )
+/**
+ * hanime 条目页。和上面两个同一个写法：只存 id，地址从 id 拼。
+ *
+ * 那个按钮只在有 id 时才出现（不是 disabled 着摆在那儿）—— 普通片库里
+ * 每部片旁边挂一个永远点不动的「hanime」按钮，是在给绝大多数用户添一个
+ * 他不需要也不想看见的东西。TMDB 和豆瓣不同：那两个对任何片子都可能有条目，
+ * 灰着摆在那儿表示「还没匹配上」，是有意义的状态。
+ */
+const hanimeUrl = computed(() =>
+  item.value?.hanime_id ? `https://hanime1.me/watch?v=${item.value.hanime_id}` : ''
+)
 
 async function removeItem(): Promise<void> {
   if (!item.value) return
@@ -507,6 +532,10 @@ function copyPath(path: string): void {
           >
             <ExternalLink :size="14" />
             豆瓣
+          </button>
+          <button v-if="hanimeUrl" class="btn btn--ghost" :title="hanimeUrl" @click="openUrl(hanimeUrl)">
+            <ExternalLink :size="14" />
+            hanime
           </button>
           <button class="btn btn--ghost" @click="toggleArchive">
             <component :is="item.is_archived ? ArchiveRestore : Archive" :size="14" />
@@ -779,7 +808,14 @@ function copyPath(path: string): void {
           <section class="panel">
             <h2 class="sec-title">标签</h2>
             <div v-if="item.tags.length > 0" class="tags">
-              <TagBadge v-for="t in item.tags" :key="t" :label="t" />
+              <TagBadge
+                v-for="t in item.tags"
+                :key="t"
+                :label="t"
+                clickable
+                :title="`看所有「${t}」的作品`"
+                @click="filterByTag(t)"
+              />
             </div>
             <EditableField
               :model-value="item.tags.join('、')"
