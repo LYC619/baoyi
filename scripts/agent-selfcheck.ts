@@ -268,6 +268,22 @@ import { fillVideoSystem, videoCandidatePrompt } from '../electron/kinds/video/p
 import { buildVideoTools, limitVideoTags } from '../electron/kinds/video/tools.ts'
 import { normalizeTag, parseHentaiName } from '../electron/kinds/video/hentai/filename.ts'
 import {
+  cleanTag,
+  durationSec,
+  parseDetail,
+  parseSearch,
+  searchUrl,
+  toVideoCode,
+  watchUrl
+} from '../electron/kinds/video/hentai/selectors.ts'
+import {
+  MAX_HANIME_FETCHES,
+  hanimeDetail,
+  hanimeSearch,
+  looksLikeChallenge,
+  newBudget
+} from '../electron/kinds/video/hentai/hanime.ts'
+import {
   HENTAI_CATEGORY,
   HENTAI_CATEGORY_ID,
   VIDEO_CATEGORIES,
@@ -2369,6 +2385,7 @@ async function main(): Promise<void> {
   await videoPlaybackSection()
   await hentaiCategorySection()
   await hentaiFilenameSection()
+  await hanimeChannelSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -8229,6 +8246,322 @@ async function hentaiFilenameSection(): Promise<void> {
       assert.equal(r.absolute_episode, null)
       assert.deepEqual(r.site_tags, [])
     }
+  })
+}
+
+/* ================= hanime 刮削通道 · v0.8 Step 4/5 ================= */
+
+/**
+ * URL 拼装、videoCode 提取、HTML 解析、标签清洗 —— 全是纯逻辑，不联网。
+ *
+ * ## fixture 的来源，以及它的**局限**
+ *
+ * 下面这些 HTML 是**按 doc/hanime-api-notes.md 第三、四节记的 DOM 结构搭的**，
+ * 那一节的选择器抄自 Han1meViewer 的 `Parser.kt`。它们**不是从真实页面抓下来的**
+ * —— 计划里 Step 1 那个「抓一份真实 HTML 验证选择器还有效」的验证项还没做。
+ *
+ * 所以这一节能证明的是「解析器按我们理解的结构工作，且畸形输入不炸」，
+ * 证明不了「我们理解的结构和 2026 年的 hanime1.me 一致」。后者只能拿真页面验，
+ * 而那要联网。这个区别写在这儿，免得后面有人把绿灯当成「通道已经通了」。
+ */
+async function hanimeChannelSection(): Promise<void> {
+  console.log('\nhanime 刮削通道 · v0.8 Step 4/5（纯逻辑，未联网验证）')
+
+  /* -------------------- URL 拼装 -------------------- */
+
+  await check('搜索 URL：query 转义、genre 锁繁体「裏番」', () => {
+    const u = new URL(searchUrl('寝取られファイター ヤリっちんぐ！'))
+    assert.equal(u.origin + u.pathname, 'https://hanime1.me/search')
+    assert.equal(u.searchParams.get('query'), '寝取られファイター ヤリっちんぐ！')
+    // 简体「里番」在站方 genre.json 里搜不到 —— 两个字不同形
+    assert.equal(u.searchParams.get('genre'), '裏番')
+    assert.ok(u.href.includes('%'), '非 ASCII 该被转义')
+  })
+
+  await check('搜索 URL：页码 1 不写进去，多个 tags[] 是重复参数', () => {
+    assert.ok(!searchUrl('x').includes('page='), '第一页不该带 page 参数')
+    assert.ok(searchUrl('x', { page: 3 }).includes('page=3'))
+    const u = new URL(searchUrl('x', { tags: ['巨乳', '無碼'] }))
+    assert.deepEqual(u.searchParams.getAll('tags[]'), ['巨乳', '無碼'])
+  })
+
+  await check('详情 URL：拼得出来，空 code 给空串', () => {
+    assert.equal(watchUrl('12345'), 'https://hanime1.me/watch?v=12345')
+    assert.equal(watchUrl(''), '')
+    assert.equal(watchUrl('   '), '')
+  })
+
+  await check('镜像域名可以换 base', () => {
+    assert.equal(watchUrl('7', 'https://javchu.com/'), 'https://javchu.com/watch?v=7')
+  })
+
+  /* -------------------- toVideoCode -------------------- */
+
+  await check('toVideoCode：绝对 / 相对 / 四个镜像 / v= 前有别的参数', () => {
+    assert.equal(toVideoCode('https://hanime1.me/watch?v=12345'), '12345')
+    assert.equal(toVideoCode('/watch?v=678'), '678')
+    assert.equal(toVideoCode('watch?v=678'), '678')
+    for (const h of ['hanime1.me', 'hanime1.com', 'hanimeone.me', 'javchu.com']) {
+      assert.equal(toVideoCode(`https://${h}/watch?v=99`), '99', `${h} 没认出来`)
+    }
+    // v= 前面允许夹别的查询参数（上游那条正则也管这个）
+    assert.equal(toVideoCode('https://hanime1.me/watch?ref=home&v=42'), '42')
+    assert.equal(toVideoCode('https://www.hanime1.me/watch?v=42'), '42', 'www. 前缀该被剥掉')
+  })
+
+  await check('toVideoCode：认不出来返回空串，不抛', () => {
+    for (const bad of [
+      '',
+      null,
+      undefined,
+      '/search?query=x',
+      'https://example.com/watch?v=1', // 不在镜像白名单里
+      'https://hanime1.me/watch?v=abc', // 不是纯数字
+      'https://hanime1.me/watch', // 没有 v=
+      '一段没有链接的文本'
+    ]) {
+      assert.equal(toVideoCode(bad as any), '', `${String(bad)} 该解不出来`)
+    }
+  })
+
+  await check('toVideoCode：从一段带引号和空白的 data-href 里也捞得出来', () => {
+    assert.equal(toVideoCode('  "/watch?v=555"  '), '555')
+  })
+
+  /* -------------------- 标签清洗 -------------------- */
+
+  await check('标签清洗：去掉 # 前缀和 (计数)', () => {
+    // 页面上是 `#巨乳 (1234)`，而那个计数每天都在变 ——
+    // 不洗的话同一个标签会因为数字不同反复入池
+    assert.equal(cleanTag('#巨乳 (1234)'), '巨乳')
+    assert.equal(cleanTag('巨乳'), '巨乳')
+    assert.equal(cleanTag('#無碼'), '無碼')
+    assert.equal(cleanTag('  #女教師 (12)  '), '女教師')
+    assert.equal(cleanTag(''), '')
+    assert.equal(cleanTag(null), '')
+  })
+
+  await check('时长：mm:ss 和 h:mm:ss 都认，认不出给 0', () => {
+    assert.equal(durationSec('12:34'), 754)
+    assert.equal(durationSec('1:02:03'), 3723)
+    assert.equal(durationSec('00:59'), 59)
+    for (const bad of ['', '—', 'abc', '1:2:3:4', null]) {
+      assert.equal(durationSec(bad as any), 0, `${String(bad)} 该给 0`)
+    }
+  })
+
+  /* -------------------- 搜索结果解析 -------------------- */
+
+  // 正常版式，照 doc/hanime-api-notes.md 第四节的结构搭
+  const searchHtml = `
+<div class="content-padding-new">
+  <div class="search-doujin-videos">
+    <a class="overlay" href="/watch?v=12345"></a>
+    <div class="card-mobile-panel">
+      <img src="/uploads/cover-12345.jpg">
+      <div class="card-mobile-title">巨乳女教師 ＃1</div>
+      <div class="thumb-container"><div class="duration">17:28</div></div>
+    </div>
+  </div>
+  <div class="search-doujin-videos">
+    <a class="overlay" href="https://hanime1.me/watch?v=67890"></a>
+    <div class="card-mobile-panel">
+      <img src="https://cdn.hanime1.me/cover-67890.jpg">
+      <div class="card-mobile-title">寝取られファイター ROUND1</div>
+      <div class="thumb-container"><div class="duration">1:05:00</div></div>
+    </div>
+  </div>
+  <div class="search-doujin-videos">
+    <a class="overlay" href="/search?query=x"></a>
+    <div class="card-mobile-title">这一项不是作品，没有 watch 链接</div>
+  </div>
+</div>`
+
+  await check('搜索结果：逐条解出 code / 标题 / 封面 / 时长', () => {
+    const hits = parseSearch(searchHtml)
+    assert.equal(hits.length, 2, `解出 ${hits.length} 条，非作品那条该被丢掉`)
+    assert.deepEqual(hits[0], {
+      videoCode: '12345',
+      title: '巨乳女教師 ＃1',
+      coverUrl: 'https://hanime1.me/uploads/cover-12345.jpg',
+      durationSec: 1048
+    })
+    assert.equal(hits[1].videoCode, '67890')
+    assert.equal(hits[1].durationSec, 3900)
+  })
+
+  await check('搜索结果：相对封面拼绝对，已经绝对的原样留着', () => {
+    const hits = parseSearch(searchHtml)
+    assert.ok(hits[0].coverUrl.startsWith('https://hanime1.me/'), '相对路径没拼上 base')
+    assert.equal(hits[1].coverUrl, 'https://cdn.hanime1.me/cover-67890.jpg', 'CDN 绝对地址被改写了')
+  })
+
+  await check('搜索结果：同一个 videoCode 只留一条', () => {
+    const dup = `<div class="content-padding-new">
+      <div class="search-doujin-videos"><a href="/watch?v=1"></a><div class="card-mobile-title">A</div></div>
+      <div class="search-doujin-videos"><a href="/watch?v=1"></a><div class="card-mobile-title">A 重复</div></div>
+    </div>`
+    assert.equal(parseSearch(dup).length, 1)
+  })
+
+  await check('搜索结果：简化版式也认', () => {
+    const simplified = `<div class="home-rows-videos-wrapper">
+      <a class="home-rows-videos-div" href="/watch?v=321">
+        <img src="/c.jpg"><div class="home-rows-videos-title">简化版式的标题</div>
+      </a>
+    </div>`
+    const hits = parseSearch(simplified)
+    assert.equal(hits.length, 1)
+    assert.equal(hits[0].videoCode, '321')
+    assert.equal(hits[0].title, '简化版式的标题')
+  })
+
+  await check('搜索结果：改版 / 空页 / 垃圾输入一律空数组，不抛', () => {
+    // 站方改版时正确的行为是「这次刮不到」，不是让整次识别炸掉
+    for (const bad of ['', '<html><body>盾的挑战页</body></html>', '不是 HTML', '<div class="x"></div>']) {
+      assert.deepEqual(parseSearch(bad), [], `${bad.slice(0, 20)} 该给空数组`)
+    }
+  })
+
+  /* -------------------- 详情页解析 -------------------- */
+
+  const detailHtml = `
+<html><head>
+  <meta property="og:image" content="/uploads/big-cover.jpg">
+  <meta property="og:url" content="https://hanime1.me/watch?v=12345">
+</head><body>
+  <div id="shareBtn-title">巨乳女教師 ＃1</div>
+  <div class="video-details-wrapper">
+    <h4 class="video-details-title">巨乳女教师 第一集</h4>
+    <div class="video-caption-text caption-ellipsis">这里是简介正文。<span>剧集列表</span></div>
+  </div>
+  <div class="meta-author"><a href="/search?brands[]=某厂牌">某厂牌</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=巨乳">#巨乳 (1234)</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=女教師">#女教師 (567)</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=無碼">#無碼</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=巨乳">#巨乳 (1234)</a></div>
+  <div class="video-playlist-wrapper">
+    <div id="playlist-top-block"><h4><a href="/search?query=巨乳女教師">巨乳女教師 系列</a></h4></div>
+    <div id="playlist-scroll">
+      <div class="playlist-hover-wrap" data-href="/watch?v=12345">
+        <img class="main-thumb" src="/e1.jpg">
+        <h4 class="video-title"><a href="/watch?v=12345">＃1</a></h4>
+        <div class="duration">17:28</div>
+      </div>
+      <div class="playlist-hover-wrap" data-href="/watch?v=12346">
+        <img class="main-thumb" src="/e2.jpg">
+        <h4 class="video-title"><a href="/watch?v=12346">＃2</a></h4>
+        <div class="duration">18:02</div>
+      </div>
+    </div>
+  </div>
+</body></html>`
+
+  await check('详情页：标题 / 中文名 / 简介 / 封面 / 厂牌', () => {
+    const d = parseDetail(detailHtml)
+    assert.equal(d.videoCode, '12345')
+    assert.equal(d.title, '巨乳女教師 ＃1')
+    // 中文名在简介节点**前面**那个兄弟节点上
+    assert.equal(d.chineseTitle, '巨乳女教师 第一集')
+    assert.equal(d.coverUrl, 'https://hanime1.me/uploads/big-cover.jpg')
+    assert.equal(d.artist, '某厂牌')
+  })
+
+  await check('详情页：简介用 ownText，不吃子节点的文本', () => {
+    // 那个节点底下有个 <span>剧集列表</span>，用 .text 会把它一起吃进来 ——
+    // 于是简介末尾多出三个字，而它看着像是简介的一部分
+    const d = parseDetail(detailHtml)
+    assert.equal(d.introduction, '这里是简介正文。')
+    assert.ok(!d.introduction.includes('剧集列表'), '子节点文本漏进简介了')
+  })
+
+  await check('详情页：标签洗过且去重', () => {
+    const d = parseDetail(detailHtml)
+    assert.deepEqual(d.tags, ['巨乳', '女教師', '無碼'])
+  })
+
+  await check('详情页：playlist 就是集数来源，每集有自己的 code', () => {
+    // 站上没有季集层级，一部作品的多集是一个 playlist 里的多个独立条目
+    const d = parseDetail(detailHtml)
+    assert.equal(d.seriesName, '巨乳女教師 系列')
+    assert.equal(d.episodes.length, 2)
+    assert.equal(d.episodes[0].videoCode, '12345')
+    assert.equal(d.episodes[0].durationSec, 1048)
+    assert.equal(d.episodes[1].videoCode, '12346')
+    assert.equal(d.episodes[1].coverUrl, 'https://hanime1.me/e2.jpg')
+  })
+
+  await check('详情页：旧结构的 playlist 容器也认', () => {
+    const old = detailHtml.replace('class="video-playlist-wrapper"', 'id="video-playlist-wrapper"')
+    assert.equal(parseDetail(old).episodes.length, 2, '旧结构没走到 fallback 选择器')
+  })
+
+  await check('详情页：单集作品的 episodes 是空数组，不是一条自己', () => {
+    const single = detailHtml.replace(/<div class="video-playlist-wrapper">[\s\S]*?<\/div>\s*<\/body>/, '</body>')
+    const d = parseDetail(single)
+    assert.deepEqual(d.episodes, [])
+    assert.equal(d.seriesName, '')
+    // playlist 没了，但别的字段该照旧
+    assert.equal(d.title, '巨乳女教師 ＃1')
+  })
+
+  await check('详情页：每个字段独立降级，一个选择器失效不带走别的', () => {
+    // 站方改版通常只动一部分 DOM。全靠一个 try 包起来会让能拿到的字段跟着一起丢
+    const noTitle = detailHtml.replace('id="shareBtn-title"', 'id="something-else"')
+    const d = parseDetail(noTitle)
+    assert.equal(d.title, '巨乳女教师 第一集', '标题该退到正文标题上')
+    assert.equal(d.tags.length, 3, '标题没了不该影响标签')
+    assert.equal(d.episodes.length, 2, '标题没了不该影响集数')
+  })
+
+  await check('详情页：整页改版 / 空串一律给一个全空的结果，不抛', () => {
+    for (const bad of ['', '<html></html>', '不是 HTML']) {
+      const d = parseDetail(bad)
+      assert.equal(d.title, '')
+      assert.deepEqual(d.tags, [])
+      assert.deepEqual(d.episodes, [])
+    }
+  })
+
+  /* -------------------- 盾 -------------------- */
+
+  await check('挑战页认得出来 —— 它是 200，不分辨就会被当成「站上没有」', () => {
+    // 盾挡下来和真的没搜到，HTTP 状态都是 200，区别只在内容。
+    // 混在一起的话用户看到「刮不到，重试也刮不到」，而真实原因是 IP 被盯上了
+    for (const s of [
+      '<title>Just a moment...</title>',
+      '<div class="cf-browser-verification"></div>',
+      '<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/jsch/v1"></script>',
+      'Checking your browser before accessing'
+    ]) {
+      assert.equal(looksLikeChallenge(s), true, `没认出挑战页：${s.slice(0, 40)}`)
+    }
+  })
+
+  await check('正常页面不会被误判成挑战页', () => {
+    assert.equal(looksLikeChallenge(detailHtml), false)
+    assert.equal(looksLikeChallenge(searchHtml), false)
+    assert.equal(looksLikeChallenge(''), false)
+  })
+
+  await check('取页预算：用完就不再发请求', () => {
+    // 配额按「别把用户 IP 打进挑战页」定，不按额度 —— hanime 不烧用户的 API 额度，
+    // 但请求太密被盾盯上之后，代价落在用户 IP 上
+    const b = newBudget()
+    assert.equal(b.used, 0)
+    assert.ok(MAX_HANIME_FETCHES > 0 && MAX_HANIME_FETCHES <= 4, '上限该比 TMDB 的 4 次更紧或相当')
+  })
+
+  await check('空 query 不发请求，直接空数组', async () => {
+    const b = newBudget()
+    assert.deepEqual(await hanimeSearch('   ', b), [])
+    assert.equal(b.used, 0, '空 query 不该消耗预算')
+  })
+
+  await check('空 videoCode 不发请求，直接 null', async () => {
+    const b = newBudget()
+    assert.equal(await hanimeDetail('', b), null)
+    assert.equal(b.used, 0)
   })
 }
 
