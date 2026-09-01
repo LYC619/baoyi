@@ -277,6 +277,8 @@ import {
   watchUrl
 } from '../electron/kinds/video/hentai/selectors.ts'
 import { hanimeChannel } from '../electron/kinds/video/hentai/channel.ts'
+// 从 proxy-rules 而不是 proxy 进 —— 后者顶层 import electron，纯 Node 下加载即崩
+import { normalizeProxyRules } from '../electron/services/proxy-rules.ts'
 import {
   MAX_HANIME_FETCHES,
   hanimeDetail,
@@ -2387,6 +2389,8 @@ async function main(): Promise<void> {
   await hentaiCategorySection()
   await hentaiFilenameSection()
   await hanimeChannelSection()
+  await proxySection()
+  await hideHentaiSection()
 
   console.log(`\n${passed} 通过，${failed} 失败\n`)
   if (failed > 0) process.exit(1)
@@ -8911,6 +8915,195 @@ async function hanimeChannelSection(): Promise<void> {
     const row = d.prepare('SELECT hanime_id FROM video_meta').get() as any
     assert.equal(row.hanime_id, '', '没查过的 hanime_id 不能落库')
     assert.ok(String(out).includes('99999'), '要把编的那个回灌给模型，别静默丢掉')
+    d.close()
+  })
+}
+
+/* ==================== 出站代理 · v0.8 ==================== */
+
+/**
+ * 只验 `normalizeProxyRules` 这一个纯函数。
+ *
+ * 代理这条链路真正的风险**不在这儿** —— 它在「包到底从哪个网络栈出去」，
+ * 而那是 `scripts/verify-proxy.cjs` 的活（要真起 Electron、真发请求、比对出口
+ * IP）。这一节只保证用户填的那串被规范化成 Chromium 认得的形状，别把
+ * 「配了没生效」的原因又多加一种。
+ */
+async function proxySection(): Promise<void> {
+  console.log('\n出站代理 · v0.8（纯函数；接线由 verify-proxy.cjs 验）')
+
+  await check('空串和纯空白都当直连', () => {
+    assert.equal(normalizeProxyRules(''), '')
+    assert.equal(normalizeProxyRules('   '), '')
+    assert.equal(normalizeProxyRules('\t\n'), '')
+    // undefined / null 也不能炸 —— 老库里这个键可能根本不存在
+    assert.equal(normalizeProxyRules(undefined as any), '')
+    assert.equal(normalizeProxyRules(null as any), '')
+  })
+
+  await check('裸 host:port 补成 http://（对齐 --proxy-server 的默认）', () => {
+    assert.equal(normalizeProxyRules('127.0.0.1:10808'), 'http://127.0.0.1:10808')
+    assert.equal(normalizeProxyRules('  127.0.0.1:10808  '), 'http://127.0.0.1:10808')
+  })
+
+  await check('写了协议的原样保留，不替用户改主意', () => {
+    assert.equal(normalizeProxyRules('socks5://127.0.0.1:10808'), 'socks5://127.0.0.1:10808')
+    assert.equal(normalizeProxyRules('http://127.0.0.1:8080'), 'http://127.0.0.1:8080')
+    assert.equal(normalizeProxyRules('socks4://10.0.0.1:1080'), 'socks4://10.0.0.1:1080')
+  })
+
+  await check('Chromium 那套多规则写法不被拆坏', () => {
+    // `scheme=proxy` 和分号分隔都是 Chromium proxyRules 的合法写法。
+    // 含 `=` 时不补协议 —— 补了会变成 `http://https=...` 这种废话
+    const multi = 'https=socks5://127.0.0.1:10808;http=http://127.0.0.1:8080'
+    assert.equal(normalizeProxyRules(multi), multi)
+    assert.equal(normalizeProxyRules('direct://'), 'direct://')
+  })
+
+  await check('不自己校验端口和协议名 —— 那是 Chromium 的活', () => {
+    // 故意给几个不合法的：这里照样原样传下去，由 setProxy 去拒。
+    // 在这儿重写一遍校验只会和 Chromium 的规则打架，且必然漏
+    assert.equal(normalizeProxyRules('socks5://127.0.0.1:999999'), 'socks5://127.0.0.1:999999')
+    assert.equal(normalizeProxyRules('nonsense://x'), 'nonsense://x')
+  })
+}
+
+/* ==================== 隐藏里番 · v0.8 ==================== */
+
+/**
+ * 「隐藏里番」这个开关。
+ *
+ * 重点全在**覆盖面**：判据出现在七处（列表 + counts 的六个聚合），漏掉任何一处的
+ * 表现都是「关了还能从别处看见」，而那比不做更糟 —— 用户以为藏住了。所以这一节
+ * 挨个数字都验一遍，不只验「墙上没有了」。
+ *
+ * 另外验两件容易想歪的事：藏起来**不改数据**（关掉就全回来），以及归档那一格
+ * 也得挡（漏出去等于告诉用户「藏了几条」）。
+ */
+async function hideHentaiSection(): Promise<void> {
+  console.log('\n隐藏里番 · v0.8（开关只管显示，不动数据）')
+
+  /** 铺一个小库：2 条里番 + 2 条别的 + 1 条归档的里番 */
+  const seed = (): any => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    const add = (
+      id: string,
+      name: string,
+      category: string,
+      tags: string[],
+      status: string,
+      type: string,
+      archived = 0
+    ): void => {
+      d.prepare(
+        `INSERT INTO resource (id, kind, created_at, updated_at, path, file_name,
+           name_zh, category, tags, is_archived)
+         VALUES (?, 'video', 1, 2, ?, ?, ?, ?, ?, ?)`
+      ).run(id, `D:\\V\\${name}.mkv`, `${name}.mkv`, name, category, JSON.stringify(tags), archived)
+      d.prepare(
+        `INSERT INTO video_meta (resource_id, video_type, watch_status) VALUES (?, ?, ?)`
+      ).run(id, type, status)
+    }
+    add('h1', '里番甲', HENTAI_CATEGORY, ['巨乳'], 'watched', 'movie')
+    add('h2', '里番乙', HENTAI_CATEGORY, ['巨乳', '女教師'], 'unwatched', 'movie')
+    add('n1', '普通电影', '欧美', ['科幻'], 'watching', 'movie')
+    add('n2', '普通剧集', '日韩', ['悬疑'], 'unwatched', 'series')
+    add('h3', '归档的里番', HENTAI_CATEGORY, ['巨乳'], 'watched', 'movie', 1)
+    return d
+  }
+
+  await check('关着开关时一切照旧（默认不藏）', () => {
+    const d = seed()
+    // 默认值必须是 false —— 默认藏的话，用户装完看不见自己刮进来的东西，
+    // 第一反应是「刮削坏了」
+    assert.equal(listVideos(d as any).length, 4, '4 条未归档的都该在')
+    const c = videoCounts(d as any)
+    assert.equal(c.all, 4)
+    assert.equal(c.archived, 1)
+    assert.ok(c.categories.some((x) => x.name === HENTAI_CATEGORY))
+    d.close()
+  })
+
+  await check('开了之后墙上不铺里番', () => {
+    const d = seed()
+    const names = listVideos(d as any, {}, true).map((v) => v.name_zh)
+    assert.deepEqual(names.sort(), ['普通剧集', '普通电影'])
+    d.close()
+  })
+
+  await check('开了之后侧栏那一格消失，别的分类不受影响', () => {
+    const d = seed()
+    const c = videoCounts(d as any, true)
+    assert.ok(!c.categories.some((x) => x.name === HENTAI_CATEGORY), '里番那一格该没了')
+    assert.deepEqual(
+      c.categories.map((x) => x.name).sort(),
+      ['日韩', '欧美'],
+      '别的分类得原样留着'
+    )
+    d.close()
+  })
+
+  await check('六个聚合一个都不能漏 —— 漏一处就等于告诉用户藏了几条', () => {
+    const d = seed()
+    const c = videoCounts(d as any, true)
+    assert.equal(c.all, 2, `all 没挡住：${c.all}`)
+    // 归档那一格也要挡。h3 是归档的里番，漏出去就是「归档区里有 1 条看不见的东西」
+    assert.equal(c.archived, 0, `archived 没挡住：${c.archived}`)
+    // 观看状态：里番占了 watched 1 条 + unwatched 1 条，藏了之后
+    // watched 该是 0，unwatched 只剩普通剧集那 1 条
+    assert.equal(c.status.watched, 0, `status.watched 没挡住：${c.status.watched}`)
+    assert.equal(c.status.unwatched, 1, `status.unwatched 没挡住：${c.status.unwatched}`)
+    assert.equal(c.status.watching, 1, '普通电影那条该还在')
+    // 类型：里番两条都是 movie，藏了之后 movie 只剩 1
+    assert.equal(c.type.movie, 1, `type.movie 没挡住：${c.type.movie}`)
+    assert.equal(c.type.series, 1)
+    // 标签：巨乳 / 女教師 只挂在里番上，该整个消失
+    const tags = c.tags.map((t) => t.name)
+    assert.ok(!tags.includes('巨乳'), `标签池漏了「巨乳」：${JSON.stringify(tags)}`)
+    assert.ok(!tags.includes('女教師'), `标签池漏了「女教師」：${JSON.stringify(tags)}`)
+    assert.deepEqual(tags.sort(), ['悬疑', '科幻'])
+    d.close()
+  })
+
+  await check('明确点里番分类也筛不出东西 —— 判据在数据层，不靠界面自觉', () => {
+    const d = seed()
+    // 开关刚打开的那一刻 selection 可能还停在里番上。挡在这一层才是真挡住
+    assert.equal(listVideos(d as any, { category: HENTAI_CATEGORY }, true).length, 0)
+    // 走标签进来也一样
+    assert.equal(listVideos(d as any, { tag: '巨乳' }, true).length, 0)
+    // 关键词搜索走的是同一条查询路径，所以顺带就挡住了 —— 验一下别真漏了
+    assert.equal(listVideos(d as any, { keyword: '里番' }, true).length, 0)
+    // 归档视图也不能漏
+    assert.equal(listVideos(d as any, { group: 'archived' }, true).length, 0)
+    d.close()
+  })
+
+  await check('藏起来不改数据 —— 关掉开关全回来', () => {
+    const d = seed()
+    // 先藏
+    assert.equal(listVideos(d as any, {}, true).length, 2)
+    // 表里的行数一条都没变：这个开关只是查询时多一个条件
+    const rows = (
+      d.prepare(`SELECT COUNT(*) AS n FROM resource WHERE kind = 'video'`).get() as any
+    ).n
+    assert.equal(rows, 5, '开关不该动任何一行数据')
+    // 再放开
+    assert.equal(listVideos(d as any).length, 4)
+    assert.equal(videoCounts(d as any).categories.some((x) => x.name === HENTAI_CATEGORY), true)
+    d.close()
+  })
+
+  await check('库里没有里番时，开着开关也不出错', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    assert.deepEqual(listVideos(d as any, {}, true), [])
+    const c = videoCounts(d as any, true)
+    assert.equal(c.all, 0)
+    assert.deepEqual(c.categories, [])
+    assert.deepEqual(c.tags, [])
     d.close()
   })
 }

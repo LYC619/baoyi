@@ -528,6 +528,40 @@ export interface AppSettings {
    * 会把另一条挤掉。
    */
   save_backup_keep: number
+  /**
+   * 出站代理。空串 = 直连。
+   *
+   * 形如 `socks5://127.0.0.1:10808` 或 `http://127.0.0.1:8080`；不写协议时
+   * 按 Chromium 的规矩当 HTTP 代理。它喂给 `session.setProxy` 的 `proxyRules`，
+   * 所以 Chromium 那套写法（`socks5://h:p`、多规则用分号隔开）都认。
+   *
+   * **只有走 Chromium 网络栈的请求受它管。** 主进程里 `globalThis.fetch` 是
+   * Node 的 undici，不看 session 的代理设置，也不看 `--proxy-server` ——
+   * 所以要走代理的取页必须用 `net.fetch`（见 `hentai/hanime.ts` 的注入点）。
+   * 这一条是坑：配了代理却没生效，看起来像代理设置没保存。
+   *
+   * 目前只有 hanime 那条链路用它。TMDB / 豆瓣走的还是 undici，
+   * 它们本来也不在需要代理的名单上（真要加，照 hanime 那个注入点做）。
+   */
+  proxy: string
+  /**
+   * 隐藏里番：侧栏不出现那一格，海报墙不铺那些条目。
+   *
+   * 纯设置项，**不动库版本号** —— 它不改任何一行数据，只是查询时多一个
+   * `category != '里番'`。关掉开关，东西原样都在。
+   *
+   * **它藏的是「浏览时看不见」，不是「访问不到」。** 明确说清楚边界，
+   * 免得当成加密或权限用：
+   *
+   * - 藏住的：侧栏那一格、海报墙（含关键词搜索，同一条查询路径）、
+   *   侧栏的观看状态 / 类型 / 标签 / 归档四处计数。
+   * - **没藏住的**：设置页里「影视条目」那个总数、已经存在的详情页地址
+   *   （手上有 id 直接开还是打得开）、磁盘上的文件和海报。
+   *
+   * 后一组要不要一起藏是另一个决定（会牵动统计面板和 `getVideo`），
+   * 这一版按用户要求只做侧栏和墙。
+   */
+  hide_hentai: boolean
   theme: 'dark' | 'light'
   view_mode: 'grid' | 'list'
   /**
@@ -1395,6 +1429,8 @@ export interface BaoyiApi {
   settings: {
     getAll(): Promise<AppSettings>
     patch(patch: Partial<AppSettings>): Promise<AppSettings>
+    /** 问 Chromium 某个地址实际会走哪条代理。诊断「配了没生效」用 */
+    proxyStatus(url?: string): Promise<{ rules: string; resolved: string }>
   }
   scan: {
     pickDirectory(): Promise<string | null>

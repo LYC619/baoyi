@@ -41,6 +41,7 @@ import { useToast } from '@/composables/useToast'
 import { ICON_NAMES, useCategoriesStore } from '@/stores/categories'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
+import { useVideoStore } from '@/stores/video'
 import { formatBytes, searchCalls } from '@/utils'
 import type {
   AIConfig,
@@ -62,6 +63,8 @@ const route = useRoute()
 const router = useRouter()
 const settings = useSettingsStore()
 const store = useSoftwareStore()
+// 「隐藏里番」的开关要在设置页里当场让影视那边重查，所以这儿得拿到它的 store
+const video = useVideoStore()
 const catStore = useCategoriesStore()
 const { success, error, toast } = useToast()
 const scan = useScan()
@@ -454,6 +457,77 @@ async function testTmdbConn(): Promise<void> {
     tmdbResult.value = await window.baoyi.ai.testTmdb(currentTmdbConfig())
   } finally {
     tmdbTesting.value = false
+  }
+}
+
+/* ------------------------------ 隐藏里番 ------------------------------ */
+
+const hideHentai = ref(settings.settings.hide_hentai)
+
+/**
+ * 即时落盘 + 立刻让影视那边重查。
+ *
+ * `video.reload()` 这一下是必需的：判据在主进程的查询层，而渲染进程手上是
+ * 上一次查回来的 `items` 和 `counts`。不重查的话开关扳完**界面一点变化都没有**，
+ * 要等下次进影视页才生效 —— 那看起来就是开关坏了。
+ *
+ * 之后再看选中项还在不在：用户可能正停在里番那一格上，而那一格马上就没了，
+ * 留在原地会得到一面空墙配一个「里番」的标题。
+ *
+ * 判据是「刷新后的 counts 里还有没有这个分类」，而不是拿分类名去比 ——
+ * 渲染进程**不 import `electron/`** 下的任何东西（那条边界全项目都守着），
+ * 所以这里没有 `HENTAI_CATEGORY` 这个常量可用。照计数判反而更通用：
+ * 任何一个分类因为任何原因消失了，都会被拨回「全部」。
+ */
+async function toggleHideHentai(): Promise<void> {
+  await settings.patch({ hide_hentai: hideHentai.value })
+  await video.reload()
+  const sel = video.selection
+  if (sel.kind === 'category' && !video.counts.categories.some((c) => c.name === sel.value)) {
+    video.select({ kind: 'group', value: 'all' })
+  }
+  success(hideHentai.value ? '里番已隐藏' : '里番已恢复显示')
+}
+
+/* ------------------------------ 出站代理 ------------------------------ */
+
+const proxyRules = ref(settings.settings.proxy)
+const proxyChecking = ref(false)
+const proxyResult = ref<{ ok: boolean; message: string } | null>(null)
+
+/**
+ * 保存代理。主进程在 `settings:patch` 里看见 `proxy` 这个键就当场铺下去，
+ * 所以这里不需要另开一个「应用代理」的通道。
+ *
+ * 铺失败时它不抛、只在返回值里说 —— 但 patch 的返回是设置本身，拿不到那句话。
+ * 所以保存后再问一次生效情况，把「规则铺上了吗」摆给用户看。
+ */
+async function saveProxy(): Promise<void> {
+  await settings.patch({ proxy: proxyRules.value.trim() })
+  success(proxyRules.value.trim() === '' ? '已切回直连' : '代理配置已保存')
+  await checkProxy()
+}
+
+/**
+ * 问主进程「这个地址实际会走哪条代理」。
+ *
+ * 这一条不是锦上添花：代理填错时最常见的现象是「看着保存了但没生效」，而
+ * `resolveProxy` 的回答能当场分清两件事 —— 规则没铺上（回 DIRECT），
+ * 还是规则铺上了但目标本身不通（回 SOCKS5 ...，那问题在代理或目标那边）。
+ */
+async function checkProxy(): Promise<void> {
+  proxyChecking.value = true
+  try {
+    const s = await window.baoyi.settings.proxyStatus()
+    const rules = s.rules === '' ? '（直连）' : s.rules
+    proxyResult.value = {
+      ok: true,
+      message: `当前规则：${rules}　·　hanime1.me 实际走：${s.resolved}`
+    }
+  } catch (err) {
+    proxyResult.value = { ok: false, message: `问不到代理状态：${(err as Error).message}` }
+  } finally {
+    proxyChecking.value = false
   }
 }
 
@@ -1483,6 +1557,76 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               两个域名各填只填域名，不带 <span class="mono">https://</span> 和路径。
               官方的 <span class="mono">api.themoviedb.org</span> 在国内多数网络下连不上，
               填自己的反代能解决；海报下载只允许走这里填的图片域名，别处的地址一概不收。
+            </p>
+          </section>
+
+          <!--
+            代理。放在 TMDB 之后、日志之前 —— 它服务的是「联网刮削」这一组，
+            而不是某一个站。
+          -->
+          <section class="panel">
+            <div class="sec-head">
+              <h2>出站代理</h2>
+            </div>
+            <p class="sec-desc">
+              留空为直连。填 <span class="mono">socks5://127.0.0.1:10808</span> 这样的地址；
+              不写协议名时按 HTTP 代理处理。改完保存即刻生效，不用重启。
+            </p>
+
+            <div class="form">
+              <label class="field">
+                <span class="field__label">代理地址</span>
+                <input
+                  v-model="proxyRules"
+                  class="input mono"
+                  placeholder="socks5://127.0.0.1:10808"
+                />
+              </label>
+            </div>
+
+            <div class="row">
+              <button class="btn btn--primary" @click="saveProxy">保存配置</button>
+              <button class="btn btn--ghost" :disabled="proxyChecking" @click="checkProxy">
+                <Loader2 v-if="proxyChecking" :size="14" class="spin" />
+                查看生效情况
+              </button>
+            </div>
+
+            <p v-if="proxyResult" class="result" :class="{ 'result--bad': !proxyResult.ok }">
+              {{ proxyResult.message }}
+            </p>
+
+            <!--
+              这一段是必要的，不是免责声明：只有走 Chromium 网络栈的请求吃这份
+              代理，而「配了没反应」是这里最容易出现的现象
+            -->
+            <p class="sec-desc sec-desc--foot">
+              目前只有里番（hanime）那条刮削链路走代理，TMDB 和豆瓣仍是直连。
+              本机回环地址一律不走代理，所以海报那条自定义协议不受影响。
+            </p>
+          </section>
+
+          <section class="panel">
+            <div class="sec-head">
+              <h2>隐藏里番</h2>
+              <label class="switch">
+                <input v-model="hideHentai" type="checkbox" @change="toggleHideHentai" />
+                <span>{{ hideHentai ? '已隐藏' : '正常显示' }}</span>
+              </label>
+            </div>
+            <p class="sec-desc">
+              打开后影视侧边栏不再出现「里番」这一格，海报墙也不铺这些条目，
+              侧栏的观看状态、类型、标签、归档几处计数都不把它们算进去。
+            </p>
+
+            <!--
+              边界要写明白，否则它很容易被当成锁用。藏起来的是「浏览时看不见」，
+              不是「访问不到」—— 说清楚比让用户自己发现要好
+            -->
+            <p class="sec-desc sec-desc--foot">
+              它只管显示：条目、文件和海报都原样留着，关掉开关立刻回来，
+              不改任何数据。设置页这边「影视条目」的总数仍是全库的数字，
+              已经打开过的详情页地址也照样能打开。
             </p>
           </section>
 

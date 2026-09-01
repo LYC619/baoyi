@@ -13,6 +13,8 @@ const FALLBACK: AppSettings = {
   organize_root: '',
   save_backup_root: '',
   save_backup_keep: 10,
+  proxy: '',
+  hide_hentai: false,
   theme: 'dark',
   view_mode: 'grid',
   group_by_category: false,

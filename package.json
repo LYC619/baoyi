@@ -1,7 +1,7 @@
 {
   "name": "baoyi",
   "productName": "抱一",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "抱一 — 本地资源掌控工具。知止而后得。",
   "author": "BaoYi",
   "license": "MIT",
@@ -27,6 +27,8 @@
     "rollback-v9": "node --experimental-strip-types --no-warnings scripts/rollback-v9.ts",
     "verify-rollback-v7": "node --experimental-strip-types --no-warnings scripts/verify-rollback-v7.ts",
     "verify-rollback-v9": "node --experimental-strip-types --no-warnings scripts/verify-rollback-v9.ts",
+    "verify-proxy": "electron scripts/verify-proxy.cjs",
+    "probe-hanime": "electron scripts/probe-hanime-proxy.cjs",
     "verify-packaged": "node --experimental-strip-types --no-warnings scripts/verify-packaged.ts",
     "inspect": "set ELECTRON_RUN_AS_NODE=1&& electron scripts/inspect-db.cjs",
     "preview": "vite preview",

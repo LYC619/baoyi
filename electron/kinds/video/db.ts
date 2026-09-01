@@ -22,6 +22,7 @@ import type {
   WatchStatus
 } from '../../../src/types'
 import type { SqlDb } from '../../services/schema.ts'
+import { HENTAI_CATEGORY } from './taxonomy.ts'
 
 /** 一集的入库形状。id 由这一层生成，调用方不用管 */
 export interface EpisodePayload {
@@ -583,9 +584,44 @@ const VIDEO_ORDER: Record<NonNullable<VideoQuery['sort']>, string> = {
     'COALESCE(NULLIF(rating, 0), douban_rating) DESC, created_at DESC'
 }
 
-export function listVideos(d: SqlDb, query: VideoQuery = {}): VideoItem[] {
+/**
+ * 「隐藏里番」那个开关的 SQL 片段。
+ *
+ * 收在一个常量里而不是各处手写 `category != '里番'`：这个条件要出现在**七处**
+ * （列表 + counts 的六个聚合），漏掉任何一处的表现都是「关了还能从别的地方看见」
+ * —— 而那种漏比不做更糟，用户以为藏住了。
+ *
+ * 用 `!=` 而不是 `NOT IN`：目前只有一个分类要藏。将来 F 那条（要不要把
+ * 泡面番 / 3D / MMD 也做成分类）如果定了要加，这里改成一个列表，
+ * 七处引用一起跟着变，不用再找一遍。
+ */
+const NOT_HENTAI = `category != '${HENTAI_CATEGORY}'`
+
+/**
+ * @param hideHentai 隐藏里番。**显式传进来**，不在这一层读设置 ——
+ *   db.ts 是纯数据层，自检直接拿内存库驱动它；一读设置就得先有 app 和库，
+ *   那几十条断言全得改。判据留在 service 层（`listVideoItems`）。
+ */
+export function listVideos(
+  d: SqlDb,
+  query: VideoQuery = {},
+  hideHentai = false
+): VideoItem[] {
   const where: string[] = [query.group === 'archived' ? 'is_archived = 1' : 'is_archived = 0']
   const params: unknown[] = []
+
+  /*
+   * 藏的时候连**明确点了里番分类**的查询也一起空掉。
+   *
+   * 看着多余 —— 藏了之后侧栏那一格就没了，正常操作点不到它。但 `query` 是从
+   * 渲染进程过来的，挡在这一层才是真的挡住：开关刚打开的那一刻 store 里的
+   * selection 可能还停在里番（用户正看着那一格时去设置页打开了开关），
+   * 而任何一处忘了刷新都会让墙上原样铺着。
+   *
+   * 判据放数据层而不是靠界面自觉，理由是这个开关的意义就是「别显示出来」——
+   * 靠调用方每一处都记得传对参数，等于把它做成了君子协定。
+   */
+  if (hideHentai) where.push(NOT_HENTAI)
 
   if (query.type && VIDEO_TYPES.includes(query.type)) {
     where.push('video_type = ?')
@@ -692,14 +728,24 @@ export function resumeEpisode(d: SqlDb, resourceId: string): Episode | null {
   return row ? rowToEpisode(row) : null
 }
 
-export function videoCounts(d: SqlDb): VideoCounts {
+/**
+ * @param hideHentai 隐藏里番。**六个聚合都要挡**，不是只挡 categories ——
+ *   侧栏的观看状态、类型、标签三处计数都从这里来，只挡分类那一格的话，
+ *   格子消失了而别处的数字仍旧含着里番，等于告诉用户「藏了几条」。
+ *   `archived` 也挡：归档区的计数漏出去是同一回事。
+ */
+export function videoCounts(d: SqlDb, hideHentai = false): VideoCounts {
   const one = (sql: string, ...args: unknown[]) =>
     Number((d.prepare(sql).get(...args) as { n: number }).n) || 0
+
+  /** 拼在 `is_archived = ?` 后面的那一截。不藏时是空串，SQL 原样不变 */
+  const hide = hideHentai ? ` AND ${NOT_HENTAI}` : ''
 
   const status = Object.fromEntries(WATCH_STATUSES.map((s) => [s, 0])) as Record<WatchStatus, number>
   const statusRows = d
     .prepare(
-      `SELECT watch_status AS s, COUNT(*) AS n FROM video WHERE is_archived = 0 GROUP BY watch_status`
+      `SELECT watch_status AS s, COUNT(*) AS n FROM video
+       WHERE is_archived = 0${hide} GROUP BY watch_status`
     )
     .all() as Array<{ s: string; n: number }>
   for (const r of statusRows) {
@@ -709,7 +755,8 @@ export function videoCounts(d: SqlDb): VideoCounts {
   const type = Object.fromEntries(VIDEO_TYPES.map((t) => [t, 0])) as Record<VideoType, number>
   const typeRows = d
     .prepare(
-      `SELECT video_type AS t, COUNT(*) AS n FROM video WHERE is_archived = 0 GROUP BY video_type`
+      `SELECT video_type AS t, COUNT(*) AS n FROM video
+       WHERE is_archived = 0${hide} GROUP BY video_type`
     )
     .all() as Array<{ t: string; n: number }>
   for (const r of typeRows) {
@@ -720,20 +767,22 @@ export function videoCounts(d: SqlDb): VideoCounts {
     d
       .prepare(
         `SELECT category AS name, COUNT(*) AS count FROM video
-         WHERE is_archived = 0 GROUP BY category ORDER BY count DESC`
+         WHERE is_archived = 0${hide} GROUP BY category ORDER BY count DESC`
       )
       .all() as Array<{ name: string; count: number }>
   ).map((r) => ({ name: String(r.name ?? ''), count: Number(r.count) || 0 }))
 
   // 标签在 JSON 数组里，直接在 JS 里聚合。视频库是百级规模，够用
   const tagMap = new Map<string, number>()
-  for (const r of d.prepare('SELECT tags FROM video WHERE is_archived = 0').all() as Row[]) {
+  for (const r of d
+    .prepare(`SELECT tags FROM video WHERE is_archived = 0${hide}`)
+    .all() as Row[]) {
     for (const t of jsonArray<string>(r.tags)) tagMap.set(t, (tagMap.get(t) ?? 0) + 1)
   }
 
   return {
-    all: one('SELECT COUNT(*) AS n FROM video WHERE is_archived = 0'),
-    archived: one('SELECT COUNT(*) AS n FROM video WHERE is_archived = 1'),
+    all: one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 0${hide}`),
+    archived: one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 1${hide}`),
     type,
     status,
     categories,

@@ -554,7 +554,7 @@ async function main(): Promise<void> {
   )
   assert('不认这条资源的字幕路径被挡掉了', foreign === false, `返回 ${JSON.stringify(foreign)}`)
 
-  console.log(`\n【十】里番这一格 + hanime 按钮 + 点标签筛选（v0.8）`)
+  console.log(`\n【十】里番这一格 + hanime 按钮 + 点标签筛选 + 隐藏开关（v0.8）`)
   // 排在【十一】记事本之前：那一节抢焦点，之后的 DOM 查询不可靠
   await goto(ws, '#/video')
   const hentaiSide = await evalJs(
@@ -717,6 +717,111 @@ async function main(): Promise<void> {
   assert('页面上也没有 hanime 字样残留', noId.text === false)
   // 别的按钮还在 —— 证明上一条不是因为整页没渲染出来
   assert('同一页别的按钮照常渲染（排除「整页空」这种假绿）', noId.hasPlay === true)
+
+  /* ---------- 隐藏里番开关：自检只验得到查询层，渲染要在这儿看 ---------- */
+  await goto(ws, '#/video')
+  const hidden = await evalJs(
+    ws,
+    `for (let i = 0; i < 40; i++) {
+       if (document.querySelectorAll('.card').length > 0) break
+       await new Promise((r) => setTimeout(r, 200))
+     }
+     const cell = () =>
+       [...document.querySelectorAll('.row')].some(
+         (r) => r.querySelector('.row__label')?.textContent?.trim() === '${SEED_HENTAI}'
+       )
+     const before = {
+       cell: cell(),
+       cards: document.querySelectorAll('.card').length
+     }
+
+     // 打开开关。走的是真 IPC，不是改 store —— 判据在主进程查询层
+     await window.baoyi.settings.patch({ hide_hentai: true })
+     const counts = await window.baoyi.video.counts()
+     const list = await window.baoyi.video.list({})
+     return {
+       before,
+       counts,
+       listNames: list.map((v) => v.name_zh),
+       hasHentaiCell: (counts.categories ?? []).some((c) => c.name === '${SEED_HENTAI}'),
+       tagNames: (counts.tags ?? []).map((t) => t.name)
+     }`
+  )
+  console.log('  开关打开后:', JSON.stringify({ ...hidden, counts: undefined }))
+  assert(`开关之前侧栏有「${SEED_HENTAI}」这一格`, hidden.before.cell === true)
+  assert(
+    '打开后 counts 里没有里番那一格了',
+    hidden.hasHentaiCell === false,
+    JSON.stringify((hidden.counts.categories ?? []).map((c: any) => c.name))
+  )
+  assert(
+    `打开后列表只剩 ${SEED_EXPECT.live - SEED_EXPECT.hentai} 条`,
+    hidden.listNames.length === SEED_EXPECT.live - SEED_EXPECT.hentai,
+    JSON.stringify(hidden.listNames)
+  )
+  assert(
+    '里番的标签从标签池里一起消失了（漏了就等于告诉用户藏了几条）',
+    !hidden.tagNames.includes('巨乳') && !hidden.tagNames.includes('女教師'),
+    JSON.stringify(hidden.tagNames)
+  )
+  assert(
+    'counts.all 也跟着少了',
+    hidden.counts.all === SEED_EXPECT.live - SEED_EXPECT.hentai,
+    `拿到 ${hidden.counts.all}`
+  )
+
+  // 重新加载页面：藏的东西在真渲染里也不该出现。
+  // 上面那几条问的是 IPC 的返回值，这一条问的是 DOM —— 两回事
+  await goto(ws, '#/video')
+  const hiddenDom = await evalJs(
+    ws,
+    `for (let i = 0; i < 40; i++) {
+       if (document.querySelectorAll('.card').length > 0) break
+       await new Promise((r) => setTimeout(r, 200))
+     }
+     const t = document.body.innerText
+     return {
+       cards: document.querySelectorAll('.card').length,
+       names: [...document.querySelectorAll('.card__name')].map((e) => e.textContent.trim()),
+       cellPresent: [...document.querySelectorAll('.row')].some(
+         (r) => r.querySelector('.row__label')?.textContent?.trim() === '${SEED_HENTAI}'
+       ),
+       mentionsHentai: t.includes('${SEED_HENTAI}')
+     }`
+  )
+  console.log('  重载后的墙:', JSON.stringify(hiddenDom))
+  assert('侧栏那一格真的不画了', hiddenDom.cellPresent === false)
+  assert(
+    `墙上真的只剩 ${SEED_EXPECT.live - SEED_EXPECT.hentai} 张卡`,
+    hiddenDom.cards === SEED_EXPECT.live - SEED_EXPECT.hentai,
+    `拿到 ${hiddenDom.cards}：${JSON.stringify(hiddenDom.names)}`
+  )
+  // detail 在通过时也会打出来，所以写实测值而不是「还有地方提到它」那种结论
+  assert(
+    '页面上一处「里番」字样都没有',
+    hiddenDom.mentionsHentai === false,
+    `页面含「${SEED_HENTAI}」=${hiddenDom.mentionsHentai}`
+  )
+
+  // 关掉：东西必须原样回来。这一条证明开关只管显示，没动数据
+  const restored = await evalJs(
+    ws,
+    `await window.baoyi.settings.patch({ hide_hentai: false })
+     const counts = await window.baoyi.video.counts()
+     const list = await window.baoyi.video.list({})
+     return {
+       all: counts.all,
+       hasCell: (counts.categories ?? []).some((c) => c.name === '${SEED_HENTAI}'),
+       names: list.map((v) => v.name_zh)
+     }`
+  )
+  console.log('  关掉之后:', JSON.stringify(restored))
+  assert('关掉后里番那一格回来了', restored.hasCell === true)
+  assert(
+    `关掉后条目全回来（${SEED_EXPECT.live} 条）—— 开关没动数据`,
+    restored.names.length === SEED_EXPECT.live && restored.all === SEED_EXPECT.live,
+    `拿到 ${restored.names.length} 条 / all=${restored.all}`
+  )
 
   console.log('\n【十一】真调起播放器（会弹记事本，随后杀掉）')
   // 这一节必须排在所有 DOM 断言之后，理由见文件头。

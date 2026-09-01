@@ -73,9 +73,19 @@ export function cancelVideoScan(): void {
 
 /* ------------------------------ 读写绑定 ------------------------------ */
 
-export const listVideoItems = (query: VideoQuery = {}): VideoItem[] => listVideos(getDb(), query)
+/**
+ * 「隐藏里番」的判据只在这一处读设置。
+ *
+ * db.ts 那边收的是一个显式布尔，理由见 `listVideos` 的注释（纯数据层，
+ * 自检拿内存库直驱）。这里是它和设置之间的唯一接缝 —— 加一处新的读取点之前，
+ * 先想清楚为什么不能走这儿。
+ */
+const hideHentai = (): boolean => getSettings().hide_hentai === true
+
+export const listVideoItems = (query: VideoQuery = {}): VideoItem[] =>
+  listVideos(getDb(), query, hideHentai())
 export const getVideoItem = (id: string): VideoItem | null => getVideo(getDb(), id)
-export const videoCountsOf = (): VideoCounts => videoCounts(getDb())
+export const videoCountsOf = (): VideoCounts => videoCounts(getDb(), hideHentai())
 export const listVideoEpisodes = (id: string): Episode[] => listEpisodes(getDb(), id)
 export const getVideoEpisode = (episodeId: string): Episode | null => getEpisode(getDb(), episodeId)
 export const nextVideoEpisode = (id: string, season: number, episode: number): Episode | null =>
