@@ -64,7 +64,8 @@ const api: BaoyiApi = {
       ipcRenderer.invoke('software:reveal', id, launcherPath),
     addManual: () => ipcRenderer.invoke('software:add-manual'),
     pickIcon: (id: string) => ipcRenderer.invoke('software:pick-icon', id),
-    clearIcon: (id: string) => ipcRenderer.invoke('software:clear-icon', id)
+    clearIcon: (id: string) => ipcRenderer.invoke('software:clear-icon', id),
+    refreshIcons: () => ipcRenderer.invoke('software:refresh-icons')
   },
   game: {
     list: (query: GameQuery = {}) => ipcRenderer.invoke('game:list', plain(query)),

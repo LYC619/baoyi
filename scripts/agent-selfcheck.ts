@@ -41,6 +41,7 @@ import {
 import { planRoot, skippable } from '../electron/kinds/software/scanPlan.ts'
 import { countExes } from '../electron/kinds/software/exeCount.ts'
 import { parseVersionResource } from '../electron/kinds/software/peReader.ts'
+import { pickBestPngFrame } from '../electron/kinds/software/peIcon.ts'
 import {
   ICON_EXTS,
   iconFileName,
@@ -737,6 +738,141 @@ async function main(): Promise<void> {
     const info = parseVersionResource(verNode({ key: '不认识', value: wide('x') }))
     assert.equal(info.company, '')
     assert.equal(info.version, '')
+  })
+
+  /* --------------------------- 从 PE 里取图标帧 --------------------------- */
+
+  // 0.8.0 上报的「空图标」的根因**不是提取失败**：`app.getFileIcon` 在有图标资源的
+  // exe 上也会回一张 Windows 的通用程序图标（淡色窗框加蓝块）。2026-09-02 在真库
+  // 46 条上量到 13 条拿的是同一张 32×32 通用图，而其中 12 条的 PE 里有 256×256 的
+  // 真图标，腾讯 ima.copilot 甚至有 12 组 61 张。
+  //
+  // **这个洞躲过了所有能自动检查的地方**：icon_path 非空、图标文件真的在、
+  // `<img>` 也渲染成功。只有人眼看得出那是张空白图 —— 和「Write 工具毁中文」
+  // 同一类：闸门全绿，只有肉眼能发现。
+  //
+  // 所以现在自己解 RT_GROUP_ICON 挑最大的 PNG 帧（peIcon.ts），取不到才退回
+  // getFileIcon。下面喂构造出来的畸形数据，守住真实文件上撞到的那几个形状。
+  console.log('\n软件图标 · 从 PE 里取图标帧')
+
+  /** 拼一段 GRPICONDIR。宽高和张数都可以手写成假的，畸形用例要的就是这个 */
+  function iconGroup(
+    frames: Array<{ w: number; h: number; bits?: number; id: number }>,
+    declaredCount?: number
+  ): Buffer {
+    const b = Buffer.alloc(6 + frames.length * 14)
+    b.writeUInt16LE(0, 0)
+    b.writeUInt16LE(1, 2)
+    b.writeUInt16LE(declaredCount ?? frames.length, 4)
+    frames.forEach((f, i) => {
+      const o = 6 + i * 14
+      // 256 在这个格式里记成 0（宽高各只有一个字节）
+      b[o] = f.w >= 256 ? 0 : f.w
+      b[o + 1] = f.h >= 256 ? 0 : f.h
+      b.writeUInt16LE(f.bits ?? 32, o + 6)
+      b.writeUInt16LE(f.id, o + 12)
+    })
+    return b
+  }
+
+  /** 一张最小可用的假 PNG：魔数 + IHDR（宽高写在里面）+ 填充到够长 */
+  function fakePng(w: number, h: number): Buffer {
+    const b = Buffer.alloc(96)
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0)
+    b.writeUInt32BE(13, 8)
+    b.write('IHDR', 12, 'latin1')
+    b.writeUInt32BE(w, 16)
+    b.writeUInt32BE(h, 20)
+    return b
+  }
+
+  /** 老式 DIB 帧：BITMAPINFOHEADER 打头，不是 PNG */
+  function fakeDib(w: number, h: number): Buffer {
+    const b = Buffer.alloc(96)
+    b.writeUInt32LE(40, 0)
+    b.writeInt32LE(w, 4)
+    b.writeInt32LE(h * 2, 8)
+    return b
+  }
+
+  await check('挑最大的 PNG 帧，256 记成 0 也要认出来', () => {
+    const icons = new Map([
+      [1, fakePng(32, 32)],
+      [2, fakePng(256, 256)],
+      [3, fakePng(48, 48)]
+    ])
+    const best = pickBestPngFrame(
+      iconGroup([
+        { w: 32, h: 32, id: 1 },
+        { w: 256, h: 256, id: 2 },
+        { w: 48, h: 48, id: 3 }
+      ]),
+      icons
+    )
+    assert.equal(best?.width, 256, '256 那一帧在目录项里宽高写的是 0，不还原就会被当成最小的')
+    assert.equal(best?.height, 256)
+  })
+
+  await check('目录项自报的宽高不可信，按 PNG 的 IHDR 算', () => {
+    // X-Mouse Button Control 的真实形状：目录项自报 13×13，那一帧实际是 256×256。
+    // 按自报的排序会把最好的帧排到最后，表现是「图标对但很糊」，
+    // 没人会往「目录项在说谎」上想。和 wValueLength 短报是同一类教训
+    const best = pickBestPngFrame(
+      iconGroup([
+        { w: 13, h: 13, id: 1 },
+        { w: 48, h: 48, id: 2 }
+      ]),
+      new Map([
+        [1, fakePng(256, 256)],
+        [2, fakePng(48, 48)]
+      ])
+    )
+    assert.equal(best?.width, 256, '自报 13×13 的那一帧实际是 256×256，它才是最佳帧')
+  })
+
+  await check('自报的张数远大于实际数据时不越界', () => {
+    // 畸形资源里 idCount 可以是任意数。照着它读会读到缓冲区外面
+    const best = pickBestPngFrame(iconGroup([{ w: 64, h: 64, id: 1 }], 9999), new Map([[1, fakePng(64, 64)]]))
+    assert.equal(best?.width, 64, '实际只有一帧，多报的那些不该让整段解析崩掉')
+  })
+
+  await check('DIB 帧跳过去，让 getFileIcon 接手', () => {
+    // DIB-only 的 exe（真库上 15 条）getFileIcon 取到的是 48×48 的**真**图标，
+    // 不是通用图，所以这条退路是有用的，不是聊胜于无
+    const best = pickBestPngFrame(iconGroup([{ w: 256, h: 256, id: 1 }]), new Map([[1, fakeDib(256, 256)]]))
+    assert.equal(best, null, '不解 DIB，回 null 让调用方退回 getFileIcon')
+  })
+
+  await check('比 getFileIcon 还小的 PNG 帧不值得用', () => {
+    // 16×16 的 PNG 放到 48px 的卡上比 getFileIcon 的 48×48 更难看
+    assert.equal(pickBestPngFrame(iconGroup([{ w: 16, h: 16, id: 1 }]), new Map([[1, fakePng(16, 16)]])), null)
+    assert.ok(pickBestPngFrame(iconGroup([{ w: 32, h: 32, id: 1 }]), new Map([[1, fakePng(32, 32)]])), '32 够用')
+  })
+
+  await check('帧指向的 RT_ICON 不存在时不炸，也不回半张图', () => {
+    assert.equal(pickBestPngFrame(iconGroup([{ w: 256, h: 256, id: 7 }]), new Map()), null)
+  })
+
+  await check('截断的 GRPICONDIR 和空缓冲都当没有图标', () => {
+    assert.equal(pickBestPngFrame(Buffer.alloc(0), new Map([[1, fakePng(64, 64)]])), null)
+    assert.equal(pickBestPngFrame(Buffer.alloc(4), new Map([[1, fakePng(64, 64)]])), null)
+    // 头齐了但帧数据只有一半
+    assert.equal(
+      pickBestPngFrame(iconGroup([{ w: 64, h: 64, id: 1 }]).subarray(0, 12), new Map([[1, fakePng(64, 64)]])),
+      null
+    )
+  })
+
+  await check('PNG 魔数对但短得不像图的不收', () => {
+    // 坏图标写进去的表现是界面上一个破图框，比退回首字占位更糟
+    const stub = fakePng(256, 256).subarray(0, 24)
+    assert.equal(pickBestPngFrame(iconGroup([{ w: 256, h: 256, id: 1 }]), new Map([[1, stub]])), null)
+  })
+
+  await check('IHDR 里写了荒唐的尺寸就不认这一帧', () => {
+    const bogus = fakePng(1, 1)
+    bogus.writeUInt32BE(999_999, 16)
+    assert.equal(pickBestPngFrame(iconGroup([{ w: 256, h: 256, id: 1 }]), new Map([[1, bogus]])), null)
   })
 
   /* ------------------------------ 手动换图标 ------------------------------ */

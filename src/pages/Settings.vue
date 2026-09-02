@@ -981,6 +981,36 @@ async function exportMarkdown(): Promise<void> {
   if (file) success(`已导出到 ${file}`)
 }
 
+const refreshingIcons = ref(false)
+
+/**
+ * 重新提取全部软件图标。
+ *
+ * 单独一个按钮而不是搭在「重新识别」上：图标和 AI 一点关系都没有，为了换一张图
+ * 重跑一遍识别是在烧用户的 token。而不给这个按钮的话，修好的提取逻辑对已经入库的
+ * 条目一点效果都没有 —— `extractIcon` 只在识别时被调 —— 现象和「这个 bug 没修」
+ * 一模一样。
+ *
+ * 结果按四档报数（换了 / 手改过跳过 / 提不到 / 总数）。只说「完成了」的话，
+ * 「一张都没换」和「全换了」在界面上长得一样，而前者说明这条路根本没跑起来。
+ */
+async function refreshIcons(): Promise<void> {
+  refreshingIcons.value = true
+  try {
+    const r = await window.baoyi.software.refreshIcons()
+    await Promise.all([store.reload(), loadStats()])
+    const bits = [`${r.total} 条里换了 ${r.changed} 张`]
+    if (r.manual > 0) bits.push(`${r.manual} 条是你手动指的，没动`)
+    if (r.failed > 0) bits.push(`${r.failed} 条提不到图标`)
+    if (r.changed > 0) success(bits.join('，'))
+    else toast(bits.join('，') + ' —— 现在这批已经是能提到的最好结果了')
+  } catch (err) {
+    error(`重提图标失败：${err instanceof Error ? err.message : String(err)}`)
+  } finally {
+    refreshingIcons.value = false
+  }
+}
+
 async function reset(mode: 'library' | 'all'): Promise<void> {
   // 文案必须把「游戏也会清」写出来。0.6 那版只说「软件条目」而代码只清 software，
   // 两边是对上的；现在改成清全部品类，文案不跟着改就成了一句谎话
@@ -2007,6 +2037,25 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               封面是你亲手指的图，海报多半是刮来的但也可能是你选的，
               两者都只在清空条目时才跟着走。
             </p>
+          </section>
+
+          <section class="panel">
+            <h2 class="sec-head">重新提取软件图标</h2>
+            <p class="sec-desc">
+              直接从 exe 的图标资源里取最大那一张（256×256 居多）。
+              <b>你亲手换过的图标不会被动。</b>
+              这个按钮不联网、不花 token，和「重新识别」是两件事。
+            </p>
+            <div class="row">
+              <button class="btn btn--ghost" :disabled="busy || refreshingIcons" @click="refreshIcons">
+                <Loader2 v-if="refreshingIcons" :size="14" class="spin" />
+                <Image v-else :size="14" />
+                {{ refreshingIcons ? '正在重提' : '重新提取' }}
+              </button>
+              <span class="hint">
+                Windows 有时会对明明带图标的程序回一张通用的空白图，这个按钮绕开它
+              </span>
+            </div>
           </section>
 
           <section class="panel panel--danger">

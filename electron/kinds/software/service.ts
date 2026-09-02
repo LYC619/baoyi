@@ -8,9 +8,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SoftwareItem } from '../../../src/types'
-import { getSoftware, iconsDir, updateSoftware } from '../../services/database'
+import { getSoftware, iconsDir, listSoftware, updateSoftware } from '../../services/database'
 import { extractIcon } from '../../services/iconExtractor'
-import { ICON_EXTS, iconFileName, iconSiblings, isIconExt } from './icons.ts'
+import { ICON_EXTS, iconFileName, iconSiblings, isIconExt, isManualIcon } from './icons.ts'
 
 /** 清掉这个条目的所有手动图标文件（含换过扩展名留下的孤儿） */
 function dropManualIcons(id: string): void {
@@ -76,4 +76,51 @@ export async function clearSoftwareIcon(id: string): Promise<SoftwareItem | null
 
   const auto = await extractIcon(item.exe_path)
   return updateSoftware(id, { icon_path: auto })
+}
+
+/**
+ * 把全库的自动图标重提一遍。
+ *
+ * ## 为什么非要有这个入口
+ *
+ * 修好提取逻辑**对已经入库的条目没有任何效果** —— `extractIcon` 只在识别时被调，
+ * 而老条目不会重新识别。用户装上修好的版本，看到的还是原来那批通用图标，
+ * 现象和「这个 bug 没修」一模一样。
+ *
+ * 光靠「重新识别」也不行：那要烧 token 重跑一遍 AI，而图标和 AI 一点关系都没有。
+ *
+ * ## 手改过的图标一律不动
+ *
+ * 判据是 `isManualIcon`（文件名是 `<条目 id>.<扩展名>` 还是 `<sha1>-N.png`）。
+ * 判错的方向不对称：把手动当自动 = 用户亲手挑的图被这个按钮悄悄换掉，
+ * 而他按下去时想的是「把读不到的那些补上」，不是「重置我的设置」。
+ */
+export async function refreshSoftwareIcons(): Promise<{
+  total: number
+  changed: number
+  manual: number
+  failed: number
+}> {
+  // 归档的也要一起提：`listSoftware({})` 默认只回 `is_archived = 0`，
+  // 只查一次的话归档条目永远刷不到，而界面照样报「换了 N 张」——
+  // 那一条静静地留着空白图，用户没有任何线索知道为什么
+  const items = [...listSoftware({}), ...listSoftware({ group: 'archived' })]
+  const out = { total: items.length, changed: 0, manual: 0, failed: 0 }
+
+  for (const item of items) {
+    if (isManualIcon(item.id, item.icon_path)) {
+      out.manual++
+      continue
+    }
+    const icon = await extractIcon(item.exe_path)
+    if (!icon) {
+      out.failed++
+      continue
+    }
+    if (icon !== item.icon_path) {
+      updateSoftware(item.id, { icon_path: icon })
+      out.changed++
+    }
+  }
+  return out
 }

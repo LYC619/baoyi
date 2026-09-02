@@ -1231,6 +1231,13 @@ export interface BaoyiApi {
     ): Promise<{ ok: boolean; message: string; item: SoftwareItem | null } | null>
     /** 撤掉手动图标，退回自动提取的那张（提不到才落到首字占位） */
     clearIcon(id: string): Promise<SoftwareItem | null>
+    /**
+     * 把全库的自动图标重提一遍。手改过的（`isManualIcon`）一律不动。
+     *
+     * 存在的理由是「修好提取逻辑对已入库的条目没效果」：`extractIcon` 只在识别时
+     * 被调，老条目不会自己重来，于是修好的版本装上去看起来和没修一样。
+     */
+    refreshIcons(): Promise<{ total: number; changed: number; manual: number; failed: number }>
   }
   game: {
     list(query?: GameQuery): Promise<GameItem[]>

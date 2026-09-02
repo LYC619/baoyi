@@ -54,6 +54,10 @@ export function readPeArch(exePath: string): PeArch {
 /**
  * resedit 需要把整个 exe 读进内存。超过这个体积就跳过资源解析，
  * 只靠文件名 + AI 识别。
+ *
+ * 图标提取那边（`peIcon.ts` 的 `MAX_ICON_BYTES`）刻意比这里松：这个函数是
+ * **同步**的，而且扫描循环里每个 exe 都要走一次；图标提取是异步的，且结果
+ * 按 exe 缓存，一辈子只读一次。
  * ponytail: 上限 128MB —— 想支持更大的文件需换成按节区流式读取 PE 资源表。
  */
 const MAX_PARSE_BYTES = 128 * 1024 * 1024

@@ -116,7 +116,7 @@ import {
 } from '../kinds/software/organize'
 import { addSingleExe, cancelScan, scanDirectories } from '../kinds/software/scanner'
 import { ICON_EXTS } from '../kinds/software/icons'
-import { clearSoftwareIcon, setSoftwareIcon } from '../kinds/software/service'
+import { clearSoftwareIcon, refreshSoftwareIcons, setSoftwareIcon } from '../kinds/software/service'
 import { testSearch } from '../services/searchService'
 import { countIpcSend } from '../services/timing.ts'
 
@@ -188,6 +188,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return { ...outcome, item: outcome.ok ? getSoftware(id) : null }
   })
   ipcMain.handle('software:clear-icon', (_e, id: string) => clearSoftwareIcon(id))
+  ipcMain.handle('software:refresh-icons', () => refreshSoftwareIcons())
 
   ipcMain.handle('software:add-manual', async () => {
     const win = getWindow()
