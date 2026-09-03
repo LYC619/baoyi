@@ -126,6 +126,10 @@ const OVA_GLUED = /^\s*OVA(?=[ぁ-ゟ゠-ヿ])/i
  * 那条路上被定成普通电影 —— 用户报的就是这个。放宽的安全阀不在这里，
  * 而在 prompt：`HANIME_NOTE_FILENAME` 让模型自己再判一次「像不像成人动画」，
  * 搜不到就退回 TMDB。所以这一层宁可宽。
+ *
+ * 2026-09-03 第二轮放宽：里番常见的「#上卷」「#下卷」「#前篇」「#後編」写法，
+ * 以及单独一个方括号内的「中文字幕」也算命中（`BARE_MARKERS` 已有但需要不带括号，
+ * 而实际文件名 `[中文字幕]` 这种带括号的更常见）。
  */
 export function looksLikeHentaiName(name: string): boolean {
   const raw = String(name ?? '')
@@ -134,11 +138,16 @@ export function looksLikeHentaiName(name: string): boolean {
   // 里番专用的两种集号写法。全角井号在这里就地认，不劳解析器
   if (/[#＃]\s*[\d０-９]/.test(raw)) return true
   if (/\bROUND\s*\d/i.test(raw)) return true
+  // 里番常见的「#上卷」「#下卷」「#前篇」「#後編」「#完」等写法
+  if (/[#＃]\s*[上下前後后完]/.test(raw)) return true
 
   if (THE_ANIMATION.test(raw)) return true
   if (OVA_GLUED.test(raw) && KANA.test(raw)) return true
   if (BARE_MARKERS.some((m) => lower.includes(m))) return true
   if (STUDIOS.some((s) => lower.includes(s))) return true
+
+  // 单独的 [中文字幕] 也算 —— 普通片库不会这么标
+  if (/[\[【]\s*中文字幕\s*[\]】]/i.test(raw)) return true
 
   const parsed = parseHentaiName(raw)
   return parsed.site_tags.some((t) => SITE_MARKERS.has(t))
