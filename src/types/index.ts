@@ -1403,6 +1403,7 @@ export interface BaoyiApi {
      * 更要紧的是用户重扫一次不该把自己手动选的海报冲掉。
      */
     fetchPoster(id: string): Promise<{ ok: boolean; message: string; item: VideoItem | null }>
+    reidentify(id: string, forceHentai?: boolean): Promise<VideoItem | null>
     /** 选一张本地图当海报。取消返回 null */
     pickPoster(id: string): Promise<{ ok: boolean; message: string; item: VideoItem | null } | null>
     /** 撤掉海报，退回首字占位。磁盘上那份拷贝一起删 */

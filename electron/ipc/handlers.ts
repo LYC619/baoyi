@@ -95,6 +95,7 @@ import {
   removeVideo,
   revealSubtitle,
   revealVideo,
+  reidentifyVideo,
   scanVideos,
   setVideoPoster,
   restoreVideoScraped,
@@ -352,6 +353,11 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     scanVideos(dirs, (p) => send('video:progress', p))
   )
   ipcMain.on('video:cancel', () => cancelVideoScan())
+  // 进度走的是**同一个** video:progress 通道，所以详情页那个按钮和海报墙上的
+  // 扫描共用一份进度显示。两条通道的话渲染进程得订两处，而它们永远不会同时跑
+  ipcMain.handle('video:reidentify', (_e, id: string, forceHentai: boolean = false) =>
+    reidentifyVideo(id, forceHentai, (p) => send('video:progress', p))
+  )
 
   ipcMain.handle('video:pick-dirs', async () => {
     const win = getWindow()

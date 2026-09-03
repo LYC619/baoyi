@@ -490,9 +490,24 @@ async function register(
   const claimedHanime = idOf(args?.hanime_id)
   let hanimeId = ''
   let rejectedHanime = ''
+  /**
+   * 封面地址**从账本取，不从参数取** —— 和豆瓣评分一个道理（见 DoubanLedger）。
+   *
+   * 让模型填一个 URL 的话，它会「记得」一个看起来像的地址然后编出来，而编错的
+   * 后果是一张别的作品的封面挂在这条上，用户没法判断它是错的。账本里的那个
+   * 是我们自己从页面上解出来的，没有第二个来源。
+   *
+   * 顺带省掉一个工具参数：`register_video` 的参数表不用为它长一栏。
+   */
+  let hanimeCover = ''
   if (claimedHanime) {
-    if (hanimeLedger.has(claimedHanime)) hanimeId = claimedHanime
-    else rejectedHanime = claimedHanime
+    const hit = hanimeLedger.get(claimedHanime)
+    if (hit) {
+      hanimeId = claimedHanime
+      hanimeCover = hit.coverUrl ?? ''
+    } else {
+      rejectedHanime = claimedHanime
+    }
   }
 
   /* -------- 集列表 -------- */
@@ -552,7 +567,12 @@ async function register(
     hanime_id: hanimeId,
     // 相对路径，不是本地文件。下载是 Step 6 的活，但这两个值在这次刮削的
     // 详情响应里白拿 —— 不存的话 Step 6 得为每个条目把详情重取一遍
-    poster_path: detail?.poster_path ?? '',
+    //
+    // 里番走 hanime 的封面（一个完整的 https 地址，见 posters.ts 的
+    // isRemotePoster）。TMDB 那份排在前面：两个都有的时候前者是竖版海报，
+    // 而 hanime 给的是横版缩略图。实际上两者几乎不会同时出现 ——
+    // 走了 hanime 通道就不查 TMDB
+    poster_path: detail?.poster_path || hanimeCover,
     fanart_path: detail?.backdrop_path ?? '',
     episodes,
     // 电影从 nfo 带过来的观看状态。只在新建时生效，剧集恒为 null，

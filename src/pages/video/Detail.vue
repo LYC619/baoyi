@@ -24,6 +24,7 @@ import {
   ImageOff,
   Loader2,
   Play,
+  RefreshCw,
   Star,
   Subtitles,
   Trash2
@@ -103,6 +104,7 @@ const poster = computed(() =>
 )
 
 const posterBusy = ref(false)
+const reidentifying = ref(false)
 
 /**
  * 三条来路依次试。判断在主进程里，这儿只负责把结果说清楚 ——
@@ -147,6 +149,25 @@ async function clearPoster(): Promise<void> {
   const updated = await window.baoyi.video.clearPoster(item.value.id)
   if (updated) item.value = updated
   store.merge(updated)
+}
+
+async function reidentify(forceHentai: boolean): Promise<void> {
+  if (!item.value) return
+  reidentifying.value = true
+  try {
+    const updated = await window.baoyi.video.reidentify(item.value.id, forceHentai)
+    if (updated) {
+      item.value = updated
+      store.merge(updated)
+      success(forceHentai ? '里番刮削完成' : '重新识别完成')
+    } else {
+      error('识别失败')
+    }
+  } catch (err) {
+    error(`识别失败：${errorMessage(err)}`)
+  } finally {
+    reidentifying.value = false
+  }
 }
 
 /* ---------------------------- 保存 ---------------------------- */
@@ -536,6 +557,20 @@ function copyPath(path: string): void {
           <button v-if="hanimeUrl" class="btn btn--ghost" :title="hanimeUrl" @click="openUrl(hanimeUrl)">
             <ExternalLink :size="14" />
             hanime
+          </button>
+          <button class="btn btn--ghost" :disabled="reidentifying" @click="reidentify(false)">
+            <component :is="reidentifying ? Loader2 : RefreshCw" :size="14" :class="{ spin: reidentifying }" />
+            重新识别
+          </button>
+          <button
+            v-if="item.category !== 'hentai' || hanimeUrl"
+            class="btn btn--ghost"
+            :disabled="reidentifying"
+            title="强制按里番刮削（即使文件名不像）"
+            @click="reidentify(true)"
+          >
+            <component :is="reidentifying ? Loader2 : RefreshCw" :size="14" :class="{ spin: reidentifying }" />
+            按里番刮削
           </button>
           <button class="btn btn--ghost" @click="toggleArchive">
             <component :is="item.is_archived ? ArchiveRestore : Archive" :size="14" />

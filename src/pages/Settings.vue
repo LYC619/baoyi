@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, version as vueVersion, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { activeModule, moduleTarget } from '@/composables/useModules'
 import {
   ArrowLeft,
   Bot,
@@ -1064,7 +1065,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 <template>
   <div class="settings">
     <header class="head">
-      <button class="btn btn--subtle" @click="router.push({ name: 'home' })">
+      <button class="btn btn--subtle" @click="router.push(moduleTarget(activeModule))">
         <ArrowLeft :size="16" />
         返回
       </button>

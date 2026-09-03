@@ -124,6 +124,8 @@ const api: BaoyiApi = {
     updateEpisode: (episodeId: string, patch: Partial<Episode>) =>
       ipcRenderer.invoke('video:update-episode', episodeId, plain(patch)),
     fetchPoster: (id: string) => ipcRenderer.invoke('video:fetch-poster', id),
+    reidentify: (id: string, forceHentai: boolean = false) =>
+      ipcRenderer.invoke('video:reidentify', id, forceHentai),
     pickPoster: (id: string) => ipcRenderer.invoke('video:pick-poster', id),
     clearPoster: (id: string) => ipcRenderer.invoke('video:clear-poster', id)
   },

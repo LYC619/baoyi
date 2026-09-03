@@ -153,6 +153,60 @@ export function acceptPosterUrl(raw: string, cfg: TmdbConfig): boolean {
   return extFromPath(u.pathname) !== ''
 }
 
+/**
+ * `poster_path` 里这个值是不是一个外站的绝对地址。
+ *
+ * 这一列现在有**三**种值（前两种是 v0.7 就有的）：
+ *   1. TMDB 的相对路径 `/abc123.jpg`；
+ *   2. 下载完覆盖上去的本机绝对路径；
+ *   3. hanime 的封面地址 —— 一个完整的 `https://...`。
+ *
+ * 第三种非要是完整地址不可：TMDB 那边地址是我们自己拼的（域名在配置里），
+ * 而 hanime 的封面 URL 是从它自己的页面上读出来的，主机名**我们说不出来**。
+ * 所以只能原样存着，下载时再判。
+ *
+ * 不加这个判断的后果很具体：`isLocalPoster('https://x/y.jpg')` 是 false，
+ * 于是它会被当成 TMDB 的相对路径，拼出 `https://image.tmdb.org/t/p/w500/https://x/y.jpg`。
+ */
+export function isRemotePoster(value: string): boolean {
+  return /^https?:\/\//i.test(String(value ?? '').trim())
+}
+
+/**
+ * 私有网段和回环。外站给的图片地址必须挡掉这些。
+ *
+ * hanime 的页面是外部输入，它写什么主机名我们就会去连什么主机名 ——
+ * 指向 `127.0.0.1` 或 `192.168.x.x` 的话，这个进程就变成了一个替远端
+ * 探内网的工具。TMDB 那边不需要这一道是因为那边主机名是**用户自己配的**，
+ * 用户填自己的反代（甚至就是局域网里的一台机器）是正当用法。
+ */
+const PRIVATE_HOST =
+  /^(localhost|127\.|0\.0\.0\.0$|10\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$|\[?f[cd])/i
+
+/**
+ * 外站（当下只有 hanime）的封面地址收不收。
+ *
+ * 和 `acceptPosterUrl` 是两套判据，**故意不合并**：
+ *
+ * - TMDB 那边主机名在配置里，能用**正向白名单**（只许连用户填的那台）；
+ * - hanime 的封面在哪个 CDN 上我们不知道（真页面至今没抓到，见待确认 H），
+ *   编一个白名单出来就是在假装知道 —— 而猜错的表现是「封面永远刮不到」，
+ *   和这个功能压根没接上长得一模一样。所以这边只能用**反向护栏**：
+ *   必须 https、不许指向内网、扩展名不做要求（CDN 常常不带扩展名，
+ *   真正的格式以 content-type 为准）。
+ */
+export function acceptExternalPosterUrl(raw: string): boolean {
+  let u: URL
+  try {
+    u = new URL(String(raw ?? ''))
+  } catch {
+    return false
+  }
+  if (u.protocol !== 'https:') return false
+  if (PRIVATE_HOST.test(u.hostname)) return false
+  return u.hostname.includes('.')
+}
+
 /** 从路径里取扩展名，认不出返回空串 */
 export function extFromPath(pathname: string): string {
   const m = /\.([a-z0-9]+)$/i.exec(String(pathname ?? ''))

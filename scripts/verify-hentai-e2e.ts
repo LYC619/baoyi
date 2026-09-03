@@ -34,6 +34,7 @@ import { parseHentaiName } from '../electron/kinds/video/hentai/filename.ts'
 import { hanimeChannel } from '../electron/kinds/video/hentai/channel.ts'
 import { clearHanimeCache } from '../electron/kinds/video/hentai/hanime.ts'
 import { watchUrl } from '../electron/kinds/video/hentai/selectors.ts'
+import { acceptExternalPosterUrl, isRemotePoster } from '../electron/kinds/video/posters.ts'
 import { HENTAI_CATEGORY } from '../electron/kinds/video/taxonomy.ts'
 import { buildVideoTools } from '../electron/kinds/video/tools.ts'
 import { fillVideoSystem } from '../electron/kinds/video/prompts.ts'
@@ -265,7 +266,7 @@ async function main(): Promise<void> {
     assert.equal(row.hanime_id, '86994')
   })
 
-  await step('7 落库后的形状：分类、标签、hanime_id、官网兜底', () => {
+  await step('7 落库后的形状：分类、标签、hanime_id、官网兜底、封面', () => {
     const v = listVideos(d as any, { category: HENTAI_CATEGORY } as any)[0] as any
     assert.equal(v.name_zh, '巨乳女教師')
     assert.equal(v.category, HENTAI_CATEGORY)
@@ -275,6 +276,24 @@ async function main(): Promise<void> {
     assert.ok(v.tags.includes('巨乳'))
     // 豆瓣和官网都没有时退到 hanime 条目页
     assert.equal(v.official_url, watchUrl('86994'))
+
+    /*
+     * 封面这一条是补上来的。v0.8 把 coverUrl 解出来了却从来没用过 ——
+     * register_video 里 poster_path 只取 TMDB 那份，于是里番条目永远是空白海报，
+     * 而**这一路当时全绿**：id 落库了、标签对了、官网兜底也对了，
+     * 谁都不会想到封面压根没接上。用户报的「封面获取没体现」就是这个。
+     *
+     * 三件事一起钉：值来自站方页面（不是模型填的）、是完整地址（不是 TMDB 那种
+     * 相对路径）、且被 isRemotePoster 认成远端 —— 少最后一条的话
+     * fetchVideoPoster 会把它当 TMDB 相对路径去拼，拼出一个必然 404 的地址。
+     */
+    assert.equal(
+      v.poster_path,
+      'https://hanime1.me/uploads/86994-big.jpg',
+      'hanime 的封面没落进 poster_path'
+    )
+    assert.ok(isRemotePoster(v.poster_path), '认不出是远端地址，下载那头会当成 TMDB 的相对路径')
+    assert.ok(acceptExternalPosterUrl(v.poster_path), '过不了外站护栏，封面还是下不来')
   })
 
   /* ---------- 8. 界面读得到 ---------- */

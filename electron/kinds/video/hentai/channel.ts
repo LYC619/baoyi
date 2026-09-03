@@ -45,17 +45,100 @@ export type HanimeReason = '' | 'category' | 'filename'
 const SITE_MARKERS = new Set(['無碼', 'AI解碼', '中文字幕', '中文配音', '同人作品', '斷面圖', 'ASMR'])
 
 /**
+ * 不带方括号也算的词。
+ *
+ * 上面那张表比对的是**方括号里剥下来的**内容，所以 `巨乳女教師 無修正 1080p.mkv`
+ * 这种没加括号的写法一个都不命中 —— 而它和 `[无修正]` 表达的是同一件事。
+ * 这里只收繁简两形都无歧义的那几个：普通片库里不会出现「无修正」。
+ */
+const BARE_MARKERS = [
+  '无修正',
+  '無修正',
+  '无码',
+  '無碼',
+  'uncensored',
+  '中文字幕',
+  '中文配音',
+  '18禁',
+  '成人向',
+  'エロアニメ',
+  'hアニメ',
+  'hentai'
+]
+
+/**
+ * `THE ANIMATION` —— 里番改编作的招牌后缀（原作是漫画或游戏时几乎必带）。
+ * 中间允许全角空格、连字符、点。
+ */
+const THE_ANIMATION = /the[\s　._-]*animation/i
+
+/**
+ * 厂牌名。里番的文件名常常只有 `[厂牌] 作品名.mp4` 这一种形状，
+ * 一个集号和标记都没有 —— 那正是用户报的「导入了一个里番然后被定成电影」。
+ *
+ * 只收**不会和正常片名撞**的：`Edge`、`Milky`、`Mary Jane` 这类通用词
+ * 一律不收（`Edge` 会命中《明日边缘》）。宁可漏一个厂牌，
+ * 不能让一个英文单词把整个片库圈进来。
+ *
+ * ponytail: 手工维护的名单，没法用真页面校对（待确认 H 还没解）。
+ * 漏掉的厂牌靠「用户手改一次分类」那条路兜（详情页的「按里番刮削」），
+ * 不指望这张表全。
+ */
+const STUDIOS = [
+  'ピンクパイナップル',
+  'pink pineapple',
+  'pinkpineapple',
+  'メリー・ジェーン',
+  'queen bee',
+  'collaboration works',
+  'studio eromatick',
+  'suzuki mirano',
+  'せるふぃっしゅ',
+  'survive more',
+  'lune pictures',
+  'green bunny',
+  'chichinoya',
+  'bomb!cute!bomb!',
+  'magin label',
+  'poro'
+]
+
+/** 平假名或片假名。判「OVA 紧贴日文」时用 */
+const KANA = /[ぁ-ゟ゠-ヿ]/
+
+/**
+ * `OVA` 直接粘着日文假名，中间没有分隔符 —— `OVAピュアピュア` 就是这个形状。
+ *
+ * 正常番剧的 OVA 写成 `作品名 OVA` 或 `作品名 - OVA 01`，**分隔符是有的**；
+ * 粘在一起是里番发布的习惯。所以判据卡的是「粘着」这件事，不是「出现了 OVA」——
+ * 后者会把整柜子正常 OVA 圈进来。
+ */
+const OVA_GLUED = /^\s*OVA(?=[ぁ-ゟ゠-ヿ])/i
+
+/**
  * 判一个文件名的形状像不像里番。
  *
- * 两类特征：里番专用的集号写法（`＃N` / `ROUND N`），或站方标记。
- * `第N話` / `EPN` **不算** —— 普通番剧也这么写，拿它当判据会把整个动画库
- * 都挂上这两个工具。
+ * 判据按「误判代价从低到高」排下来，命中任一条即可。`第N話` / `EPN` **不算** ——
+ * 普通番剧也这么写，拿它当判据会把整个动画库都挂上这两个工具。
+ *
+ * 2026-09-03 放宽了一轮：原先只有集号写法和方括号标记两类，于是一个
+ * `[厂牌] 作品名.mp4` 或 `作品名 THE ANIMATION.mkv` 全都漏掉，落到 TMDB
+ * 那条路上被定成普通电影 —— 用户报的就是这个。放宽的安全阀不在这里，
+ * 而在 prompt：`HANIME_NOTE_FILENAME` 让模型自己再判一次「像不像成人动画」，
+ * 搜不到就退回 TMDB。所以这一层宁可宽。
  */
 export function looksLikeHentaiName(name: string): boolean {
   const raw = String(name ?? '')
+  const lower = raw.toLowerCase()
+
   // 里番专用的两种集号写法。全角井号在这里就地认，不劳解析器
   if (/[#＃]\s*[\d０-９]/.test(raw)) return true
   if (/\bROUND\s*\d/i.test(raw)) return true
+
+  if (THE_ANIMATION.test(raw)) return true
+  if (OVA_GLUED.test(raw) && KANA.test(raw)) return true
+  if (BARE_MARKERS.some((m) => lower.includes(m))) return true
+  if (STUDIOS.some((s) => lower.includes(s))) return true
 
   const parsed = parseHentaiName(raw)
   return parsed.site_tags.some((t) => SITE_MARKERS.has(t))

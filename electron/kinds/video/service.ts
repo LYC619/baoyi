@@ -44,17 +44,19 @@ import {
   videoCategoryOf,
   videosUnder
 } from './db.ts'
-import { hanimeChannel } from './hentai/channel.ts'
+import { hanimeChannel, type HanimeReason } from './hentai/channel.ts'
 import { scanVideoRoot, type VideoCandidate } from './scanner.ts'
 import { buildFacts } from './facts.ts'
 import { fillVideoSystem, videoCandidatePrompt } from './prompts.ts'
 import { buildVideoTools, type VideoToolContext } from './tools.ts'
 import { imageUrl, tmdbAvailable } from './tmdb.ts'
 import {
+  acceptExternalPosterUrl,
   acceptPosterUrl,
   extFromContentType,
   isLocalPoster,
   isPosterExt,
+  isRemotePoster,
   MAX_POSTER_BYTES,
   pickSidecarPoster,
   posterFileName,
@@ -345,6 +347,35 @@ export async function scanVideos(
   }
 
   /* -------- 第二截：逐个识别 -------- */
+  for (const [i, c] of candidates.entries()) {
+    if (signal.aborted) break
+    await identifyOne(c, result, report, signal, i)
+  }
+
+  report({ phase: 'done', processed: candidates.length })
+  return result
+}
+
+/**
+ * 识别**一个**候选条目。扫描循环和「单条重新识别」共用它。
+ *
+ * 抽出来不是为了少写几行 —— 是因为这里有一组必须同时成立的约束：
+ * prompt 里那段话、挂上去的工具表、里番判据三者必须一致（一份 prompt 配两种
+ * 工具表的话，模型会去调一个没注册的工具，白烧一轮；软件那边踩过这个坑）。
+ * 两处各写一份的话，改了一处就会走岔，而走岔的表现是「偶尔白烧一轮」，
+ * 不报错、不好复现。
+ *
+ * `channelOverride` 是用户在详情页说「这是里番，按里番刮」时传的 ——
+ * 见 `reidentifyVideo`。不传就按判据自己算。
+ */
+async function identifyOne(
+  c: VideoCandidate,
+  result: VideoScanResult,
+  report: (p: Partial<VideoScanProgress>) => void,
+  signal: AbortSignal,
+  index: number,
+  channelOverride?: HanimeReason
+): Promise<void> {
   const settings = getSettings()
   const withSearch = searchAvailable(settings.search)
   const withTmdb = tmdbAvailable(settings.tmdb)
@@ -352,69 +383,122 @@ export async function scanVideos(
   // 软件的「开发工具」和游戏的「魂系」不能进这个 prompt
   const pool = tagPool('video')
   const categories = listCategories('video')
-  const categoryNames = categories.map((c) => c.name)
+  const categoryNames = categories.map((c2) => c2.name)
   const db = getDb()
 
-  // 系统提示按条目现拼，不再是整次扫描一份。
-  //
-  // 里番通道的判据是**逐条**的（这一条的分类、这一条的文件名），而 prompt 里
-  // 那段话必须和真正挂上去的工具表一致 —— 一份 prompt 配两种工具表的话，
-  // 模型会去调一个没注册的工具，白烧一轮。软件那边踩过这个坑。
-  //
-  // 代价是每个条目多做一次字符串拼接。相比一次模型往返，这可以忽略
-  const systemFor = (reason: '' | 'category' | 'filename'): string =>
-    fillVideoSystem(categories, pool, withSearch, withTmdb, reason)
+  report({ current: c.path, processed: index, log: '读本地事实' })
 
-  for (const [i, c] of candidates.entries()) {
-    if (signal.aborted) break
-    report({ current: c.path, processed: i, log: '读本地事实' })
+  // 本地事实先凑齐再进 prompt。这一步是同步磁盘 IO + WASM 解析，
+  // 比一次模型往返快得多，而它省下的往返不止一次
+  const facts = await buildFacts(c)
+  if (signal.aborted) return
 
-    // 本地事实先凑齐再进 prompt。这一步是同步磁盘 IO + WASM 解析，
-    // 比一次模型往返快得多，而它省下的往返不止一次
-    const facts = await buildFacts(c)
-    if (signal.aborted) break
-
-    const ctx: VideoToolContext = {
-      facts,
-      db,
-      tagPool: pool,
-      searchConfig: settings.search,
-      tmdbConfig: settings.tmdb,
-      onRegister: (info) => {
-        result.registered++
-        result.episodes += info.episodesAdded
-      },
-      onSkip: () => {
-        result.skipped++
-      },
-      // 按次计费的服务商，这个数就是这次扫描的账单。缓存命中不计
-      onSearch: () => {
-        result.searches++
-      }
+  const ctx: VideoToolContext = {
+    facts,
+    db,
+    tagPool: pool,
+    searchConfig: settings.search,
+    tmdbConfig: settings.tmdb,
+    onRegister: (info) => {
+      result.registered++
+      result.episodes += info.episodesAdded
+    },
+    onSkip: () => {
+      result.skipped++
+    },
+    // 按次计费的服务商，这个数就是这次扫描的账单。缓存命中不计
+    onSearch: () => {
+      result.searches++
     }
-
-    // 走不走里番通道。两条判据：库里已有的分类（用户手改过的永久保护，
-    // 所以读一次就够）、文件名形状。见 hentai/channel.ts
-    const hanimeReason = hanimeChannel(path.basename(c.path), videoCategoryOf(db, c.path))
-    if (hanimeReason) {
-      report({ current: c.path, processed: i, log: `走 hanime 通道（${hanimeReason}）` })
-    }
-
-    const run = await runAgent({
-      config: settings.ai,
-      system: systemFor(hanimeReason),
-      user: videoCandidatePrompt(facts, videosUnder(db, facts.dir)),
-      tools: buildVideoTools(ctx, categoryNames, withSearch, withTmdb, hanimeReason !== ''),
-      maxTurns: MAX_TURNS,
-      signal,
-      onEvent: (e) => report({ current: c.path, processed: i, log: describeEvent(e) })
-    })
-    result.tokens += run.tokens
-    if (run.stopReason === 'error') result.failed++
   }
 
-  report({ phase: 'done', processed: candidates.length })
-  return result
+  // 走不走里番通道。两条判据：库里已有的分类（用户手改过的永久保护，
+  // 所以读一次就够）、文件名形状。见 hentai/channel.ts
+  const hanimeReason =
+    channelOverride ?? hanimeChannel(path.basename(c.path), videoCategoryOf(db, c.path))
+  if (hanimeReason) {
+    report({ current: c.path, processed: index, log: `走 hanime 通道（${hanimeReason}）` })
+  }
+
+  const run = await runAgent({
+    config: settings.ai,
+    system: fillVideoSystem(categories, pool, withSearch, withTmdb, hanimeReason),
+    user: videoCandidatePrompt(facts, videosUnder(db, facts.dir)),
+    tools: buildVideoTools(ctx, categoryNames, withSearch, withTmdb, hanimeReason !== ''),
+    maxTurns: MAX_TURNS,
+    signal,
+    onEvent: (e) => report({ current: c.path, processed: index, log: describeEvent(e) })
+  })
+  result.tokens += run.tokens
+  if (run.stopReason === 'error') result.failed++
+}
+
+/**
+ * 重新识别**已在库里**的一条，可以指定按里番通道刮。
+ *
+ * ## 为什么非要有这个入口
+ *
+ * v0.8 的里番通道有两条判据，第一条是「分类已经是里番」，理由写着「用户手改
+ * 一次分类，下次识别就命中了」。**但那个「下次识别」在界面上不存在** ——
+ * 影视模块从来没有单条重新识别（只有软件详情页有），用户改完分类没有任何办法
+ * 让它重刮。于是那条判据在实际使用中等于不存在，而文档里写着它管用。
+ *
+ * `forceHentai` 比「改分类再重识别」更直接：用户看着这一条说「这是里番」，
+ * 那就不必再绕分类和判据一圈。判据是启发式的，用户说的话不是。
+ *
+ * ## 为什么重扫一次目录而不是直接拿库里的记录
+ *
+ * 识别要的是**本地事实**（容器元数据、季集、侧车文件），那些只有走一遍扫描器
+ * 才拿得到，而库里存的是识别**结果**。拿结果当输入等于让第二次识别继承第一次
+ * 的错。
+ */
+export async function reidentifyVideo(
+  id: string,
+  forceHentai: boolean = false,
+  onProgress: (p: VideoScanProgress) => void = () => {}
+): Promise<VideoItem | null> {
+  const item = getVideo(getDb(), id)
+  if (!item) return null
+
+  const ready = videoScanReadiness()
+  if (!ready.ok) return null
+
+  controller = new AbortController()
+  const signal = controller.signal
+  const result: VideoScanResult = {
+    candidates: 0,
+    registered: 0,
+    skipped: 0,
+    failed: 0,
+    tokens: 0,
+    episodes: 0,
+    searches: 0
+  }
+  const report = (p: Partial<VideoScanProgress>): void =>
+    onProgress({
+      phase: 'identifying',
+      current: item.path,
+      processed: 0,
+      total: 1,
+      registered: result.registered,
+      failed: result.failed,
+      log: '',
+      ...p
+    })
+
+  const narrow = item.video_type === 'series' ? item.path : path.dirname(item.path)
+  const key = item.path.toLowerCase()
+  let candidate = scanVideoRoot(narrow).find((c) => c.path.toLowerCase() === key)
+  if (!candidate) {
+    candidate = scanVideoRoot(path.dirname(narrow)).find((c) => c.path.toLowerCase() === key)
+  }
+  if (!candidate) return null
+
+  result.candidates = 1
+  await identifyOne(candidate, result, report, signal, 0, forceHentai ? 'category' : undefined)
+  report({ phase: 'done', processed: 1 })
+
+  return getVideo(getDb(), id)
 }
 
 /**
@@ -533,10 +617,22 @@ function imagesBesideVideo(item: VideoItem): string[] {
 /**
  * 下载一张海报并装上。三道卡和游戏封面那边同构：URL 过白名单、
  * content-type 必须是图片（扩展名以它为准）、体积边下边数超了就断。
+ *
+ * 第一道按来源分两套，`source` 由**调用方**说明而不是在这儿嗅 URL ——
+ * 两种地址都是 `https://`，靠形状分不开，而分错的方向是不对称的：
+ * 把外站地址当 TMDB 会白挡掉（封面刮不到），把 TMDB 当外站会松掉那道
+ * 「只许连用户配的那台机器」。
+ *
+ * 两套判据本身的理由写在 `posters.ts` 的 `acceptExternalPosterUrl` 上。
  */
-async function downloadPoster(id: string, url: string): Promise<{ ok: boolean; message: string }> {
-  const cfg = getSettings().tmdb
-  if (!acceptPosterUrl(url, cfg)) return { ok: false, message: '这个图片地址不在允许的来源里' }
+async function downloadPoster(
+  id: string,
+  url: string,
+  source: 'tmdb' | 'external'
+): Promise<{ ok: boolean; message: string }> {
+  const allowed =
+    source === 'tmdb' ? acceptPosterUrl(url, getSettings().tmdb) : acceptExternalPosterUrl(url)
+  if (!allowed) return { ok: false, message: '这个图片地址不在允许的来源里' }
 
   let tmp = ''
   try {
@@ -621,11 +717,23 @@ export async function fetchVideoPoster(
   }
 
   const rel = item.poster_path
+  /*
+   * 里番的封面是一个完整的 https 地址（hanime 的图床，主机名我们说不出来），
+   * 这一支必须排在 TMDB 那支**前面**：`isLocalPoster('https://…')` 是 false，
+   * 落到下面就会被当成 TMDB 的相对路径，拼出
+   * `https://image.tmdb.org/t/p/w500/https://…` 这种地址然后 404。
+   */
+  if (isRemotePoster(rel)) {
+    const r = await downloadPoster(id, rel, 'external')
+    if (r.ok) return { ok: true, message: '封面已下载', changed: true }
+    return { ok: false, message: r.message, changed: false }
+  }
+
   if (rel && !isLocalPoster(rel)) {
     const cfg = getSettings().tmdb
     // w500 而不是原图：海报墙的框宽 150px，2x 屏也就 300px。原图动辄 2000px 宽、
     // 几 MB 一张，下几百张纯属浪费用户的带宽和磁盘
-    const r = await downloadPoster(id, imageUrl(cfg, rel, 'w500'))
+    const r = await downloadPoster(id, imageUrl(cfg, rel, 'w500'), 'tmdb')
     if (r.ok) return { ok: true, message: '海报已下载', changed: true }
     return { ok: false, message: r.message, changed: false }
   }

@@ -297,6 +297,7 @@ import {
   VIDEO_TAGS
 } from '../electron/kinds/video/taxonomy.ts'
 import {
+  acceptExternalPosterUrl,
   acceptPosterUrl,
   // 和 game/covers.ts 的同名函数重名，这里换个名字进来。两份实现刻意保持一致，
   // 一致性由「海报和游戏封面认的格式是同一份名单」那条断言盯着
@@ -304,6 +305,7 @@ import {
   extFromPath,
   isLocalPoster,
   isPosterExt,
+  isRemotePoster,
   MAX_POSTER_BYTES,
   pickSidecarPoster,
   posterFileName,
@@ -7432,6 +7434,68 @@ async function videoPosterSection(): Promise<void> {
     }
   })
 
+  /* ---------------------- 里番封面：外站地址那一支 ---------------------- */
+
+  // v0.8 的 hanime 通道把封面地址解出来了却**从来没用过** —— register_video 里
+  // `poster_path` 只取 TMDB 那份，于是里番条目永远是空白海报。用户报的
+  // 「封面获取没体现」就是这个。
+  //
+  // 补上之后 poster_path 多了第三种值（完整的 https 地址），下面守的是
+  // 「这一支不许被当成 TMDB 的相对路径」和「外站地址的护栏别开太大」。
+
+  await check('完整的 https 地址要认出来，别当成 TMDB 的相对路径', () => {
+    // 认错的表现很具体：拼出 https://image.tmdb.org/t/p/w500/https://… 然后 404
+    assert.equal(isRemotePoster('https://cdn.example.com/thumb/86994.jpg'), true)
+    assert.equal(isRemotePoster('http://cdn.example.com/a.jpg'), true, 'http 也算远端，收不收是下一道的事')
+    assert.equal(isRemotePoster('/abc123.jpg'), false, 'TMDB 的相对路径')
+    assert.equal(isRemotePoster('D:\\baoyi\\posters\\x.jpg'), false, '本地文件')
+    assert.equal(isRemotePoster(''), false)
+    // 三个判据合起来必须是互斥的，否则 fetchVideoPoster 里的分支顺序会说不清
+    assert.equal(isLocalPoster('https://cdn.example.com/a.jpg'), false)
+  })
+
+  await check('外站封面走反向护栏：https + 不许指向内网', () => {
+    // 正向白名单在这儿做不了 —— hanime 的封面在哪个 CDN 上至今没抓到真页面
+    // （待确认 H），编一个域名白名单出来就是在假装知道，而猜错的表现是
+    // 「封面永远刮不到」，和这个功能压根没接上长得一模一样
+    assert.equal(acceptExternalPosterUrl('https://cdn.hanime1.me/thumb/86994.jpg'), true)
+    assert.equal(acceptExternalPosterUrl('https://vdown.example.net/x/y'), true, 'CDN 常常不带扩展名')
+
+    assert.equal(acceptExternalPosterUrl('http://cdn.example.com/a.jpg'), false, 'http 不收')
+    // 页面是外部输入，它写什么主机名我们就会去连什么 —— 指向内网的话这个进程
+    // 就变成了替远端探内网的工具
+    for (const bad of [
+      'https://127.0.0.1/a.jpg',
+      'https://localhost/a.jpg',
+      'https://192.168.1.1/a.jpg',
+      'https://10.0.0.5/a.jpg',
+      'https://172.16.3.4/a.jpg',
+      'https://172.31.255.1/a.jpg',
+      'https://169.254.169.254/latest/meta-data',
+      'https://[::1]/a.jpg'
+    ]) {
+      assert.equal(acceptExternalPosterUrl(bad), false, `${bad} 该被挡住`)
+    }
+    // 172.15 / 172.32 不在私有段里，别顺手多挡
+    assert.equal(acceptExternalPosterUrl('https://172.15.0.1/a.jpg'), true)
+    assert.equal(acceptExternalPosterUrl('https://172.32.0.1/a.jpg'), true)
+
+    assert.equal(acceptExternalPosterUrl('https://nodot/a.jpg'), false, '没有点的主机名不像公网域名')
+    assert.equal(acceptExternalPosterUrl('not a url'), false, '拼不出 URL 时不能抛')
+    assert.equal(acceptExternalPosterUrl(''), false)
+  })
+
+  await check('两套判据不许互相顶替', () => {
+    // 分错的方向不对称：把外站地址当 TMDB 会白挡掉（封面刮不到），
+    // 把 TMDB 当外站会松掉那道「只许连用户配的那台机器」。
+    // 所以 downloadPoster 的 source 由调用方说明，不在函数里嗅 URL
+    const cfg = { api_key: 'k', api_domain: '', image_domain: 'img.mycdn.cn', enabled: true }
+    const tmdbUrl = imageUrl(cfg, '/abc.jpg', 'w500')
+    assert.ok(acceptPosterUrl(tmdbUrl, cfg), 'TMDB 的地址过 TMDB 那道')
+    // 反过来：外站的地址过不了 TMDB 那道，这正是为什么需要第二套
+    assert.equal(acceptPosterUrl('https://cdn.hanime1.me/thumb/1.jpg', cfg), false)
+  })
+
   await check('扩展名以 content-type 为准，认不出就不落盘', () => {
     // 远端完全可以在 .jpg 地址上回一张 webp，而扩展名写错的文件在 <img> 里
     // 未必渲染得出来
@@ -8950,17 +9014,55 @@ async function hanimeChannelSection(): Promise<void> {
     }
   })
 
-  await check('判据二不该被普通片库命中', () => {
+  await check('判据二放宽的那几类：一个集号和方括号都没有也认得出来', () => {
+    // 2026-09-03 放宽。放宽之前这几种全部漏掉，落到 TMDB 那条路上被定成
+    // 普通电影 —— 用户报的就是这个。安全阀在 prompt 那头（模型自己再判一次，
+    // 搜不到就退回 TMDB），所以这一层宁可宽
+    for (const n of [
+      // THE ANIMATION：里番改编作的招牌后缀
+      '巨乳女教師 THE ANIMATION.mkv',
+      '作品名 the animation 01.mp4',
+      '作品名 THE　ANIMATION.mkv',
+      // 厂牌名，常常是唯一的线索
+      '[ピンクパイナップル] 作品名.mp4',
+      '[Pink Pineapple] Some Title.mkv',
+      '(Queen Bee) 作品名 01.mp4',
+      '[Collaboration Works] 作品名.mkv',
+      // 不带方括号的标记
+      '巨乳女教師 無修正 1080p.mkv',
+      '作品名 无修正.mp4',
+      '某作品 中文字幕 720p.mkv',
+      // OVA 紧贴假名，中间没有分隔符
+      'OVAピュアピュア.mkv',
+      'OVAたとえば.mp4'
+    ]) {
+      assert.equal(hanimeChannel(n), 'filename', `${n} 该命中放宽后的判据`)
+    }
+  })
+
+  await check('放宽之后普通片库仍旧不许命中', () => {
     // 挂错的代价是模型多两个搜不到东西的工具（可恢复），
     // 漏挂的代价是这条片子永远刮不到（不可恢复）——
-    // 所以判据偏松。但松也不能松到把整个动画库和普通片库都圈进来
+    // 所以判据偏松。但松也不能松到把整个动画库和普通片库都圈进来。
+    // **这一条是放宽那一版的刹车**：每加一条判据都得回来跑它
     for (const n of [
       '漫长的季节.S01E05.2023.2160p.WEB-DL.mp4',
       'Dune.Part.Two.2024.2160p.WEB-DL.x265-GRP.mkv',
       '[SubsPlease] Frieren - 12 (1080p).mkv',
       '孤独摇滚 第3話 [简繁内封]_1080P.mkv',
       '权力的游戏.第二季.第05集.mp4',
-      '某部电影 1080p.mkv'
+      '某部电影 1080p.mkv',
+      // 正常番剧的 OVA：分隔符是有的，判据卡的是「粘着」不是「出现了 OVA」
+      '钢之炼金术师 OVA 01.mkv',
+      'Clannad - OVA.mkv',
+      '某番剧 OVA 合集.mp4',
+      // 厂牌名单里刻意不收的通用英文词，收了会命中这些
+      'Edge.of.Tomorrow.2014.1080p.mkv',
+      'Milky.Way.Documentary.2019.mkv',
+      'Mary.Jane.2022.WEB-DL.mkv',
+      // 「动画」两个字不是判据 —— 那会圈进整个动画库
+      '某某动画电影.2021.1080p.mkv',
+      'The.Animated.Series.S01E01.mkv'
     ]) {
       assert.equal(hanimeChannel(n), '', `${n} 不该命中 —— 它会给整个片库挂上 hanime 工具`)
     }
