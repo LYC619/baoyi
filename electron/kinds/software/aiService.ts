@@ -429,6 +429,7 @@ export async function completeWithAi(
           dir,
           label,
           kind: job.kind,
+          resource_kind: 'software',
           status,
           summary: outcome.note,
           registered: outcome.registered,

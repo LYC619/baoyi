@@ -5,7 +5,7 @@
  * 结论那一行（「未注册任何条目」）说不清任何事 —— 是判据不对，还是在子目录里
  * 兜圈子兜到轮数用光？两者要改的东西完全不同。这一页就是回答这个问题的。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -22,6 +22,11 @@ import ReportDialog from '@/components/identify/ReportDialog.vue'
 import type { IdentifyLog, IdentifyLogStatus, IdentifyReport } from '@/types'
 import { useToast } from '@/composables/useToast'
 import { formatDateTime, groupRounds, logToText } from '@/utils'
+
+const props = defineProps<{
+  /** 资源类型：software / game / video，用于过滤该模块的识别日志 */
+  resourceKind: string
+}>()
 
 const emit = defineEmits<{ (e: 'retry', dir: string): void }>()
 
@@ -63,7 +68,8 @@ async function load(): Promise<void> {
   try {
     logs.value = await window.baoyi.logs.list({
       status: filter.value === 'all' ? undefined : filter.value,
-      keyword: kw || undefined
+      keyword: kw || undefined,
+      resource_kind: props.resourceKind
     })
   } finally {
     loading.value = false
@@ -73,6 +79,9 @@ async function load(): Promise<void> {
 function blurSearch(): void {
   if (keyword.value.trim() !== queriedKeyword) void load()
 }
+
+// 切换模块时重新加载日志
+watch(() => props.resourceKind, () => void load())
 
 onMounted(async () => {
   await load()

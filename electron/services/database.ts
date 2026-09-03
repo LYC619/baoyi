@@ -63,7 +63,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     image_domain: '',
     enabled: false
   },
-  scan_dirs: [],
+  software_scan_dirs: [],
+  game_scan_dirs: [],
+  video_scan_dirs: [],
   organize_root: '',
   save_backup_root: '',
   save_backup_keep: 10,
@@ -1064,16 +1066,17 @@ export function saveIdentifyLog(log: Omit<IdentifyLog, 'id' | 'created_at'>): st
   const tx = d.transaction(() => {
     d.prepare(
       `INSERT INTO identify_logs
-         (id, dir, label, kind, status, summary, registered, rounds,
+         (id, dir, label, kind, resource_kind, status, summary, registered, rounds,
           duration_ms, tokens, stop_reason, events, created_at)
        VALUES
-         (@id, @dir, @label, @kind, @status, @summary, @registered, @rounds,
+         (@id, @dir, @label, @kind, @resource_kind, @status, @summary, @registered, @rounds,
           @duration_ms, @tokens, @stop_reason, @events, @created_at)`
     ).run({
       id,
       dir: log.dir,
       label: log.label,
       kind: log.kind,
+      resource_kind: log.resource_kind,
       status: log.status,
       summary: log.summary.slice(0, 500),
       registered: log.registered,
@@ -1107,6 +1110,7 @@ function rowToLog(row: Row): IdentifyLog {
     dir: row.dir,
     label: row.label ?? '',
     kind: row.kind === 'item' ? 'item' : 'unit',
+    resource_kind: row.resource_kind ?? 'software',
     status: (row.status ?? 'failed') as IdentifyLogStatus,
     summary: row.summary ?? '',
     registered: row.registered ?? 0,
@@ -1125,6 +1129,10 @@ export function listIdentifyLogs(query: IdentifyLogQuery = {}): IdentifyLog[] {
   if (query.status) {
     where.push('status = ?')
     params.push(query.status)
+  }
+  if (query.resource_kind) {
+    where.push('resource_kind = ?')
+    params.push(query.resource_kind)
   }
   const keyword = query.keyword?.trim()
   if (keyword) {
@@ -1752,6 +1760,13 @@ export function getSettings(): AppSettings {
       stored[r.key] = r.value
     }
   }
+  // 0.8 迁移兼容：scan_dirs -> software_scan_dirs / game_scan_dirs / video_scan_dirs
+  // 迁移函数已经在库里写入新字段，但如果 settings 读取发生在迁移前（不该发生但防御一下），
+  // 或者用户手动改了配置文件，这里兜底：有旧字段就映射到 software_scan_dirs
+  if (stored.scan_dirs && !stored.software_scan_dirs) {
+    stored.software_scan_dirs = stored.scan_dirs
+  }
+
   return {
     ...DEFAULT_SETTINGS,
     ...stored,
@@ -1782,9 +1797,9 @@ export function patchSettings(patch: Partial<AppSettings>): AppSettings {
   })
   tx()
 
-  // 目录被移出扫描列表后，它名下的待识别单元也就没意义了
-  if (patch.scan_dirs) {
-    const kept = new Set(next.scan_dirs)
+  // 目录被移出扫描列表后，它名下的待识别单元也就没意义了（仅软件模块有 scan_units）
+  if (patch.software_scan_dirs) {
+    const kept = new Set(next.software_scan_dirs)
     const stale = new Set(listScanUnits().map((u) => u.root).filter((r) => !kept.has(r)))
     for (const root of stale) removeScanUnitsUnder(root)
   }

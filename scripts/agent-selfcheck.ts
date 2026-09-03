@@ -1741,6 +1741,7 @@ async function main(): Promise<void> {
     dir: 'D:\\Software\\1.system\\RegistryFinder64',
     label: 'RegistryFinder64',
     kind: 'unit' as const,
+    resource_kind: 'software',
     status: 'success' as const,
     summary: '待确认 1 项',
     registered: 1,
@@ -1888,15 +1889,15 @@ async function main(): Promise<void> {
   }
 
   await check('reactive 代理直接递过去会被结构化克隆拒收（这就是那个 bug）', () => {
-    const store = ref({ scan_dirs: ['D:\\Software'] })
-    assert.equal(cloneable(store.value.scan_dirs), false, '代理竟然能克隆？那这个护栏就没意义了')
+    const store = ref({ software_scan_dirs: ['D:\\Software'] })
+    assert.equal(cloneable(store.value.software_scan_dirs), false, '代理竟然能克隆？那这个护栏就没意义了')
     const item = reactive({ tags: ['t'] })
     assert.equal(cloneable({ tags: item.tags }), false, '嵌在对象里的代理同样过不去')
   })
 
   await check('plain() 拍平之后能过克隆，且值不变', () => {
-    const store = ref({ scan_dirs: ['D:\\Software\\1.system', 'E:\\Tools'] })
-    const flat = plain(store.value.scan_dirs)
+    const store = ref({ software_scan_dirs: ['D:\\Software\\1.system', 'E:\\Tools'] })
+    const flat = plain(store.value.software_scan_dirs)
     assert.ok(cloneable(flat), 'plain() 之后还是克隆不了，护栏失效')
     assert.deepEqual(flat, ['D:\\Software\\1.system', 'E:\\Tools'])
 

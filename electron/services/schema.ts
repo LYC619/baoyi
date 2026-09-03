@@ -22,7 +22,7 @@ import type { Category, TagSource } from '../../src/types'
  * 0.4 要再换一次分类体系，没有列可以拿来当标记了。于是显式记一个数字，
  * 存在 settings 表里（下划线开头的键不会出现在 AppSettings 里，见 getSettings）。
  */
-export const SCHEMA_VERSION = 9
+export const SCHEMA_VERSION = 10
 export const SCHEMA_KEY = '_schema'
 
 /* --------------------------- 最小 SQL 接口 --------------------------- */
@@ -131,11 +131,15 @@ export const TABLES_SQL = `
   -- ponytail: 刻意不给 dir 建外键。scan_units 的主键就是 dir，而移除扫描目录会
   -- 直接 DELETE 那些行；带外键要么阻塞删除，要么级联把日志一起带走 —— 而日志的
   -- 价值恰恰在于目录已经不在了还能回头看。它是一份只增不改的流水，按条数自行淘汰。
+  --
+  -- resource_kind 是资源类型（software / game / video），区分各模块的识别日志。
+  -- kind 字段保留原有语义（unit / batch / manual），不改名以避免混淆。
   CREATE TABLE IF NOT EXISTS identify_logs (
     id TEXT PRIMARY KEY,
     dir TEXT NOT NULL,
     label TEXT DEFAULT '',
     kind TEXT DEFAULT 'unit',
+    resource_kind TEXT NOT NULL DEFAULT 'software',
     status TEXT NOT NULL,
     summary TEXT DEFAULT '',
     registered INTEGER DEFAULT 0,
@@ -184,6 +188,7 @@ export const INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_resource_ai_status ON resource(ai_status);
   CREATE INDEX IF NOT EXISTS idx_resource_source_dir ON resource(source_dir);
   CREATE INDEX IF NOT EXISTS idx_identify_logs_status ON identify_logs(status);
+  CREATE INDEX IF NOT EXISTS idx_identify_logs_resource_kind ON identify_logs(resource_kind);
   CREATE INDEX IF NOT EXISTS idx_identify_logs_created ON identify_logs(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_organize_plans_created ON organize_plans(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_reports_created ON identification_reports(created_at DESC);
@@ -354,6 +359,16 @@ export function migrate(d: SqlDb, from = schemaVersion(d)): void {
     d.exec(`ALTER TABLE categories ADD COLUMN kind TEXT NOT NULL DEFAULT 'software'`)
   }
   splitTagsByKind(d)
+
+  // 0.8 给识别日志加 resource_kind，区分各模块的识别记录
+  if (!columnsOf(d, 'identify_logs').has('resource_kind')) {
+    d.exec(`ALTER TABLE identify_logs ADD COLUMN resource_kind TEXT NOT NULL DEFAULT 'software'`)
+  }
+
+  // 0.8 拆分扫描目录：scan_dirs -> software_scan_dirs / game_scan_dirs / video_scan_dirs
+  if (from < 10) {
+    splitScanDirsByKind(d)
+  }
 }
 
 /**
@@ -388,6 +403,52 @@ export function splitTagsByKind(d: SqlDb): void {
 
     d.exec('DROP TABLE tags')
     d.exec('ALTER TABLE tags_v6 RENAME TO tags')
+  })
+}
+
+/**
+ * 0.8 -> 0.9：scan_dirs 拆成 software_scan_dirs / game_scan_dirs / video_scan_dirs。
+ *
+ * 旧的 scan_dirs 保留作为软件模块的扫描目录（向后兼容），新字段初始为空数组。
+ * 用户需要在各模块的设置页重新配置游戏和视频的扫描目录。
+ */
+export function splitScanDirsByKind(d: SqlDb): void {
+  const row = d.prepare('SELECT value FROM settings WHERE key = ?').get('scan_dirs') as
+    | { value: string }
+    | undefined
+
+  if (!row) {
+    // 没有旧数据，直接创建三个新字段
+    d.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO NOTHING`
+    ).run('software_scan_dirs', '[]')
+    d.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO NOTHING`
+    ).run('game_scan_dirs', '[]')
+    d.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO NOTHING`
+    ).run('video_scan_dirs', '[]')
+    return
+  }
+
+  // 读取旧的 scan_dirs，分配给 software_scan_dirs，其他两个模块初始为空
+  const oldDirs = row.value
+  tx(d, () => {
+    d.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    ).run('software_scan_dirs', oldDirs)
+    d.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO NOTHING`
+    ).run('game_scan_dirs', '[]')
+    d.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO NOTHING`
+    ).run('video_scan_dirs', '[]')
   })
 }
 

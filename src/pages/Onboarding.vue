@@ -24,7 +24,7 @@ const step = ref(0)
  * 所以每一步都必须自带失败出口：看到原因、能重试、能绕过去。
  */
 const stepError = ref('')
-const dirs = ref<string[]>([...settings.settings.scan_dirs])
+const dirs = ref<string[]>([...settings.settings.software_scan_dirs])
 
 const apiUrl = ref(settings.settings.ai.api_url)
 const apiKey = ref(settings.settings.ai.api_key)
@@ -47,7 +47,7 @@ function removeDir(dir: string): void {
 async function startScan(): Promise<void> {
   stepError.value = ''
   try {
-    await settings.patch({ scan_dirs: [...dirs.value] })
+    await settings.patch({ software_scan_dirs: [...dirs.value] })
   } catch (err) {
     toast.error(`保存扫描目录失败：${errorMessage(err)}`)
     return

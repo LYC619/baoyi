@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft } from 'lucide-vue-next'
-import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
+import { ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import type { Component } from 'vue'
 
 interface Tab {
@@ -18,7 +16,6 @@ const props = defineProps<{
 }>()
 
 const route = useRoute()
-const router = useRouter()
 
 type TabId = string
 
@@ -32,15 +29,6 @@ watch(
   () => route.query.tab,
   (v) => (tab.value = tabFromRoute(v))
 )
-
-function switchTab(id: TabId): void {
-  tab.value = id
-  router.replace({ query: { tab: id } })
-}
-
-const slots = defineSlots<{
-  [key: string]: any
-}>()
 
 
 

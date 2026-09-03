@@ -504,9 +504,20 @@ export interface AppSettings {
    * 而搜索引擎回的是网页。两者在识别链路上做的是不同的事。
    */
   tmdb: TmdbConfig
-  scan_dirs: string[]
   /**
-   * 自动整理的目标根目录。和 scan_dirs 刻意分开 —— 扫描是「去哪里找」，
+   * 软件模块的扫描目录。0.8 从 scan_dirs 拆分出来，各模块独立管理。
+   */
+  software_scan_dirs: string[]
+  /**
+   * 游戏模块的扫描目录。
+   */
+  game_scan_dirs: string[]
+  /**
+   * 影视模块的扫描目录。
+   */
+  video_scan_dirs: string[]
+  /**
+   * 自动整理的目标根目录。和扫描目录刻意分开 —— 扫描是「去哪里找」，
    * 这里是「归到哪里去」，把整理目标也加进扫描列表只会让下一轮重扫再发现一遍。
    */
   organize_root: string
@@ -843,6 +854,8 @@ export interface IdentifyLog {
   label: string
   /** unit = 整个目录，item = 单条补全 */
   kind: 'unit' | 'item'
+  /** 资源类型：software / game / video。0.8 加入，区分各模块的识别日志 */
+  resource_kind: string
   status: IdentifyLogStatus
   /** 一行结论，例如「注册 2 项」或跳过原因 */
   summary: string
@@ -859,6 +872,8 @@ export interface IdentifyLog {
 export interface IdentifyLogQuery {
   status?: IdentifyLogStatus
   keyword?: string
+  /** 按资源类型过滤：software / game / video */
+  resource_kind?: string
   limit?: number
 }
 

@@ -135,7 +135,7 @@ async function launch(id: string): Promise<void> {
  * 识别是要花 token 的，得由用户点头。
  */
 async function rescan(): Promise<void> {
-  const dirs = settings.settings.scan_dirs
+  const dirs = settings.settings.software_scan_dirs
   if (dirs.length === 0) {
     toast('还没有配置扫描目录，先去设置里添加')
     void router.push({ name: 'settings', query: { tab: 'scan' } })

@@ -588,7 +588,14 @@ const noteworthy = computed(() =>
   units.value.filter((u) => u.status === 'skipped' || u.status === 'failed').slice(0, 12)
 )
 
-const dirs = computed(() => settings.settings.scan_dirs)
+/** 当前模块的扫描目录。整理 Tab 只在软件模块显示，那里用的也是 software_scan_dirs */
+const dirs = computed(() => {
+  const kind = currentKind.value
+  if (kind === 'game') return settings.settings.game_scan_dirs
+  if (kind === 'video') return settings.settings.video_scan_dirs
+  return settings.settings.software_scan_dirs
+})
+
 const busy = computed(() => scan.running.value || ai.running.value)
 
 async function resetUnits(): Promise<void> {
@@ -619,11 +626,25 @@ async function addDir(): Promise<void> {
     toast('这个目录已经在列表里了')
     return
   }
-  await settings.patch({ scan_dirs: [...dirs.value, dir] })
+  const kind = currentKind.value
+  if (kind === 'game') {
+    await settings.patch({ game_scan_dirs: [...dirs.value, dir] })
+  } else if (kind === 'video') {
+    await settings.patch({ video_scan_dirs: [...dirs.value, dir] })
+  } else {
+    await settings.patch({ software_scan_dirs: [...dirs.value, dir] })
+  }
 }
 
 async function removeDir(dir: string): Promise<void> {
-  await settings.patch({ scan_dirs: dirs.value.filter((d) => d !== dir) })
+  const kind = currentKind.value
+  if (kind === 'game') {
+    await settings.patch({ game_scan_dirs: dirs.value.filter((d) => d !== dir) })
+  } else if (kind === 'video') {
+    await settings.patch({ video_scan_dirs: dirs.value.filter((d) => d !== dir) })
+  } else {
+    await settings.patch({ software_scan_dirs: dirs.value.filter((d) => d !== dir) })
+  }
   await loadUnits()
 }
 
@@ -1937,7 +1958,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 
         <!-- -------------------------- 识别日志 -------------------------- -->
         <template v-else-if="tab === 'logs'">
-          <IdentifyLog @retry="retryUnit" />
+          <IdentifyLog :resource-kind="currentKind" @retry="retryUnit" />
         </template>
         <!-- -------------------------- 数据管理 -------------------------- -->
         <template v-else-if="tab === 'data'">
