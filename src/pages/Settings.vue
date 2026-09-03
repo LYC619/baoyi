@@ -73,23 +73,29 @@ const ai = useAI()
 
 /* -------------------------------- 分页 -------------------------------- */
 
-const TABS = [
-  { id: 'scan', label: '扫描与识别', icon: Telescope },
-  { id: 'organize', label: '目录整理', icon: FolderTree },
-  { id: 'ai', label: 'AI 配置', icon: Bot },
-  { id: 'search', label: '搜索服务', icon: Globe },
-  { id: 'appearance', label: '外观', icon: Palette },
-  { id: 'taxonomy', label: '分类与标签', icon: Tags },
-  { id: 'logs', label: '识别日志', icon: ScrollText },
-  { id: 'data', label: '数据管理', icon: Database },
-  { id: 'about', label: '关于', icon: Info }
+const ALL_TABS = [
+  { id: 'scan', label: '扫描与识别', icon: Telescope, modules: ['software', 'game', 'video'] },
+  { id: 'organize', label: '目录整理', icon: FolderTree, modules: ['software'] },
+  { id: 'ai', label: 'AI 配置', icon: Bot, modules: ['software', 'game', 'video'] },
+  { id: 'search', label: '搜索服务', icon: Globe, modules: ['game', 'video'] },
+  { id: 'appearance', label: '外观', icon: Palette, modules: ['software', 'game', 'video'] },
+  { id: 'taxonomy', label: '分类与标签', icon: Tags, modules: ['software', 'game', 'video'] },
+  { id: 'logs', label: '识别日志', icon: ScrollText, modules: ['software', 'game', 'video'] },
+  { id: 'data', label: '数据管理', icon: Database, modules: ['software', 'game', 'video'] },
+  { id: 'about', label: '关于', icon: Info, modules: ['software', 'game', 'video'] }
 ] as const
 
-type TabId = (typeof TABS)[number]['id']
+// 根据当前模块过滤标签页
+const TABS = computed(() =>
+  ALL_TABS.filter((t) => (t.modules as readonly string[]).includes(activeModule.value))
+)
+
+type TabId = (typeof ALL_TABS)[number]['id']
 
 function tabFromRoute(value: unknown): TabId {
   const id = String(Array.isArray(value) ? value[0] : (value ?? '')) as TabId
-  return TABS.some((t) => t.id === id) ? id : 'scan'
+  const availableTabs = TABS.value
+  return availableTabs.some((t) => t.id === id) ? id : availableTabs[0]?.id ?? 'scan'
 }
 
 // Tab 记在 query 上，刷新和后退都还停在原来那一页，也方便从别处直接跳到 ?tab=logs。
@@ -712,9 +718,19 @@ const mergeInto = ref<number | null>(null)
 const newCategory = ref('')
 const newTag = ref('')
 
+/** activeModule -> kind 映射 */
+const currentKind = computed(() => {
+  const map: Record<string, string> = {
+    software: 'software',
+    game: 'game',
+    video: 'video'
+  }
+  return map[activeModule.value] || 'software'
+})
+
 async function loadTaxonomy(): Promise<void> {
-  await catStore.load()
-  tags.value = await window.baoyi.tags.list()
+  await catStore.load(currentKind.value)
+  tags.value = await window.baoyi.tags.list(currentKind.value)
 }
 
 onMounted(loadTaxonomy)
@@ -738,7 +754,7 @@ const TAG_SOURCE_META: Record<Tag['source'], { label: string; tone: 'muted' | 'a
 }
 
 async function saveCategory(c: Category, patch: Partial<Category>): Promise<void> {
-  await catStore.upsert({ ...c, ...patch })
+  await catStore.upsert({ ...c, ...patch }, currentKind.value)
   await store.refreshCounts()
 }
 
@@ -756,7 +772,7 @@ async function addCategory(): Promise<void> {
     return
   }
   const max = catStore.list.reduce((n, c) => Math.max(n, c.sort_order), 0)
-  await catStore.upsert({ id: '', name, description: '', icon: 'box', sort_order: max + 1 })
+  await catStore.upsert({ id: '', name, description: '', icon: 'box', sort_order: max + 1 }, currentKind.value)
   newCategory.value = ''
   await store.refreshCounts()
 }
@@ -776,7 +792,7 @@ async function dropCategory(c: Category): Promise<void> {
 async function addTag(): Promise<void> {
   const name = newTag.value.trim()
   if (!name) return
-  tags.value = await window.baoyi.tags.create(name)
+  tags.value = await window.baoyi.tags.create(name, currentKind.value)
   newTag.value = ''
 }
 
@@ -1069,7 +1085,14 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
         <ArrowLeft :size="16" />
         返回
       </button>
-      <h1>设置</h1>
+      <h1>
+        设置
+        <span class="head__module">
+          {{
+            activeModule === 'software' ? '软件' : activeModule === 'game' ? '游戏' : '影视'
+          }}
+        </span>
+      </h1>
     </header>
 
     <div class="layout">
@@ -1524,7 +1547,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             没有 TMDB 也能扫进来（按文件名 + 模型知识），只是拿不到官方简介、
             评分和完整季集表 —— 而季集表是「缺哪几集」这件事的唯一来源。
           -->
-          <section class="panel">
+          <section v-if="activeModule === 'video'" class="panel">
             <div class="sec-head">
               <h2>TMDB 刮削（影视）</h2>
               <label
@@ -1595,7 +1618,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             代理。放在 TMDB 之后、日志之前 —— 它服务的是「联网刮削」这一组，
             而不是某一个站。
           -->
-          <section class="panel">
+          <section v-if="activeModule === 'video'" class="panel">
             <div class="sec-head">
               <h2>出站代理</h2>
             </div>
@@ -1637,7 +1660,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </p>
           </section>
 
-          <section class="panel">
+          <section v-if="activeModule === 'video'" class="panel">
             <div class="sec-head">
               <h2>隐藏里番</h2>
               <label class="switch">
@@ -2171,6 +2194,18 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 .head h1 {
   font-size: var(--fs-title);
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.head__module {
+  font-size: var(--fs-body);
+  font-weight: 400;
+  color: var(--text-sub);
+  padding: 2px 8px;
+  border-radius: var(--radius-tag);
+  background: var(--bg-overlay);
 }
 
 .layout {

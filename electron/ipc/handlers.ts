@@ -410,14 +410,14 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('video:clear-poster', (_e, id: string) => clearVideoPoster(id))
 
   /* ------------------------------ 分类 ------------------------------ */
-  ipcMain.handle('categories:list', () => listCategories())
-  ipcMain.handle('categories:upsert', (_e, category: Category) => upsertCategory(category))
+  ipcMain.handle('categories:list', (_e, kind?: string) => listCategories(kind))
+  ipcMain.handle('categories:upsert', (_e, category: Category, kind?: string) => upsertCategory(category, kind))
   ipcMain.handle('categories:remove', (_e, id: string) => removeCategory(id))
   ipcMain.handle('categories:move', (_e, id: string, delta: number) => moveCategory(id, delta))
 
   /* ------------------------------ 标签 ------------------------------ */
-  ipcMain.handle('tags:list', () => listTags())
-  ipcMain.handle('tags:create', (_e, name: string) => createTag(name))
+  ipcMain.handle('tags:list', (_e, kind?: string) => listTags(kind))
+  ipcMain.handle('tags:create', (_e, name: string, kind?: string) => createTag(name, kind))
   ipcMain.handle('tags:rename', (_e, id: number, name: string) => renameTag(id, name))
   ipcMain.handle('tags:merge', (_e, fromIds: number[], intoId: number) => mergeTags(fromIds, intoId))
   ipcMain.handle('tags:remove', (_e, id: number) => removeTag(id))

@@ -53,12 +53,12 @@ export const ICON_NAMES = Object.keys(ICONS)
 export const useCategoriesStore = defineStore('categories', () => {
   const list = ref<Category[]>([])
 
-  async function load(): Promise<void> {
-    list.value = await window.baoyi.categories.list()
+  async function load(kind?: string): Promise<void> {
+    list.value = await window.baoyi.categories.list(kind)
   }
 
-  async function upsert(category: Category): Promise<void> {
-    list.value = await window.baoyi.categories.upsert(plain(category))
+  async function upsert(category: Category, kind?: string): Promise<void> {
+    list.value = await window.baoyi.categories.upsert(plain(category), kind)
   }
 
   async function remove(id: string): Promise<void> {

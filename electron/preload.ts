@@ -130,14 +130,14 @@ const api: BaoyiApi = {
     clearPoster: (id: string) => ipcRenderer.invoke('video:clear-poster', id)
   },
   categories: {
-    list: () => ipcRenderer.invoke('categories:list'),
-    upsert: (category: Category) => ipcRenderer.invoke('categories:upsert', plain(category)),
+    list: (kind?: string) => ipcRenderer.invoke('categories:list', kind),
+    upsert: (category: Category, kind?: string) => ipcRenderer.invoke('categories:upsert', plain(category), kind),
     remove: (id: string) => ipcRenderer.invoke('categories:remove', id),
     move: (id: string, delta: number) => ipcRenderer.invoke('categories:move', id, delta)
   },
   tags: {
-    list: () => ipcRenderer.invoke('tags:list'),
-    create: (name: string) => ipcRenderer.invoke('tags:create', name),
+    list: (kind?: string) => ipcRenderer.invoke('tags:list', kind),
+    create: (name: string, kind?: string) => ipcRenderer.invoke('tags:create', name, kind),
     rename: (id: number, name: string) => ipcRenderer.invoke('tags:rename', id, name),
     merge: (fromIds: number[], intoId: number) =>
       ipcRenderer.invoke('tags:merge', plain(fromIds), intoId),

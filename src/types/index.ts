@@ -1410,16 +1410,16 @@ export interface BaoyiApi {
     clearPoster(id: string): Promise<VideoItem | null>
   }
   categories: {
-    list(): Promise<Category[]>
-    upsert(category: Category): Promise<Category[]>
+    list(kind?: string): Promise<Category[]>
+    upsert(category: Category, kind?: string): Promise<Category[]>
     remove(id: string): Promise<Category[]>
     /** 上下挪一格。拖拽排序留给以后，这个能到达同样的顺序 */
     move(id: string, delta: number): Promise<Category[]>
   }
   tags: {
-    list(): Promise<Tag[]>
+    list(kind?: string): Promise<Tag[]>
     /** 用户手工建标签，直接进池 */
-    create(name: string): Promise<Tag[]>
+    create(name: string, kind?: string): Promise<Tag[]>
     rename(id: number, name: string): Promise<Tag[]>
     /** 把若干标签并进一个，所有条目上的引用一并替换 */
     merge(fromIds: number[], intoId: number): Promise<Tag[]>
