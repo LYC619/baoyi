@@ -8,6 +8,7 @@ import { rebase } from '../kinds/software/organize/plan'
 import { KINDS } from '../kinds'
 import { initSchema, insertCategories, insertTag, schemaVersion, seedDefaults, SCHEMA_VERSION } from './schema'
 import { FALLBACK_CATEGORY } from './taxonomy'
+import { VIDEO_JOBS_SQL } from '../kinds/video/download/jobs.ts'
 import { migratePosterStorage, resolvePosterDirectory } from './poster-storage.ts'
 import { isPortable } from './portable'
 import type {
@@ -70,6 +71,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   software_scan_dirs: [],
   game_scan_dirs: [],
   video_scan_dirs: [],
+  video_download_root: '',
+  video_download_quality: '',
+  video_download_strict_quality: false,
+  video_download_register: true,
   organize_root: '',
   save_backup_root: '',
   save_backup_keep: 10,
@@ -211,6 +216,7 @@ export function getDb(): Database.Database {
   // 品类模块从注册表来：公共层不认识 software_meta，也不认识「开发工具」
   // 这些分类名，它只负责把每个品类交上来的那几段 SQL 按顺序执行一遍
   initSchema(db, KINDS)
+  db.exec(VIDEO_JOBS_SQL)
   try {
     const migration = migratePosterStorage(db, legacyProjectPostersDir(), postersDir())
     if (migration.removed || migration.updated) console.log(`[抱一] 影视图片已搬回 ${postersDir()}（${migration.removed} 张，${migration.updated} 处引用）`)
@@ -2058,6 +2064,8 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
     // 一份读不懂的记录不比没有记录更有用，所以改成一起清。
     // 代价是清空后无法再自动撤销整理，这一点已经写进了重置对话框的提示里。
     d.prepare('DELETE FROM organize_plans').run()
+    d.prepare('DELETE FROM video_organize_journal').run()
+    d.prepare('DELETE FROM video_download_jobs').run()
     d.prepare('DELETE FROM task_records').run()
     if (mode === 'all') {
       // 识别日志只在恢复出厂时清。反复调 prompt 时要的正是「改之前那次是怎么判断的」，

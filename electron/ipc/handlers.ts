@@ -55,7 +55,7 @@ import {
   updateSoftware,
   upsertCategory
 } from '../services/database'
-import { listTaskRecords, saveTaskRecord, clearTaskRecords } from '../services/database'
+import { getDb, listTaskRecords, saveTaskRecord, clearTaskRecords } from '../services/database'
 import { launchSoftware, revealInFolder } from '../kinds/software/launcher'
 import {
   addGameLinks,
@@ -87,6 +87,7 @@ import {
 } from '../kinds/game/service'
 import { COVER_EXTS } from '../kinds/game/links'
 import {
+  searchVideoSource, scrapeVideoEpisode, setVideoEpisodeArtwork, importVideoBundle,
   cancelVideoScan,
   clearVideoPoster,
   fetchVideoPoster,
@@ -107,6 +108,8 @@ import {
   videoCountsOf,
   videoScanReadiness
 } from '../kinds/video/service'
+import { previewVideoRemoval, applyVideoRemoval, bulkUpdateVideos } from '../kinds/video/management.ts'
+import { readLocalVideoBundle } from '../kinds/video/local-files.ts'
 import { POSTER_EXTS } from '../kinds/video/posters'
 import { testTmdb } from '../kinds/video/tmdb'
 import { isPortable } from '../services/portable'
@@ -131,6 +134,8 @@ import { ICON_EXTS } from '../kinds/software/icons'
 import { clearSoftwareIcon, refreshSoftwareIcons, setSoftwareIcon } from '../kinds/software/service'
 import { testSearch } from '../services/searchService'
 import { countIpcSend } from '../services/timing.ts'
+import { registerVideoDownloadIpc } from './video-download.ts'
+import { registerVideoWorkflowIpc } from './video-workflow.ts'
 import { createHanimeBrowser } from '../services/hanime-browser.ts'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
@@ -141,6 +146,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     await reapplyProxy(getSettings().proxy)
     return hanimeBrowser.open(url)
   })
+  const videoWorkflow = registerVideoWorkflowIpc(getWindow, ipcMain)
   const send = (channel: string, payload: unknown) => {
     const win = getWindow()
     if (win && !win.isDestroyed()) {
@@ -148,6 +154,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       win.webContents.send(channel, payload)
     }
   }
+
+  registerVideoDownloadIpc(getWindow, ipcMain)
 
   /* ------------------------------ 应用 ------------------------------ */
   ipcMain.handle('app:info', () => ({
@@ -381,7 +389,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   // 界面不用为了刷新那个状态再查一趟
   ipcMain.handle('video:play', (_e, id: string) => playVideo(id))
   ipcMain.handle('video:play-episode', (_e, episodeId: string) => playVideoEpisode(episodeId))
-  ipcMain.handle('video:readiness', () => videoScanReadiness())
+  ipcMain.handle('video:readiness', (_e, forAgent?: boolean) => videoScanReadiness(forAgent === true))
   ipcMain.handle('video:scan', (_e, dirs: string[]) =>
     scanVideos(dirs, (p) => send('video:progress', p))
   )
@@ -403,6 +411,34 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   })
 
   ipcMain.handle('video:episodes', (_e, id: string) => listVideoEpisodes(id))
+
+  ipcMain.handle('video:source-search', (_e, query: string) => searchVideoSource(query))
+  ipcMain.handle('video:episode-scrape', async (_e, resourceId: string, episodeId: string, source: string) => {
+    const result = await scrapeVideoEpisode(resourceId, episodeId, source); send('video:library-changed', resourceId); return result
+  })
+  ipcMain.handle('video:episode-artwork', async (_e, episodeId: string, role: 'poster' | 'thumbnail') => {
+    const win = getWindow(); if (!win) return null
+    const picked = await dialog.showOpenDialog(win, { title: role === 'poster' ? '选择单集封面' : '选择单集预览图', properties: ['openFile'], filters: [{ name: '图片', extensions: ['png','jpg','jpeg','webp'] }] })
+    if (picked.canceled || !picked.filePaths[0]) return null
+    return setVideoEpisodeArtwork(episodeId, picked.filePaths[0], role)
+  })
+  ipcMain.handle('video:removal-preview', (_e, input) => previewVideoRemoval(getDb(), input))
+  ipcMain.handle('video:removal-apply', async (_e, preview) => {
+    const result = await applyVideoRemoval(getDb(), preview, file => shell.trashItem(file)); send('video:library-changed', preview.request.resourceIds[0]); return result
+  })
+  ipcMain.handle('video:bulk-update', (_e, ids: string[], patch) => {
+    const result = bulkUpdateVideos(getDb(), ids, patch); send('video:library-changed', ids[0]); return result
+  })
+  ipcMain.handle('video:import-bundle', async () => {
+    const win = getWindow()
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, { title: '导入视频目录（支持本地视频或抱一资源包）', properties: ['openDirectory'] })
+    if (result.canceled || !result.filePaths[0]) return null
+    const directory = result.filePaths[0]
+    if (readLocalVideoBundle(directory)) return importVideoBundle(directory, true)
+    const scanResult = await scanVideos([directory], p => send('video:progress', p), true)
+    return { resourceId: scanResult.entries?.find(e => e.resourceId)?.resourceId || '', bundleId: '', created: false, itemsAdded: scanResult.episodes, filesAdded: 0, scanResult }
+  })
 
   ipcMain.handle('tasks:list', () => listTaskRecords())
   ipcMain.handle('tasks:save', (_e, task: import('../../src/types').TaskRecord) => { saveTaskRecord(task); return true })
@@ -568,6 +604,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle('data:reset', (_e, mode: 'library' | 'all') => {
     const summary = resetData(mode === 'all' ? 'all' : 'library')
+    videoWorkflow.resetHistory()
     return { summary, settings: getSettings() }
   })
 

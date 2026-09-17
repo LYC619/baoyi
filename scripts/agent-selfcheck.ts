@@ -5691,10 +5691,11 @@ async function videoScanSection(): Promise<void> {
     assert.deepEqual(s.episodes.map((e: any) => `S${e.season}E${e.episode}`), ['S1E1', 'S1E2'])
   })
 
-  await check('番剧的绝对集号成集，标题取目录名而不是罗马音', () => {
+  await check('番剧绝对集号归并，文件原名优先，目录保留作上下文', () => {
     const s = byPath('番剧/葬送的芙莉莲')
     assert.equal(s.video_type, 'series')
-    assert.equal(s.title_zh, '葬送的芙莉莲')
+    assert.equal(s.title_en, 'Sousou no Frieren')
+    assert.equal(path.basename(s.directory), '葬送的芙莉莲')
     assert.deepEqual(s.episodes.map((e: any) => e.episode), [11, 12])
   })
 
@@ -6612,6 +6613,7 @@ async function videoFactsSection(): Promise<void> {
     const f = await buildFacts(scanVideoRoot(path.join(dir, '借id'))[0]!)
     assert.equal(f.tmdb_id, '99999', 'id 该借过来 —— 有它刮削就是精确查询')
     assert.equal(f.plot, '', '简介不能借：那是一集的简介，不是整部剧的')
+    assert.equal(f.episodes.find(episode => episode.episode === 1)?.local_metadata?.description, '只是第一集的简介', '简介仍应保留在它所属的单集里')
     assert.ok(!f.title_zh.includes('只是第一集'), '标题也不能借')
   })
 
@@ -7033,6 +7035,19 @@ async function videoIdentifySection(): Promise<void> {
 
     const row = d.prepare('SELECT tmdb_id FROM video_meta').get() as any
     assert.equal(row.tmdb_id, '', '编的 id 绝不能落库 —— 下次刷新会刮到另一部片')
+    d.close()
+  })
+
+  await check('注册回调带回条目 id，供注册后自动下载封面', async () => {
+    const d = new DatabaseSync(':memory:')
+    initSchema(d as any, KINDS)
+    let registered: any = null
+    const ctx = mkCtx({ db: d as any, onRegister: (info: any) => { registered = info } }) as any
+    const tools = buildVideoTools(ctx, ['欧美'], false, false)
+    const reg = tools.find((t) => t.name === 'register_video')!
+    await reg.execute({ name_zh: '沙丘', summary: 'x', category: '欧美' })
+    assert.ok(registered?.id, '注册回调必须返回数据库条目 id')
+    assert.equal(registered.hanime_id, '', '普通影视注册不应伪造 Hanime id')
     d.close()
   })
 
@@ -8894,6 +8909,22 @@ async function hanimeChannelSection(): Promise<void> {
     assert.equal(hits[0].title, '简化版式的标题')
   })
 
+  await check('搜索结果：当前 Hanime 外层 a + 内层 card 结构也认', () => {
+    const current = `<div class="home-rows-videos-wrapper">
+      <a href="https://hanime1.me/watch?v=87022">
+        <div class="home-rows-videos-div search-videos">
+          <div class="video-card-inner"><img src="https://vdownload.hembed.com/image/cover/x.jpg">
+            <div class="home-rows-videos-title">妻NTR・凌辱輪迴 4</div>
+          </div>
+        </div>
+      </a>
+    </div>`
+    const hits = parseSearch(current)
+    assert.equal(hits.length, 1)
+    assert.equal(hits[0].videoCode, '87022')
+    assert.equal(hits[0].title, '妻NTR・凌辱輪迴 4')
+  })
+
   await check('搜索结果：改版 / 空页 / 垃圾输入一律空数组，不抛', () => {
     // 站方改版时正确的行为是「这次刮不到」，不是让整次识别炸掉
     for (const bad of ['', '<html><body>盾的挑战页</body></html>', '不是 HTML', '<div class="x"></div>']) {
@@ -9229,7 +9260,7 @@ async function hanimeChannelSection(): Promise<void> {
 
   /* -------------------- 侧栏 / 海报墙 / 详情页 -------------------- */
 
-  await check('侧栏那一格和海报墙筛选是白拿的 —— 不需要界面代码', () => {
+  await check('里番类型单独计数，显式选择后筛选海报墙', () => {
     // v0.8-计划.md 第三节说「加一条分类，侧栏入口和筛选同时就有」。
     // 那句话对**界面**成立（这一条验它），对**老库**不成立（迁移那一节验它）。
     // 两件事分开验，因为它们当初是被混成一句话才出的错
@@ -9248,28 +9279,37 @@ async function hanimeChannelSection(): Promise<void> {
     }
     insertVideo(d as any, {
       ...base, path: 'D:\\H\\a.mkv', name_zh: '巨乳女教師', summary: 'x',
-      category: HENTAI_CATEGORY, tags: ['巨乳', '女教師'], hanime_id: '86994'
+      category: HENTAI_CATEGORY, tags: [], hanime_tags: ['巨乳', '女教師'], hanime_id: '86994'
     } as any)
     insertVideo(d as any, {
       ...base, path: 'D:\\H\\b.mkv', name_zh: '寝取られファイター', summary: 'x',
-      category: HENTAI_CATEGORY, tags: ['巨乳'], hanime_id: '86995'
+      category: HENTAI_CATEGORY, tags: [], hanime_tags: ['巨乳'], hanime_id: '86995'
     } as any)
     insertVideo(d as any, {
       ...base, path: 'D:\\M\\c.mkv', name_zh: '沙丘', summary: 'x',
       category: '欧美', tags: ['科幻']
     } as any)
 
-    // 侧栏那个 v-for 遍历的就是这个数组
     const cats = videoCounts(d as any).categories
-    assert.deepEqual(
-      cats.find((c) => c.name === HENTAI_CATEGORY),
-      { name: HENTAI_CATEGORY, count: 2 },
-      '侧栏拿不到这一格'
-    )
+    assert.equal(cats.find((c) => c.name === HENTAI_CATEGORY), undefined)
+    assert.equal(videoCounts(d as any).hentai, 2)
 
     // 点一下侧栏 = store.select({kind:'category'}) -> q.category -> 这个查询
-    const only = listVideos(d as any, { category: HENTAI_CATEGORY } as any).map((v: any) => v.name_zh)
+    const only = listVideos(d as any, { type: 'hentai' }).map((v: any) => v.name_zh)
     assert.deepEqual(only.sort(), ['寝取られファイター', '巨乳女教師'].sort())
+    const counts = videoCounts(d as any)
+    assert.deepEqual(counts.tags, [{ name: '科幻', count: 1 }], '普通标签栏不该露出里番标签')
+    assert.deepEqual(
+      counts.hanime_tags,
+      [{ name: '巨乳', count: 2 }, { name: '女教師', count: 1 }],
+      '进入里番分类时要拿到站方标签计数'
+    )
+    assert.deepEqual(
+      listVideos(d as any, { type: 'hentai', tag: '女教師' })
+        .map((v: any) => v.name_zh),
+      ['巨乳女教師'],
+      '里番标签筛选必须和分类条件叠加'
+    )
     assert.deepEqual(
       listVideos(d as any, { category: '欧美' } as any).map((v: any) => v.name_zh),
       ['沙丘'],
@@ -9313,7 +9353,7 @@ async function hanimeChannelSection(): Promise<void> {
     } as any)
 
     assert.deepEqual(
-      listVideos(d as any, { tag: '女教師' } as any).map((v: any) => v.name_zh),
+      listVideos(d as any, { type: 'hentai', tag: '女教師' }).map((v: any) => v.name_zh),
       ['巨乳女教師']
     )
     assert.deepEqual(
@@ -9337,7 +9377,7 @@ async function hanimeChannelSection(): Promise<void> {
       poster_path: '', fanart_path: '', watch_status: 'unwatched', episodes: []
     } as any)
     // 详情页那个按钮的 v-if 判的就是这个值非空
-    const row = listVideos(d as any, { category: HENTAI_CATEGORY } as any)[0] as any
+    const row = listVideos(d as any, { type: 'hentai' })[0] as any
     assert.equal(row.hanime_id, '86994')
     assert.equal(watchUrl(row.hanime_id), 'https://hanime1.me/watch?v=86994')
     d.close()
@@ -9730,15 +9770,15 @@ async function hideHentaiSection(): Promise<void> {
     return d
   }
 
-  await check('关着开关时一切照旧（默认不藏）', () => {
+  await check('关闭全局隐藏时，仍须显式选择里番类型', () => {
     const d = seed()
-    // 默认值必须是 false —— 默认藏的话，用户装完看不见自己刮进来的东西，
-    // 第一反应是「刮削坏了」
-    assert.equal(listVideos(d as any).length, 4, '4 条未归档的都该在')
+    assert.equal(listVideos(d as any).length, 2)
+    assert.equal(listVideos(d as any, { type: 'hentai' }).length, 2)
     const c = videoCounts(d as any)
-    assert.equal(c.all, 4)
-    assert.equal(c.archived, 1)
-    assert.ok(c.categories.some((x) => x.name === HENTAI_CATEGORY))
+    assert.equal(c.all, 2)
+    assert.equal(c.archived, 0)
+    assert.equal(c.hentai, 2)
+    assert.ok(!c.categories.some((x) => x.name === HENTAI_CATEGORY))
     d.close()
   })
 
@@ -9786,7 +9826,7 @@ async function hideHentaiSection(): Promise<void> {
   await check('明确点里番分类也筛不出东西 —— 判据在数据层，不靠界面自觉', () => {
     const d = seed()
     // 开关刚打开的那一刻 selection 可能还停在里番上。挡在这一层才是真挡住
-    assert.equal(listVideos(d as any, { category: HENTAI_CATEGORY }, true).length, 0)
+    assert.equal(listVideos(d as any, { type: 'hentai' }, true).length, 0)
     // 走标签进来也一样
     assert.equal(listVideos(d as any, { tag: '巨乳' }, true).length, 0)
     // 关键词搜索走的是同一条查询路径，所以顺带就挡住了 —— 验一下别真漏了
@@ -9806,8 +9846,9 @@ async function hideHentaiSection(): Promise<void> {
     ).n
     assert.equal(rows, 5, '开关不该动任何一行数据')
     // 再放开
-    assert.equal(listVideos(d as any).length, 4)
-    assert.equal(videoCounts(d as any).categories.some((x) => x.name === HENTAI_CATEGORY), true)
+    assert.equal(listVideos(d as any).length, 2)
+    assert.equal(listVideos(d as any, { type: 'hentai' }).length, 2)
+    assert.equal(videoCounts(d as any).hentai, 2)
     d.close()
   })
 

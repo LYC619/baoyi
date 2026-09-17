@@ -34,7 +34,8 @@ import type { AgentTool } from '../../services/agent/loop.ts'
 import type { SqlDb } from '../../services/schema.ts'
 import type { SearchConfig, TmdbConfig, VideoPart } from '../../../src/types'
 import { formatHits, search, searchCached } from '../../services/searchService.ts'
-import { insertVideo, type EpisodePayload, type VideoPayload } from './db.ts'
+import type { EpisodePayload, VideoPayload } from './db.ts'
+import { registerVideoIdentification } from './registration.ts'
 import { doubanLookup, doubanQuery, doubanUrl, type DoubanCandidate } from './douban.ts'
 import type { EpisodeFacts, VideoFacts } from './facts.ts'
 import {
@@ -52,6 +53,7 @@ import {
   type HanimeBudget
 } from './hentai/hanime.ts'
 import { watchUrl, type HanimeDetail, type HanimeHit } from './hentai/selectors.ts'
+import type { SourceEpisodeDetails } from './episode-details.ts'
 
 /** 一次识别最多搜几次 TMDB。上限在 prompt 里也写了一遍，这里是执行它的那一半 */
 const MAX_TMDB_SEARCHES = 4
@@ -86,11 +88,23 @@ export interface VideoToolContext {
   facts: VideoFacts
   /** 落库句柄 */
   db: SqlDb
+  /** Existing mixed-series owner, supplied only by the local scan planner. */
+  splitFromId?: string
+  onPayload?: (payload: VideoPayload, sourceDetails?: SourceEpisodeDetails) => void
   /** 现有标签池，用来收敛模型新造标签的冲动 */
   tagPool: string[]
   searchConfig: SearchConfig
   tmdbConfig: TmdbConfig
-  onRegister?: (info: { name: string; path: string; created: boolean; episodesAdded: number }) => void
+  onRegister?: (info: {
+    id: string
+    name: string
+    path: string
+    created: boolean
+    episodesAdded: number
+    hanime_id: string
+    episodeId?: string
+    posterUrl?: string
+  }) => void | Promise<void>
   onSkip?: (path: string, reason: string) => void
   /**
    * 每次真的走了一趟用户的搜索服务商就叫一下（豆瓣和 web_search 都算）。
@@ -354,6 +368,7 @@ async function fetchEpisodes(
       const local = have.get(key)
       filled.add(key)
       list.push({
+        local_metadata: local?.local_metadata,
         season: e.season_number,
         episode: e.episode_number,
         // TMDB 的集标题比文件名里切出来的准，但本地 nfo 写了的话优先本地
@@ -375,6 +390,7 @@ async function fetchEpisodes(
     if (filled.has(key)) continue
     const [s, e] = key.split('/').map(Number)
     list.push({
+      local_metadata: local.local_metadata,
       season: s ?? 1,
       episode: e ?? 0,
       title: local.title,
@@ -415,6 +431,7 @@ function watchOf(e: EpisodeFacts | undefined): Partial<EpisodePayload> {
 /** 本地事实里的集列表，TMDB 不可用或没挑条目时用它 */
 function localEpisodes(f: VideoFacts): EpisodePayload[] {
   return f.episodes.map((e) => ({
+    local_metadata: e.local_metadata,
     season: e.season,
     episode: e.episode,
     title: e.title,
@@ -490,6 +507,7 @@ async function register(
   const claimedHanime = idOf(args?.hanime_id)
   let hanimeId = ''
   let rejectedHanime = ''
+  let hanimeSource: HanimeDetail | null = null
   /**
    * 封面地址**从账本取，不从参数取** —— 和豆瓣评分一个道理（见 DoubanLedger）。
    *
@@ -505,6 +523,7 @@ async function register(
     if (hit) {
       hanimeId = claimedHanime
       hanimeCover = hit.coverUrl ?? ''
+      if ('tags' in hit) hanimeSource = hit
     } else {
       rejectedHanime = claimedHanime
     }
@@ -527,12 +546,13 @@ async function register(
   const payload: VideoPayload = {
     path: f.path,
     video_type: f.video_type,
+    collection_name: '',
     name_zh: nameZh,
-    name_en: str(args?.name_en, 160) || detail?.original_title || f.title_en,
+    name_en: str(args?.name_en, 160) || detail?.original_title || f.original_title || f.title_en,
     summary: str(args?.summary, 80) || '未填写说明',
     description: str(args?.description, 600) || detail?.overview || f.plot,
     category: str(args?.category, 20) || '其他',
-    tags: limitVideoTags(args?.tags, new Set(ctx.tagPool)),
+    tags: [...new Set([...(f.tags || []), ...limitVideoTags(args?.tags, new Set(ctx.tagPool))])],
     // 官网都没有时退到豆瓣条目页：对中文用户来说，那个页面比一个 404 的
     // 官方站有用得多 —— 演职员、短评、同类推荐都在那儿
     // 里番排在豆瓣后面：豆瓣上没有这类作品，所以有 hanime_id 的时候
@@ -544,10 +564,10 @@ async function register(
 
     // 年份：刮削结果压过本地 —— TMDB 的上映年是权威的，
     // 而文件名里的年份可能是发布年
-    year: detail?.year || f.year,
+    year: detail?.year || f.year || (hanimeSource?.releaseDate ? new Date(hanimeSource.releaseDate).getUTCFullYear() : 0),
     end_year: detail?.end_year ?? 0,
     rating: detail?.rating || f.nfo_rating,
-    duration_sec: f.duration_sec || (detail?.runtime_min ?? 0) * 60,
+    duration_sec: f.duration_sec || (detail?.runtime_min ?? 0) * 60 || hanimeSource?.durationSec || 0,
     resolution: f.resolution,
     video_codec: f.video_codec,
     source: f.source,
@@ -558,20 +578,21 @@ async function register(
     // 外挂字幕和 nfo 记成关联文件：用户想知道「这部片旁边都有什么」
     linked_files: [
       ...f.external_subtitles.map((p) => ({ path: p, label: '字幕', type: 'other' as const })),
-      ...f.nfo_files.map((p) => ({ path: p, label: 'NFO', type: 'other' as const }))
+      ...[...new Set([...f.nfo_files, ...(f.attachments || []).map(a => a.path)])].map((p) => ({ path: p, label: '本地资料', type: 'other' as const }))
     ].slice(0, 20),
     tmdb_id: detail ? String(detail.id) : f.tmdb_id,
     imdb_id: detail?.imdb_id || f.imdb_id,
     douban_id: douban?.id ?? '',
     douban_rating: douban?.rating ?? 0,
     hanime_id: hanimeId,
-    // 相对路径，不是本地文件。下载是 Step 6 的活，但这两个值在这次刮削的
-    // 详情响应里白拿 —— 不存的话 Step 6 得为每个条目把详情重取一遍
+    original_description: hanimeSource?.introduction ?? '',
+    hanime_tags: hanimeSource?.tags ?? [],
+    // 相对路径，不是本地文件。注册完成后服务层会立即尝试下载；这两个值在
+    // 这次刮削的详情响应里白拿，失败时也能留给详情页稍后重试。
     //
     // 里番走 hanime 的封面（一个完整的 https 地址，见 posters.ts 的
-    // isRemotePoster）。TMDB 那份排在前面：两个都有的时候前者是竖版海报，
-    // 而 hanime 给的是横版缩略图。实际上两者几乎不会同时出现 ——
-    // 走了 hanime 通道就不查 TMDB
+    // isRemotePoster），优先保留搜索页上的正式封面，缺失才用详情缩略图兜底。
+    // 双源都有时沿用 TMDB 优先；实际上走 hanime 通道通常不会再查 TMDB。
     poster_path: detail?.poster_path || hanimeCover,
     fanart_path: detail?.backdrop_path ?? '',
     episodes,
@@ -586,12 +607,18 @@ async function register(
       : {})
   }
 
-  const outcome = insertVideo(ctx.db, payload)
-  ctx.onRegister?.({
+  const sourceDetails = hanimeSource ? { ...hanimeSource, description: hanimeSource.introduction, originalTitle: hanimeSource.title } : undefined
+  const outcome = registerVideoIdentification(ctx.db, payload, sourceDetails, ctx.splitFromId)
+  ctx.onPayload?.(payload, sourceDetails)
+  await ctx.onRegister?.({
+    id: outcome.id,
     name: nameZh,
     path: f.path,
     created: outcome.created,
-    episodesAdded: outcome.episodesAdded
+    episodesAdded: outcome.episodesAdded,
+    hanime_id: hanimeId,
+    episodeId: 'episodeId' in outcome ? outcome.episodeId : undefined,
+    posterUrl: 'posterUrl' in outcome ? outcome.posterUrl : undefined
   })
 
   const lines = [
@@ -840,13 +867,21 @@ async function doHanimeDetail(
     )
   }
 
-  ledger.set(detail.videoCode || id, detail)
+  const detailId = detail.videoCode || id
+  // 搜索页给的是带标题的正式封面，详情 og:image 通常只是播放清单同款缩略图。
+  // 详情只补元数据，不能把同一 ID 已取得的封面降级；也不能改写图片路径，
+  // 两种图的文件名和签名不同。没有搜索封面时仍保留详情图作为兜底。
+  const knownCover = ledger.get(detailId)?.coverUrl
+  ledger.set(detailId, { ...detail, coverUrl: knownCover || detail.coverUrl })
 
   const bits = [
     `hanime 详情（id ${detail.videoCode || id}）：`,
     `标题：${detail.title || '（没解出来）'}`,
     detail.chineseTitle ? `中文名：${detail.chineseTitle}` : '',
     detail.artist ? `厂牌 / 作者：${detail.artist}` : '',
+    detail.publishedAt ? `站点发布日期：${new Date(detail.publishedAt).toISOString().slice(0, 10)}` : '',
+    detail.releaseDate ? `发行日期：${new Date(detail.releaseDate).toISOString().slice(0, 10)}` : '',
+    detail.durationSec ? `时长：${detail.durationSec} 秒` : '',
     detail.tags.length > 0 ? `站方标签：${detail.tags.join('、')}` : '站方标签：（没解出来）',
     detail.introduction ? `简介：${detail.introduction.slice(0, 600)}` : '',
     detail.seriesName ? `系列：${detail.seriesName}` : '',

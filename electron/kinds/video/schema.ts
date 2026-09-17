@@ -34,6 +34,7 @@
  * 它走的是版本号闸门而不是列闸门，理由见 `migrateHentaiCategory` 上的注释。
  */
 
+import { VIDEO_SCAN_STATE_SQL } from './scan-state.ts'
 import type { KindSchema } from '../types.ts'
 import { columnsOf, objectType, type SqlDb } from '../../services/schema.ts'
 import { HENTAI_CATEGORY_ID, VIDEO_CATEGORIES } from './taxonomy.ts'
@@ -69,6 +70,10 @@ export const VIDEO_META_SQL = `
 
     -- 竖版 2:3 海报 / 横版背景图的本地路径。空串 = 还没有，界面退回首字占位
     poster_path TEXT NOT NULL DEFAULT '',
+    poster_source TEXT NOT NULL DEFAULT '',
+    thumbnail_path TEXT NOT NULL DEFAULT '',
+    thumbnail_source TEXT NOT NULL DEFAULT '',
+    collection_name TEXT NOT NULL DEFAULT '',
     fanart_path TEXT NOT NULL DEFAULT '',
 
     -- 电影是一个点，剧集是区间起点。0 = 不知道，不是公元 0 年
@@ -121,6 +126,11 @@ export const VIDEO_META_SQL = `
     -- 而 tmdb_id / douban_id 也都是 TEXT。前导零真出现时 INTEGER 会吃掉它。
     hanime_id TEXT NOT NULL DEFAULT '',
 
+    -- Hanime 页面上的原始简介和全部站方标签。与 agent 生成的中文简介、普通标签
+    -- 分开保存：前者是数据源事实，不应被模型截断或受普通标签数量上限影响。
+    original_description TEXT NOT NULL DEFAULT '',
+    hanime_tags TEXT NOT NULL DEFAULT '[]',
+
     -- 用户在界面上改过哪些字段，JSON 字符串数组，如 '["category","name_zh"]'。
     -- 重扫时这些字段跳过不写，见 db.ts 的 PROTECTED_* 两张名单。
     --
@@ -161,6 +171,19 @@ export const EPISODE_SQL = `
     season INTEGER NOT NULL DEFAULT 1,
     episode INTEGER NOT NULL,
     title TEXT NOT NULL DEFAULT '',
+    display_label TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '[]',
+    poster_source TEXT NOT NULL DEFAULT '',
+    thumbnail_path TEXT NOT NULL DEFAULT '',
+    thumbnail_source TEXT NOT NULL DEFAULT '',
+    original_title TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    original_description TEXT NOT NULL DEFAULT '',
+    poster_path TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    studio TEXT NOT NULL DEFAULT '',
+    published_at INTEGER NOT NULL DEFAULT 0,
 
     -- 空串 = 缺文件，见文件头注释
     path TEXT NOT NULL DEFAULT '',
@@ -176,6 +199,65 @@ export const EPISODE_SQL = `
 
     UNIQUE(resource_id, season, episode)
   );
+`
+
+/** Stable source, managed-directory and file-asset records for downloadable works. */
+export const VIDEO_LIBRARY_SQL = `
+  CREATE TABLE IF NOT EXISTS video_sources (
+    id TEXT PRIMARY KEY,
+    resource_id TEXT NOT NULL REFERENCES resource(id) ON DELETE CASCADE,
+    episode_id TEXT REFERENCES episode(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('work', 'episode')),
+    page_url TEXT NOT NULL DEFAULT '',
+    evidence TEXT NOT NULL DEFAULT 'legacy',
+    confirmed INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(provider, external_id, scope, resource_id, episode_id)
+  );
+  CREATE TABLE IF NOT EXISTS video_directories (
+    resource_id TEXT PRIMARY KEY REFERENCES resource(id) ON DELETE CASCADE,
+    bundle_id TEXT NOT NULL UNIQUE,
+    root TEXT NOT NULL,
+    relative_path TEXT NOT NULL,
+    directory_path TEXT NOT NULL UNIQUE,
+    metadata_state TEXT NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS video_assets (
+    id TEXT PRIMARY KEY,
+    resource_id TEXT NOT NULL REFERENCES resource(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('video', 'subtitle', 'poster', 'attachment')),
+    quality TEXT NOT NULL DEFAULT '',
+    file_size INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'unchecked' CHECK (state IN ('unchecked', 'present', 'missing', 'offline')),
+    checked_at INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    UNIQUE(resource_id, path, role)
+  );
+  CREATE TABLE IF NOT EXISTS video_episode_assets (
+    episode_id TEXT NOT NULL REFERENCES episode(id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL REFERENCES video_assets(id) ON DELETE CASCADE,
+    PRIMARY KEY (episode_id, asset_id)
+  );
+`
+
+/** Recovery data intentionally has no cascading FK: removing a work must not erase its journal. */
+export const VIDEO_ORGANIZE_SQL = `
+  CREATE TABLE IF NOT EXISTS video_organize_journal (
+    id TEXT PRIMARY KEY,
+    resource_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('organize', 'relocate')),
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_video_organize_resource ON video_organize_journal(resource_id, created_at);
 `
 
 /**
@@ -199,7 +281,11 @@ export const VIDEO_VIEW_SQL = `
     r.name_zh, r.name_en, r.summary, r.description, r.category, r.tags,
     r.official_url, r.ai_status, r.notes, r.is_archived,
     COALESCE(m.video_type, 'movie') AS video_type,
+    COALESCE(m.thumbnail_path, '') AS thumbnail_path,
+    COALESCE(m.thumbnail_source, '') AS thumbnail_source,
     COALESCE(m.poster_path, '') AS poster_path,
+    COALESCE(m.poster_source, '') AS poster_source,
+    COALESCE(m.collection_name, '') AS collection_name,
     COALESCE(m.fanart_path, '') AS fanart_path,
     COALESCE(m.year, 0) AS year,
     COALESCE(m.end_year, 0) AS end_year,
@@ -221,6 +307,8 @@ export const VIDEO_VIEW_SQL = `
     COALESCE(m.douban_id, '') AS douban_id,
     COALESCE(m.douban_rating, 0) AS douban_rating,
     COALESCE(m.hanime_id, '') AS hanime_id,
+    COALESCE(m.original_description, '') AS original_description,
+    COALESCE(m.hanime_tags, '[]') AS hanime_tags,
     COALESCE(m.user_edited, '[]') AS user_edited,
     (SELECT COUNT(*) FROM episode e WHERE e.resource_id = r.id) AS episode_total,
     (SELECT COUNT(*) FROM episode e WHERE e.resource_id = r.id AND e.watch_status = 'watched')
@@ -244,6 +332,9 @@ export const VIDEO_INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_video_year ON video_meta(year);
   CREATE INDEX IF NOT EXISTS idx_video_last_watched ON video_meta(last_watched_at);
   CREATE INDEX IF NOT EXISTS idx_episode_resource ON episode(resource_id, season, episode);
+  CREATE INDEX IF NOT EXISTS idx_video_sources_external ON video_sources(provider, external_id);
+  CREATE INDEX IF NOT EXISTS idx_video_assets_resource ON video_assets(resource_id, state);
+  CREATE INDEX IF NOT EXISTS idx_video_episode_assets_asset ON video_episode_assets(asset_id);
 `
 
 /**
@@ -326,6 +417,15 @@ export function migrateVideo(d: SqlDb, from: number): void {
 
   if (objectType(d, 'video_meta') !== 'table') return
   const cols = columnsOf(d, 'video_meta')
+  for (const column of ['thumbnail_path', 'thumbnail_source']) if (!cols.has(column)) d.exec(`ALTER TABLE video_meta ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`)
+  if (!cols.has('collection_name')) {
+    d.exec(`ALTER TABLE video_meta ADD COLUMN collection_name TEXT NOT NULL DEFAULT ''`)
+  }
+  if (!cols.has('poster_source')) {
+    d.exec(`ALTER TABLE video_meta ADD COLUMN poster_source TEXT NOT NULL DEFAULT ''`)
+    d.exec(`UPDATE video_meta SET poster_source = poster_path
+      WHERE poster_path LIKE 'https://%' OR (poster_path LIKE '/%' AND instr(substr(poster_path, 2), '/') = 0)`)
+  }
   if (!cols.has('douban_id')) {
     d.exec(`ALTER TABLE video_meta ADD COLUMN douban_id TEXT NOT NULL DEFAULT ''`)
   }
@@ -340,6 +440,21 @@ export function migrateVideo(d: SqlDb, from: number): void {
   if (!cols.has('hanime_id')) {
     d.exec(`ALTER TABLE video_meta ADD COLUMN hanime_id TEXT NOT NULL DEFAULT ''`)
   }
+  if (!cols.has('original_description')) {
+    d.exec(`ALTER TABLE video_meta ADD COLUMN original_description TEXT NOT NULL DEFAULT ''`)
+  }
+  if (!cols.has('hanime_tags')) {
+    d.exec(`ALTER TABLE video_meta ADD COLUMN hanime_tags TEXT NOT NULL DEFAULT '[]'`)
+  }
+  if (!columnsOf(d, 'episode').has('display_label')) {
+    d.exec(`ALTER TABLE episode ADD COLUMN display_label TEXT NOT NULL DEFAULT ''`)
+  }
+  const episodeColumns = columnsOf(d, 'episode')
+  if (!episodeColumns.has('published_at')) d.exec('ALTER TABLE episode ADD COLUMN published_at INTEGER NOT NULL DEFAULT 0')
+  if (!episodeColumns.has('tags')) d.exec(`ALTER TABLE episode ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`)
+  for (const column of ['studio', 'poster_source', 'thumbnail_path', 'thumbnail_source', 'original_title', 'description', 'original_description', 'poster_path', 'source_url', 'notes']) {
+    if (!episodeColumns.has(column)) d.exec(`ALTER TABLE episode ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`)
+  }
 
   // 视图缺任何一个新列就撤掉，让 initSchema 紧接着按新定义重建。
   //
@@ -350,12 +465,19 @@ export function migrateVideo(d: SqlDb, from: number): void {
   // 且不报任何错，因为 SQL 层面视图本身是合法的
   if (objectType(d, 'video') === 'view') {
     const v = columnsOf(d, 'video')
-    if (!v.has('user_edited') || !v.has('hanime_id')) d.exec('DROP VIEW video')
+    if (
+      !v.has('user_edited') ||
+      !v.has('hanime_id') ||
+      !v.has('original_description') ||
+      !v.has('hanime_tags') ||
+      !v.has('collection_name') ||
+      !v.has('poster_source') || !v.has('thumbnail_path')
+    ) d.exec('DROP VIEW video')
   }
 }
 
 export const videoSchema: KindSchema = {
-  tables: VIDEO_META_SQL + EPISODE_SQL,
+  tables: VIDEO_SCAN_STATE_SQL + VIDEO_META_SQL + EPISODE_SQL + VIDEO_LIBRARY_SQL + VIDEO_ORGANIZE_SQL,
   view: VIDEO_VIEW_SQL,
   indexes: VIDEO_INDEXES_SQL,
   migrate: migrateVideo

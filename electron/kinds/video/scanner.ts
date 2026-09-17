@@ -65,7 +65,7 @@ const SKIP_DIRS = new Set([
 const EXTRA_DIRS = new Set([
   'trailers', 'trailer', 'sample', 'samples', 'backdrops', 'theme-music',
   'behind the scenes', 'behindthescenes', 'deleted scenes', 'deletedscenes',
-  'interviews', 'scenes', 'shorts', 'featurettes', 'clips', 'other', 'extrafanart',
+  'interviews', 'scenes', 'featurettes', 'extrafanart',
   '花絮', '预告', '预告片', '幕后', '删减片段', '访谈', '特典'
 ])
 
@@ -128,6 +128,11 @@ export interface VideoCandidate {
   title_zh: string
   title_en: string
   year: number
+  /** 实际内容目录；共享目录的条目 path 可以是代表文件。 */
+  directory?: string
+  shared_directory?: boolean
+  /** 同目录作品，仅作为 agent 判断命名分组的上下文。 */
+  sibling_titles?: string[]
   /** 电影：本体文件（分卷时多个）。剧集：空数组，内容在 episodes 里 */
   files: VideoFile[]
   /** 剧集的集列表，按季、集排好。电影是空数组 */
@@ -340,11 +345,17 @@ export function scanVideoRoot(root: string): VideoCandidate[] {
 
   const out: VideoCandidate[] = []
   for (const [dir, items] of groups) {
-    const seriesFlag = looksLikeSeries(root, dir, items)
-    if (seriesFlag.yes) {
-      out.push(buildSeries(root, dir, items, seriesFlag.evidence, extras, sidecarsByDir))
-    } else {
-      out.push(...buildMovies(dir, items, extras, sidecarsByDir))
+    const { series, movies } = partitionWorks(dir, items)
+    const shared = series.size + movies.length > 1
+    const candidates: VideoCandidate[] = []
+    for (const episodes of series.values()) {
+      candidates.push(buildSeries(root, dir, episodes, ['按文件标题与季集标记归并'], extras, sidecarsByDir, shared))
+    }
+    candidates.push(...buildMovies(dir, movies, extras, sidecarsByDir, series.size > 0))
+    const titles = [...new Set(candidates.map(c => c.title_zh || c.title_en).filter(Boolean))]
+    for (const candidate of candidates) {
+      candidate.sibling_titles = titles
+      out.push(candidate)
     }
   }
   return out
@@ -365,52 +376,54 @@ function entryRoot(root: string, segs: string[]): string {
   return path.join(root, ...kept)
 }
 
-/** 这一堆文件是不是一部剧，以及凭什么这么说 */
-function looksLikeSeries(
-  root: string,
-  dir: string,
-  items: Array<{ raw: RawFile; p: ParsedVideoName }>
-): { yes: boolean; evidence: string[] } {
-  const evidence: string[] = []
+type ParsedFile = { raw: RawFile; p: ParsedVideoName }
 
-  // 1. 有明确的季目录
-  const rel = path.relative(root, dir)
-  const depth = rel ? rel.split(path.sep).length : 0
-  const seasonDirs = new Set<string>()
-  for (const it of items) {
-    for (const s of it.raw.segs.slice(depth)) {
-      if (parseSeasonFolder(s)?.kind === 'marked') seasonDirs.add(s)
+/** 文件名里只有占位词或集号时，才借目录名识别作品。 */
+function fileTitle(item: ParsedFile, dir: string): { zh: string; en: string } {
+  let region = titleRegion(item.raw.name)
+  if (item.p.absolute_episode !== null) {
+    region = region.replace(new RegExp(`(?:[ ._\\-\\[]|^)+(?:e(?:p)?[ ._-]*)?0*${item.p.absolute_episode}\\]?$`, 'i'), '')
+  }
+  const generic = !region.trim() || /^(?:movie|film|video|main|正片|视频|录像|s\d+(?:e\d+)?|e(?:p)?\d+|\d+)$/i.test(region.trim())
+  return splitTitle(generic ? titleRegion(path.basename(dir)) : region)
+}
+
+/** 集号只影响所属作品，不能把同目录的其他作品一起吞进来。 */
+function partitionWorks(dir: string, originals: ParsedFile[]): { series: Map<string, ParsedFile[]>; movies: ParsedFile[] } {
+  const items = originals.map(item => ({ ...item, p: { ...item.p } }))
+  const numbered = new Map<string, Array<{ item: ParsedFile; parsed: ParsedVideoName }>>()
+  for (const item of items) {
+    if (item.p.episodes.length || item.p.absolute_episode !== null) continue
+    const inSeason = item.raw.segs.some(s => parseSeasonFolder(s)?.kind === 'marked')
+    if (inSeason && /^\d{1,3}$/.test(item.raw.base) && Number(item.raw.base) > 0) {
+      item.p.absolute_episode = Number(item.raw.base)
+      continue
     }
+    // 裸数字只有一致的补零序列才尝试归并，避免把电影续作 1/2/3 当剧集。
+    if (!/(?:^|[ ._-])(?:0\d{1,2}|\d{3})(?:$|[ ._-])/.test(item.raw.base)) continue
+    const parsed = parseVideoName(item.raw.name, true)
+    if (parsed.absolute_episode === null) continue
+    const title = fileTitle({ raw: item.raw, p: parsed }, dir)
+    const key = normStem(title.zh || title.en)
+    const bucket = numbered.get(key) ?? []
+    bucket.push({ item, parsed })
+    numbered.set(key, bucket)
   }
-  if (seasonDirs.size > 0) {
-    evidence.push(`有季目录：${[...seasonDirs].join('、')}`)
-    return { yes: true, evidence }
+  for (const bucket of numbered.values()) {
+    if (new Set(bucket.map(x => x.parsed.absolute_episode)).size < 3) continue
+    for (const { item, parsed } of bucket) item.p = parsed
   }
-
-  // 2. 文件名里有季集标记
-  const marked = items.filter((it) => it.p.season !== null || it.p.episodes.length > 0)
-  if (marked.length > 0) {
-    evidence.push(`${marked.length} 个文件名带季集标记`)
-    return { yes: true, evidence }
+  const series = new Map<string, ParsedFile[]>()
+  const movies: ParsedFile[] = []
+  for (const item of items) {
+    if (!item.p.episodes.length && item.p.absolute_episode === null) { movies.push(item); continue }
+    const title = fileTitle(item, dir)
+    const key = normStem(title.zh || title.en)
+    const bucket = series.get(key) ?? []
+    bucket.push(item)
+    series.set(key, bucket)
   }
-
-  // 3. 番剧的绝对集号
-  const abs = items.filter((it) => it.p.absolute_episode !== null)
-  if (abs.length >= 2) {
-    evidence.push(`${abs.length} 个文件带番剧集号`)
-    return { yes: true, evidence }
-  }
-
-  // 4. 同一目录里多个文件共享标题词干 —— 这是 hintSeries 存在的理由
-  if (items.length >= 3) {
-    const stems = new Set(items.map((it) => normStem(titleRegion(it.raw.name))))
-    if (stems.size === 1) {
-      evidence.push(`同目录 ${items.length} 个文件共享标题「${[...stems][0]}」`)
-      return { yes: true, evidence }
-    }
-  }
-
-  return { yes: false, evidence }
+  return { series, movies }
 }
 
 function normStem(s: string): string {
@@ -424,7 +437,8 @@ function buildSeries(
   items: Array<{ raw: RawFile; p: ParsedVideoName }>,
   evidence: string[],
   allExtras: Array<{ path: string; kind: string; segs: string[] }>,
-  sidecarsByDir: Map<string, { nfo: string[]; images: string[]; subtitles: string[] }>
+  sidecarsByDir: Map<string, { nfo: string[]; images: string[]; subtitles: string[] }>,
+  sharedDirectory = false
 ): VideoCandidate {
   const rel = path.relative(root, dir)
   const depth = rel ? rel.split(path.sep).length : 0
@@ -475,22 +489,29 @@ function buildSeries(
   const episodes = [...byKey.values()].sort((a, b) => a.season - b.season || a.episode - b.episode)
   for (const e of episodes) e.files.sort((a, b) => (a.part ?? 0) - (b.part ?? 0) || a.name.localeCompare(b.name))
 
-  // 剧名从目录名取，取不到再退回文件名。目录名更可信 ——
-  // 文件名里的标题会被发布组前缀和技术标记切得七零八落
-  const title = splitTitle(titleRegion(path.basename(dir)))
-  const fallback = items[0] ? splitTitle(titleRegion(items[0].raw.name)) : { zh: '', en: '' }
+  const title = fileTitle(items[0], dir)
   const year = items.map((it) => it.p.year).find((y) => y > 0) ?? 0
+  const sidecars = sharedDirectory
+    ? items.reduce((all, item) => {
+        const own = narrowSidecars(path.dirname(item.raw.path), item.raw.base, sidecarsByDir)
+        const work = narrowSidecars(dir, title.zh || title.en, sidecarsByDir)
+        for (const key of ['nfo', 'images', 'subtitles'] as const) all[key] = [...new Set([...all[key], ...own[key], ...work[key]])]
+        return all
+      }, { nfo: [] as string[], images: [] as string[], subtitles: [] as string[] })
+    : mergeSidecars(dir, sidecarsByDir)
 
   return {
     video_type: 'series',
-    path: dir,
-    title_zh: title.zh || fallback.zh,
-    title_en: title.en || fallback.en,
+    path: sharedDirectory ? [...items].sort((a, b) => a.raw.path.localeCompare(b.raw.path))[0].raw.path : dir,
+    directory: dir,
+    shared_directory: sharedDirectory,
+    title_zh: title.zh,
+    title_en: title.en,
     year,
     files: [],
     episodes,
-    sidecars: mergeSidecars(dir, sidecarsByDir),
-    extras: allExtras.filter((e) => path.join(root, ...e.segs).startsWith(dir)).map((e) => ({ path: e.path, kind: e.kind })),
+    sidecars,
+    extras: sharedDirectory ? [] : allExtras.filter((e) => e.path.startsWith(dir + path.sep)).map((e) => ({ path: e.path, kind: e.kind })),
     evidence
   }
 }
@@ -503,7 +524,8 @@ function buildMovies(
   dir: string,
   items: Array<{ raw: RawFile; p: ParsedVideoName }>,
   allExtras: Array<{ path: string; kind: string; segs: string[] }>,
-  sidecarsByDir: Map<string, { nfo: string[]; images: string[]; subtitles: string[] }>
+  sidecarsByDir: Map<string, { nfo: string[]; images: string[]; subtitles: string[] }>,
+  sharedDirectory = false
 ): VideoCandidate[] {
   // 分卷合并：`Movie.CD1.avi` + `Movie.CD2.avi` -> 一条，两个文件
   const byStem = new Map<string, Array<{ raw: RawFile; p: ParsedVideoName; part: number | null }>>()
@@ -522,24 +544,25 @@ function buildMovies(
 
     // 条目路径：一个目录里只有这一部片时用目录，否则用文件本身。
     // 这一条直接决定 resource.path 这个全局唯一键，错了会让两部片抢同一个键。
-    const soleInDir = byStem.size === 1
+    const soleInDir = byStem.size === 1 && !sharedDirectory
     const entryPath = soleInDir ? dir : head.raw.path
 
     // 标题：独占目录时优先用目录名（`沙丘 (2021)/movie.mkv` 这种常见形状里
     // 文件名是没信息的），否则只能靠文件名
-    const fromName = splitTitle(titleRegion(head.raw.name))
-    const fromDir = soleInDir ? splitTitle(titleRegion(path.basename(dir))) : { zh: '', en: '' }
+    const title = fileTitle(head, dir)
     const dirParsed = soleInDir ? parseVideoName(path.basename(dir)) : null
 
     const evidence: string[] = []
     if (group.length > 1) evidence.push(`分卷合并 ${group.length} 个文件：${group.map((g) => g.raw.name).join('、')}`)
-    if (soleInDir) evidence.push(`独占目录「${path.basename(dir)}」，标题取目录名`)
+    evidence.push(`文件「${head.raw.name}」；目录「${path.basename(dir)}」仅提供上下文`)
 
     out.push({
       video_type: 'movie',
       path: entryPath,
-      title_zh: fromDir.zh || fromName.zh,
-      title_en: fromDir.en || fromName.en,
+      directory: path.dirname(head.raw.path),
+      shared_directory: !soleInDir,
+      title_zh: title.zh,
+      title_en: title.en,
       year: head.p.year || (dirParsed?.year ?? 0),
       files: group.map((g) => ({
         path: g.raw.path,
@@ -583,7 +606,11 @@ function narrowSidecars(
   byDir: Map<string, { nfo: string[]; images: string[]; subtitles: string[] }>
 ): { nfo: string[]; images: string[]; subtitles: string[] } {
   const all = byDir.get(dir) ?? { nfo: [], images: [], subtitles: [] }
-  const hit = (p: string): boolean => path.basename(p).toLowerCase().startsWith(base.toLowerCase())
+  const hit = (p: string): boolean => {
+    const name = path.basename(p).toLowerCase()
+    const prefix = base.toLowerCase()
+    return name === prefix || ['.', '-', '_'].some(separator => name.startsWith(prefix + separator))
+  }
   return {
     nfo: all.nfo.filter(hit),
     images: all.images.filter(hit),

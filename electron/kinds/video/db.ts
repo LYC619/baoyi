@@ -22,13 +22,18 @@ import type {
   WatchStatus
 } from '../../../src/types'
 import type { SqlDb } from '../../services/schema.ts'
+import type { VideoContentInput } from '../../../src/types/video-library.ts'
 import { HENTAI_CATEGORY } from './taxonomy.ts'
+import { resolveVideoOrganizeOwner, resolveVideoOrganizePathOwner } from './organize-owner.ts'
+import { episodePublicationSql, publicationBounds, videoWithPublicationSql } from './publication.ts'
 
 /** 一集的入库形状。id 由这一层生成，调用方不用管 */
 export interface EpisodePayload {
+  local_metadata?: Partial<VideoContentInput>
   season: number
   episode: number
   title?: string
+  display_label?: string
   /** 空串 = 库里知道有这一集但磁盘上没文件，见 schema.ts */
   path?: string
   file_size?: number
@@ -56,6 +61,7 @@ export interface VideoPayload {
   /** 电影：默认文件路径。剧集：整部剧的目录。同时是 resource.path 这个全局唯一键 */
   path: string
   video_type: VideoType
+  collection_name?: string
   name_zh: string
   name_en: string
   summary: string
@@ -91,6 +97,10 @@ export interface VideoPayload {
    * 而那些地方没有一处知道 hanime 是什么。
    */
   hanime_id?: string
+  /** Hanime 页面原文；不经过模型，空串表示没有 Hanime 详情。 */
+  original_description?: string
+  /** Hanime 站方全部标签；与普通的、受数量限制的 tags 分开。 */
+  hanime_tags?: string[]
   /**
    * TMDB 上的海报相对路径（`/abc.jpg`），**不是本地文件路径**。
    *
@@ -164,7 +174,7 @@ export const PROTECTED_RESOURCE_FIELDS = [
   'name_zh', 'name_en', 'summary', 'description', 'category', 'tags', 'official_url'
 ] as const
 export const PROTECTED_META_FIELDS = [
-  'video_type', 'year', 'end_year', 'rating',
+  'video_type', 'collection_name', 'year', 'end_year', 'rating',
   'tmdb_id', 'imdb_id', 'douban_id', 'douban_rating', 'hanime_id'
 ] as const
 
@@ -210,7 +220,45 @@ export function parseUserEdited(raw: unknown): string[] {
  * 「欧美」改成「科幻」、把烂译名改成通行叫法，下一次重扫全退回 agent 说的
  * 那个值 —— 而重扫可能只是因为他往那个目录里加了一集。
  */
-export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
+/** 目录拆分或代表集变化时，用已入库的实际文件定位原条目。多个归属时不猜。 */
+export function videoOwnerForFiles(d: SqlDb, files: string[]): { id: string; path: string } | null {
+  const keys = new Set(files.filter(Boolean).map(file => file.toLowerCase()))
+  if (!keys.size) return null
+  const owners = new Map<string, { id: string; path: string }>()
+  const addOwner = (rawId: string) => {
+    const id = resolveVideoOrganizeOwner(d, rawId)
+    const row = d.prepare("SELECT id, path FROM resource WHERE id = ? AND kind = 'video' AND is_archived = 0").get(id) as { id: string; path: string } | undefined
+    if (row) owners.set(id, row)
+  }
+  for (const row of d.prepare('SELECT id, path, parts FROM video').all() as Row[]) {
+    if (keys.has(String(row.path).toLowerCase()) || jsonArray<VideoPart>(row.parts).some(part => keys.has(String(part.path).toLowerCase()))) {
+      addOwner(row.id)
+    }
+  }
+  for (const row of d.prepare(`SELECT e.resource_id AS id, r.path AS resource_path, e.path
+    FROM episode e JOIN resource r ON r.id = e.resource_id WHERE e.path != '' AND r.kind = 'video'`).all() as Row[]) {
+    if (keys.has(String(row.path).toLowerCase())) addOwner(row.id)
+  }
+  for (const row of d.prepare('SELECT resource_id, path FROM video_assets').all() as Row[]) if (keys.has(String(row.path).toLowerCase())) addOwner(row.resource_id)
+  for (const file of files) { const historical = resolveVideoOrganizePathOwner(d, file); if (historical) addOwner(historical) }
+  return owners.size === 1 ? [...owners.values()][0] : null
+}
+
+export function insertVideo(d: SqlDb, p: VideoPayload, splitFromId = ''): VideoWriteOutcome {
+  if (!splitFromId) return writeVideo(d, p, '')
+  d.exec('SAVEPOINT split_video')
+  try {
+    const outcome = writeVideo(d, p, splitFromId)
+    d.exec('RELEASE SAVEPOINT split_video')
+    return outcome
+  } catch (error) {
+    d.exec('ROLLBACK TO SAVEPOINT split_video')
+    d.exec('RELEASE SAVEPOINT split_video')
+    throw error
+  }
+}
+
+function writeVideo(d: SqlDb, p: VideoPayload, splitFromId: string): VideoWriteOutcome {
   const now = Date.now()
 
   // 字段名和值配对着走，因为重扫时要按 user_edited 把其中几对摘掉。
@@ -246,7 +294,9 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
     // 不补的话 undefined 会一路走到 stmt.run()，报的是
     // 「Provided value cannot be bound to SQLite parameter 13」——
     // 一句不提哪个字段的错，而它会在**每一次入库**上炸，不只是里番那条路
-    ['hanime_id', p.hanime_id ?? '']
+    ['hanime_id', p.hanime_id ?? ''],
+    ['original_description', p.original_description ?? ''],
+    ['hanime_tags', JSON.stringify(p.hanime_tags ?? [])]
   ]
   // 只在新建时写的一组：别家 nfo 记的观看状态。
   //
@@ -276,9 +326,8 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
     ['parts', JSON.stringify(p.parts)]
   ]
 
-  const existing = d.prepare('SELECT id FROM resource WHERE path = ?').get(p.path) as
-    | { id: string }
-    | undefined
+  const existing = (d.prepare("SELECT id, path FROM resource WHERE kind = 'video' AND path = ?").get(p.path) as
+    { id: string; path: string } | undefined) ?? (splitFromId ? null : videoOwnerForFiles(d, [...p.parts.map(part => part.path), ...p.episodes.map(ep => ep.path || '')]))
 
   let id: string
   let created: boolean
@@ -286,6 +335,7 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
   if (existing) {
     id = existing.id
     created = false
+    if (existing.path !== p.path) d.prepare('UPDATE resource SET path = ? WHERE id = ?').run(p.path, id)
 
     // meta 行可能不存在（手工改库、或早于 video_meta 建表的条目），补一行再写。
     // 提到读 user_edited 之前 —— 没这一行的话下面那句 SELECT 拿不到东西，
@@ -316,11 +366,14 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
       `UPDATE video_meta SET ${metaSets.map(([f]) => `${f} = ?`).join(', ')},
          linked_files = CASE WHEN linked_files IN ('[]', '') THEN ? ELSE linked_files END,
          poster_path = CASE WHEN poster_path = '' THEN ? ELSE poster_path END,
+         poster_source = CASE WHEN ? != '' THEN ? ELSE poster_source END,
          fanart_path = CASE WHEN fanart_path = '' THEN ? ELSE fanart_path END
        WHERE resource_id = ?`
     ).run(
       ...metaSets.map(([, v]) => v),
       JSON.stringify(p.linked_files),
+      p.poster_path,
+      p.poster_path,
       p.poster_path,
       p.fanart_path,
       id
@@ -340,18 +393,28 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
     const mCols = [...metaFields, ...metaAlways, ...metaCreateOnly]
     d.prepare(
       `INSERT INTO video_meta
-         (resource_id, linked_files, poster_path, fanart_path,
+         (resource_id, linked_files, poster_path, poster_source, fanart_path,
           ${mCols.map(([f]) => f).join(', ')})
-       VALUES (?, ?, ?, ?, ${mCols.map(() => '?').join(', ')})`
+       VALUES (?, ?, ?, ?, ?, ${mCols.map(() => '?').join(', ')})`
     ).run(
       id,
       JSON.stringify(p.linked_files),
+      p.poster_path,
       p.poster_path,
       p.fanart_path,
       ...mCols.map(([, v]) => v)
     )
   }
 
+  // Move the existing rows before upsert so episode IDs and watch progress follow their files.
+  let episodesMoved = 0
+  if (splitFromId && splitFromId !== id) {
+    const move = d.prepare('UPDATE episode SET resource_id = ? WHERE resource_id = ? AND path = ? COLLATE NOCASE')
+    for (const file of new Set(p.episodes.map(ep => ep.path).filter(Boolean))) {
+      episodesMoved += Number(move.run(id, splitFromId, file).changes)
+    }
+    if (episodesMoved > 0) syncSeriesStatus(d, splitFromId)
+  }
   const episodesAdded = upsertEpisodes(d, id, p.episodes)
 
   // 集数变了就把剧一级的状态重算一遍。
@@ -368,7 +431,7 @@ export function insertVideo(d: SqlDb, p: VideoPayload): VideoWriteOutcome {
   // **只在真的补进新集时重算**（`episodesAdded > 0`）：集列表没变的重扫
   // 不该动它，那种情况下没有任何新事实，重算只会把用户在剧一级上做过的
   // 标记按集列表推翻一次。
-  if (episodesAdded > 0) syncSeriesStatus(d, id)
+  if (episodesAdded > 0 || episodesMoved > 0) syncSeriesStatus(d, id)
 
   return { id, created, episodesAdded }
 }
@@ -393,14 +456,14 @@ export function upsertEpisodes(d: SqlDb, resourceId: string, list: EpisodePayloa
   )
   const ins = d.prepare(
     `INSERT INTO episode
-       (id, resource_id, season, episode, title, path, file_size, duration_sec, air_date,
+       (id, resource_id, season, episode, title, display_label, path, file_size, duration_sec, air_date,
         watch_status, position_sec, watched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
   // UPDATE 的列比 INSERT 少三个，是这个函数的全部要点：观看进度只在新建时接受
   // 外来值，之后就归用户和 updateEpisode 管。别顺手把它们补齐成一样的列表
   const upd = d.prepare(
-    `UPDATE episode SET title = ?, path = ?, file_size = ?, duration_sec = ?, air_date = ?
+    `UPDATE episode SET title = ?, display_label = ?, path = ?, file_size = ?, duration_sec = ?, air_date = ?
      WHERE id = ?`
   )
 
@@ -412,6 +475,7 @@ export function upsertEpisodes(d: SqlDb, resourceId: string, list: EpisodePayloa
     if (row) {
       upd.run(
         String(e.title ?? ''),
+        String(e.display_label ?? ''),
         String(e.path ?? ''),
         Number(e.file_size) || 0,
         Number(e.duration_sec) || 0,
@@ -430,6 +494,7 @@ export function upsertEpisodes(d: SqlDb, resourceId: string, list: EpisodePayloa
         season,
         episode,
         String(e.title ?? ''),
+        String(e.display_label ?? ''),
         String(e.path ?? ''),
         Number(e.file_size) || 0,
         Number(e.duration_sec) || 0,
@@ -445,14 +510,14 @@ export function upsertEpisodes(d: SqlDb, resourceId: string, list: EpisodePayloa
 }
 
 /** 某个目录下已注册的视频，用来告诉 agent 别重复注册 */
-export function videosUnder(d: SqlDb, dir: string): Array<{ name: string; path: string }> {
+export function videosUnder(d: SqlDb, dir: string): Array<{ name: string; path: string; collection_name: string }> {
   const rows = d
     .prepare(
-      `SELECT name_zh, name_en, file_name, path FROM resource
-       WHERE kind = 'video' AND source_dir = ? ORDER BY created_at`
+      `SELECT name_zh, name_en, file_name, path, collection_name FROM video
+       WHERE source_dir = ? ORDER BY created_at`
     )
     .all(dir) as Array<Record<string, string>>
-  return rows.map((r) => ({ name: r.name_zh || r.name_en || r.file_name, path: r.path }))
+  return rows.map((r) => ({ name: r.name_zh || r.name_en || r.file_name, path: r.path, collection_name: r.collection_name }))
 }
 
 /**
@@ -508,9 +573,16 @@ function rowToVideo(row: Row): VideoItem {
     official_url: String(row.official_url ?? ''),
     notes: String(row.notes ?? ''),
     is_archived: Number(row.is_archived) === 1,
+    needs_review: row.ai_status !== 'done',
+    published_start: Number(row.published_start) || 0,
+    published_end: Number(row.published_end) || 0,
     // 库里有 CHECK 兜着，读到别的值只能是手工改库改坏了，退回默认而不是把它透出去
     video_type: VIDEO_TYPES.includes(row.video_type) ? row.video_type : 'movie',
+    thumbnail_path: String(row.thumbnail_path ?? ""),
+    thumbnail_source: String(row.thumbnail_source ?? ""),
     poster_path: String(row.poster_path ?? ''),
+    poster_source: String(row.poster_source ?? ''),
+    collection_name: String(row.collection_name ?? ''),
     fanart_path: String(row.fanart_path ?? ''),
     year: Number(row.year) || 0,
     end_year: Number(row.end_year) || 0,
@@ -532,6 +604,8 @@ function rowToVideo(row: Row): VideoItem {
     douban_id: String(row.douban_id ?? ''),
     douban_rating: Number(row.douban_rating) || 0,
     hanime_id: String(row.hanime_id ?? ''),
+    original_description: String(row.original_description ?? ''),
+    hanime_tags: jsonArray<string>(row.hanime_tags),
     user_edited: parseUserEdited(row.user_edited),
     episode_total: Number(row.episode_total) || 0,
     episode_watched: Number(row.episode_watched) || 0,
@@ -541,11 +615,24 @@ function rowToVideo(row: Row): VideoItem {
 
 function rowToEpisode(row: Row): Episode {
   return {
+    published_at: Number(row.published_at) || 0,
+    studio: String(row.studio ?? ''),
     id: String(row.id),
     resource_id: String(row.resource_id ?? ''),
     season: Number(row.season) || 0,
     episode: Number(row.episode) || 0,
     title: String(row.title ?? ''),
+    display_label: String(row.display_label ?? ''),
+    tags: jsonArray<string>(row.tags),
+    poster_source: String(row.poster_source ?? ""),
+    original_title: String(row.original_title ?? ''),
+    description: String(row.description ?? ''),
+    original_description: String(row.original_description ?? ''),
+    thumbnail_path: String(row.thumbnail_path ?? ""),
+    thumbnail_source: String(row.thumbnail_source ?? ""),
+    poster_path: String(row.poster_path ?? ''),
+    source_url: String(row.source_url ?? ''),
+    notes: String(row.notes ?? ''),
     path: String(row.path ?? ''),
     file_size: Number(row.file_size) || 0,
     duration_sec: Number(row.duration_sec) || 0,
@@ -568,6 +655,9 @@ const VIDEO_ORDER: Record<NonNullable<VideoQuery['sort']>, string> = {
   // year 为 0（不知道年份）的沉到底，不要浮在 2026 前面
   year: 'CASE WHEN year = 0 THEN 1 ELSE 0 END, year DESC, created_at DESC',
   added: 'created_at DESC',
+  updated: 'updated_at DESC',
+  published: 'CASE WHEN published_end = 0 THEN 1 ELSE 0 END, published_end DESC, created_at DESC',
+  'published-asc': 'CASE WHEN published_start = 0 THEN 1 ELSE 0 END, published_start ASC, created_at DESC',
   /**
    * 按分排序时 TMDB 分优先、豆瓣分兜底。
    *
@@ -610,6 +700,14 @@ export function listVideos(
   const where: string[] = [query.group === 'archived' ? 'is_archived = 1' : 'is_archived = 0']
   const params: unknown[] = []
 
+  const dates = publicationBounds(query.publishedFrom, query.publishedTo)
+  if (dates.from !== undefined || dates.until !== undefined) {
+    const bounds = [`e.resource_id=video.id`, `${episodePublicationSql} IS NOT NULL`]
+    if (dates.from !== undefined) { bounds.push(`${episodePublicationSql} >= ?`); params.push(dates.from) }
+    if (dates.until !== undefined) { bounds.push(`${episodePublicationSql} < ?`); params.push(dates.until) }
+    where.push(`EXISTS (SELECT 1 FROM episode e WHERE ${bounds.join(' AND ')})`)
+  }
+
   /*
    * 藏的时候连**明确点了里番分类**的查询也一起空掉。
    *
@@ -621,9 +719,12 @@ export function listVideos(
    * 判据放数据层而不是靠界面自觉，理由是这个开关的意义就是「别显示出来」——
    * 靠调用方每一处都记得传对参数，等于把它做成了君子协定。
    */
-  if (hideHentai) where.push(NOT_HENTAI)
+  const inHentai = query.type === 'hentai'
+  if (hideHentai || !inHentai) where.push(NOT_HENTAI)
+  if (inHentai) { where.push('category = ?'); params.push(HENTAI_CATEGORY) }
+  if (query.collection !== undefined) { where.push('collection_name = ?'); params.push(query.collection) }
 
-  if (query.type && VIDEO_TYPES.includes(query.type)) {
+  if (query.type && query.type !== 'hentai' && VIDEO_TYPES.includes(query.type)) {
     where.push('video_type = ?')
     params.push(query.type)
   }
@@ -636,28 +737,38 @@ export function listVideos(
     params.push(query.status)
   }
   if (query.tag) {
-    // tags 是 JSON 数组字符串，带引号匹配，免得「剧情」命中「剧情向」
-    where.push('tags LIKE ?')
-    params.push(`%"${query.tag}"%`)
+    // 站方标签只在明确进入里番分类后参与查询。这样普通标签区即使存在同名词，
+    // 也不会把里番条目带进普通影视结果。
+    where.push("(EXISTS (SELECT 1 FROM json_each(video.tags) t WHERE t.value = ?) OR EXISTS (SELECT 1 FROM json_each(video.hanime_tags) t WHERE t.value = ?) OR EXISTS (SELECT 1 FROM episode e,json_each(e.tags) t WHERE e.resource_id=video.id AND t.value=?))")
+    params.push(query.tag, query.tag, query.tag)
   }
   const keyword = query.keyword?.trim()
   if (keyword) {
     // 中英文标题都要搜得到（规格明确要求），顺带 summary / tags / 文件名
     where.push(
-      '(name_zh LIKE ? OR name_en LIKE ? OR summary LIKE ? OR tags LIKE ? OR file_name LIKE ?)'
+      `(name_zh LIKE ? OR name_en LIKE ? OR summary LIKE ? OR tags LIKE ? OR file_name LIKE ?
+        OR EXISTS (SELECT 1 FROM episode e WHERE e.resource_id = video.id AND (e.title LIKE ? OR e.path LIKE ? OR e.original_title LIKE ? OR e.tags LIKE ?))
+        OR EXISTS (SELECT 1 FROM video_assets a WHERE a.resource_id = video.id AND a.path LIKE ?))`
     )
-    for (let i = 0; i < 5; i++) params.push(`%${keyword}%`)
+    for (let i = 0; i < 10; i++) params.push(`%${keyword}%`)
   }
 
   const order = VIDEO_ORDER[query.sort ?? 'added'] ?? VIDEO_ORDER.added
   const rows = d
-    .prepare(`SELECT * FROM video WHERE ${where.join(' AND ')} ORDER BY ${order}`)
+    .prepare(`${videoWithPublicationSql} WHERE ${where.join(' AND ')} ORDER BY ${order}`)
     .all(...params) as Row[]
-  return rows.map(rowToVideo)
+  return rows.map(row => {
+    const item = rowToVideo(row)
+    if (keyword) {
+      const match = d.prepare('SELECT title, path FROM episode WHERE resource_id = ? AND (title LIKE ? OR path LIKE ?) LIMIT 1').get(item.id, `%${keyword}%`, `%${keyword}%`) as Row | undefined
+      if (match) item.matched_content = String(match.title || path.basename(match.path || ''))
+    }
+    return item
+  })
 }
 
 export function getVideo(d: SqlDb, id: string): VideoItem | null {
-  const row = d.prepare('SELECT * FROM video WHERE id = ?').get(id) as Row | undefined
+  const row = d.prepare(`${videoWithPublicationSql} WHERE id = ?`).get(id) as Row | undefined
   return row ? rowToVideo(row) : null
 }
 
@@ -739,7 +850,7 @@ export function videoCounts(d: SqlDb, hideHentai = false): VideoCounts {
     Number((d.prepare(sql).get(...args) as { n: number }).n) || 0
 
   /** 拼在 `is_archived = ?` 后面的那一截。不藏时是空串，SQL 原样不变 */
-  const hide = hideHentai ? ` AND ${NOT_HENTAI}` : ''
+  const hide = ` AND ${NOT_HENTAI}`
 
   const status = Object.fromEntries(WATCH_STATUSES.map((s) => [s, 0])) as Record<WatchStatus, number>
   const statusRows = d
@@ -772,23 +883,35 @@ export function videoCounts(d: SqlDb, hideHentai = false): VideoCounts {
       .all() as Array<{ name: string; count: number }>
   ).map((r) => ({ name: String(r.name ?? ''), count: Number(r.count) || 0 }))
 
-  // 标签在 JSON 数组里，直接在 JS 里聚合。视频库是百级规模，够用
-  const tagMap = new Map<string, number>()
-  for (const r of d
-    .prepare(`SELECT tags FROM video WHERE is_archived = 0${hide}`)
-    .all() as Row[]) {
-    for (const t of jsonArray<string>(r.tags)) tagMap.set(t, (tagMap.get(t) ?? 0) + 1)
+  const tagMap = new Map<string, number>(), hanimeTagMap = new Map<string, number>()
+  const tagRows = d.prepare(`SELECT tag, category, COUNT(DISTINCT resource_id) AS count FROM (
+    SELECT v.id AS resource_id,v.category,t.value AS tag FROM video v,json_each(v.tags) t WHERE v.is_archived=0
+    UNION SELECT v.id,v.category,t.value FROM video v,json_each(v.hanime_tags) t WHERE v.is_archived=0
+    UNION SELECT v.id,v.category,t.value FROM video v JOIN episode e ON e.resource_id=v.id,json_each(e.tags) t WHERE v.is_archived=0
+  ) GROUP BY tag,category`).all() as Row[]
+  for (const row of tagRows) {
+    const map = row.category === HENTAI_CATEGORY ? hideHentai ? null : hanimeTagMap : tagMap
+    if (map) map.set(String(row.tag),(map.get(String(row.tag)) || 0) + Number(row.count))
   }
-
   return {
     all: one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 0${hide}`),
+    hentai: hideHentai ? 0 : one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 0 AND category = ?`, HENTAI_CATEGORY),
+    hentai_visible: !hideHentai,
+    hentai_archived: hideHentai ? 0 : one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 1 AND category = ?`, HENTAI_CATEGORY),
+    collections: d.prepare(`SELECT collection_name AS name, COUNT(*) AS count FROM video
+      WHERE is_archived = 0${hide} AND collection_name != '' GROUP BY collection_name ORDER BY collection_name`).all().map(row => ({ name: String((row as Row).name), count: Number((row as Row).count) })),
+    hentai_collections: hideHentai ? [] : d.prepare(`SELECT collection_name AS name, COUNT(*) AS count FROM video
+      WHERE is_archived = 0 AND category = ? AND collection_name != '' GROUP BY collection_name ORDER BY collection_name`).all(HENTAI_CATEGORY).map(row => ({ name: String((row as Row).name), count: Number((row as Row).count) })),
     archived: one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 1${hide}`),
     type,
     status,
     categories,
     tags: [...tagMap.entries()]
       .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh')),
+    hanime_tags: [...hanimeTagMap.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh'))
   }
 }
 
@@ -807,14 +930,15 @@ export const VIDEO_RESOURCE_COLUMNS = new Set([
   'official_url', 'notes', 'is_archived'
 ])
 export const VIDEO_META_COLUMNS = new Set([
-  'video_type', 'poster_path', 'fanart_path', 'year', 'end_year', 'rating',
+  'thumbnail_path', 'thumbnail_source', 'video_type', 'collection_name', 'poster_path', 'poster_source', 'fanart_path', 'year', 'end_year', 'rating',
   'watch_status', 'position_sec', 'duration_sec', 'last_watched_at',
   'resolution', 'video_codec', 'source', 'release_group',
   'audio_tracks', 'subtitle_tracks', 'parts', 'linked_files', 'tmdb_id', 'imdb_id',
-  'douban_id', 'douban_rating', 'hanime_id'
+  'douban_id', 'douban_rating', 'hanime_id', 'original_description', 'hanime_tags'
 ])
 
 function toColumn(key: string, value: unknown): string | number {
+  if (key === 'collection_name') return String(value ?? '').trim().slice(0, 80)
   if (key === 'is_archived') return value ? 1 : 0
   if (Array.isArray(value)) return JSON.stringify(value)
   if (typeof value === 'number') return value
@@ -907,8 +1031,8 @@ export function updateVideo(d: SqlDb, id: string, patch: Partial<VideoItem>): Vi
   return getVideo(d, id)
 }
 
-/** 允许从界面改的集字段。观看进度是唯一会被界面改的东西 */
-const EPISODE_COLUMNS = new Set(['watch_status', 'position_sec', 'watched_at', 'title'])
+/** Editable episode metadata and progress; identity and file ownership use dedicated operations. */
+const EPISODE_COLUMNS = new Set(['published_at', 'air_date', 'duration_sec', 'studio', 'watch_status', 'position_sec', 'watched_at', 'title', 'display_label', 'original_title', 'description', 'original_description', 'notes', 'tags', 'poster_path', 'poster_source', 'thumbnail_path', 'thumbnail_source', 'source_url'])
 
 export function updateEpisode(d: SqlDb, episodeId: string, patch: Partial<Episode>): Episode | null {
   const mine = Object.entries(patch).filter(
@@ -918,7 +1042,7 @@ export function updateEpisode(d: SqlDb, episodeId: string, patch: Partial<Episod
 
   const sets = mine.map(([k]) => `${k} = ?`).join(', ')
   d.prepare(`UPDATE episode SET ${sets} WHERE id = ?`).run(
-    ...mine.map(([, v]) => (typeof v === 'number' ? v : String(v ?? ''))),
+    ...mine.map(([, v]) => (Array.isArray(v) ? JSON.stringify(v) : typeof v === 'number' ? v : String(v ?? ''))),
     episodeId
   )
 

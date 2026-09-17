@@ -28,7 +28,7 @@ import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { initSchema } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
-import { listVideos, videoCounts, videoCategoryOf } from '../electron/kinds/video/db.ts'
+import { listVideos, updateVideo, videoCounts, videoCategoryOf } from '../electron/kinds/video/db.ts'
 import { emptyFacts } from '../electron/kinds/video/facts.ts'
 import { parseHentaiName } from '../electron/kinds/video/hentai/filename.ts'
 import { hanimeChannel } from '../electron/kinds/video/hentai/channel.ts'
@@ -59,12 +59,18 @@ function step(name: string, fn: () => void | Promise<void>): Promise<void> {
 
 /* ==================== fixture：假的站方响应 ==================== */
 
+// 搜索卡片是带标题的正式封面，详情 og:image / 播放清单是另一张视频缩略图。
+// 两者文件名和签名都不同，不能靠改写 thumbnail 路径来拼出 cover。
+const COVER_URL = 'https://vdownload.hembed.com/image/cover/title-art.jpg?secure=cover-token,1790822314'
+const OTHER_COVER_URL = 'https://vdownload.hembed.com/image/cover/other-title-art.jpg?secure=other-token,1790822314'
+const THUMBNAIL_URL = 'https://vdownload.hembed.com/image/thumbnail/scene-86994.jpg?secure=thumb-token,1790822306'
+
 const SEARCH_HTML = `
 <div class="content-padding-new">
   <div class="search-doujin-videos">
     <a class="overlay" href="/watch?v=86994"></a>
     <div class="card-mobile-panel">
-      <img src="/uploads/86994.jpg">
+      <img src="${COVER_URL}">
       <div class="card-mobile-title">巨乳女教師 ＃1</div>
       <div class="thumb-container"><div class="duration">17:28</div></div>
     </div>
@@ -72,7 +78,7 @@ const SEARCH_HTML = `
   <div class="search-doujin-videos">
     <a class="overlay" href="/watch?v=86995"></a>
     <div class="card-mobile-panel">
-      <img src="/uploads/86995.jpg">
+      <img src="${OTHER_COVER_URL}">
       <div class="card-mobile-title">巨乳女教師 ＃2</div>
       <div class="thumb-container"><div class="duration">18:02</div></div>
     </div>
@@ -81,10 +87,12 @@ const SEARCH_HTML = `
 
 const WATCH_HTML = `
 <html><head>
-  <meta property="og:image" content="/uploads/86994-big.jpg">
+  <meta property="og:image" content="${THUMBNAIL_URL}">
   <meta property="og:url" content="https://hanime1.me/watch?v=86994">
+  <meta property="og:video:duration" content="1048">
 </head><body>
   <div id="shareBtn-title">巨乳女教師 ＃1</div>
+  <div class="video-details-wrapper">观看次数：10万次 2026-08-28</div>
   <div class="video-details-wrapper">
     <h4 class="video-details-title">巨乳女教师 第一集</h4>
     <div class="video-caption-text caption-ellipsis">新来的女教师被学生盯上了。<span>剧集列表</span></div>
@@ -93,11 +101,18 @@ const WATCH_HTML = `
   <div class="single-video-tag"><a href="/search?tags[]=巨乳">#巨乳 (1234)</a></div>
   <div class="single-video-tag"><a href="/search?tags[]=女教師">#女教師 (567)</a></div>
   <div class="single-video-tag"><a href="/search?tags[]=無碼">#無碼 (89)</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=中文字幕">#中文字幕 (77)</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=凌辱">#凌辱 (66)</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=調教">#調教 (55)</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=人妻">#人妻 (44)</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=NTR">#NTR (33)</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=女教師">#女教師 (22)</a></div>
+  <div class="single-video-tag"><a href="/search?tags[]=巨乳">#巨乳 (11)</a></div>
   <div class="video-playlist-wrapper">
     <div id="playlist-top-block"><h4><a href="/search?query=巨乳女教師">巨乳女教師 系列</a></h4></div>
     <div id="playlist-scroll">
       <div class="playlist-hover-wrap" data-href="/watch?v=86994">
-        <img class="main-thumb" src="/e1.jpg">
+        <img class="main-thumb" src="${THUMBNAIL_URL}">
         <h4 class="video-title"><a href="/watch?v=86994">＃1</a></h4>
         <div class="duration">17:28</div>
       </div>
@@ -245,11 +260,13 @@ async function main(): Promise<void> {
     assert.ok(out.includes('新来的女教师被学生盯上了。'), '简介没出来')
     assert.ok(!out.includes('剧集列表'), '子节点文本漏进简介了')
     assert.ok(out.includes('同系列 2 集'), '集表没解出来')
+    assert.ok(out.includes('站点发布日期：2026-08-28'))
+    assert.ok(out.includes('时长：1048 秒'))
     assert.ok(out.includes('不要合并成一条'), '缺了那句提醒，模型会把 2 集并成一条')
   })
 
   /* ---------- 6. 入库 ---------- */
-  await step('6 register_video：查过的 id 落库，标签收敛，分类是里番', async () => {
+  await step('6 register_video：查过的 id 落库，译文和普通标签由 agent 提交', async () => {
     const out = String(
       await tools.find((t) => t.name === 'register_video')!.execute({
         name_zh: '巨乳女教師',
@@ -257,23 +274,32 @@ async function main(): Promise<void> {
         summary: '新来的女教师',
         description: '新来的女教师被学生盯上了。',
         category: HENTAI_CATEGORY,
-        tags: ['巨乳', '女教師', '無碼'],
+        tags: ['剧情'],
         hanime_id: 86994
       })
     )
     assert.ok(!/被忽略/.test(out), `查过的 id 该收下，实际：${out.slice(0, 160)}`)
     const row = d.prepare('SELECT hanime_id FROM video_meta').get() as any
     assert.equal(row.hanime_id, '86994')
+    const episode = d.prepare('SELECT published_at,studio,duration_sec FROM episode').get() as any
+    assert.equal(episode.published_at, Date.UTC(2026, 7, 28))
+    assert.equal(episode.studio, '某工作室')
+    assert.equal(episode.duration_sec, 1048)
   })
 
-  await step('7 落库后的形状：分类、标签、hanime_id、官网兜底、封面', () => {
-    const v = listVideos(d as any, { category: HENTAI_CATEGORY } as any)[0] as any
+  await step('7 落库后的形状：译文、原文、全部站方标签、链接和封面', () => {
+    const v = listVideos(d as any, { type: 'hentai' })[0] as any
     assert.equal(v.name_zh, '巨乳女教師')
     assert.equal(v.category, HENTAI_CATEGORY)
     assert.equal(v.hanime_id, '86994')
-    // 标签收敛：池里有「巨乳」，新增最多 2 个，总数最多 3
-    assert.ok(v.tags.length <= 3, `标签没收敛：${JSON.stringify(v.tags)}`)
-    assert.ok(v.tags.includes('巨乳'))
+    assert.equal(v.description, '新来的女教师被学生盯上了。')
+    assert.equal(v.original_description, '新来的女教师被学生盯上了。')
+    assert.deepEqual(v.tags, ['剧情'])
+    assert.deepEqual(
+      v.hanime_tags,
+      ['巨乳', '女教師', '無碼', '中文字幕', '凌辱', '調教', '人妻', 'NTR'],
+      '站方标签必须去重但不能按普通标签上限截断'
+    )
     // 豆瓣和官网都没有时退到 hanime 条目页
     assert.equal(v.official_url, watchUrl('86994'))
 
@@ -289,8 +315,8 @@ async function main(): Promise<void> {
      */
     assert.equal(
       v.poster_path,
-      'https://hanime1.me/uploads/86994-big.jpg',
-      'hanime 的封面没落进 poster_path'
+      COVER_URL,
+      '搜索页的正式封面不能被详情页 / 播放清单缩略图覆盖，签名参数也必须原样保留'
     )
     assert.ok(isRemotePoster(v.poster_path), '认不出是远端地址，下载那头会当成 TMDB 的相对路径')
     assert.ok(acceptExternalPosterUrl(v.poster_path), '过不了外站护栏，封面还是下不来')
@@ -299,17 +325,19 @@ async function main(): Promise<void> {
   /* ---------- 8. 界面读得到 ---------- */
   await step('8 侧栏那一格出现了，点它筛得出这一条', () => {
     const cats = videoCounts(d as any).categories
-    const cell = cats.find((c) => c.name === HENTAI_CATEGORY)
-    assert.ok(cell, '侧栏拿不到「里番」这一格')
-    assert.equal(cell!.count, 1)
-    assert.equal(listVideos(d as any, { category: HENTAI_CATEGORY } as any).length, 1)
+    assert.ok(!cats.some(c => c.name === HENTAI_CATEGORY))
+    assert.equal(videoCounts(d as any).hentai, 1)
+    assert.equal(listVideos(d as any, { type: 'hentai' }).length, 1)
+    assert.equal(listVideos(d as any).length, 0)
   })
 
-  await step('9 详情页点标签能筛出同标签的作品', () => {
-    const v = listVideos(d as any, { category: HENTAI_CATEGORY } as any)[0] as any
-    const tag = v.tags[0]
+  await step('9 里番标签只在里番分类出现，点击后仍限定在里番分类', () => {
+    const v = listVideos(d as any, { type: 'hentai' })[0] as any
+    assert.ok(!videoCounts(d as any).tags.some((t) => t.name === '巨乳'))
+    assert.ok(videoCounts(d as any).hanime_tags.some((t) => t.name === '巨乳'))
     assert.deepEqual(
-      listVideos(d as any, { tag } as any).map((x: any) => x.name_zh),
+      listVideos(d as any, { type: 'hentai', tag: v.hanime_tags[0] })
+        .map((x: any) => x.name_zh),
       ['巨乳女教師']
     )
   })
@@ -321,6 +349,22 @@ async function main(): Promise<void> {
     assert.equal(hanimeChannel(REAL_FILE, videoCategoryOf(d as any, 'D:\\H\\' + REAL_FILE)), 'category')
     // 连文件名被改成毫无特征的名字也照样命中
     assert.equal(hanimeChannel('作品.mkv', HENTAI_CATEGORY), 'category')
+  })
+
+  await step('10b 已有缓存海报受保护；撤掉后重新刮削才能换成正式封面', async () => {
+    const row = listVideos(d as any, { type: 'hentai' })[0] as any
+    const oldPoster = 'D:\\posters\\cached-thumbnail.jpg'
+    const registerAgain = () => tools.find((t) => t.name === 'register_video')!.execute({
+      name_zh: '封面回归', summary: '缓存海报回归', category: HENTAI_CATEGORY, hanime_id: '86994'
+    })
+    updateVideo(d as any, row.id, { poster_path: oldPoster })
+    await registerAgain()
+    assert.equal(listVideos(d as any, { type: 'hentai' })[0].poster_path, oldPoster, '重新识别不能擅自覆盖已有海报')
+
+    // clearVideoPoster 同样通过 updateVideo 清空这一列；这里只动内存库，不删真实图片。
+    updateVideo(d as any, row.id, { poster_path: '' })
+    await registerAgain()
+    assert.equal(listVideos(d as any, { type: 'hentai' })[0].poster_path, COVER_URL, '撤掉旧海报后应采用新取得的正式封面')
   })
 
   /* ---------- 11. 盾 ---------- */
@@ -358,6 +402,82 @@ async function main(): Promise<void> {
   })
 
   d.close()
+
+  /* ---------- 封面来源回归：真实解析、账本合并、注册入库，只替换取页 ---------- */
+  const noSearchCover = SEARCH_HTML.replace('<img src="' + COVER_URL + '">', '')
+  const noDetailCover = WATCH_HTML.replace('<meta property="og:image" content="' + THUMBNAIL_URL + '">', '')
+  const coverCases = [
+    {
+      name: '14 封面：重复读取详情仍保留正式封面，不增加网络请求',
+      searchHtml: SEARCH_HTML, watchHtml: WATCH_HTML, id: '86994', repeats: 2,
+      expected: COVER_URL
+    },
+    {
+      name: '15 封面：选中第二个候选时只用同一 ID 的封面',
+      searchHtml: SEARCH_HTML, watchHtml: WATCH_HTML.replaceAll('86994', '86995'), id: '86995',
+      expected: OTHER_COVER_URL
+    },
+    {
+      name: '16 封面：搜索图缺失时退到详情图，不借用其他候选封面',
+      searchHtml: noSearchCover, watchHtml: WATCH_HTML, id: '86994',
+      expected: THUMBNAIL_URL
+    },
+    {
+      name: '17 封面：直接取详情、没有搜索候选时仍有详情图兜底',
+      searchHtml: null, watchHtml: WATCH_HTML, id: '86994',
+      expected: THUMBNAIL_URL
+    },
+    {
+      name: '18 封面：详情图缺失不能清空已取得的正式封面',
+      searchHtml: SEARCH_HTML, watchHtml: noDetailCover, id: '86994',
+      expected: COVER_URL
+    },
+    {
+      name: '19 封面：双方都无图时保持空值，不拿播放清单图或其他候选凑数',
+      searchHtml: noSearchCover, watchHtml: noDetailCover, id: '86994',
+      expected: ''
+    },
+    {
+      name: '20 封面：详情缺少 og:url 时按请求 ID 保留搜索封面',
+      searchHtml: SEARCH_HTML,
+      watchHtml: WATCH_HTML.replace('<meta property="og:url" content="https://hanime1.me/watch?v=86994">', ''),
+      id: '86994', expected: COVER_URL
+    }
+  ]
+  for (const c of coverCases) {
+    await step(c.name, async () => {
+      const coverDb = new DatabaseSync(':memory:')
+      clearHanimeCache()
+      calls.length = 0
+      try {
+        coverDb.exec('PRAGMA foreign_keys = ON')
+        initSchema(coverDb as any, KINDS)
+        const coverTools = buildVideoTools({ ...ctx, db: coverDb as any }, [HENTAI_CATEGORY], false, false, true)
+        if (c.searchHtml !== null) {
+          nextBody = c.searchHtml
+          await coverTools.find((t) => t.name === 'hanime_search')!.execute({ query: '封面回归' })
+        }
+        nextBody = c.watchHtml
+        for (let i = 0; i < (c.repeats ?? 1); i++) {
+          await coverTools.find((t) => t.name === 'hanime_detail')!.execute({ hanime_id: c.id })
+        }
+        nextBody = null
+        await coverTools.find((t) => t.name === 'register_video')!.execute({
+          name_zh: '封面回归', summary: '封面来源测试', category: HENTAI_CATEGORY, hanime_id: c.id
+        })
+        const row = listVideos(coverDb as any, { type: 'hentai' })[0] as any
+        assert.equal(row.hanime_id, c.id)
+        assert.equal(row.poster_path, c.expected)
+        assert.equal(row.original_description, '新来的女教师被学生盯上了。', '保留封面不能丢掉详情元数据')
+        assert.ok(row.hanime_tags.includes('中文字幕'), '站方标签仍需从详情入库')
+        assert.equal(calls.length, c.searchHtml === null ? 1 : 2, '合并封面不应增加额外请求')
+      } finally {
+        nextBody = null
+        clearHanimeCache()
+        coverDb.close()
+      }
+    })
+  }
   globalThis.fetch = realFetch
 
   console.log(`\n${pass} 通过，${fail} 失败`)

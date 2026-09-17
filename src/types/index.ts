@@ -3,6 +3,17 @@
  * 主进程与渲染进程共用，仅作类型标注（编译后不产生运行时代码）。
  */
 
+import type {
+  VideoDownloadCatalog,
+  VideoDownloadProgress,
+  VideoDownloadRequest,
+  VideoDownloadResult,
+  VideoSeriesCatalog,
+  VideoSeriesDownloadProgress,
+  VideoSeriesDownloadRequest,
+  VideoSeriesDownloadResult
+} from './video-download'
+
 export type MasteryLevel = 'proficient' | 'familiar' | 'learning' | 'new'
 
 /** AI 补全状态：待识别 / 已完成 / 失败（可重试） */
@@ -545,6 +556,10 @@ export interface AppSettings {
    * 影视模块的扫描目录。
    */
   video_scan_dirs: string[]
+  video_download_root: string
+  video_download_quality: string
+  video_download_strict_quality: boolean
+  video_download_register: boolean
   /**
    * 自动整理的目标根目录。和扫描目录刻意分开 —— 扫描是「去哪里找」，
    * 这里是「归到哪里去」，把整理目标也加进扫描列表只会让下一轮重扫再发现一遍。
@@ -1031,6 +1046,7 @@ export interface SearchCallRecord {
  * 而真正的差别在解析器里，不在数据结构里。
  */
 export type VideoType = 'movie' | 'series'
+export type VideoFilterType = VideoType | 'hentai'
 
 /**
  * 观看状态。四态闭集，库里有 CHECK 约束兜着（见 kinds/video/schema.ts）。
@@ -1084,11 +1100,27 @@ export interface MediaTrack {
  * 用户手上只有 8 个文件，缺的那 8 集该露面，否则用户不知道自己缺什么。
  */
 export interface Episode {
+  /** 站点发布日期，日期按 UTC 保存；与原作发行/首播日期分开。 */
+  published_at?: number
+  /** 来源列出的厂牌或作者。 */
+  studio?: string
+  tags?: string[]
+  poster_source?: string
+  thumbnail_path?: string
+  thumbnail_source?: string
   id: string
   resource_id: string
   season: number
   episode: number
   title: string
+  /** 用户或来源提供的非季播标签，例如「上卷」「番外」 */
+  display_label?: string
+  original_title?: string
+  description?: string
+  original_description?: string
+  poster_path?: string
+  source_url?: string
+  notes?: string
   /** 空串 = 缺文件 */
   path: string
   file_size: number
@@ -1098,12 +1130,14 @@ export interface Episode {
   position_sec: number
   /** 最后一次看它的时刻，0 表示没看过 */
   watched_at: number
-  /** 首播日期（TMDB 给的），0 表示不知道 */
+  /** 原作发行/首播日期，0 表示不知道 */
   air_date: number
 }
 
 /** video_meta 那张表的形状。resource 的公共字段不在这里，见 VIDEO_VIEW_SQL */
 export interface VideoMeta {
+  thumbnail_path?: string
+  thumbnail_source?: string
   video_type: VideoType
   /**
    * 竖版 2:3 海报。空串 = 还没有，界面退回首字占位。
@@ -1113,6 +1147,8 @@ export interface VideoMeta {
    * 拼上图片域名，要么当占位处理，不能直接塞进 `<img src>` 就完事。
    */
   poster_path: string
+  poster_source?: string
+  collection_name?: string
   fanart_path: string
   /** 电影是一个点，剧集是区间的起点。0 表示不知道 */
   year: number
@@ -1162,6 +1198,10 @@ export interface VideoMeta {
    * 空串 = 没刮到，或这条不是里番。地位同 `tmdb_id`：有它就能精确重刮。
    */
   hanime_id: string
+  /** Hanime 页面原始简介；中文译文仍在 description。 */
+  original_description: string
+  /** Hanime 页面全部站方标签，不受普通 tags 的数量限制。 */
+  hanime_tags: string[]
 }
 
 /**
@@ -1173,6 +1213,13 @@ export interface VideoMeta {
  * 而视频库是百级规模，子查询的代价可以忽略。
  */
 export interface VideoItem extends VideoMeta {
+  needs_review?: boolean
+  published_start?: number
+  published_end?: number
+  available_files?: number
+  missing_files?: number
+  pending_reasons?: string[]
+  matched_content?: string
   id: string
   created_at: number
   updated_at: number
@@ -1212,26 +1259,46 @@ export interface VideoItem extends VideoMeta {
   episode_present: number
 }
 
+export interface VideoLibraryFilters {
+  publishedFrom: string
+  publishedTo: string
+  status: WatchStatus | ''
+  local: 'available' | 'missing' | 'none' | ''
+}
 export interface VideoQuery {
+  publishedFrom?: string
+  publishedTo?: string
+  local?: 'available' | 'missing' | 'none'
+  issue?: 'any' | 'poster' | 'files' | 'metadata'
   keyword?: string
-  type?: VideoType
+  type?: VideoFilterType
+  collection?: string
   category?: string
   tag?: string
   status?: WatchStatus
   /** 归档区和正常区互斥，和另两个品类同一个约定 */
   group?: 'all' | 'archived'
-  sort?: 'name' | 'year' | 'added' | 'rating'
+  sort?: 'name' | 'year' | 'added' | 'rating' | 'updated' | 'published' | 'published-asc'
 }
+
+export type { VideoAsset, VideoAssetState, VideoBundle, VideoContentInput, VideoDirectory, VideoOwnership, VideoRegistration, VideoRegistrationResult, VideoSourceRef } from './video-library'
 
 export interface VideoCounts {
   all: number
   archived: number
   /** 电影 / 剧集各有几部。闭集 */
   type: Record<VideoType, number>
+  hentai?: number
+  hentai_archived?: number
+  hentai_visible?: boolean
+  collections?: Array<{ name: string; count: number }>
+  hentai_collections?: Array<{ name: string; count: number }>
   /** 四个观看状态各有几个。闭集，缺的那个是 0 不是不存在 */
   status: Record<WatchStatus, number>
   categories: Array<{ name: string; count: number }>
   tags: Array<{ name: string; count: number }>
+  /** 仅供进入“里番”分类后的标签栏使用。 */
+  hanime_tags: Array<{ name: string; count: number }>
 }
 
 /**
@@ -1498,10 +1565,34 @@ export interface BaoyiApi {
     cancel(): void
     onProgress(cb: (p: VideoScanProgress) => void): Unsubscribe
     /** 扫描前的可用性检查。ok 为 false 是硬拦；ok 为 true 而 message 非空是降级提醒 */
-    readiness(): Promise<{ ok: boolean; message: string }>
+    readiness(forAgent?: boolean): Promise<{ ok: boolean; message: string }>
 
     /** 一部剧的所有集，按季集号排。电影返回空数组 */
     episodes(id: string): Promise<Episode[]>
+    searchSource(query: string): Promise<Array<{ videoCode: string; title: string; coverUrl: string }>>
+    scrapeEpisode(id: string, episodeId?: string, source?: string): Promise<{ episode: Episode | null; item: VideoItem | null; warnings: string[] }>
+    pickEpisodeArtwork(id: string, role: 'poster' | 'thumbnail'): Promise<Episode | null>
+    previewRemoval(request: import('./video-management').VideoRemovalRequest): Promise<import('./video-management').VideoRemovalPreview>
+    applyRemoval(preview: import('./video-management').VideoRemovalPreview): Promise<{ detachedId: string; warnings: string[] }>
+    bulkUpdate(ids: string[], patch: import('./video-management').VideoBulkPatch): Promise<number>
+    importBundle(): Promise<(import('./video-library').VideoRegistrationResult & { scanResult?: VideoScanResult }) | null>
+    library(id: string): Promise<import('./video-workflow').VideoWorkLibrary>
+    syncFiles(id: string): Promise<import('./video-workflow').VideoLibrarySyncResult>
+    previewCollectionName(id: string, title: string): Promise<{ title: string; from: string; to: string }>
+    renameCollection(id: string, title: string): Promise<{ title: string; from: string; to: string; warnings: string[] }>
+    playAsset(id: string): Promise<VideoPlayOutcome>
+    revealAsset(id: string): Promise<boolean>
+    relocateAsset(id: string): Promise<boolean>
+    setDefaultAsset(episodeId: string, assetId: string): Promise<boolean>
+    prepareDownload(input: { url?: string; resourceId?: string }): Promise<import('./video-workflow').VideoDownloadDraft>
+    pickDownloadRoot(draftId: string): Promise<import('./video-workflow').VideoDownloadDraft | null>
+    enqueueDownload(request: import('./video-workflow').VideoEnqueueRequest): Promise<import('./video-workflow').VideoDownloadJob>
+    downloadJobs(): Promise<import('./video-workflow').VideoDownloadJob[]>
+    retryDownloadJob(id: string, stage: import('./video-workflow').VideoJobRetry): Promise<import('./video-workflow').VideoDownloadJob>
+    cancelDownloadJob(id: string): Promise<boolean>
+    revealDownloadJob(id: string): Promise<boolean>
+    onDownloadJob(cb: (job: import('./video-workflow').VideoDownloadJob) => void): Unsubscribe
+    onLibraryChanged(cb: (resourceId: string) => void): Unsubscribe
     /**
      * 改一集。改完整部剧的观看状态会跟着刷一遍，所以要把条目也拿回来 ——
      * 界面上那个「3/12 集」和侧栏计数都得跟着动。
@@ -1524,6 +1615,15 @@ export interface BaoyiApi {
     pickPoster(id: string): Promise<{ ok: boolean; message: string; item: VideoItem | null } | null>
     /** 撤掉海报，退回首字占位。磁盘上那份拷贝一起删 */
     clearPoster(id: string): Promise<VideoItem | null>
+    /** 解析播放器直链；返回短期源令牌，不返回签名 URL。 */
+    downloadSources(id: string): Promise<VideoDownloadCatalog>
+    download(request: VideoDownloadRequest): Promise<VideoDownloadResult>
+    /** 解析 Hanime 播放清单中的实际系列集数，不返回签名 URL。 */
+    downloadSeries(id: string): Promise<VideoSeriesCatalog>
+    downloadSeriesRun(request: VideoSeriesDownloadRequest): Promise<VideoSeriesDownloadResult>
+    cancelDownload(requestId: string): Promise<{ ok: boolean; message?: string }>
+    onDownloadProgress(cb: (progress: VideoDownloadProgress | VideoSeriesDownloadProgress) => void): Unsubscribe
+    revealDownload(requestId: string): Promise<boolean>
   }
   tasks: {
     list(): Promise<TaskRecord[]>
@@ -1651,3 +1751,18 @@ export interface BaoyiApi {
     unlink(id: string): Promise<{ ok: boolean; message: string }>
   }
 }
+
+export type {
+  VideoDownloadCatalog,
+  VideoDownloadProgress,
+  VideoDownloadRequest,
+  VideoDownloadResult,
+  VideoDownloadSource,
+  VideoSeriesCatalog,
+  VideoSeriesDownloadPhase,
+  VideoSeriesDownloadProgress,
+  VideoSeriesDownloadRequest,
+  VideoSeriesDownloadResult,
+  VideoSeriesEpisode,
+  VideoSeriesEpisodeResult
+} from './video-download'

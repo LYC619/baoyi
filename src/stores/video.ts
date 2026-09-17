@@ -38,7 +38,8 @@ const EMPTY_COUNTS: VideoCounts = {
   type: { movie: 0, series: 0 },
   status: { unwatched: 0, watching: 0, watched: 0, dropped: 0 },
   categories: [],
-  tags: []
+  tags: [],
+  hanime_tags: []
 }
 
 export const useVideoStore = defineStore('video', () => {

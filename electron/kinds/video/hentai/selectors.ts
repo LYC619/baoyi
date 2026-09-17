@@ -221,6 +221,9 @@ export function parseSearch(html: string, base = HANIME_BASE): HanimeHit[] {
   const items = [
     ...root.querySelectorAll('.content-padding-new .search-doujin-videos'),
     ...root.querySelectorAll('.home-rows-videos-wrapper a.home-rows-videos-div'),
+    // 当前站点把 `home-rows-videos-div search-videos` 放在外层 a 里面，
+    // href 在 a 上；旧版则把 class 直接放在 a 上。两种都要收。
+    ...root.querySelectorAll('.home-rows-videos-wrapper > a'),
     // 兜底：直接找带 watch 链接的卡片。上面两个都失效时还能捞回一部分
     ...root.querySelectorAll('div.card-mobile-panel, div.multiple-link-wrapper')
   ]
@@ -266,6 +269,13 @@ export interface HanimeEpisode {
 
 /** 详情页解析结果 */
 export interface HanimeDetail {
+  /** Date-only UTC milliseconds; the site's publication date is not the original release date. */
+  publishedAt: number
+  releaseDate: number
+  durationSec: number
+  posterUrl?: string
+  thumbnailUrl?: string
+  artworkUrls?: string[]
   videoCode: string
   /** 站上的主标题（`#shareBtn-title`）。多数是日文原名 */
   title: string
@@ -282,6 +292,45 @@ export interface HanimeDetail {
   seriesName: string
   /** 同系列的各集。单集作品是空数组，**不是一条自己** */
   episodes: HanimeEpisode[]
+}
+
+function calendarDate(raw: unknown): number {
+  const match = /\b((?:19|20)\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})(?:日|\b|(?=T\d{2}:))/.exec(String(raw ?? ''))
+  if (!match) return 0
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3])
+  const stamp = Date.UTC(year, month - 1, day), date = new Date(stamp)
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? stamp : 0
+}
+
+function detailFacts(root: HTMLElement, base: string): Pick<HanimeDetail, 'publishedAt' | 'releaseDate' | 'durationSec'> {
+  const code = toVideoCode(root.querySelector('meta[property="og:url"]')?.getAttribute('content') || base, base)
+  const objects: Record<string, unknown>[] = []
+  const collect = (value: unknown, depth = 0) => {
+    if (!value || typeof value !== 'object' || depth > 5) return
+    if (Array.isArray(value)) { value.forEach(entry => collect(entry, depth + 1)); return }
+    const object = value as Record<string, unknown>
+    if ([object['@type']].flat().includes('VideoObject') && (!object.url || toVideoCode(object.url, base) === code)) objects.push(object)
+    if (object['@graph']) collect(object['@graph'], depth + 1)
+  }
+  for (const script of root.querySelectorAll('script[type="application/ld+json"]')) {
+    try { collect(JSON.parse(script.rawText)) } catch { /* Other page metadata must not break video parsing. */ }
+  }
+  const data = objects.find(object => !!object.url) || (objects.length === 1 ? objects[0] : {}) || {}
+  let publishedAt = calendarDate(root.querySelector('meta[property="article:published_time"],meta[itemprop="datePublished"],meta[itemprop="uploadDate"]')?.getAttribute('content'))
+    || calendarDate(data.datePublished || data.uploadDate)
+  let releaseDate = 0
+  for (const element of root.querySelectorAll('.video-details-wrapper, .video-details-wrapper time, #video-publish-date, #video-release-date')) {
+    const value = text(element)
+    if (value.length > 240) continue
+    const released = /(?:出版|發行|发行|發售|发售|発売)(?:日期|日|时间|時間)?\s*[:：]?\s*(.+)/.exec(value)
+    if (released) releaseDate ||= calendarDate(released[1])
+    if (/觀看次數|观看次数|\bviews\b|(?:上傳|上传|發佈|发布)(?:日期|日|时间|時間)/i.test(value) || element.id === 'video-publish-date') publishedAt ||= calendarDate(value)
+    if (['datePublished', 'uploadDate'].includes(element.getAttribute('itemprop') || '')) publishedAt ||= calendarDate(element.getAttribute('datetime') || value)
+  }
+  const rawDuration = root.querySelector('meta[property="og:video:duration"],meta[itemprop="duration"]')?.getAttribute('content') || data.duration
+  const iso = /^PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?$/i.exec(String(rawDuration || ''))
+  const seconds = iso ? Number(iso[1] || 0) * 3600 + Number(iso[2] || 0) * 60 + Number(iso[3] || 0) : Number(rawDuration)
+  return { publishedAt, releaseDate, durationSec: Number.isFinite(seconds) && seconds > 0 && seconds < 7 * 86400 ? Math.round(seconds) : 0 }
 }
 
 /**
@@ -308,24 +357,33 @@ export function parseDetail(html: string, base = HANIME_BASE): HanimeDetail {
   const introduction = ownText(cap)
   const chineseTitle = text(cap?.previousElementSibling as HTMLElement | null)
 
+  const player = root.querySelector('video#player') || root.querySelector('video')
+  const playerImage = absUrl(player?.getAttribute('poster'), base) || root.querySelectorAll('#player-div-wrapper img')
+    .map(el => absUrl(el.getAttribute('data-src') || el.getAttribute('src'), base)).find(url => /\/image\/(?:cover|thumbnail)\//i.test(url)) || ''
   // 封面优先取 og:image —— meta 标签比正文 DOM 稳得多
   const cover = absUrl(
     root.querySelector('meta[property="og:image"]')?.getAttribute('content') ||
-      root.querySelector('#player-div-wrapper img')?.getAttribute('src') ||
-      root.querySelector('video')?.getAttribute('poster'),
+      playerImage,
     base
   )
 
+  const promoted = root.querySelectorAll('.video-cover img, img.video-cover, meta[property="og:image"], meta[name="twitter:image"]')
+    .map(el => absUrl(el.getAttribute('data-src') || el.getAttribute('src') || el.getAttribute('content'), base)).filter(Boolean)
+  const detailCovers = root.querySelectorAll('.video-details-wrapper img')
+    .map(el => absUrl(el.getAttribute('data-src') || el.getAttribute('src'), base)).filter(url => /\/image\/(?:cover|thumbnail)\//i.test(url))
+  const artworkUrls = [...new Set([cover, playerImage, ...promoted, ...detailCovers].filter(Boolean))]
+  const posterUrl = artworkUrls.find(url => /\/image\/cover\//i.test(url)) || cover
+  const thumbnailUrl = playerImage || artworkUrls.find(url => /\/thumbnail\//i.test(url)) || cover
   const tags = [
     ...new Set(
       root
         .querySelectorAll('.single-video-tag')
         .map((el) => cleanTag(text(el.querySelector('a[href]')) || text(el)))
-        .filter((t) => t && !/^\d+$/.test(t))
+        .filter((t) => t && !/^\d+$/.test(t) && !/^(?:add|remove)$/i.test(t))
     )
   ]
 
-  const artist = text(root.querySelector('.meta-author a')) || text(root.querySelector('#video-artist-name'))
+  const artist = text(root.querySelector('#video-artist-name')) || text(root.querySelector('.video-details-wrapper .meta-author a')) || text(root.querySelector('.meta-author a'))
 
   // 集数表两套结构，先试新的再试旧的（上游就是这个顺序）
   const wrap =
@@ -349,11 +407,12 @@ export function parseDetail(html: string, base = HANIME_BASE): HanimeDetail {
   }
 
   return {
+    ...detailFacts(root, base),
     videoCode: toVideoCode(root.querySelector('meta[property="og:url"]')?.getAttribute('content'), base),
     title,
     chineseTitle,
     introduction,
-    coverUrl: cover,
+    coverUrl: cover, posterUrl, thumbnailUrl, artworkUrls,
     tags,
     artist,
     seriesName,

@@ -33,17 +33,21 @@
  * （改名转发的片子上写着 1080p 实际是 720p 的重编码），容器不会。
  */
 
+import { readVideoLocalMetadata } from './local-metadata.ts'
+import type { VideoContentInput } from '../../../src/types/video-library.ts'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { MediaTrack, VideoPart, WatchStatus } from '../../../src/types'
 import type { VideoCandidate, VideoFile } from './scanner.ts'
 import { parseNfo, parseNfoEpisodes, type NfoData } from './nfo.ts'
+import { collectionName, seriesPart, seriesKey } from '../../../src/utils/video-series.ts'
 import { readContainerInfo, type ContainerInfo } from './mediainfo.ts'
 
 /* ============================== 输出形状 ============================== */
 
 /** 一集的本地事实 */
 export interface EpisodeFacts {
+  local_metadata?: Partial<VideoContentInput>
   season: number
   episode: number
   /** 标题。nfo 里有就用它，否则从文件名切出来的那个，都没有是空串 */
@@ -80,11 +84,20 @@ export interface NfoWatchState {
  * `ContainerInfo` 的约定一致 —— 调用方永远拿到完整形状。
  */
 export interface VideoFacts {
+  tags?: string[]
+  hentai?: boolean
+  hanime_id?: string
+  attachments?: VideoContentInput["attachments"]
+  local_metadata?: Partial<VideoContentInput>
   video_type: 'movie' | 'series'
   /** resource.path 那个全局唯一键，原样从扫描结果来 */
   path: string
   /** 这条东西所在的目录。剧集就是 path 自己 */
   dir: string
+  /** 原始文件名和解析标题，供识别时与数据库候选交叉核对。 */
+  files: Array<{ name: string; title: string; year: number }>
+  shared_directory: boolean
+  sibling_titles: string[]
 
   /** 标题候选，按可信度排好。第一个是最可能对的那个，交给 agent 定 */
   title_zh: string
@@ -188,6 +201,7 @@ export function emptyFacts(): VideoFacts {
     video_type: 'movie',
     path: '',
     dir: '',
+    files: [], shared_directory: false, sibling_titles: [],
     title_zh: '', title_en: '', original_title: '', year: 0,
     tmdb_id: '', imdb_id: '', tvdb_id: '', plot: '', nfo_rating: 0,
     genres: [], directors: [], actors: [], studios: [], countries: [], status: '',
@@ -285,7 +299,15 @@ export function mergeFacts(
   const f = emptyFacts()
   f.video_type = candidate.video_type
   f.path = candidate.path
-  f.dir = candidate.video_type === 'series' ? candidate.path : path.dirname(candidate.path)
+  f.dir = candidate.directory || (candidate.video_type === 'series' ? candidate.path : path.dirname(candidate.files[0]?.path || candidate.path))
+  const allFiles = [...candidate.files, ...candidate.episodes.flatMap(ep => ep.files)]
+  f.files = [...new Map(allFiles.map(file => [file.path, file])).values()].map(file => ({
+    name: file.name,
+    title: [file.parsed.title_zh, file.parsed.title_en].filter(Boolean).join(' / '),
+    year: file.parsed.year
+  }))
+  f.shared_directory = candidate.shared_directory ?? false
+  f.sibling_titles = candidate.sibling_titles ?? []
   f.evidence = [...candidate.evidence]
 
   /* -------- 标题与年份：nfo 压过扫描结果 -------- */
@@ -308,6 +330,8 @@ export function mergeFacts(
     f.plot = firstNonEmpty(nfo.plot, nfo.outline)
     f.nfo_rating = nfo.rating
     f.genres = mergeList(nfo.genres)
+    f.tags = mergeList(nfo.tags, nfo.genres)
+    f.hentai = /里番|裏番|hentai/i.test([...f.genres, ...f.tags].join(' ')) || /^(X|XXX|R18|18\+)$/i.test(nfo.mpaa) && /anime|动画|動畫|アニメ/i.test(f.genres.join(' '))
     f.directors = mergeList(nfo.directors)
     f.actors = nfo.actors.map((a) => a.name).filter(Boolean).slice(0, 12)
     f.studios = mergeList(nfo.studios)
@@ -367,6 +391,7 @@ export function mergeFacts(
     const epNfo = episodeNfos.get(head.path)
     const container = containers.get(head.path)
     f.episodes.push({
+      local_metadata: epNfo ? { originalTitle: epNfo.original_title, description: epNfo.plot, tags: mergeList(epNfo.tags, epNfo.genres) } : undefined,
       season: ep.season,
       episode: ep.episode,
       title: firstNonEmpty(epNfo?.title, ep.title),
@@ -567,5 +592,30 @@ export async function buildFacts(candidate: VideoCandidate): Promise<VideoFacts>
     facts.evidence.push('容器元数据一个都没读出来（文件可能不可访问或已损坏）')
   }
 
+  const representative = candidate.files[0]?.path || candidate.episodes[0]?.files[0]?.path
+  for (const episode of facts.episodes) {
+    const local = readVideoLocalMetadata(episode.path)
+    episode.local_metadata = { ...local, ...episode.local_metadata,
+      tags: mergeList(episode.local_metadata?.tags, local.tags) }
+    if (local.title) episode.title = local.title
+  }
+  if (representative) {
+    const local = readVideoLocalMetadata(representative)
+    facts.local_metadata = local
+    facts.attachments = local.attachments
+    facts.hanime_id = local.sources?.find(s => s.provider === 'hanime')?.externalId || ''
+    facts.hentai ||= !!facts.hanime_id
+    facts.tags = mergeList(facts.tags, local.tags)
+    facts.original_title ||= local.originalTitle || ''
+    if (!main && local.title && candidate.video_type === 'movie') { facts.title_zh = local.title; facts.title_en = local.originalTitle || '' }
+    if (candidate.video_type === 'movie' || facts.episodes.length === 1) facts.plot ||= local.description || ''
+    facts.images = mergeList(facts.images, [local.posterPath || '', local.thumbnailPath || ''])
+  }
+  if (!main && facts.episodes.length > 1) {
+    const names = facts.episodes.map(episode => episode.title || path.basename(episode.path)), parts = names.map(seriesPart)
+    if (parts.every(part => part && seriesKey(part.title) === seriesKey(parts[0]!.title))) {
+      facts.title_zh = collectionName(names, facts.episodes.map(episode => episode.episode)); facts.title_en = ''; facts.original_title = ''
+    }
+  }
   return facts
 }

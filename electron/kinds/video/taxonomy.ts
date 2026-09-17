@@ -86,7 +86,7 @@ export const VIDEO_CATEGORIES: Category[] = [
   {
     id: 'video-other',
     name: VIDEO_FALLBACK_CATEGORY,
-    description: '还没归类，或自建分类之前的临时存放',
+    description: '录屏、下载的短视频、个人影像，以及暂未归类的视频',
     icon: 'inbox',
     // 兜底那格一直排在最后。0.8 插进「里番」时它从 7 挪到 8 ——
     // 老库里这一挪要靠 migrateVideo 单独走一次，见那边的注释

@@ -42,17 +42,16 @@ export const IDENTIFY_VIDEO_SYSTEM = `你是「抱一」的影视识别 agent。
 
 ## 先读这一句
 任务描述里的「已知事实」是**系统从文件名、nfo 侧车文件、视频容器里确定性读出来的**，
-不是猜的。标题、年份、季集号、分辨率、编码、时长、音轨这些**已经是答案了**，
-你不需要再去验证，也不要在总结里重复罗列它们。
+技术参数来自实际文件，无需重复验证。标题和年份是识别线索，应结合原始文件名、nfo 和数据库检索结果判断作品；目录名只提供上下文。
 
-你要做的只有三件事：**认出这是哪一部作品**、**挑对 TMDB 条目**、**归类打标签**。
+你的任务是认出作品、核对数据库条目、归类打标签。收藏分组只能由用户修改；来源系列关系由程序另存。
 
 ## 工作方式
 1. 已知事实里**带了 TMDB id 或 IMDB id** 时：直接用 \`tmdb_detail\`（或 \`tmdb_find\`）取详情，
    **不要再搜索**。那个 id 是别的媒体中心刮削好写进 nfo 的，比你搜出来的准。
 2. 没有 id 时用 \`tmdb_search\` 搜。搜出来的候选带了分数和年份，挑一个。
 3. 挑不出来（候选都不像、或者一条都没搜到）时，{{search_hint}}
-4. {{douban_step}}用 \`register_video\` 注册。确认这不是影视内容就用 \`skip_entry\` 跳过。
+4. {{douban_step}}用 \`register_video\` 注册。录屏、短视频和个人影像也属于要收录的内容，归「其他」。仅明显的样片、预告等附属文件使用 \`skip_entry\`。
 5. 处理完用一句话总结，**不要再调用任何工具**。
 
 ## 怎么搜 TMDB
@@ -107,13 +106,16 @@ export const IDENTIFY_VIDEO_SYSTEM = `你是「抱一」的影视识别 agent。
   它就是官方简介，比你重写一遍准。太长的截到 120 字左右。
 - summary 一句话，15-25 字，让用户一眼想起这是哪一部。
 
-## 不是影视内容怎么办
-用 \`skip_entry\` 跳过并说明原因。比如：
-- 教学录屏、会议录像、监控录像、手机拍的家庭视频
-- 已经被判成花絮却漏进来的预告片、样片
-- 游戏实况、直播录像
+## 录屏、短视频和个人影像
+教学录屏、会议录像、家庭视频、游戏实况、直播录像及下载的短视频归「其他」，照常注册。
+用文件名概括内容；没有影视数据库条目时留空 id，简介只写文件名或元数据能支持的内容。
+只有明确属于其他作品的预告片、样片等附属文件才跳过，不因为“不是电影或剧集”跳过视频。
 
-误收一个比漏掉一个麻烦：它会占着海报墙的一格，而用户得手工去删。
+## 目录和命名分组
+原始视频文件名是识别作品的首要线索，目录可包含多部独立作品，不能把它们当成一部剧。
+收藏分组只能由用户管理，禁止新增或调整分组。来源系列关系由站点目录另行保存。
+结合文件标题、同目录作品和库中已有条目决定是否分组。有关联时优先复用已有分组名；
+只有“下载”“视频”等存放位置线索时留空，不因为文件放在一起就断言属于同一作品。
 
 ## 硬性要求
 - **不要编 TMDB id。** 只填 tmdb_search / tmdb_detail / tmdb_find 真实返回过的 id。
@@ -281,7 +283,7 @@ function fmtDuration(sec: number): string {
  */
 export function videoCandidatePrompt(
   f: VideoFacts,
-  registered: Array<{ name: string; path: string }> = []
+  registered: Array<{ name: string; path: string; collection_name?: string }> = []
 ): string {
   const lines = [
     `请识别并注册这个影视条目：${f.path}`,
@@ -292,6 +294,15 @@ export function videoCandidatePrompt(
 
   const title = [f.title_zh, f.title_en].filter(Boolean).join(' / ') || '（文件名里切不出标题）'
   lines.push(`  标题：${title}`)
+  lines.push(`  内容目录：${f.dir}${f.shared_directory ? '（多部作品共享）' : ''}`)
+  if (f.files?.length) {
+    lines.push('', '## 原始视频文件名与解析结果')
+    for (const file of f.files.slice(0, 12)) lines.push(`  · ${file.name} → ${file.title || '未解析出标题'}${file.year ? `（${file.year}）` : ''}`)
+    if (f.files.length > 12) lines.push(`  另有 ${f.files.length - 12} 个文件。`)
+  }
+  if (f.sibling_titles?.length > 1) {
+    lines.push('', '## 同目录作品（用于判断是否分组，分别注册）', `  ${f.sibling_titles.slice(0, 20).join('、')}`)
+  }
   if (f.original_title) lines.push(`  原名：${f.original_title}`)
   lines.push(`  年份：${f.year > 0 ? f.year : '（文件名和 nfo 里都没有）'}`)
 
@@ -375,9 +386,9 @@ export function videoCandidatePrompt(
     lines.push(
       '',
       '## 这个目录下之前已经注册过',
-      '（识别到同一部作品时用相同的路径注册即可覆盖，不要另起一条）'
+      '（核对文件和作品身份，确有关联时复用已有命名分组；不同作品分别保留）'
     )
-    for (const r of registered.slice(0, 10)) lines.push(`  · ${r.name} → ${r.path}`)
+    for (const r of registered.slice(0, 10)) lines.push(`  · ${r.name} → ${r.path}${r.collection_name ? `；分组：${r.collection_name}` : ''}`)
   }
 
   return lines.join('\n')
