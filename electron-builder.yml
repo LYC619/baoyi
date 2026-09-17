@@ -41,7 +41,7 @@ extraResources:
 win:
   icon: resources/icon.ico
   target:
-    - target: nsis
+    - target: portable
       arch: [x64]
 
 nsis:

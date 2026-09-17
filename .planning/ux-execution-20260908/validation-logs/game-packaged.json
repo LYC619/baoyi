@@ -1,0 +1,18 @@
+{
+  "executable": "D:\\8.Project\\0_0_维护\\抱一\\release\\0.8.0-integration-20260912\\win-unpacked\\抱一.exe",
+  "profile": "C:\\Users\\yicha\\AppData\\Local\\Temp\\baoyi-game-package-wL0MOk",
+  "output": "D:\\8.Project\\0_0_维护\\抱一\\.planning\\ux-execution-20260908\\packaged-ui\\game-JhCjnB",
+  "checks": [
+    "manual registration works without AI and preserves launcher identity",
+    "Portal candidates decode through baoyi protocol and selection persists",
+    "invalid replacement keeps the old image; missing cache can be rebuilt",
+    "Genshin local artwork has priority and requires no network",
+    "Genshin official source uses cached landscape previews without library keys",
+    "packaged game wall renders both saved covers after reload"
+  ],
+  "errors": [],
+  "limitations": [
+    "All network responses are offline fixtures; official artwork availability and likeness are not asserted",
+    "No installed games or actual save directories were accessed; no launcher was executed"
+  ]
+}

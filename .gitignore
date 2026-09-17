@@ -23,3 +23,6 @@ reference/
 # Codex 验证证据（截图、日志、JSON）与 Hanime 探针的临时 Chromium profile，本地留存
 /output/
 /.tmp-hanime-api-probe/
+
+# Codex 打包界面排练的截图证据，24 MB 一组 PNG；同 output/ 一样本地留存，不进版本库
+/.planning/**/packaged-ui/

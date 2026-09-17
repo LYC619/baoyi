@@ -1,0 +1,55 @@
+{
+  "executable": "D:\\8.Project\\0_0_维护\\抱一\\release\\0.8.0-integration-20260912\\win-unpacked\\抱一.exe",
+  "profile": "C:\\Users\\yicha\\AppData\\Local\\Temp\\baoyi-ux-package-lh2buu",
+  "output": "D:\\8.Project\\0_0_维护\\抱一\\.planning\\ux-execution-20260908\\packaged-ui\\run-j3wC5w",
+  "checks": [
+    "isolated packaged app, native SQLite and preload",
+    "private works and download tasks stay hidden",
+    "960×640 / 1280×900 detail rows, both themes and keyboard",
+    "125% interface zoom keeps controls within the window",
+    "default file version and watched state persist through native IPC",
+    "organization preview is read-only; UI merge and rollback preserve history",
+    "physical organization through UI publishes files and retains originals",
+    "task clearing is scoped and protects active work and reset",
+    "Settings exports all 21 metadata tables without settings",
+    "cancelled restore is read-only; confirmed restore snapshots WAL and requests restart",
+    "new process reads restored library and task history",
+    "Settings reset clears SQLite, runtime jobs and renderer state; originals remain"
+  ],
+  "layouts": [
+    {
+      "width": 960,
+      "height": 640,
+      "theme": "light",
+      "visible": 5,
+      "overflow": false
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "theme": "light",
+      "visible": 8,
+      "overflow": false
+    },
+    {
+      "width": 960,
+      "height": 640,
+      "theme": "dark",
+      "visible": 5,
+      "overflow": false
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "theme": "dark",
+      "visible": 8,
+      "overflow": false
+    }
+  ],
+  "errors": [],
+  "limitations": [
+    "Synthetic media were not played",
+    "Native file/restore dialogs and restart are controlled in the isolated fixture",
+    "125% Chromium zoom is not a physical display DPI test"
+  ]
+}

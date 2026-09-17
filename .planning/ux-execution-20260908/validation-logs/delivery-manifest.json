@@ -1,0 +1,27 @@
+{
+  "createdUtc": "2026-09-12T02:47:26.4191191Z",
+  "branch": "codex/field-test-fixes-20260908",
+  "version": "0.8.0",
+  "files": [
+    {
+      "path": "D:\\8.Project\\0_0_维护\\抱一\\release\\0.8.0-integration-20260912\\win-unpacked\\抱一.exe",
+      "bytes": 204540928,
+      "modified": "2026-09-12T02:45:47.7641917Z",
+      "sha256": "030F023B9A045C0BEC56D0FF412528D0BDDB7CCAC56E9CB96DECCB2E9A80DB76"
+    },
+    {
+      "path": "D:\\8.Project\\0_0_维护\\抱一\\release\\0.8.0-integration-20260912\\win-unpacked\\resources\\app.asar",
+      "bytes": 12370700,
+      "modified": "2026-09-12T02:45:47.1123150Z",
+      "sha256": "51C42460AFE30228686B0C0C0E9AAFC644100221FD126BC76FBD71F68F9E299A"
+    }
+  ],
+  "packagedChecks": 12,
+  "gamePackagedChecks": 6,
+  "selfcheck": 627,
+  "reports": [
+    "packaged-integration.json",
+    "game-packaged.json"
+  ],
+  "state": "Local integration build; no commit or publication"
+}
