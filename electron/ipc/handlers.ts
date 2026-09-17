@@ -29,7 +29,7 @@ import {
   createTag,
   dataStats,
   deleteSoftware,
-  exportAll,
+  exportSoftwareList,
   getSettings,
   getSoftware,
   listCategories,
@@ -139,6 +139,7 @@ import { registerVideoWorkflowIpc } from './video-workflow.ts'
 import { registerVideoOrganizeIpc } from './video-organize.ts'
 import { registerVideoImportIpc } from './video-import.ts'
 import { registerVideoAgentOrganizeIpc } from './video-agent-organize.ts'
+import { assertLibraryIdle, registerLibraryBackupIpc } from './library-backup.ts'
 import { createHanimeBrowser } from '../services/hanime-browser.ts'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
@@ -153,6 +154,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   registerVideoOrganizeIpc(getWindow, ipcMain)
   registerVideoImportIpc(getWindow, ipcMain)
   registerVideoAgentOrganizeIpc(getWindow, ipcMain)
+  registerLibraryBackupIpc(getWindow, ipcMain)
   const send = (channel: string, payload: unknown) => {
     const win = getWindow()
     if (win && !win.isDestroyed()) {
@@ -609,22 +611,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   })
 
   ipcMain.handle('data:reset', (_e, mode: 'library' | 'all') => {
+    assertLibraryIdle()
     const summary = resetData(mode === 'all' ? 'all' : 'library')
     videoWorkflow.resetHistory()
     return { summary, settings: getSettings() }
-  })
-
-  ipcMain.handle('data:export-json', async () => {
-    const win = getWindow()
-    if (!win) return null
-    const result = await dialog.showSaveDialog(win, {
-      title: '导出数据',
-      defaultPath: path.join('baoyi-export.json'),
-      filters: [{ name: 'JSON', extensions: ['json'] }]
-    })
-    if (result.canceled || !result.filePath) return null
-    await fs.writeFile(result.filePath, JSON.stringify(exportAll(), null, 2), 'utf-8')
-    return result.filePath
   })
 
   ipcMain.handle('data:export-markdown', async () => {
@@ -636,7 +626,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       filters: [{ name: 'Markdown', extensions: ['md'] }]
     })
     if (result.canceled || !result.filePath) return null
-    await fs.writeFile(result.filePath, toMarkdown(exportAll()), 'utf-8')
+    await fs.writeFile(result.filePath, toMarkdown(exportSoftwareList()), 'utf-8')
     return result.filePath
   })
 }
@@ -648,7 +638,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
  * 这份是给人看的，只留读起来有意义的东西，路径和使用统计那些不进正文。
  * 目标是能直接贴进 Obsidian。
  */
-function toMarkdown(data: ReturnType<typeof exportAll>): string {
+function toMarkdown(data: ReturnType<typeof exportSoftwareList>): string {
   const esc = (s: string) => s.replace(/\r?\n+/g, ' ').trim()
   const out: string[] = [
     '# 抱一 · 本地软件清单',

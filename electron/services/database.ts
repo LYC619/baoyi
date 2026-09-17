@@ -8,6 +8,7 @@ import { rebase } from '../kinds/software/organize/plan'
 import { KINDS } from '../kinds'
 import { initSchema, insertCategories, insertTag, schemaVersion, seedDefaults, SCHEMA_VERSION } from './schema'
 import { FALLBACK_CATEGORY } from './taxonomy'
+import { buildLibraryBackup } from './library-backup.ts'
 import { VIDEO_JOBS_SQL } from '../kinds/video/download/jobs.ts'
 import { migratePosterStorage, resolvePosterDirectory } from './poster-storage.ts'
 import { isPortable } from './portable'
@@ -1845,7 +1846,11 @@ export function patchSettings(patch: Partial<AppSettings>): AppSettings {
   return next
 }
 
-export function exportAll(): { version: number; exported_at: number; software: SoftwareItem[]; categories: Category[] } {
+export function exportAll(): import('../../src/types/library-backup.ts').LibraryBackup {
+  return buildLibraryBackup(getDb())
+}
+
+export function exportSoftwareList(): { version: number; exported_at: number; software: SoftwareItem[]; categories: Category[] } {
   return {
     // 3：条目上多了 is_portable / move_risk / link_target
     version: 3,

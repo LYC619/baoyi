@@ -1711,6 +1711,8 @@ export interface BaoyiApi {
   }
   data: {
     exportJson(): Promise<string | null>
+    /** Validate and preview a full metadata backup, confirm, snapshot and restart. */
+    restoreJson(): Promise<{ backupPath: string } | null>
     /** 导出为人能直接读的 Markdown 清单 */
     exportMarkdown(): Promise<string | null>
     /** 数据库和图标所在的目录 */

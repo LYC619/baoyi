@@ -257,6 +257,7 @@ const api: BaoyiApi = {
     onProgress: (cb) => subscribe('ai:progress', cb)
   },
   data: {
+    restoreJson: () => ipcRenderer.invoke('data:restore-json'),
     exportJson: () => ipcRenderer.invoke('data:export-json'),
     exportMarkdown: () => ipcRenderer.invoke('data:export-markdown'),
     dir: () => ipcRenderer.invoke('data:dir'),

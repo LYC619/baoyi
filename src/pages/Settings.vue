@@ -1010,8 +1010,21 @@ function openDataDir(): void {
 }
 
 async function exportJson(): Promise<void> {
-  const file = await window.baoyi.data.exportJson()
-  if (file) success(`已导出到 ${file}`)
+  try {
+    const file = await window.baoyi.data.exportJson()
+    if (file) success(`已备份到 ${file}`)
+  } catch (cause) { error(`备份失败：${cause instanceof Error ? cause.message : String(cause)}`) }
+}
+
+const restoringBackup = ref(false)
+async function restoreJson(): Promise<void> {
+  if (restoringBackup.value) return
+  restoringBackup.value = true
+  try {
+    const result = await window.baoyi.data.restoreJson()
+    if (result) success('资料库已恢复，正在重启应用')
+  } catch (cause) { error(`恢复失败：${cause instanceof Error ? cause.message : String(cause)}`) }
+  finally { restoringBackup.value = false }
 }
 
 async function exportMarkdown(): Promise<void> {
@@ -1983,15 +1996,20 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             <div class="row">
               <button class="btn btn--ghost" @click="exportJson">
                 <Download :size="14" />
-                导出为 JSON
+                备份全部资料（JSON）
+              </button>
+              <button class="btn btn--ghost" :disabled="restoringBackup || resetting" @click="restoreJson">
+                <FolderOpen :size="14" />
+                {{ restoringBackup ? '正在恢复…' : '从备份恢复' }}
               </button>
               <button class="btn btn--ghost" @click="exportMarkdown">
                 <Download :size="14" />
-                导出为 Markdown
+                导出软件清单（Markdown）
               </button>
             </div>
             <p class="hint hint--block">
-              JSON 是完整备份，字段一个不落；Markdown 是给人读的清单，按分类分节，可直接贴进笔记。
+              JSON 备份全部品类的资料、观看记录和任务记录，不包含资源文件或 API 配置。
+              恢复前会预览并自动备份当前数据库，确认后重启应用。Markdown 为软件清单。
             </p>
           </section>
 
