@@ -22,6 +22,19 @@ body {
   background: var(--bg-main);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* 默认可选中：简介、日志、路径这些都是要复制走的。只有拖拽 / 点击用的壳子
+     （标题栏、侧栏、卡片、页签、按钮）反过来关掉，见下面的 .no-select（B6） */
+  user-select: text;
+}
+
+/* 拖拽和点击用的壳子不参与选中，免得拖窗口、点卡片时拖出一片蓝 */
+.no-select,
+button,
+.titlebar,
+.sidebar,
+.segmented,
+.tabs,
+.card {
   user-select: none;
 }
 

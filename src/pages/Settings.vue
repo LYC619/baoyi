@@ -1323,7 +1323,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
     </header>
 
     <div class="layout">
-      <nav class="nav">
+      <nav class="nav no-select">
         <button
           v-for="t in TABS"
           :key="t.id"

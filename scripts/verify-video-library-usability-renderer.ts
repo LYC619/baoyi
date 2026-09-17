@@ -68,7 +68,7 @@ try {
     await page.getByRole('button',{name:'全选当前范围',exact:true}).click()
     await page.getByRole('button',{name:'Agent 复查所选',exact:true}).click()
     await page.waitForFunction(()=>(window as any).__fixture.calls.filter((c:any)=>c[0]==='reidentify').length===2)
-    await page.getByRole('button',{name:'取消选择',exact:true}).click()
+    await page.getByRole('button',{name:'退出批量管理',exact:true}).click()
     assert.equal(await page.getByRole('button',{name:'打开 Hanime',exact:true}).isVisible(),false)
     await page.evaluate(()=>(window as any).__fixture.videoStore.select({kind:'type',value:'hentai'}))
     await page.getByRole('button',{name:'打开 Hanime',exact:true}).click()

@@ -110,7 +110,7 @@ onBeforeUnmount(() => {
     <div class="organize-overlay" @click.self="$emit('close')">
       <section ref="panel" class="organize-panel" role="dialog" aria-modal="true" aria-labelledby="organize-title" tabindex="-1">
         <header class="organize-panel__head"><div><h2 id="organize-title">{{ title }}</h2><p>{{ mode === 'organize' ? '选好名称和集数，让同一部作品集中显示。' : '核对目录与文件，保留原有资料和观看记录。' }}</p></div><button class="btn btn--subtle" type="button" aria-label="关闭整理面板" @click="$emit('close')"><X :size="18" /></button></header>
-        <nav class="organize-tabs" aria-label="整理步骤">
+        <nav class="organize-tabs no-select" aria-label="整理步骤">
           <button v-if="mode !== 'history'" type="button" :aria-current="tab === 'preview' ? 'step' : undefined" @click="showSelection">{{ mode === 'organize' ? '合集内容' : '目录与预览' }}</button>
           <button type="button" :aria-current="tab === 'history' ? 'step' : undefined" :disabled="!!busy" @click="showHistory">整理记录</button>
         </nav>

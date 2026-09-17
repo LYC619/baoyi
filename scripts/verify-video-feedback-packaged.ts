@@ -188,7 +188,7 @@ try {
     await panel.getByRole('button', { name: '移除标签', exact: true }).click()
     await expect.poll(async () => (await get(single.resourceId)).tags.includes('批量临时标签')).toBe(false)
     await page.screenshot({ path: path.join(evidence, 'bulk-management.png') })
-    await page.getByRole('button', { name: '取消选择', exact: true }).click()
+    await page.getByRole('button', { name: '退出批量管理', exact: true }).click()
   })
   await check('move collection preview preserves same-name attachments and the native journal can roll it back', async () => {
     await page.getByRole('button', { name: '创建合集', exact: true }).click()

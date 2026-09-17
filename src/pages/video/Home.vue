@@ -64,19 +64,39 @@ const selectedIds = ref<string[]>([])
 const bulkOpen = ref(false)
 const removing = ref(false)
 const importing = computed(() => !!videoImport.busy.value)
-const expanded = ref<Record<string, boolean>>({}), expandedEpisodes = ref<Record<string, VideoWorkContent[]>>({})
-async function toggleCollection(id: string) {
-  expanded.value[id] = !expanded.value[id]
-  if (expanded.value[id]) try { expandedEpisodes.value[id] = (await window.baoyi.video.library(id)).contents } catch (e) { error(errorMessage(e)) }
+// 手动展开和搜索自动展开分开记：自动展开只在有搜索 / 标签条件时存在，条件一清就整组收回；
+// 之前混在一个集合里，清空搜索后 expanded[id] 仍是 true，watcher 再跑一遍等于永远收不回（B2）
+const userExpanded = ref<Record<string, boolean>>({}), autoExpanded = ref<Record<string, boolean>>({})
+const expandedEpisodes = ref<Record<string, VideoWorkContent[]>>({})
+const expanded = computed<Record<string, boolean>>(() => ({ ...autoExpanded.value, ...userExpanded.value }))
+async function loadEpisodes(id: string): Promise<VideoWorkContent[]> {
+  try { return expandedEpisodes.value[id] = (await window.baoyi.video.library(id)).contents } catch (e) { error(errorMessage(e)); return [] }
 }
-function matchingEpisodes(id: string): VideoWorkContent[] {
+async function toggleCollection(id: string) {
+  const next = !expanded.value[id]
+  userExpanded.value[id] = next
+  if (!next) delete autoExpanded.value[id]
+  if (next && !expandedEpisodes.value[id]) await loadEpisodes(id)
+}
+function matchingEpisodes(id: string, episodes = expandedEpisodes.value[id] || []): VideoWorkContent[] {
   const tag = store.selection.kind === 'tag' ? store.selection.value : ''
   const keyword = store.keyword.trim().toLocaleLowerCase()
-  return (expandedEpisodes.value[id] || []).filter(e => (!tag || e.tags?.includes(tag)) && (!keyword || [e.title,e.original_title,...e.tags || []].join(' ').toLocaleLowerCase().includes(keyword)))
+  return episodes.filter(e => (!tag || e.tags?.includes(tag)) && (!keyword || [e.title,e.original_title,...e.tags || []].join(' ').toLocaleLowerCase().includes(keyword)))
 }
+const searching = computed(() => store.selection.kind === 'tag' || !!store.keyword.trim())
+let expandRun = 0
 watch(() => [shownItems.value, store.selection, store.keyword], async () => {
+  // 关键词连着改时前一轮还在等 IPC，等它回来条件已经不是它算的那个了 —— 晚到的一轮直接作废
+  const run = ++expandRun
   expandedEpisodes.value = {}
-  for (const item of shownItems.value) if (item.episode_total > 1 && (expanded.value[item.id] || store.selection.kind === 'tag' || store.keyword.trim())) { expanded.value[item.id] = false; await toggleCollection(item.id) }
+  autoExpanded.value = {}
+  for (const item of shownItems.value) {
+    if (item.episode_total <= 1 || (!userExpanded.value[item.id] && !searching.value)) continue
+    const episodes = await loadEpisodes(item.id)
+    if (run !== expandRun) return
+    // 只有单集真的命中条件才自动展开；作品自身匹配而单集不匹配的，展开也只是一行空态
+    if (!userExpanded.value[item.id] && matchingEpisodes(item.id, episodes).length) autoExpanded.value[item.id] = true
+  }
 })
 const selectedWorks = computed(() => selectedIds.value.map(id => shownItems.value.find(item => item.id === id)).filter((item): item is VideoItem => !!item))
 const organizeMode = ref<'organize' | 'history' | ''>('')
@@ -366,9 +386,9 @@ const emptyHint = computed(() => {
         <div class="library-summary__actions">
           <button v-if="selecting && bulkOpen" type="button" class="btn btn--ghost" :disabled="scanning || reviewingSelected || !selectedWorks.length" @click="reviewSelected">{{ reviewingSelected ? '正在复查…' : 'Agent 复查所选' }}</button>
           <button v-if="pendingOnly && !selecting" type="button" @click="toggleSelecting(); bulkOpen = true; selectedIds = shownItems.filter(item => item.needs_review).map(item => item.id)">选择待复查作品</button>
-          <button v-if="selecting" type="button" class="btn btn--ghost" :disabled="!selectedWorks.length" @click="organize('organize')">下一步</button>
+          <button v-if="selecting && !bulkOpen" type="button" class="btn btn--ghost" :disabled="!selectedWorks.length" @click="organize('organize')">下一步</button>
           <button type="button" :disabled="!shownItems.length" @click="videoAgent.show(selecting ? selectedWorks : shownItems)">Agent 整理</button>
-          <button ref="organizeTrigger" type="button" :aria-pressed="selecting" @click="toggleSelecting">{{ selecting ? '取消选择' : '创建合集' }}</button>
+          <button ref="organizeTrigger" type="button" :aria-pressed="selecting" @click="toggleSelecting">{{ selecting ? (bulkOpen ? '退出批量管理' : '取消选择') : '创建合集' }}</button>
           <button v-if="!selecting" type="button" @click="toggleSelecting(); bulkOpen = true">批量管理</button>
           <button v-if="!selecting" type="button" @click="organize('history')">整理记录</button>
         </div>

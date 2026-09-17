@@ -82,7 +82,7 @@ try {
     await removal.getByRole('button',{name:'删除记录并移入回收站',exact:true}).waitFor()
     await removal.getByRole('button',{name:'关闭',exact:true}).click()
     assert.equal(await page.evaluate(()=>(window as any).__fixture.calls.filter((c:any[])=>c[0]==='removal').length),0)
-    await page.getByRole('button',{name:'取消选择',exact:true}).click()
+    await page.getByRole('button',{name:'退出批量管理',exact:true}).click()
   })
   await test('目录导入结果明确显示自动入库及跳过原因',async()=>{
     await page.getByRole('button',{name:'导入目录',exact:true}).click()

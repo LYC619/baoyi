@@ -830,7 +830,7 @@ function copyPath(path: string): void {
             </aside>
           </section>
 
-          <nav class="detail-tabs" role="tablist" aria-label="影视详情" @keydown="tabKeydown">
+          <nav class="detail-tabs no-select" role="tablist" aria-label="影视详情" @keydown="tabKeydown">
             <button v-for="tab in detailTabs" :id="'video-tab-' + tab.id" :key="tab.id" type="button" role="tab" :aria-selected="activeTab === tab.id" :aria-controls="'video-panel-' + tab.id" :tabindex="activeTab === tab.id ? 0 : -1" @click="activeTab = tab.id">{{ tab.label }}<span v-if="tab.count">{{ tab.count }}</span></button>
           </nav>
           <div id="video-panel-contents" v-show="activeTab === 'contents'" role="tabpanel" aria-labelledby="video-tab-contents" tabindex="0">

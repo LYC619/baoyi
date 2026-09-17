@@ -44,11 +44,15 @@ const panel = ref<HTMLElement | null>(null)
 const closeButton = ref<HTMLButtonElement | null>(null)
 const expanded = ref(new Set<string>())
 const identifyLogs = ref(new Set<string>())
+// 面板 body 拆成上下两个滚动区：任务在上、下载固定在底部（B5）。之前四个分区顺序铺在
+// 同一个滚动区里，历史一多下载队列就被顶到看不见的地方
 const sections = computed(() => [
-  { key: 'running', label: '运行中', items: runningTasks.value, jobs: [] as VideoDownloadJob[], collapsible: false },
-  { key: 'queue', label: '下载队列', items: [] as TaskWithResults[], jobs: jobSections.value[0].items, collapsible: false },
-  { key: 'history', label: '最近结束', items: history.value, jobs: [] as VideoDownloadJob[], collapsible: false },
-  { key: 'downloads', label: '下载结果', items: [] as TaskWithResults[], jobs: jobSections.value[1].items, collapsible: true }
+  { key: 'running', label: '运行中', items: runningTasks.value },
+  { key: 'history', label: '最近结束', items: history.value }
+])
+const downloadSections = computed(() => [
+  { key: 'queue', label: '下载队列', jobs: jobSections.value[0].items, collapsible: false },
+  { key: 'downloads', label: '下载结果', jobs: jobSections.value[1].items, collapsible: true }
 ])
 const entryLabel = computed(() => `任务中心：${runningCount.value} 个运行中，${queuedCount.value} 个排队，${failedCount.value} 个失败或待处理`)
 const kindLabels: Record<TaskKind, string> = {
@@ -215,36 +219,8 @@ onBeforeUnmount(() => {
               <p>扫描、识别、整理和验证的进度会显示在这里。</p>
             </div>
             <template v-for="section in sections" :key="section.key">
-              <component :is="section.collapsible ? 'details' : 'section'" v-if="section.items.length || section.jobs.length" class="task-group" :class="{ 'task-group--downloads': section.collapsible }" :aria-label="section.label">
-                <component :is="section.collapsible ? 'summary' : 'h3'" class="task-group__heading">{{ section.label }}<span>{{ section.items.length + section.jobs.length }}</span></component>
-                <article v-for="job in section.jobs" :key="job.id" class="task-card download-task" :class="`task-card--${job.status}`">
-                  <div class="task-card__head">
-                    <Loader2 v-if="job.status === 'running'" :size="16" class="task-spin task-card__icon" />
-                    <h4>{{ job.title }}</h4><span class="task-card__status">{{ jobStatus(job) }}</span>
-                  </div>
-                  <p class="task-card__message">{{ jobSummary(job) }}</p>
-                  <p v-if="job.message" class="task-card__message">{{ job.message }}</p>
-                  <div class="task-card__actions">
-                    <button v-if="job.resourceId" type="button" @click="openWork(job.resourceId)"><ExternalLink :size="13" />打开作品</button>
-                    <button v-if="job.directory" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.reveal(job.id)"><FolderOpen :size="13" />打开目录</button>
-                    <button v-if="job.status === 'running' || job.status === 'queued'" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.cancel(job.id)"><Square :size="12" />{{ job.status === 'queued' ? '取消排队' : '停止下载' }}</button>
-                    <button v-for="stage in videoJobRetryStages(job)" :key="stage" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.retry(job.id, stage)"><RefreshCw :size="13" />{{ retryLabels[stage] }}</button>
-                  </div>
-                  <details class="task-download-items">
-                    <summary>查看 {{ job.items.length }} 项的下载、资料和入库结果</summary>
-                    <ul>
-                      <li v-for="item in job.items" :key="item.videoCode">
-                        <strong>{{ item.title || item.videoCode }}</strong>
-                        <span>视频：{{ stageLabels[item.transfer] }} · 资料：{{ stageLabels[item.metadata] }} · 入库：{{ job.register ? stageLabels[item.registration] : '仅保存文件' }}</span>
-                        <span v-if="item.transfer === 'running'">已接收 {{ formatBytes(item.receivedBytes) }}{{ item.totalBytes > 0 ? ' / ' + formatBytes(item.totalBytes) : ' · 大小未知' }}</span>
-                        <span v-if="item.sourceLabel">实际清晰度：{{ item.sourceLabel }}</span>
-                        <p v-if="item.error" class="task-card__error">{{ item.error }}</p>
-                        <p v-for="warning in item.warnings" :key="warning" class="task-card__warning">{{ warning }}</p>
-                      </li>
-                    </ul>
-                    <p v-for="warning in job.warnings" :key="warning" class="task-card__warning">{{ warning }}</p>
-                  </details>
-                </article>
+              <section v-if="section.items.length" class="task-group" :aria-label="section.label">
+                <h3 class="task-group__heading">{{ section.label }}<span>{{ section.items.length }}</span></h3>
                 <article v-for="task in section.items" :key="task.id" class="task-card" :class="`task-card--${task.status}`">
                   <div class="task-card__head">
                     <Loader2 v-if="task.status === 'running'" :size="16" class="task-spin task-card__icon" />
@@ -309,6 +285,41 @@ onBeforeUnmount(() => {
                     <IdentifyLog v-if="identifyLogs.has(task.id)" :resource-kind="identifyKind(task)" :since="task.startedAt" :until="task.finishedAt" />
                   </details>
                 </article>
+              </section>
+            </template>
+          </div>
+          <div v-if="downloadJobs.length" class="task-panel__downloads" aria-label="下载">
+            <template v-for="section in downloadSections" :key="section.key">
+              <component :is="section.collapsible ? 'details' : 'section'" v-if="section.jobs.length" class="task-group" :class="{ 'task-group--downloads': section.collapsible }" :aria-label="section.label">
+                <component :is="section.collapsible ? 'summary' : 'h3'" class="task-group__heading">{{ section.label }}<span>{{ section.jobs.length }}</span></component>
+                <article v-for="job in section.jobs" :key="job.id" class="task-card download-task" :class="`task-card--${job.status}`">
+                  <div class="task-card__head">
+                    <Loader2 v-if="job.status === 'running'" :size="16" class="task-spin task-card__icon" />
+                    <h4>{{ job.title }}</h4><span class="task-card__status">{{ jobStatus(job) }}</span>
+                  </div>
+                  <p class="task-card__message">{{ jobSummary(job) }}</p>
+                  <p v-if="job.message" class="task-card__message">{{ job.message }}</p>
+                  <div class="task-card__actions">
+                    <button v-if="job.resourceId" type="button" @click="openWork(job.resourceId)"><ExternalLink :size="13" />打开作品</button>
+                    <button v-if="job.directory" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.reveal(job.id)"><FolderOpen :size="13" />打开目录</button>
+                    <button v-if="job.status === 'running' || job.status === 'queued'" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.cancel(job.id)"><Square :size="12" />{{ job.status === 'queued' ? '取消排队' : '停止下载' }}</button>
+                    <button v-for="stage in videoJobRetryStages(job)" :key="stage" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.retry(job.id, stage)"><RefreshCw :size="13" />{{ retryLabels[stage] }}</button>
+                  </div>
+                  <details class="task-download-items">
+                    <summary>查看 {{ job.items.length }} 项的下载、资料和入库结果</summary>
+                    <ul>
+                      <li v-for="item in job.items" :key="item.videoCode">
+                        <strong>{{ item.title || item.videoCode }}</strong>
+                        <span>视频：{{ stageLabels[item.transfer] }} · 资料：{{ stageLabels[item.metadata] }} · 入库：{{ job.register ? stageLabels[item.registration] : '仅保存文件' }}</span>
+                        <span v-if="item.transfer === 'running'">已接收 {{ formatBytes(item.receivedBytes) }}{{ item.totalBytes > 0 ? ' / ' + formatBytes(item.totalBytes) : ' · 大小未知' }}</span>
+                        <span v-if="item.sourceLabel">实际清晰度：{{ item.sourceLabel }}</span>
+                        <p v-if="item.error" class="task-card__error">{{ item.error }}</p>
+                        <p v-for="warning in item.warnings" :key="warning" class="task-card__warning">{{ warning }}</p>
+                      </li>
+                    </ul>
+                    <p v-for="warning in job.warnings" :key="warning" class="task-card__warning">{{ warning }}</p>
+                  </details>
+                </article>
               </component>
             </template>
           </div>
@@ -336,7 +347,11 @@ onBeforeUnmount(() => {
 .task-panel__clear, .task-panel__close { display: flex; align-items: center; justify-content: center; gap: 5px; flex: none; height: 28px; padding: 0 6px; border-radius: 5px; color: var(--text-sub); font-size: 11px; }
 .task-panel__clear:hover:not(:disabled), .task-panel__close:hover { color: var(--text-main); background: var(--hover-surface); }
 .task-panel__clear:disabled { opacity: 0.4; cursor: default; }
-.task-panel__body { min-height: 0; padding: 12px; overflow-y: auto; overscroll-behavior: contain; }
+.task-panel__header, .task-panel__footer { flex: none; }
+.task-panel__body { flex: 1 1 auto; min-height: 0; padding: 12px; overflow-y: auto; overscroll-behavior: contain; }
+/* 下载区固定在 footer 上方、自己滚动，最多占 45vh（面板本身没有确定高度，百分比 max-height 算不出来）；
+   任务多时上面那块被压缩滚动，下载队列始终看得见 */
+.task-panel__downloads { flex: none; max-height: 45vh; padding: 12px; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--divider); background: var(--bg-side); }
 .task-panel__empty { display: grid; justify-items: center; gap: 12px; padding: 34px 16px; color: var(--text-sub); text-align: center; }
 .task-panel__empty h3 { font-family: var(--font-display); color: var(--text-main); font-size: 17px; font-weight: 400; }
 .task-panel__empty p { font-size: var(--fs-tag); line-height: 1.7; }
