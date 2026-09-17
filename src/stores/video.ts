@@ -1,16 +1,17 @@
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
-import type { Episode, VideoCounts, VideoItem, VideoQuery, VideoType, WatchStatus } from '@/types'
+import type { Episode, VideoCounts, VideoFilterType, VideoItem, VideoLibraryFilters, VideoQuery, WatchStatus } from '@/types'
 import { useToast } from '@/composables/useToast'
 import { createLatestGuard, errorMessage, isLocalPosterPath, plain } from '@/utils'
 
 /** 侧边栏一次只选一样东西。同游戏那边的 GameSelection */
 export type VideoSelection =
-  | { kind: 'group'; value: 'all' | 'archived' }
-  | { kind: 'type'; value: VideoType }
+  | { kind: 'group'; value: 'all' | 'archived'; type?: 'hentai' }
+  | { kind: 'type'; value: VideoFilterType }
   | { kind: 'status'; value: WatchStatus }
   | { kind: 'category'; value: string }
-  | { kind: 'tag'; value: string }
+  | { kind: 'tag'; value: string; category?: string; type?: 'hentai' }
+  | { kind: 'collection'; value: string; type?: 'hentai' }
 
 /**
  * 四态的说法。
@@ -26,9 +27,10 @@ export const WATCH_STATUS_LABEL: Record<WatchStatus, string> = {
   dropped: '弃'
 }
 
-export const VIDEO_TYPE_LABEL: Record<VideoType, string> = {
+export const VIDEO_TYPE_LABEL: Record<VideoFilterType, string> = {
   movie: '电影',
-  series: '剧集'
+  series: '剧集',
+  hentai: '里番'
 }
 
 
@@ -46,20 +48,30 @@ export const useVideoStore = defineStore('video', () => {
   const items = ref<VideoItem[]>([])
   const counts = ref<VideoCounts>({ ...EMPTY_COUNTS })
   const loading = ref(false)
+  const brokenPosters = ref(new Set<string>())
 
   // 快慢两个查询并发时，晚到的旧响应不许覆盖新结果。同 game / software store
   const loadRounds = createLatestGuard()
   const countsRounds = createLatestGuard()
+  let loadPending = false, countsPending = false
+  let loadingRequest: Promise<void> | null = null, countsRequest: Promise<void> | null = null
   const { error: toastError } = useToast()
 
   const keyword = ref('')
   const sort = ref<NonNullable<VideoQuery['sort']>>('added')
+  const filters = reactive<VideoLibraryFilters>({ publishedFrom:'',publishedTo:'',status:'',local:'' })
+  const hasFilters = computed(() => Object.values(filters).some(Boolean))
   const selection = reactive<VideoSelection>({ kind: 'group', value: 'all' })
 
   const activeKey = computed(() => `${selection.kind}:${selection.value}`)
+  const inHentaiScope = computed(() =>
+    (selection.kind === 'type' && selection.value === 'hentai') ||
+    ((selection.kind === 'tag' || selection.kind === 'collection' || selection.kind === 'group') && (selection.type === 'hentai' || ('category' in selection && selection.category === '里番')))
+  )
 
   const heading = computed(() => {
-    if (selection.kind === 'category') return selection.value
+    if (selection.kind === 'collection') return selection.value || '未设置收藏分组'
+    if (selection.kind === 'category') return selection.value === '其他' ? '其他分类' : selection.value
     if (selection.kind === 'tag') return `# ${selection.value}`
     if (selection.kind === 'status') return WATCH_STATUS_LABEL[selection.value]
     if (selection.kind === 'type') return VIDEO_TYPE_LABEL[selection.value]
@@ -72,32 +84,63 @@ export const useVideoStore = defineStore('video', () => {
     if (selection.kind === 'type') q.type = selection.value
     if (selection.kind === 'status') q.status = selection.value
     if (selection.kind === 'category') q.category = selection.value
-    if (selection.kind === 'tag') q.tag = selection.value
+    if (selection.kind === 'collection') q.collection = selection.value
+    if (inHentaiScope.value) q.type = 'hentai'
+    if (selection.kind === 'tag') {
+      q.tag = selection.value
+      if (selection.category && selection.category !== '里番') q.category = selection.category
+    }
+    if (filters.publishedFrom) q.publishedFrom = filters.publishedFrom
+    if (filters.publishedTo) q.publishedTo = filters.publishedTo
+    if (filters.status) q.status = filters.status
+    if (filters.local) q.local = filters.local
     return q
   }
+  function setFilters(value: VideoLibraryFilters): void { Object.assign(filters, value); void load() }
 
-  async function load(): Promise<void> {
-    const round = loadRounds.begin()
+  function load(): Promise<void> {
+    loadRounds.begin()
+    loadPending = true
     loading.value = true
-    try {
-      const next = await window.baoyi.video.list(buildQuery())
-      if (loadRounds.isCurrent(round)) items.value = next
-    } catch (err) {
-      // 失败时保留旧列表，比清空再显示「影视库是空的」诚实
-      if (loadRounds.isCurrent(round)) toastError(`读取影视列表失败：${errorMessage(err)}`)
-    } finally {
-      if (loadRounds.isCurrent(round)) loading.value = false
-    }
+    // A burst shares one request. Changes during that request need only one later read.
+    if (!loadingRequest) loadingRequest = Promise.resolve().then(async () => {
+      try {
+        while (loadPending) {
+          loadPending = false
+          const round = loadRounds.begin()
+          try {
+            const next = await window.baoyi.video.list(buildQuery())
+            if (loadRounds.isCurrent(round)) items.value = next
+          } catch (err) {
+            if (loadRounds.isCurrent(round)) toastError(`读取影视列表失败：${errorMessage(err)}`)
+          }
+        }
+      } finally { loading.value = false; loadingRequest = null }
+    })
+    return loadingRequest
   }
 
-  async function refreshCounts(): Promise<void> {
-    const round = countsRounds.begin()
-    try {
-      const next = await window.baoyi.video.counts()
-      if (countsRounds.isCurrent(round)) counts.value = next
-    } catch (err) {
-      if (countsRounds.isCurrent(round)) toastError(`读取统计失败：${errorMessage(err)}`)
-    }
+  function refreshCounts(): Promise<void> {
+    countsRounds.begin()
+    countsPending = true
+    if (!countsRequest) countsRequest = Promise.resolve().then(async () => {
+      try {
+        while (countsPending) {
+          countsPending = false
+          const round = countsRounds.begin()
+          try {
+            const next = await window.baoyi.video.counts()
+            if (countsRounds.isCurrent(round)) {
+              counts.value = next
+              if (next.hentai_visible === false && inHentaiScope.value) select({ kind: 'group', value: 'all' })
+            }
+          } catch (err) {
+            if (countsRounds.isCurrent(round)) toastError(`读取统计失败：${errorMessage(err)}`)
+          }
+        }
+      } finally { countsRequest = null }
+    })
+    return countsRequest
   }
 
   async function reload(): Promise<void> {
@@ -105,6 +148,10 @@ export const useVideoStore = defineStore('video', () => {
   }
 
   function select(next: VideoSelection): void {
+    if (next.kind === 'status') filters.status = ''
+    for (const key of Object.keys(selection)) {
+      if (!(key in next)) delete (selection as Record<string, unknown>)[key]
+    }
     Object.assign(selection, next)
     void load()
   }
@@ -112,6 +159,7 @@ export const useVideoStore = defineStore('video', () => {
   /** 把一条更新过的条目并回列表。海报、观看状态那些都从各自的入口回来 */
   function merge(updated: VideoItem | null): VideoItem | null {
     if (!updated) return null
+    brokenPosters.value.delete(updated.id)
     const i = items.value.findIndex((x) => x.id === updated.id)
     if (i >= 0) items.value[i] = updated
     return updated
@@ -201,7 +249,7 @@ export const useVideoStore = defineStore('video', () => {
    * 首字占位，而补海报那个动作以为自己没事可做。
    */
   const missingPosters = computed(() =>
-    items.value.filter((x) => !isLocalPosterPath(x.poster_path)).map((x) => x.id)
+    items.value.filter((x) => !isLocalPosterPath(x.poster_path) || brokenPosters.value.has(x.id)).map((x) => x.id)
   )
 
   return {
@@ -210,10 +258,15 @@ export const useVideoStore = defineStore('video', () => {
     loading,
     keyword,
     sort,
+    filters,
+    hasFilters,
+    setFilters,
     selection,
     activeKey,
     heading,
     missingPosters,
+    markPosterMissing: (id: string) => { brokenPosters.value.add(id) },
+    inHentaiScope,
     load,
     reload,
     refreshCounts,

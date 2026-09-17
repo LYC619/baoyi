@@ -9,7 +9,7 @@
  * 缺集要露面，不能只列手上有的文件。TMDB 说这季 16 集而用户手里 8 个，
  * 那 8 个空位是这一页最有用的信息之一（见 types 里 Episode.path 的注释）。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Archive,
@@ -17,12 +17,15 @@ import {
   ArrowLeft,
   Check,
   Clapperboard,
+  Download,
   ExternalLink,
   FolderOpen,
   Image,
   ImageDown,
   ImageOff,
   Loader2,
+  MoreHorizontal,
+  Pencil,
   Play,
   RefreshCw,
   Star,
@@ -31,11 +34,23 @@ import {
 } from 'lucide-vue-next'
 import EditableField from '@/components/ui/EditableField.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
+import DownloadPanel from '@/components/video/DownloadPanel.vue'
+import VideoSourceDialog from '@/components/video/VideoSourceDialog.vue'
+import VideoRemovalDialog from '@/components/video/VideoRemovalDialog.vue'
+import VideoItems from '@/components/video/VideoItems.vue'
+import VideoArtwork from '@/components/video/VideoArtwork.vue'
+import VideoScopeSwitch from '@/components/video/VideoScopeSwitch.vue'
+import OrganizePanel from '@/components/video/OrganizePanel.vue'
+import CollectionNameDialog from '@/components/video/CollectionNameDialog.vue'
+import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
 import { useToast } from '@/composables/useToast'
+import { reidentifyVideo, useMediaScan } from '@/composables/useMediaScan'
 import { WATCH_STATUS_LABEL, VIDEO_TYPE_LABEL, useVideoStore } from '@/stores/video'
 import type { Episode, MediaTrack, VideoItem, WatchStatus } from '@/types'
+import type { VideoWorkContent, VideoWorkLibrary } from '@/types/video-workflow'
+import { videoDateLabel, videoEpisodeLabel, registeredVideoContent } from '@/utils/video-content'
+const HENTAI_CATEGORY = '里番'
 import {
-  episodeCode,
   errorMessage,
   formatBytes,
   formatDate,
@@ -56,27 +71,225 @@ const { success, error, toast } = useToast()
 const item = ref<VideoItem | null>(null)
 const episodes = ref<Episode[]>([])
 const loading = ref(true)
+const library = ref<VideoWorkLibrary | null>(null)
+const checking = ref(false)
+const editing = ref(false)
+const activeTab = ref<'contents' | 'description' | 'notes' | 'files'>('contents')
+const sourceOpen = ref(false), episodeEditing = ref(false), removalEpisode = ref(''), removalWork = ref(false)
+const selectedEpisodeId = ref('')
+let readingScopeInitialized = false
+const selectedEpisode = computed(() => library.value?.contents.find(episode => episode.id === selectedEpisodeId.value) ?? null)
+const singleEpisode = computed(() => library.value?.contents.length === 1 ? library.value.contents[0] : null)
+const publicationRange = computed(() => {
+  const dates = (library.value?.contents || []).map(e => videoDateLabel(e.published_at || e.air_date)).filter(Boolean).sort()
+  const first = dates[0] || videoDateLabel(item.value?.published_start), last = dates.at(-1) || videoDateLabel(item.value?.published_end)
+  return { first, last, collection: (library.value?.contents.length || item.value?.episode_total || 0) > 1 }
+})
+const detailTabs = computed(() => [
+  { id: 'contents' as const, label: '作品内容', count: library.value?.contents.length || 0 },
+  { id: 'description' as const, label: '剧情简介' },
+  { id: 'notes' as const, label: '个人笔记' },
+  { id: 'files' as const, label: '文件与资料' }
+])
+const visibleTags = computed(() => [...new Set([...(item.value?.tags ?? []), ...(item.value?.hanime_tags ?? [])])].filter(tag => tag.trim() && !/^(add|remove)$/i.test(tag.trim())))
+const tagsElement = ref<HTMLElement | null>(null)
+const tagsExpanded = ref(false)
+const tagsOverflow = ref(false)
+const tagsHeight = ref(80)
+const tagVisibleCount = ref(Infinity)
+let tagsObserver: ResizeObserver | undefined
+function measureTags(): void {
+  const element = tagsElement.value
+  if (!element) return
+  const boxes = Array.from(element.children).map(child => (child as HTMLElement).getBoundingClientRect())
+  const rows = [...new Set(boxes.map(box => Math.round(box.top)))].sort((a, b) => a - b)
+  tagsOverflow.value = rows.length > 3
+  tagVisibleCount.value = rows.length > 3 ? boxes.filter(box => Math.round(box.top) < rows[3]).length : boxes.length
+  if (rows.length >= 3) tagsHeight.value = Math.ceil(Math.max(...boxes.filter(box => Math.round(box.top) === rows[2]).map(box => box.bottom)) - element.getBoundingClientRect().top)
+}
+watch(tagsElement, element => {
+  tagsObserver?.disconnect()
+  if (element) { tagsObserver = new ResizeObserver(measureTags); tagsObserver.observe(element); void nextTick(measureTags) }
+})
+watch(visibleTags, () => { tagsExpanded.value = false; void nextTick(measureTags) })
+function showEpisode(episode: VideoWorkContent): void {
+  selectedEpisodeId.value = episode.id
+  activeTab.value = 'description'
+  void nextTick(() => document.getElementById('video-tab-description')?.focus({ preventScroll: true }))
+}
+function tabKeydown(event: KeyboardEvent): void {
+  const index = detailTabs.value.findIndex(tab => tab.id === activeTab.value)
+  const target = event.key === 'ArrowRight' ? (index + 1) % detailTabs.value.length
+    : event.key === 'ArrowLeft' ? (index + detailTabs.value.length - 1) % detailTabs.value.length
+    : event.key === 'Home' ? 0 : event.key === 'End' ? detailTabs.value.length - 1 : -1
+  if (target < 0) return
+  event.preventDefault()
+  activeTab.value = detailTabs.value[target].id
+  void nextTick(() => document.getElementById('video-tab-' + activeTab.value)?.focus())
+}
+async function scrapeSelected(): Promise<void> {
+  if (!selectedEpisode.value?.source_url) { sourceOpen.value = true; return }
+  busyEpisode.value = selectedEpisode.value.id
+  try { const result = await window.baoyi.video.scrapeEpisode(props.id, selectedEpisode.value.id); await refreshLibrary(); success(result.warnings.length ? '资料已更新；' + result.warnings[0] : '已更新这一集的资料与图片') }
+  catch (e) { error(errorMessage(e)) } finally { busyEpisode.value = '' }
+}
+async function pickEpisodeImage(role: 'poster' | 'thumbnail'): Promise<void> {
+  if (!selectedEpisode.value) return
+  try { if (await window.baoyi.video.pickEpisodeArtwork(selectedEpisode.value.id, role)) await refreshLibrary() }
+  catch (e) { error(errorMessage(e)) }
+}
+async function saveEpisode(patch: Partial<Episode>): Promise<void> {
+  if (!selectedEpisode.value || busyEpisode.value) return
+  const episodeId = selectedEpisode.value.id, resourceId = props.id
+  busyEpisode.value = episodeId
+  try {
+    const result = await window.baoyi.video.updateEpisode(episodeId, patch)
+    if (resourceId !== props.id) return
+    if (result.episode && library.value) {
+      const index = library.value.contents.findIndex(episode => episode.id === episodeId)
+      if (index >= 0) Object.assign(library.value.contents[index], result.episode)
+    }
+    store.merge(result.item)
+    success('已保存这一集的资料')
+  } catch (cause) { error('保存单集资料失败：' + errorMessage(cause)) }
+  finally { busyEpisode.value = '' }
+}
+const loadError = ref('')
+const moreMenu = ref<HTMLDetailsElement | null>(null)
+const downloadFlow = computed(() => useVideoWorkflow(props.id))
+const itemHidden = computed(() => item.value?.category === HENTAI_CATEGORY
+  && (!downloadFlow.value.privacyReady.value || downloadFlow.value.hideHentai.value))
+const organizeMode = ref<'relocate' | 'history' | ''>('')
+const renameOpen = ref(false)
+const organizeReturnFocus = ref<HTMLElement | null>(null)
+watch(itemHidden, hidden => {
+  if (hidden) { organizeMode.value = ''; renameOpen.value = false; downloadFlow.value.reset() }
+}, { flush: 'sync' })
+let loadRound = 0
+let unlistenLibrary: (() => void) | undefined
 
 /** 「想看」排第一：这一列是从没看过往看完走的顺序，和侧栏那组的排序理由不同 */
 const STATUSES: WatchStatus[] = ['unwatched', 'watching', 'watched', 'dropped']
 
 async function load(): Promise<void> {
+  const id = props.id
+  const round = ++loadRound
   loading.value = true
+  checking.value = false
+  loadError.value = ''
+  library.value = null
   try {
-    item.value = await window.baoyi.video.get(props.id)
-    // 电影那边返回空数组，不用分支
-    episodes.value = item.value ? await window.baoyi.video.episodes(props.id) : []
+    const next = await window.baoyi.video.get(id)
+    if (round !== loadRound) return
+    const content = next ? await window.baoyi.video.library(id) : null
+    if (round !== loadRound) return
+    // Library normalization may repair a legacy directory record and episode counts.
+    const normalized = content?.contents.length ? await window.baoyi.video.get(id) : next
+    if (round !== loadRound) return
+    item.value = normalized
+    library.value = content
+    episodes.value = content?.contents ?? []
   } catch (err) {
+    if (round !== loadRound) return
     error(`读取影视条目失败：${errorMessage(err)}`)
+    loadError.value = '读取影视条目失败：' + errorMessage(err)
     item.value = null
     episodes.value = []
   } finally {
-    loading.value = false
+    if (round === loadRound) loading.value = false
   }
 }
 
-onMounted(load)
-watch(() => props.id, load)
+async function refreshLibrary(): Promise<void> {
+  const id = props.id
+  const round = ++loadRound
+  checking.value = true
+  try {
+    const content = await window.baoyi.video.library(id)
+    const next = await window.baoyi.video.get(id)
+    if (id !== props.id || round !== loadRound) return
+    item.value = next
+    library.value = content
+    episodes.value = content.contents
+    store.merge(next)
+    void store.refreshCounts()
+  } catch (err) { if (round === loadRound) error('检查文件失败：' + errorMessage(err)) }
+  finally { if (round === loadRound) { checking.value = false; loading.value = false } }
+}
+const lastCheck = ref('')
+async function checkFiles(): Promise<void> {
+  if (checking.value) return
+  checking.value = true
+  const id = props.id, round = ++loadRound
+  try {
+    const result = await window.baoyi.video.syncFiles(id)
+    const next = await window.baoyi.video.get(id)
+    if (id !== props.id || round !== loadRound) return
+    library.value = result.library; episodes.value = result.library.contents; item.value = next
+    lastCheck.value = result.message
+    store.merge(next); void store.reload()
+    if (result.warnings.length) toast(result.message + '；' + result.warnings[0])
+    else success(result.message)
+  } catch (cause) { if (id === props.id) { lastCheck.value = '检查未完成：' + errorMessage(cause); error(lastCheck.value) } }
+  finally { if (id === props.id && round === loadRound) checking.value = false }
+}
+function openDownload(): void {
+  if (!item.value?.hanime_id) { sourceOpen.value = true; return }
+  const flow = downloadFlow.value
+  flow.open.value = true
+  if (!flow.draft.value) void flow.prepare()
+}
+function openOrganize(mode: 'relocate' | 'history'): void {
+  if (!item.value || itemHidden.value) return
+  organizeReturnFocus.value = moreMenu.value?.querySelector('summary') ?? null
+  if (moreMenu.value) moreMenu.value.open = false
+  organizeMode.value = mode
+}
+function closeMore(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || !moreMenu.value?.open) return
+  event.preventDefault()
+  event.stopPropagation()
+  moreMenu.value.open = false
+  moreMenu.value.querySelector('summary')?.focus()
+}
+async function markWatched(content: VideoWorkContent | null, status: WatchStatus): Promise<void> {
+  if (content) await setEpisodeStatus(content, status)
+  else await save({ watch_status: status })
+  await refreshLibrary()
+}
+onMounted(() => {
+  editing.value = router.currentRoute?.value.query.edit === '1'
+  void load()
+  unlistenLibrary = window.baoyi.video.onLibraryChanged(id => { if (id === props.id) void refreshLibrary() })
+})
+onBeforeUnmount(() => { loadRound++; unlistenLibrary?.(); tagsObserver?.disconnect() })
+watch(() => router.currentRoute?.value.query.edit, value => { editing.value = value === '1' })
+watch(() => props.id, () => {
+  organizeMode.value = ''
+  renameOpen.value = false
+  activeTab.value = 'contents'
+  selectedEpisodeId.value = ''
+  readingScopeInitialized = false
+  lastCheck.value = ''
+  tagsExpanded.value = false
+  editing.value = router.currentRoute?.value.query.edit === '1'
+  if (moreMenu.value) moreMenu.value.open = false
+  void load()
+})
+watch(() => library.value?.contents, contents => {
+  if (!contents) return
+  const registered = contents.filter(registeredVideoContent)
+  if (registered.length !== contents.length) {
+    library.value = { ...library.value!, contents: registered }; episodes.value = registered
+    return
+  }
+  if (selectedEpisodeId.value && !contents.some(episode => episode.id === selectedEpisodeId.value)) selectedEpisodeId.value = ''
+  if (readingScopeInitialized) return
+  readingScopeInitialized = true
+  const requestedEpisode = router.currentRoute.value.query.episode
+  if (!selectedEpisodeId.value && typeof requestedEpisode === 'string' && contents.some(e => e.id === requestedEpisode)) { selectedEpisodeId.value = requestedEpisode; activeTab.value = 'description' }
+  if (!selectedEpisodeId.value && contents.length === 1) selectedEpisodeId.value = contents[0].id
+})
 
 const title = computed(() => (item.value ? videoTitle(item.value) : ''))
 const initial = computed(() => title.value.trim().charAt(0).toUpperCase() || '?')
@@ -102,9 +315,13 @@ const yearText = computed(() => {
 const poster = computed(() =>
   item.value ? posterUrl(item.value.poster_path, item.value.updated_at) : ''
 )
+const posterFailed = ref(false)
+watch(poster, () => { posterFailed.value = false })
 
 const posterBusy = ref(false)
-const reidentifying = ref(false)
+const videoScan = useMediaScan('video')
+const refreshingIdentify = ref(false)
+const reidentifying = computed(() => refreshingIdentify.value || videoScan.running.value)
 
 /**
  * 三条来路依次试。判断在主进程里，这儿只负责把结果说清楚 ——
@@ -152,21 +369,23 @@ async function clearPoster(): Promise<void> {
 }
 
 async function reidentify(forceHentai: boolean): Promise<void> {
-  if (!item.value) return
-  reidentifying.value = true
+  if (!item.value || reidentifying.value) return
+  const target = item.value
+  refreshingIdentify.value = true
   try {
-    const updated = await window.baoyi.video.reidentify(item.value.id, forceHentai)
+    const updated = await reidentifyVideo(target, forceHentai)
     if (updated) {
-      item.value = updated
+      // 等待 IPC 时可以切换条目；旧结果只入库，不覆盖当前详情。
+      if (item.value?.id === target.id) item.value = updated
       store.merge(updated)
       success(forceHentai ? '里番刮削完成' : '重新识别完成')
     } else {
-      error('识别失败')
+      toast('重新识别已停止，已完成的结果保留')
     }
   } catch (err) {
-    error(`识别失败：${errorMessage(err)}`)
+    error('识别失败：' + errorMessage(err))
   } finally {
-    reidentifying.value = false
+    refreshingIdentify.value = false
   }
 }
 
@@ -182,11 +401,21 @@ async function reidentify(forceHentai: boolean): Promise<void> {
  * （悬疑、科幻）在库里是同一张标签表，没有理由让它们的点击行为不一样。
  */
 function filterByTag(tag: string): void {
-  store.select({ kind: 'tag', value: tag })
+  store.select({
+    kind: 'tag',
+    value: tag,
+    ...(item.value?.category === HENTAI_CATEGORY ? { type: 'hentai' as const } : {})
+  })
   void router.push({ name: 'video-home' })
 }
 
 /** 走 store 而不是直接调 IPC：海报墙和侧边栏计数要跟着一起更新 */
+async function changeType(value: string): Promise<void> {
+  if (!item.value) return
+  if (value === 'hentai') await save({ category: HENTAI_CATEGORY })
+  else if (value === 'movie' || value === 'series') await save({ video_type: value, ...(item.value.category === HENTAI_CATEGORY ? { category: '其他' } : {}) })
+}
+
 async function save(patch: Partial<VideoItem>): Promise<void> {
   if (!item.value) return
   try {
@@ -241,26 +470,6 @@ async function unprotect(fields: string[]): Promise<void> {
   }
 }
 
-/* ---------------------------- 季集表 ---------------------------- */
-
-/** 按季分组。季号排序，季内按集号 —— 后端已经排好，这里只切段 */
-const seasons = computed(() => {
-  const map = new Map<number, Episode[]>()
-  for (const e of episodes.value) {
-    const list = map.get(e.season)
-    if (list) list.push(e)
-    else map.set(e.season, [e])
-  }
-  return [...map.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([season, list]) => ({
-      season,
-      list,
-      watched: list.filter((e) => e.watch_status === 'watched').length,
-      missing: list.filter((e) => !e.path).length
-    }))
-})
-
 const busyEpisode = ref('')
 
 /**
@@ -276,7 +485,8 @@ async function setEpisodeStatus(e: Episode, status: WatchStatus): Promise<void> 
     const r = await window.baoyi.video.updateEpisode(e.id, { watch_status: status })
     if (r.episode) {
       const i = episodes.value.findIndex((x) => x.id === e.id)
-      if (i >= 0) episodes.value[i] = r.episode
+      // These objects also belong to library.contents; IPC returns only episode fields.
+      if (i >= 0) Object.assign(episodes.value[i], r.episode)
     }
     if (r.item) item.value = r.item
     store.merge(r.item)
@@ -286,45 +496,6 @@ async function setEpisodeStatus(e: Episode, status: WatchStatus): Promise<void> 
     error(`改这一集失败：${errorMessage(err)}`)
   } finally {
     busyEpisode.value = ''
-  }
-}
-
-/** 点一下切换看过 / 没看过。追剧时这是最高频的一个动作，不该要两步 */
-function toggleEpisode(e: Episode): void {
-  void setEpisodeStatus(e, e.watch_status === 'watched' ? 'unwatched' : 'watched')
-}
-
-const seasonBusy = ref(-1)
-
-/**
- * 整季标记看完。
- *
- * 只动手上有文件的那些：缺文件的集标成「看完」是一句不成立的话，
- * 而它会让「12/16 集」这个数字失去意义 —— 用户下次看到的就不是缺集提醒了。
- */
-async function markSeasonWatched(season: number, list: Episode[]): Promise<void> {
-  const targets = list.filter((e) => e.path && e.watch_status !== 'watched')
-  if (targets.length === 0) {
-    toast('这一季手上有的都标过了')
-    return
-  }
-  seasonBusy.value = season
-  try {
-    for (const e of targets) {
-      const r = await window.baoyi.video.updateEpisode(e.id, { watch_status: 'watched' })
-      if (r.episode) {
-        const i = episodes.value.findIndex((x) => x.id === e.id)
-        if (i >= 0) episodes.value[i] = r.episode
-      }
-      if (r.item) item.value = r.item
-    }
-    store.merge(item.value)
-    void store.refreshCounts()
-    success(`第 ${season} 季标了 ${targets.length} 集`)
-  } catch (err) {
-    error(`批量标记中断：${errorMessage(err)}`)
-  } finally {
-    seasonBusy.value = -1
   }
 }
 
@@ -341,102 +512,33 @@ async function reveal(): Promise<void> {
 /* ---------------------------- 播放 ---------------------------- */
 
 const playing = ref(false)
-/** 正在播的那一集，用来在季集表里高亮出「刚开的是这一集」 */
-const playingEpisode = ref('')
-
-/**
- * 剧集点顶部播放会开哪一集。挑选规则和主进程里的 `resumeEpisode` 一致。
- *
- * 这里算一份是为了**把它写在按钮上**（「播放 S01E03」而不是光秃秃一个
- * 「播放」）—— 一个不告诉你要开什么的播放键，在一部 40 集的剧上是个盲盒。
- * 真正开哪一集由主进程定，两边不一致时按钮上的字会不对，所以这个规则
- * 改了就得两边一起改。不在渲染进程里定夺是有意的：侧栏将来也要能一键接着看。
- */
-const resumeTarget = computed<Episode | null>(() => {
-  if (item.value?.video_type !== 'series') return null
-  const withFile = episodes.value.filter((e) => e.path)
-  return (
-    withFile.find((e) => e.position_sec > 0 && e.watch_status !== 'watched') ??
-    withFile.find((e) => e.watch_status !== 'watched' && e.watch_status !== 'dropped') ??
-    withFile[0] ??
-    null
-  )
+const resumeContent = computed(() => {
+  const available = library.value?.contents.filter(content => content.assets.some(asset => asset.role === 'video' && asset.state === 'present')) ?? []
+  return available.find(content => content.position_sec > 0 && content.watch_status !== 'watched')
+    ?? available.find(content => content.watch_status !== 'watched' && content.watch_status !== 'dropped') ?? available[0]
 })
-
-const playable = computed(() =>
-  item.value?.video_type === 'series' ? !!resumeTarget.value : !!item.value?.path
-)
-
-const playLabel = computed(() => {
-  const target = resumeTarget.value
-  return target ? `播放 ${episodeCode(target.season, target.episode)}` : '播放'
+const resumeAsset = computed(() => {
+  const content = resumeContent.value
+  if (content) return content.assets.find(asset => asset.role === 'video' && asset.path === content.path && asset.state === 'present') ?? content.assets.find(asset => asset.role === 'video' && asset.state === 'present')
+  return library.value?.assets.find(asset => asset.role === 'video' && asset.path === item.value?.path && asset.state === 'present')
+    ?? library.value?.assets.find(asset => asset.role === 'video' && asset.state === 'present')
 })
-
-const playHint = computed(() => {
-  if (!item.value) return ''
-  if (item.value.video_type === 'series') {
-    const target = resumeTarget.value
-    if (!target) return '这部剧在磁盘上还没有任何一集的文件'
-    return `用系统默认播放器打开 ${episodeCode(target.season, target.episode)}${target.title ? ` ${target.title}` : ''}`
-  }
-  return item.value.path ? '用系统默认播放器打开' : '这一条没有记下文件路径'
-})
-
-/**
- * 交给系统默认播放器。
- *
- * 成功后把那一集并回本地列表：主进程会把它从「未看」抬到「在看」
- * （用户确实打开了它），而这一页手里那份 `episodes` 是自己查的，
- * 不重新拿一趟的话季集表上那一行还写着「想看」。
- */
+const playable = computed(() => !!resumeAsset.value)
+const presentCount = computed(() => library.value?.assets.filter(asset => asset.role === 'video' && asset.state === 'present').length ?? 0)
+const playLabel = computed(() => (library.value?.contents.length ?? 0) > 1 && resumeContent.value
+  ? '播放 ' + (resumeContent.value.display_label || resumeContent.value.title || '内容') : '播放')
+const playHint = computed(() => resumeAsset.value ? '用系统播放器打开：' + resumeAsset.value.path : '没有可用文件，可检查磁盘或重新定位文件')
 async function play(): Promise<void> {
-  if (!item.value || playing.value) return
+  if (!resumeAsset.value || playing.value) return
   playing.value = true
   try {
-    if (item.value.video_type === 'series') {
-      const target = resumeTarget.value
-      if (!target) return
-      const updated = await store.playEpisode(target.id)
-      if (updated) {
-        mergeEpisode(updated)
-        playingEpisode.value = updated.id
-      }
-    } else {
-      const ok = await store.play(item.value.id)
-      if (ok) item.value = store.items.find((x) => x.id === props.id) ?? item.value
-    }
-  } catch (e) {
-    error(`打不开这个文件：${errorMessage(e)}`)
-  } finally {
-    playing.value = false
-  }
+    const outcome = await window.baoyi.video.playAsset(resumeAsset.value.id)
+    if (!outcome.ok) error(outcome.message || '无法打开文件')
+    store.merge(outcome.item)
+    await refreshLibrary()
+  } catch (cause) { error(errorMessage(cause)) }
+  finally { playing.value = false }
 }
-
-/** 单集行上的播放键 */
-async function playOne(e: Episode): Promise<void> {
-  if (playing.value || !e.path) return
-  playing.value = true
-  try {
-    const updated = await store.playEpisode(e.id)
-    if (updated) {
-      mergeEpisode(updated)
-      playingEpisode.value = updated.id
-    }
-  } catch (err) {
-    error(`打不开这个文件：${errorMessage(err)}`)
-  } finally {
-    playing.value = false
-  }
-}
-
-function mergeEpisode(updated: Episode): void {
-  const i = episodes.value.findIndex((x) => x.id === updated.id)
-  if (i >= 0) episodes.value[i] = updated
-  // 剧一级的状态可能跟着变了（第一集一开，整部剧就从「想看」进「在看」），
-  // 而那个值在 item 上，不在 episodes 里
-  item.value = store.items.find((x) => x.id === props.id) ?? item.value
-}
-
 /* ---------------------------- 字幕 ---------------------------- */
 
 /**
@@ -481,15 +583,13 @@ const hanimeUrl = computed(() =>
   item.value?.hanime_id ? `https://hanime1.me/watch?v=${item.value.hanime_id}` : ''
 )
 
-async function removeItem(): Promise<void> {
-  if (!item.value) return
-  const ok = window.confirm(
-    `确定把「${title.value}」从库里移除吗？\n磁盘上的视频文件和字幕都不会被删。`
-  )
-  if (!ok) return
-  await store.remove(item.value.id)
-  success('已从库里移除')
-  void router.push({ name: 'video-home' })
+function removeItem(): void { removalWork.value = true }
+async function afterRemoval(): Promise<void> {
+  await store.reload()
+  if (removalWork.value || !await window.baoyi.video.get(props.id)) {
+    success('已从库里移除'); void router.push({ name: 'video-home' }); return
+  }
+  await refreshLibrary()
 }
 
 function copyPath(path: string): void {
@@ -501,18 +601,19 @@ function copyPath(path: string): void {
 <template>
   <div class="detail">
     <div v-if="loading" class="detail__state">载入中…</div>
-    <div v-else-if="!item" class="detail__state">
-      <p>这条记录不存在或已被移除。</p>
+    <div v-else-if="!item || itemHidden" class="detail__state">
+      <p role="status">{{ itemHidden ? '当前作品已隐藏。' : loadError || '这条记录不存在、已被移除或当前不可见。' }}</p>
+      <button v-if="loadError" class="btn btn--ghost" @click="load">重新加载</button>
       <button class="btn btn--ghost" @click="router.push({ name: 'video-home' })">
-        返回海报墙
+        返回影视库
       </button>
     </div>
 
     <template v-else>
       <header class="head">
-        <button class="btn btn--subtle" @click="router.back()">
+        <button class="btn btn--subtle" @click="router.push({ name: 'video-home' })">
           <ArrowLeft :size="16" />
-          返回
+          返回影视库
         </button>
 
         <div class="head__actions">
@@ -536,6 +637,13 @@ function copyPath(path: string): void {
             <FolderOpen :size="14" />
             打开所在文件夹
           </button>
+          <button class="btn btn--ghost" @click="openDownload"><Download :size="14" />下载 / 补齐内容</button>
+          <details ref="moreMenu" class="head__more" @keydown="closeMore">
+            <summary class="btn btn--ghost" aria-label="更多作品操作"><MoreHorizontal :size="16" />更多</summary>
+            <div class="head__moreMenu">
+          <button class="btn btn--ghost" @click="openOrganize('relocate')"><FolderOpen :size="14" />目录管理 / 重新绑定</button>
+          <button v-if="library?.directory" class="btn btn--ghost" @click="renameOpen = true; moreMenu && (moreMenu.open = false)"><Pencil :size="14" />修改合集名称</button>
+          <button class="btn btn--ghost" @click="openOrganize('history')">整理记录</button>
           <button
             class="btn btn--ghost"
             :disabled="!tmdbUrl"
@@ -558,12 +666,20 @@ function copyPath(path: string): void {
             <ExternalLink :size="14" />
             hanime
           </button>
+          <button
+            v-if="item.official_url && item.official_url !== hanimeUrl"
+            class="btn btn--ghost"
+            :title="item.official_url"
+            @click="openUrl(item.official_url)"
+          >
+            <ExternalLink :size="14" />
+            来源
+          </button>
           <button class="btn btn--ghost" :disabled="reidentifying" @click="reidentify(false)">
             <component :is="reidentifying ? Loader2 : RefreshCw" :size="14" :class="{ spin: reidentifying }" />
             重新识别
           </button>
           <button
-            v-if="item.category !== 'hentai' || hanimeUrl"
             class="btn btn--ghost"
             :disabled="reidentifying"
             title="强制按里番刮削（即使文件名不像）"
@@ -580,16 +696,22 @@ function copyPath(path: string): void {
             <Trash2 :size="14" />
             移除
           </button>
+            </div>
+          </details>
         </div>
       </header>
 
+      <VideoSourceDialog v-if="sourceOpen" :item="item" :episodes="library?.contents || []" :episode-id="selectedEpisodeId" @close="sourceOpen = false" @changed="refreshLibrary" />
+      <VideoRemovalDialog v-if="removalEpisode || removalWork" :resource-ids="[item.id]" :episode-id="removalEpisode || undefined" @close="removalEpisode = ''; removalWork = false" @changed="afterRemoval" />
+      <CollectionNameDialog v-if="renameOpen" :item="item" @close="renameOpen = false" @changed="refreshLibrary" />
       <div class="body">
         <!-- ------------------------------ 主列 ------------------------------ -->
         <div class="col col--main">
           <section class="hero panel">
             <!-- 海报区自己是那几个按钮的入口，悬停才显形，同游戏详情页 -->
             <div class="hero__poster" :style="{ '--hue': hue }">
-              <img v-if="poster" :src="poster" :alt="title" class="hero__img" />
+              <img v-if="poster && !posterFailed" :src="poster" :alt="title" class="hero__img"
+                @error="posterFailed = true; store.markPosterMissing(item.id)" />
               <span v-else class="hero__initial">{{ initial }}</span>
 
               <div class="hero__posterActs">
@@ -615,6 +737,7 @@ function copyPath(path: string): void {
                   v-if="item.poster_path"
                   class="hero__posterBtn"
                   title="撤掉海报，退回首字占位"
+                  aria-label="撤掉海报"
                   @click="clearPoster"
                 >
                   <ImageOff :size="13" />
@@ -623,26 +746,36 @@ function copyPath(path: string): void {
             </div>
 
             <div class="hero__text">
-              <input
+              <template v-if="editing">
+              <textarea
                 class="hero__name"
+                aria-label="片名"
+                rows="2"
                 :value="item.name_zh"
                 placeholder="片名"
-                @change="save({ name_zh: ($event.target as HTMLInputElement).value.trim() })"
+                @change="save({ name_zh: ($event.target as HTMLTextAreaElement).value.trim() })"
               />
               <input
                 class="hero__en"
+                aria-label="原名 / 英文名"
                 :value="item.name_en"
                 placeholder="原名 / 英文名"
                 @change="save({ name_en: ($event.target as HTMLInputElement).value.trim() })"
               />
+              </template>
+              <template v-else>
+                <div class="hero__title-line"><h1 class="hero__title">{{ title }}</h1><span class="hero__badge"><Clapperboard :size="12" />{{ item.category === HENTAI_CATEGORY ? '里番' : VIDEO_TYPE_LABEL[item.video_type] }}</span></div>
+                <p v-if="item.name_en && item.name_en !== title" class="hero__original">{{ item.name_en }}</p>
+              </template>
 
               <div class="hero__meta">
-                <span class="hero__badge">
-                  <Clapperboard :size="11" />
-                  {{ VIDEO_TYPE_LABEL[item.video_type] }}
-                </span>
                 <span v-if="yearText">{{ yearText }}</span>
+                <span v-if="singleEpisode?.air_date">发行 {{ videoDateLabel(singleEpisode.air_date) }}</span>
+                <span v-if="singleEpisode?.published_at">站点发布日期 {{ videoDateLabel(singleEpisode.published_at) }}</span>
+                <span v-if="publicationRange.collection" class="hero__publication">发布时间：最早 {{ publicationRange.first || '未知' }} · 最晚 {{ publicationRange.last || '未知' }}</span>
+                <span v-else-if="!singleEpisode?.published_at && !singleEpisode?.air_date" class="hero__publication">发布时间：{{ publicationRange.first || '未知' }}</span>
                 <span v-if="item.resolution">{{ item.resolution }}</span>
+                <span>{{ presentCount }} 个视频文件可用</span>
                 <span v-if="!isSeries && item.duration_sec > 0">
                   {{ formatDuration(item.duration_sec) }}
                 </span>
@@ -657,206 +790,125 @@ function copyPath(path: string): void {
               </div>
 
               <input
+                v-if="editing"
                 class="hero__summary"
+                aria-label="一句话说明"
                 :value="item.summary"
                 placeholder="一句话说明"
                 @change="save({ summary: ($event.target as HTMLInputElement).value.trim() })"
               />
+              <p v-else-if="item.summary" class="hero__summary-text">{{ item.summary }}</p>
 
-              <div class="statuses">
+              <div class="statuses" role="group" aria-label="作品观看状态">
                 <button
                   v-for="s in STATUSES"
                   :key="s"
                   class="chip"
                   :class="{ on: item.watch_status === s }"
+                  :aria-pressed="item.watch_status === s"
                   @click="save({ watch_status: s })"
                 >
                   {{ WATCH_STATUS_LABEL[s] }}
                 </button>
+                <button class="btn btn--subtle hero__edit" type="button" :aria-pressed="editing" @click="editing = !editing"><Check v-if="editing" :size="13" /><Pencil v-else :size="13" />{{ editing ? '完成编辑' : '编辑资料' }}</button>
               </div>
+              <button v-if="library?.directory?.path || item.path" class="hero__location" type="button" :title="'复制作品位置：' + (library?.directory?.path || item.path)" @click="copyPath(library?.directory?.path || item.path)"><FolderOpen :size="12" /><span>{{ library?.directory?.path || item.path }}</span></button>
             </div>
-          </section>
-
-          <section class="panel">
-            <h2 class="sec-title">简介</h2>
-            <EditableField
-              :model-value="item.description"
-              multiline
-              placeholder="讲的是什么"
-              @commit="save({ description: $event })"
-            />
-          </section>
-
-          <!--
-            季集表。剧集才有，电影这一块整个不出现 ——
-            一部电影没有「季集」这种东西，给它一张空表只会让人以为刮削漏了。
-          -->
-          <template v-if="isSeries">
-            <section v-if="seasons.length > 0" class="panel">
-              <h2 class="sec-title">
-                季集
-                <span class="sec-title__count">
-                  {{ item.episode_watched }}/{{ item.episode_total }} 集
-                </span>
-              </h2>
-
-              <div v-for="s in seasons" :key="s.season" class="season">
-                <div class="season__head">
-                  <span class="season__name">
-                    {{ s.season === 0 ? '特别篇' : `第 ${s.season} 季` }}
-                  </span>
-                  <span class="season__meta">
-                    {{ s.watched }}/{{ s.list.length }} 集看完
-                    <template v-if="s.missing > 0">　缺 {{ s.missing }}</template>
-                  </span>
-                  <button
-                    class="season__act"
-                    :disabled="seasonBusy === s.season"
-                    title="把这一季手上有的都标成看完（缺文件的不动）"
-                    @click="markSeasonWatched(s.season, s.list)"
-                  >
-                    <component
-                      :is="seasonBusy === s.season ? Loader2 : Check"
-                      :size="12"
-                      :class="{ spin: seasonBusy === s.season }"
-                    />
-                    整季标看完
-                  </button>
-                </div>
-
-                <ul class="eps">
-                  <li
-                    v-for="e in s.list"
-                    :key="e.id"
-                    class="ep"
-                    :class="{
-                      'ep--missing': !e.path,
-                      'ep--watched': e.watch_status === 'watched',
-                      'ep--playing': playingEpisode === e.id
-                    }"
-                  >
-                    <!-- 勾选框在最左：追剧时手指落点固定在同一列，不用每行找位置 -->
-                    <button
-                      class="ep__check"
-                      :disabled="busyEpisode === e.id || !e.path"
-                      :title="e.path ? '标记看过 / 没看过' : '这一集没有文件'"
-                      @click="toggleEpisode(e)"
-                    >
-                      <Loader2 v-if="busyEpisode === e.id" :size="12" class="spin" />
-                      <Check v-else-if="e.watch_status === 'watched'" :size="12" />
-                    </button>
-
-                    <!--
-                      播放键紧跟着勾选框：这两个是这一行上唯一的两个动作，
-                      而「开这一集」比「标这一集」更常用
-                    -->
-                    <button
-                      class="ep__play"
-                      :disabled="playing || !e.path"
-                      :title="e.path ? '用系统默认播放器打开这一集' : '这一集没有文件'"
-                      @click="playOne(e)"
-                    >
-                      <Play :size="12" />
-                    </button>
-
-                    <span class="ep__code mono">{{ episodeCode(e.season, e.episode) }}</span>
-                    <span class="ep__title truncate" :title="e.title">
-                      {{ e.title || '（无标题）' }}
-                    </span>
-
-                    <!-- 缺文件的那些明说，这是这一页最有用的信息之一 -->
-                    <span v-if="!e.path" class="ep__missing">缺文件</span>
-                    <template v-else>
-                      <span v-if="e.position_sec > 0" class="ep__pos" title="上次播到这里">
-                        {{ formatPosition(e.position_sec) }}
-                      </span>
-                      <span v-if="e.duration_sec > 0" class="ep__dur">
-                        {{ formatDuration(e.duration_sec) }}
-                      </span>
-                      <button
-                        class="ep__path mono truncate"
-                        :title="`${e.path}（点击复制）`"
-                        @click="copyPath(e.path)"
-                      >
-                        {{ e.path.split(/[\\/]/).pop() }}
-                      </button>
-                    </template>
-                  </li>
-                </ul>
+            <aside class="hero__facts" aria-label="作品信息">
+              <span v-if="item.category && item.category !== HENTAI_CATEGORY" class="hero__category">{{ item.category }}</span>
+              <label v-if="editing" class="hero__field">类型<select class="input" aria-label="视频类型" :value="item.category === HENTAI_CATEGORY ? 'hentai' : item.video_type" @change="changeType(($event.target as HTMLSelectElement).value)"><option value="movie">电影</option><option value="series">剧集</option><option value="hentai">里番</option></select></label>
+              <label v-if="editing && item.category !== HENTAI_CATEGORY" class="hero__field">分类<input class="input" :value="item.category" list="video-category-options" aria-label="视频分类" @change="save({ category: ($event.target as HTMLInputElement).value.trim() })" /></label>
+              <datalist id="video-category-options"><option v-for="name in ['华语', '欧美', '日韩', '动画', '纪录片', '综艺', '其他']" :key="name" :value="name" /></datalist>
+              <div class="hero__tag-heading">作品标签<span v-if="(library?.contents.length || 0) > 1"> · 各集标签独立保存</span></div>
+              <div v-if="visibleTags.length" class="hero__tag-area">
+                <div id="video-work-tags" ref="tagsElement" class="tags hero__tags" :style="{ maxHeight: tagsExpanded ? 'none' : tagsHeight + 'px' }"><TagBadge v-for="(tag, index) in visibleTags" :key="tag" :label="tag" clickable :inert="!tagsExpanded && index >= tagVisibleCount" :aria-hidden="!tagsExpanded && index >= tagVisibleCount ? true : undefined" :title="`看所有「${tag}」的作品`" @click="filterByTag(tag)" /></div>
+                <button v-if="tagsOverflow" class="hero__tags-more" type="button" :aria-expanded="tagsExpanded" aria-controls="video-work-tags" :aria-label="tagsExpanded ? '收起标签' : '展开全部标签'" @click="tagsExpanded = !tagsExpanded">{{ tagsExpanded ? '收起' : '...' }}</button>
               </div>
-            </section>
+              <p v-else class="hero__empty-tags">暂无标签</p>
+              <EditableField v-if="editing" :model-value="item.tags.join('、')" placeholder="用「、」隔开，最多 8 个" @commit="commitTags" />
+              <p v-if="library?.contents.length" class="hero__progress">已看 {{ library.contents.filter(episode => episode.watch_status === 'watched').length }} / {{ library.contents.length }} 集</p>
+            </aside>
+          </section>
 
-            <section v-else class="panel">
-              <h2 class="sec-title">季集</h2>
-              <p class="hint">
-                还没有季集表。扫描时没配 TMDB 的话只会记下手上的文件，
-                拿不到官方的季集列表 —— 也就看不出缺哪几集。
-                在设置 › 搜索服务里填一个免费的 TMDB API Key，然后重扫这个目录可以补上。
-              </p>
-            </section>
-          </template>
+          <nav class="detail-tabs" role="tablist" aria-label="影视详情" @keydown="tabKeydown">
+            <button v-for="tab in detailTabs" :id="'video-tab-' + tab.id" :key="tab.id" type="button" role="tab" :aria-selected="activeTab === tab.id" :aria-controls="'video-panel-' + tab.id" :tabindex="activeTab === tab.id ? 0 : -1" @click="activeTab = tab.id">{{ tab.label }}<span v-if="tab.count">{{ tab.count }}</span></button>
+          </nav>
+          <div id="video-panel-contents" v-show="activeTab === 'contents'" role="tabpanel" aria-labelledby="video-tab-contents" tabindex="0">
+            <VideoItems :item="item" :library="library" :checking="checking" :check-message="lastCheck" :marking="!!busyEpisode" :selected-id="selectedEpisodeId" @select="showEpisode" @remove="removalEpisode = $event.id" @check="checkFiles" @changed="refreshLibrary" @watched="markWatched" />
+          </div>
 
-          <!-- 电影的分卷。CD1/CD2 那种，只有真的分卷了才出现 -->
-          <section v-if="!isSeries && item.parts.length > 1" class="panel">
-            <h2 class="sec-title">
-              分卷
-              <span class="sec-title__count">{{ item.parts.length }}</span>
-            </h2>
-            <ul class="paths">
-              <li v-for="p in item.parts" :key="p.path" class="path">
-                <span class="path__note">{{ p.label || '—' }}</span>
-                <button
-                  class="path__text mono truncate"
-                  :title="`${p.path}（点击复制）`"
-                  @click="copyPath(p.path)"
-                >
-                  {{ p.path.split(/[\\/]/).pop() }}
-                </button>
-                <span class="path__note">{{ formatBytes(p.file_size) }}</span>
-              </li>
-            </ul>
+          <section id="video-panel-description" v-show="activeTab === 'description'" class="panel episode-reading" role="tabpanel" aria-labelledby="video-tab-description" tabindex="0">
+            <header class="episode-reading__head">
+              <div><h2>{{ selectedEpisode ? videoEpisodeLabel(selectedEpisode, item.category === '里番') : '作品简介' }}</h2><p>{{ selectedEpisode ? '这一集的故事与资料' : '整部作品的介绍' }}</p></div>
+              <VideoScopeSwitch v-if="library?.contents.length" v-model="selectedEpisodeId" :episodes="library.contents" :without-season="item.category === '里番'" />
+            </header>
+            <template v-if="selectedEpisode">
+              <div class="episode-actions"><button class="btn btn--subtle" @click="episodeEditing = !episodeEditing">{{ episodeEditing ? '完成单集编辑' : '编辑这一集' }}</button><button class="btn btn--subtle" :disabled="!!busyEpisode" @click="scrapeSelected">{{ busyEpisode ? '正在刮削…' : '单集刮削' }}</button><button class="btn btn--ghost" @click="sourceOpen = true">更改来源</button><button class="btn btn--ghost" @click="pickEpisodeImage('poster')">选择封面</button><button class="btn btn--ghost" @click="pickEpisodeImage('thumbnail')">选择预览图</button><button class="btn btn--ghost" @click="removalEpisode = selectedEpisode.id">移除 / 移出合集…</button></div>
+              <div class="episode-summary" :class="{ 'episode-summary--text-only': !selectedEpisode.poster_path && !selectedEpisode.thumbnail_path }">
+              <VideoArtwork :poster="selectedEpisode.poster_path" :thumbnail="selectedEpisode.thumbnail_path" />
+              <div class="episode-copy">
+              <label v-if="episodeEditing">单集标题<input class="input" :value="selectedEpisode.title" @change="saveEpisode({ title: ($event.target as HTMLInputElement).value.trim() })" /></label>
+              <div class="episode-reading__title"><h3>{{ selectedEpisode.original_title || selectedEpisode.title }}</h3><p v-if="selectedEpisode.original_title && selectedEpisode.original_title !== selectedEpisode.title">{{ selectedEpisode.title }}</p></div>
+              <dl v-if="selectedEpisode.air_date || selectedEpisode.published_at || selectedEpisode.studio || selectedEpisode.duration_sec" class="episode-facts" aria-label="单集基本资料">
+                <div v-if="selectedEpisode.air_date"><dt>发行日期</dt><dd>{{ videoDateLabel(selectedEpisode.air_date) }}</dd></div>
+                <div v-if="selectedEpisode.published_at"><dt>站点发布日期</dt><dd>{{ videoDateLabel(selectedEpisode.published_at) }}</dd></div>
+                <div v-if="selectedEpisode.studio"><dt>厂牌 / 作者</dt><dd>{{ selectedEpisode.studio }}</dd></div>
+                <div v-if="selectedEpisode.duration_sec"><dt>片长</dt><dd>{{ formatDuration(selectedEpisode.duration_sec) }}</dd></div>
+              </dl>
+              <label v-if="editing || episodeEditing" class="episode-reading__original">原名<input class="input" :value="selectedEpisode.original_title || ''" aria-label="单集原名" @change="saveEpisode({ original_title: ($event.target as HTMLInputElement).value.trim() })" /></label>
+              <EditableField v-if="editing || episodeEditing" :key="'description-' + selectedEpisode.id" :model-value="selectedEpisode.description || ''" multiline placeholder="这一集讲的是什么" @commit="saveEpisode({ description: $event })" />
+              <p v-else class="read-text">{{ selectedEpisode.description || '这一集暂无简介，可在编辑资料中补充。' }}</p>
+              <details v-if="selectedEpisode.original_description && selectedEpisode.original_description !== selectedEpisode.description" class="original-description"><summary>查看这一集的原文</summary><p>{{ selectedEpisode.original_description }}</p></details>
+              <button v-if="selectedEpisode.source_url" class="btn btn--subtle episode-reading__source" type="button" @click="openUrl(selectedEpisode.source_url)"><ExternalLink :size="13" />这一集的来源</button>
+              </div>
+              </div>
+              <div class="tags episode-tags"><TagBadge v-for="tag in selectedEpisode.tags || []" :key="tag" :label="tag" clickable @click="filterByTag(tag)" /></div>
+              <EditableField v-if="episodeEditing" :key="'tags-' + selectedEpisode.id" :model-value="(selectedEpisode.tags || []).join('、')" placeholder="单集标签，用顿号分隔" @commit="saveEpisode({ tags: $event.split(/[、,，]/).map(t => t.trim()).filter(Boolean) })" />
+            </template>
+            <template v-else>
+              <div class="episode-summary" :class="{ 'episode-summary--text-only': !item.poster_path && !item.thumbnail_path }">
+              <VideoArtwork :poster="item.poster_path" :thumbnail="item.thumbnail_path" />
+              <div class="episode-copy">
+              <div class="episode-reading__title"><h3>{{ title }}</h3><p v-if="item.name_en && item.name_en !== title">{{ item.name_en }}</p></div>
+              <EditableField v-if="editing" :model-value="item.description" multiline placeholder="整部作品讲的是什么" @commit="save({ description: $event })" />
+              <p v-else class="read-text">{{ item.description || (library?.contents.length ? '暂无整部作品简介。可以切换集数，查看各集的独立介绍。' : '尚无简介，可在编辑资料中补充。') }}</p>
+              <details v-if="item.original_description" class="original-description"><summary>查看日文原文</summary><p>{{ item.original_description }}</p></details>
+              </div></div>
+            </template>
+          </section>
+
+          <section id="video-panel-notes" v-show="activeTab === 'notes'" class="panel episode-reading" role="tabpanel" aria-labelledby="video-tab-notes" tabindex="0">
+            <header class="episode-reading__head">
+              <div><h2>{{ selectedEpisode ? videoEpisodeLabel(selectedEpisode, item.category === '里番') + ' · 笔记' : '作品笔记' }}</h2><p>{{ selectedEpisode ? selectedEpisode.original_title || selectedEpisode.title : '记录观看感受、版本偏好或待办事项' }}</p></div>
+              <VideoScopeSwitch v-if="library?.contents.length" v-model="selectedEpisodeId" :episodes="library.contents" :without-season="item.category === '里番'" notes />
+            </header>
+            <EditableField v-if="editing" :key="'notes-' + selectedEpisodeId" :model-value="selectedEpisode ? selectedEpisode.notes || '' : item.notes" multiline placeholder="看到哪儿了、哪个版本、想说的话…" @commit="selectedEpisode ? saveEpisode({ notes: $event }) : save({ notes: $event })" />
+            <p v-else class="read-text">{{ (selectedEpisode ? selectedEpisode.notes : item.notes) || '暂无笔记' }}</p>
+          </section>
+
+        <section id="video-panel-files" v-show="activeTab === 'files'" role="tabpanel" aria-labelledby="video-tab-files" tabindex="0">
+          <div class="detail-info-grid">
+          <section class="panel">
+            <h2 class="sec-title">作品目录</h2>
+            <p class="read-text mono">{{ library?.directory?.path || item.path }}</p>
+            <div class="file-management-actions"><button class="btn btn--ghost" type="button" @click="reveal"><FolderOpen :size="13" />打开目录</button><button class="btn btn--ghost" type="button" @click="openOrganize('relocate')">管理目录</button><button class="btn btn--subtle" type="button" @click="openOrganize('history')">整理记录</button></div>
           </section>
 
           <section class="panel">
-            <h2 class="sec-title">个人笔记</h2>
-            <EditableField
-              :model-value="item.notes"
-              multiline
-              placeholder="看到哪儿了、哪个版本、想说的话…"
-              @commit="save({ notes: $event })"
-            />
-          </section>
-        </div>
-
-        <!-- ------------------------------ 侧列 ------------------------------ -->
-        <div class="col col--side">
-          <section class="panel">
-            <h2 class="sec-title">分类</h2>
-            <input
-              class="input"
-              :value="item.category"
-              placeholder="剧情 / 科幻 / 纪录片…"
-              @change="save({ category: ($event.target as HTMLInputElement).value.trim() })"
-            />
-          </section>
-
-          <section class="panel">
-            <h2 class="sec-title">标签</h2>
-            <div v-if="item.tags.length > 0" class="tags">
-              <TagBadge
-                v-for="t in item.tags"
-                :key="t"
-                :label="t"
-                clickable
-                :title="`看所有「${t}」的作品`"
-                @click="filterByTag(t)"
-              />
-            </div>
-            <EditableField
-              :model-value="item.tags.join('、')"
-              placeholder="用「、」隔开，最多 8 个"
-              @commit="commitTags"
-            />
+            <h2 class="sec-title">收藏分组</h2>
+            <input class="input" :value="item.collection_name || ''" aria-label="视频分组" maxlength="80"
+              list="video-collection-options" placeholder="未分组"
+              @change="save({ collection_name: ($event.target as HTMLInputElement).value.trim() })" />
+            <p class="panel__note">收藏分组用于筛选作品，不改变文件位置。</p>
+            <button class="btn btn--subtle" @click="sourceOpen = true">搜索 / 绑定来源</button>
+            <datalist id="video-collection-options">
+              <option v-for="group in (item.category === HENTAI_CATEGORY ? store.counts.hentai_collections : store.counts.collections) || []"
+                :key="group.name" :value="group.name" />
+            </datalist>
+            <button v-if="item.collection_name" type="button" class="btn btn--ghost"
+              @click="store.select({ kind: 'collection', value: item.collection_name, ...(item.category === HENTAI_CATEGORY ? { type: 'hentai' as const } : {}) }); router.push({ name: 'video-home' })">
+              <FolderOpen :size="14" /> 查看分组
+            </button>
           </section>
 
           <!--
@@ -900,10 +952,7 @@ function copyPath(path: string): void {
               <template v-if="isSeries">
                 <dt>进度</dt>
                 <dd>
-                  {{ item.episode_watched }}/{{ item.episode_total }} 集
-                  <template v-if="item.episode_total > item.episode_present">
-                    （缺 {{ item.episode_total - item.episode_present }}）
-                  </template>
+                  已看 {{ item.episode_watched }} 项 · 已发现 {{ item.episode_total }} 项
                 </dd>
               </template>
               <template v-else-if="item.position_sec > 0">
@@ -986,13 +1035,27 @@ function copyPath(path: string): void {
               </li>
             </ul>
           </section>
+          </div>
+        </section>
         </div>
       </div>
     </template>
+    <DownloadPanel v-if="downloadFlow.open.value && !itemHidden" :key="id" :id="id" @close="downloadFlow.open.value = false" />
+    <OrganizePanel v-if="organizeMode && item && !itemHidden" :key="id" :mode="organizeMode" :resource-id="id" :works="[item]" :directory="library?.directory" :return-focus="organizeReturnFocus" @close="organizeMode = ''" @changed="refreshLibrary" />
   </div>
 </template>
 
 <style scoped>
+.episode-facts { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-block: 16px; font-size: var(--fs-body); }
+.episode-facts > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.episode-facts dt { color: var(--text-sub); }
+.episode-facts dd { margin: 0; color: var(--text-main); overflow-wrap: anywhere; }
+.episode-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.episode-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 22px; }
+.episode-summary--text-only { grid-template-columns: minmax(0, 1fr); }
+.episode-copy { min-width: 0; }
+.episode-tags { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--divider); }
+@media (max-width: 720px) { .episode-summary { grid-template-columns: minmax(0, 1fr); } }
 .detail {
   display: flex;
   flex-direction: column;
@@ -1018,7 +1081,7 @@ function copyPath(path: string): void {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 24px;
+  padding: 10px 16px;
   background: var(--bg-main);
   border-bottom: 1px solid var(--divider);
 }
@@ -1028,22 +1091,22 @@ function copyPath(path: string): void {
   align-items: center;
   gap: 8px;
   margin-left: auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
 }
 
 .body {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
-  gap: 16px;
-  padding: 20px 24px 32px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 16px 24px;
   align-items: start;
 }
 
 .col {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -1067,17 +1130,18 @@ function copyPath(path: string): void {
 
 /* ------------------------------- 头部卡片 ------------------------------- */
 .hero {
-  display: flex;
-  gap: 18px;
-  align-items: flex-start;
-  padding: 20px;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) minmax(180px, 23%);
+  gap: 16px;
+  align-items: start;
+  padding: 16px;
 }
 
 /* 比游戏封面宽一点：影视海报上常有中文片名，96px 下那行字糊成一团 */
 .hero__poster {
   position: relative;
   flex: none;
-  width: 116px;
+  width: 84px;
   aspect-ratio: 2 / 3;
   border-radius: var(--radius-card);
   overflow: hidden;
@@ -1112,7 +1176,7 @@ function copyPath(path: string): void {
   padding: 5px 4px;
   background: rgb(0 0 0 / 0.62);
   backdrop-filter: blur(4px);
-  opacity: 0;
+  opacity: 1;
   transition: opacity var(--t-fast) ease;
 }
 .hero__poster:hover .hero__posterActs,
@@ -1462,6 +1526,32 @@ function copyPath(path: string): void {
   margin-bottom: 10px;
 }
 
+.tags--hanime {
+  padding-top: 8px;
+  border-top: 1px solid var(--divider);
+}
+
+.original-description {
+  margin-top: 12px;
+  color: var(--text-sub);
+  font-size: var(--fs-tag);
+  line-height: 1.7;
+}
+
+.original-description summary {
+  cursor: pointer;
+  color: var(--text-faint);
+}
+
+.original-description summary:hover {
+  color: var(--accent);
+}
+
+.original-description p {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+}
+
 .facts {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -1589,4 +1679,67 @@ function copyPath(path: string): void {
   margin-top: 8px;
   text-align: left;
 }
+.detail { --text-sub: color-mix(in srgb, var(--text-main) 70%, var(--bg-main)); --text-faint: var(--text-sub); }
+.detail :is(button, input, textarea, select, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.detail__play { max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.head__more { position: relative; flex: none; }
+.head__more > summary { list-style: none; cursor: pointer; }
+.head__more > summary::-webkit-details-marker { display: none; }
+.head__moreMenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; display: flex; flex-direction: column; align-items: stretch; gap: 5px; width: 210px; max-height: calc(100dvh - 110px); overflow-y: auto; padding: 10px; background: var(--bg-elevated); border: 1px solid var(--divider); border-radius: var(--radius-input); box-shadow: var(--shadow-pop); }
+.head__moreMenu .btn { justify-content: flex-start; }
+.hero__title { font-size: 19px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.hero__title-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hero__title-line h1 { min-width: 0; }
+.hero__title-line .hero__badge { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; white-space: nowrap; font-size: 11px; font-weight: 400; padding: 3px 7px; }
+.hero__original, .hero__summary-text { font-size: var(--fs-tag); color: var(--text-sub); line-height: 1.5; overflow-wrap: anywhere; }
+.hero__summary-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.hero__location { display: flex; gap: 6px; align-items: flex-start; text-align: left; color: var(--text-sub); font-size: 11px; line-height: 1.5; }
+.hero__location svg { flex: none; margin-top: 2px; }
+.hero__location span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.hero__edit { margin-left: auto; min-height: 28px; }
+.hero__name { resize: vertical; min-height: 44px; font-size: 18px; line-height: 1.4; }
+.hero__posterActs { display: grid; grid-template-columns: minmax(0, 1fr) 18px; gap: 2px; padding: 3px; }
+.hero__posterBtn { justify-content: center; font-size: 10px; min-height: 22px; white-space: nowrap; }
+.hero__posterBtn:first-child { grid-column: 1 / -1; }
+.hero__posterBtn:nth-child(2):last-child { grid-column: 1 / -1; }
+.read-text { font-size: var(--fs-body); color: var(--text-sub); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.detail-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; align-items: start; }
+.hero__facts { min-width: 0; border-left: 1px solid var(--divider); padding-left: 16px; display: flex; flex-direction: column; gap: 9px; }
+.hero__classification { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.hero__badge { padding: 4px 8px; font-size: 12px; color: var(--text-main); }
+.hero__category, .hero__tag-heading, .hero__empty-tags, .hero__progress { font-size: 11px; color: var(--text-sub); line-height: 1.6; }
+.hero__tag-heading { margin-top: 3px; }
+.hero__tags { margin: 0; gap: 5px; overflow: hidden; align-content: start; }
+.hero__tag-area { min-width: 0; }
+.hero__tags-more { color: var(--text-sub); margin-top: 3px; padding: 0 8px; min-width: 28px; min-height: 22px; border-radius: 4px; font-size: 12px; }
+.hero__tags-more:hover { background: var(--hover-surface); color: var(--accent); }
+.hero__progress { padding-top: 8px; border-top: 1px solid var(--divider); font-variant-numeric: tabular-nums; }
+.hero__field { display: grid; gap: 5px; color: var(--text-sub); font-size: 11px; }
+.detail-tabs { display: flex; align-items: center; gap: 24px; border-bottom: 1px solid var(--divider); padding: 0 4px; }
+.detail-tabs button { min-height: 42px; padding: 8px 2px; display: flex; align-items: center; gap: 7px; border-bottom: 2px solid transparent; color: var(--text-sub); font-size: 13px; white-space: nowrap; }
+.detail-tabs button[aria-selected='true'] { color: var(--text-main); border-bottom-color: var(--accent); font-weight: 600; }
+.detail-tabs button:hover { color: var(--text-main); }
+.detail-tabs span { padding: 1px 5px; border-radius: 4px; background: var(--hover-surface); font-size: 10px; font-variant-numeric: tabular-nums; }
+[role='tabpanel'] { min-width: 0; }
+[role='tabpanel']:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.episode-reading { min-height: 220px; padding: 20px 24px; }
+.episode-reading__head { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 22px; padding-bottom: 15px; border-bottom: 1px solid var(--divider); }
+.episode-reading__head > div { min-width: 0; }
+.episode-reading__head h2 { font-size: 15px; font-weight: 600; }
+.episode-reading__head p { color: var(--text-sub); font-size: 12px; line-height: 1.6; margin-top: 5px; overflow-wrap: anywhere; }
+.episode-reading__scope { display: grid; gap: 5px; flex: 0 1 320px; min-width: 140px; color: var(--text-sub); font-size: 11px; }
+.episode-reading__scope select { width: 100%; min-width: 0; height: 34px; padding: 0 9px; border: 1px solid var(--divider); border-radius: var(--radius-input); background: var(--bg-main); color: var(--text-main); font-size: 12px; }
+.episode-reading__title { margin-bottom: 16px; }
+.episode-reading__title h3 { font-size: 17px; font-weight: 500; line-height: 1.6; overflow-wrap: anywhere; }
+.episode-reading__title p { color: var(--text-sub); font-size: 12px; margin-top: 4px; }
+.episode-reading .read-text { max-width: 76ch; line-height: 1.9; }
+.episode-reading__source { margin-top: 20px; }
+.episode-reading__original { display: grid; gap: 6px; margin-bottom: 14px; color: var(--text-sub); font-size: 12px; }
+.file-management-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.statuses { flex-wrap: wrap; }
+.chip.on { color: var(--text-main); }
+.detail .btn--primary { background: #6652c8; color: #fff; }
+:global([data-theme='light']) .detail { --danger: #b42332; --warning: #825800; }
+@media (max-width: 1060px) { .hero { grid-template-columns: 70px minmax(0, 1fr) 180px; gap: 12px; padding: 12px; } .hero__poster { width: 70px; } .hero__facts { padding-left: 12px; } .hero__title { font-size: 17px; } .hero__text { gap: 5px; } .detail__play { max-width: 170px; } }
+@media (max-width: 720px) { .head { gap: 6px; padding: 8px 12px; align-items: flex-start; } .head__actions { flex-wrap: wrap; gap: 5px; } .body { padding: 10px 12px 20px; } .hero { grid-template-columns: 70px minmax(0, 1fr); } .hero__facts { grid-column: 1 / -1; padding: 10px 0 0; border-left: 0; border-top: 1px solid var(--divider); } .detail-tabs { gap: 16px; } .episode-reading { padding: 16px; } .episode-reading__head { flex-wrap: wrap; } .episode-reading__scope { flex-basis: 100%; } }
 </style>

@@ -2,6 +2,15 @@
 import { RouterView } from 'vue-router'
 import TitleBar from '@/components/TitleBar.vue'
 import ToastHost from '@/components/ui/ToastHost.vue'
+import VideoImportPanel from '@/components/video/VideoImportPanel.vue'
+import AgentOrganizePanel from '@/components/video/AgentOrganizePanel.vue'
+import { useVideoAgentOrganize } from '@/composables/useVideoAgentOrganize'
+import { useVideoImport } from '@/composables/useVideoImport'
+import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
+import { watch } from 'vue'
+const videoImport = useVideoImport(), workflow = useVideoWorkflow()
+const videoAgent = useVideoAgentOrganize()
+watch(workflow.hideHentai, hidden => { videoImport.setPrivacy(hidden); if (hidden) videoAgent.hide() })
 </script>
 
 <template>
@@ -13,6 +22,8 @@ import ToastHost from '@/components/ui/ToastHost.vue'
       </Transition>
     </RouterView>
     <ToastHost />
+    <VideoImportPanel v-if="videoImport.open.value" />
+    <AgentOrganizePanel v-if="videoAgent.open.value" />
   </div>
 </template>
 

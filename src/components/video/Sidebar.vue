@@ -7,26 +7,40 @@
  * 而软件和游戏没有对应物。
  */
 import { computed, ref } from 'vue'
-import { Archive, Box, ChevronDown, Clapperboard, Film, Hash, Tv } from 'lucide-vue-next'
+import { Archive, Box, ChevronDown, CircleAlert, Clapperboard, Film, Flame, Folder, Hash, Tv } from 'lucide-vue-next'
 import { VIDEO_TYPE_LABEL, WATCH_STATUS_LABEL, useVideoStore } from '@/stores/video'
 import type { VideoType, WatchStatus } from '@/types'
 
 const store = useVideoStore()
+const props = withDefaults(defineProps<{ pendingActive?: boolean; pendingCount?: number; privateHidden?: boolean }>(), { pendingActive: false, pendingCount: 0, privateHidden: false })
+defineEmits<{ pending: [] }>()
 
 /** 在看排第一：这一格是这组里唯一有行动含义的那一格（接着看什么） */
 const STATUSES: WatchStatus[] = ['watching', 'unwatched', 'watched', 'dropped']
 const TYPES: VideoType[] = ['movie', 'series']
 
 const tagsOpen = ref(false)
+const inHentaiScope = computed(() => store.inHentaiScope)
+const collections = computed(() => {
+  const saved = (inHentaiScope.value ? props.privateHidden ? [] : store.counts.hentai_collections : store.counts.collections) ?? []
+  const total = inHentaiScope.value ? props.privateHidden ? 0 : store.counts.hentai : store.counts.all
+  return [{ name: '', count: Math.max(0, (total || 0) - saved.reduce((sum, row) => sum + row.count, 0)) }, ...saved]
+})
+const categories = computed(() => {
+  const list = store.counts.categories.filter(c => c.name !== '里番')
+  return list.some(c => c.name === '其他') ? list : [...list, { name: '其他', count: 0 }]
+})
+const tagCounts = computed(() => (inHentaiScope.value ? props.privateHidden ? [] : store.counts.hanime_tags : store.counts.tags))
+const archivedCount = computed(() => inHentaiScope.value ? props.privateHidden ? 0 : store.counts.hentai_archived ?? 0 : store.counts.archived)
 const visibleTags = computed(() =>
-  tagsOpen.value ? store.counts.tags : store.counts.tags.slice(0, 8)
+  tagsOpen.value ? tagCounts.value : tagCounts.value.slice(0, 8)
 )
 
-const isActive = (kind: string, value: string) => store.activeKey === `${kind}:${value}`
+const isActive = (kind: string, value: string) => !props.pendingActive && store.activeKey === `${kind}:${value}`
 </script>
 
 <template>
-  <nav class="sidebar">
+  <nav class="sidebar" aria-label="影视分类与待处理">
     <div class="sidebar__scroll">
       <button
         class="row"
@@ -36,6 +50,9 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
         <Clapperboard :size="15" />
         <span class="row__label">全部影视</span>
         <span class="row__count">{{ store.counts.all }}</span>
+      </button>
+      <button type="button" class="row" :class="{ 'row--active': pendingActive }" :aria-pressed="pendingActive" title="查看当前范围的待处理作品" @click="$emit('pending')">
+        <CircleAlert :size="15" /><span class="row__label">待处理</span><span class="row__count">{{ pendingCount }}</span>
       </button>
 
       <p class="sidebar__title">类型</p>
@@ -53,6 +70,14 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
         <span class="row__count">{{ store.counts.type[t] }}</span>
       </button>
 
+      <button v-if="!privateHidden && store.counts.hentai_visible !== false" class="row"
+        :class="{ 'row--active': isActive('type', 'hentai') }"
+        @click="store.select({ kind: 'type', value: 'hentai' })">
+        <Flame :size="15" />
+        <span class="row__label">里番</span>
+        <span class="row__count">{{ store.counts.hentai ?? 0 }}</span>
+      </button>
+
       <p class="sidebar__title">观看</p>
       <!-- 四态是闭集，计数为 0 的也留着。分类那边相反，空分类不出现 ——
            分类是开集，会越长越多 -->
@@ -68,24 +93,35 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
         <span class="row__count">{{ store.counts.status[s] }}</span>
       </button>
 
-      <template v-if="store.counts.categories.length > 0">
+      <template v-if="categories.length > 0">
         <p class="sidebar__title">分类</p>
         <button
-          v-for="c in store.counts.categories"
+          v-for="c in categories"
           :key="c.name"
           class="row"
           :class="{ 'row--active': isActive('category', c.name) }"
           @click="store.select({ kind: 'category', value: c.name })"
         >
           <Box :size="15" />
-          <span class="row__label">{{ c.name }}</span>
+          <span class="row__label">{{ c.name === '其他' ? '其他分类' : c.name }}</span>
           <span class="row__count">{{ c.count }}</span>
         </button>
       </template>
 
-      <template v-if="store.counts.tags.length > 0">
-        <button class="sidebar__title sidebar__title--btn" @click="tagsOpen = !tagsOpen">
-          <span>标签</span>
+      <template v-if="collections.length">
+        <p class="sidebar__title">收藏分组</p>
+        <button v-for="collection in collections" :key="collection.name" class="row"
+          :class="{ 'row--active': isActive('collection', collection.name) }"
+          @click="store.select({ kind: 'collection', value: collection.name, ...(inHentaiScope ? { type: 'hentai' as const } : {}) })">
+          <Folder :size="15" />
+          <span class="row__label" :title="collection.name || '未设置'">{{ collection.name || '未设置' }}</span>
+          <span class="row__count">{{ collection.count }}</span>
+        </button>
+      </template>
+
+      <template v-if="tagCounts.length > 0">
+        <button class="sidebar__title sidebar__title--btn" :aria-expanded="tagsOpen" @click="tagsOpen = !tagsOpen">
+          <span>{{ inHentaiScope ? '里番标签' : '标签' }}</span>
           <ChevronDown :size="13" :class="['chev', { 'chev--open': tagsOpen }]" />
         </button>
         <button
@@ -93,7 +129,7 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
           :key="t.name"
           class="row"
           :class="{ 'row--active': isActive('tag', t.name) }"
-          @click="store.select({ kind: 'tag', value: t.name })"
+          @click="store.select({ kind: 'tag', value: t.name, ...(inHentaiScope ? { type: 'hentai' as const } : {}) })"
         >
           <Hash :size="15" />
           <span class="row__label">{{ t.name }}</span>
@@ -101,16 +137,16 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
         </button>
       </template>
 
-      <template v-if="store.counts.archived > 0">
+      <template v-if="archivedCount > 0">
         <div class="sidebar__divider" />
         <button
           class="row"
           :class="{ 'row--active': isActive('group', 'archived') }"
-          @click="store.select({ kind: 'group', value: 'archived' })"
+          @click="store.select({ kind: 'group', value: 'archived', ...(inHentaiScope ? { type: 'hentai' as const } : {}) })"
         >
           <Archive :size="15" />
           <span class="row__label">已归档</span>
-          <span class="row__count">{{ store.counts.archived }}</span>
+          <span class="row__count">{{ archivedCount }}</span>
         </button>
       </template>
     </div>
@@ -141,7 +177,7 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
   padding: 0 8px;
   margin: 16px 0 6px;
   font-size: 11px;
-  letter-spacing: 1px;
+  letter-spacing: 0;
   color: var(--text-faint);
 }
 
@@ -197,6 +233,11 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.sidebar { --text-faint: var(--text-sub); }
+.sidebar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { height: auto; min-height: 32px; padding-block: 6px; }
+.row__label { white-space: normal; overflow-wrap: anywhere; }
+.row--active, .row--active .row__count { color: var(--text-main); }
 
 .row__count {
   font-size: var(--fs-tag);

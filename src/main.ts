@@ -5,6 +5,9 @@ import router from './router'
 import { errorMessage } from './utils'
 import { useCategoriesStore } from './stores/categories'
 import { useSettingsStore } from './stores/settings'
+import { useVideoStore } from './stores/video'
+import { useVideoWorkflow } from './composables/useVideoWorkflow'
+import { useToast } from './composables/useToast'
 import './styles/global.scss'
 
 async function boot(): Promise<void> {
@@ -20,6 +23,17 @@ async function boot(): Promise<void> {
     app.use(router)
     await router.isReady()
     app.mount('#app')
+    window.baoyi.hanimeBrowser?.onDownload(url => {
+      if (settings.settings.hide_hentai) return
+      void (async () => {
+        const workflow = useVideoWorkflow()
+        workflow.url.value = url
+        workflow.open.value = true
+        useVideoStore().select({ kind:'type',value:'hentai' })
+        await router.push({ name:'video-home' })
+        await workflow.prepare()
+      })().catch(cause => useToast().error('打开下载预览失败：' + errorMessage(cause)))
+    })
   } catch (err) {
     showBootError(err)
   }
@@ -47,4 +61,3 @@ function showBootError(err: unknown): void {
 }
 
 void boot()
-
