@@ -8,6 +8,8 @@ import { rebase } from '../kinds/software/organize/plan'
 import { KINDS } from '../kinds'
 import { initSchema, insertCategories, insertTag, schemaVersion, seedDefaults, SCHEMA_VERSION } from './schema'
 import { FALLBACK_CATEGORY } from './taxonomy'
+import { migratePosterStorage, resolvePosterDirectory } from './poster-storage.ts'
+import { isPortable } from './portable'
 import type {
   AgentEvent,
   AppSettings,
@@ -39,6 +41,7 @@ import type {
 type Row = Record<string, any>
 
 let db: Database.Database | null = null
+let posterDirectory = ''
 
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -120,6 +123,19 @@ export function postersDir(): string {
 }
 
 /**
+ * 0.8 开发期有一版把海报缓存放到了项目/程序目录下的 `data/posters`，仓库一挪缓存就断。
+ * 现在缓存回到 userData；这里算出那个旧位置，启动时把里面的图搬回来。
+ * 绿色版和显式 --user-data-dir 从来没用过那个位置，算出来就是 userData 本身，迁移会直接跳过。
+ */
+function legacyProjectPostersDir(): string {
+  posterDirectory ||= resolvePosterDirectory({
+    appPath: app.getAppPath(), exePath: process.execPath, userDataPath: app.getPath('userData'),
+    explicitUserData: app.commandLine.hasSwitch('user-data-dir'), portable: isPortable()
+  })
+  return posterDirectory
+}
+
+/**
  * 存档备份根目录，并保证它存在。
  *
  * 设置为空时退回用户数据目录下的 save-backups —— 和 icons 同一个套路：
@@ -195,6 +211,11 @@ export function getDb(): Database.Database {
   // 品类模块从注册表来：公共层不认识 software_meta，也不认识「开发工具」
   // 这些分类名，它只负责把每个品类交上来的那几段 SQL 按顺序执行一遍
   initSchema(db, KINDS)
+  try {
+    const migration = migratePosterStorage(db, legacyProjectPostersDir(), postersDir())
+    if (migration.removed || migration.updated) console.log(`[抱一] 影视图片已搬回 ${postersDir()}（${migration.removed} 张，${migration.updated} 处引用）`)
+    for (const warning of migration.warnings) console.warn('[抱一] ' + warning)
+  } catch (cause) { console.error('[抱一] 影视图片迁移未完成；尚未迁移的原文件与恢复记录已保留：', cause) }
   return db
 }
 
