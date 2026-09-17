@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Copy, Minus, Square, X } from 'lucide-vue-next'
 import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
+import TaskCenter from '@/components/tasks/TaskCenter.vue'
 import {
   MODULE_TABS,
   activeModule,
@@ -84,6 +85,8 @@ function go(key: ModuleKey): void {
         />
       </button>
     </nav>
+
+    <TaskCenter />
 
     <div class="titlebar__controls">
       <button class="ctl" title="最小化" @click="minimize">
@@ -176,7 +179,6 @@ function go(key: ModuleKey): void {
 .titlebar__controls {
   display: flex;
   height: 100%;
-  margin-left: auto;
   -webkit-app-region: no-drag;
 }
 

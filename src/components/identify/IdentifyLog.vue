@@ -21,11 +21,13 @@ import {
 import ReportDialog from '@/components/identify/ReportDialog.vue'
 import type { IdentifyLog, IdentifyLogStatus, IdentifyReport } from '@/types'
 import { useToast } from '@/composables/useToast'
-import { formatDateTime, groupRounds, logToText } from '@/utils'
+import { errorMessage, formatDateTime, groupRounds, logToText } from '@/utils'
 
 const props = defineProps<{
   /** 资源类型：software / game / video，用于过滤该模块的识别日志 */
   resourceKind: string
+  since?: number
+  until?: number
 }>()
 
 const emit = defineEmits<{ (e: 'retry', dir: string): void }>()
@@ -51,6 +53,8 @@ const logs = ref<IdentifyLog[]>([])
 const reports = ref<IdentifyReport[]>([])
 const openReport = ref<IdentifyReport | null>(null)
 const loading = ref(false)
+const loadError = ref('')
+const taskScoped = computed(() => props.since !== undefined || props.until !== undefined)
 const filter = ref<Filter>('all')
 const keyword = ref('')
 /** 展开的日志 id。默认全收起，一页几十条时不至于一屏放不下一条 */
@@ -60,19 +64,27 @@ const spread = ref(new Set<string>())
 
 /** 上次真正发起过查询的关键词。blur 在单纯移开焦点时也会触发，没改动就不该重打 IPC */
 let queriedKeyword = ''
+let loadRound = 0
 
 async function load(): Promise<void> {
+  const round = ++loadRound
   const kw = keyword.value.trim()
   queriedKeyword = kw
   loading.value = true
+  loadError.value = ''
   try {
-    logs.value = await window.baoyi.logs.list({
+    const result = await window.baoyi.logs.list({
       status: filter.value === 'all' ? undefined : filter.value,
       keyword: kw || undefined,
-      resource_kind: props.resourceKind
+      resource_kind: props.resourceKind,
+      ...(taskScoped.value ? { limit: 300 } : {})
     })
+    if (round === loadRound) logs.value = result.filter(log => (props.since === undefined || log.created_at >= props.since)
+      && (props.until === undefined || log.created_at <= props.until))
+  } catch (cause) {
+    if (round === loadRound) { logs.value = []; loadError.value = errorMessage(cause) }
   } finally {
-    loading.value = false
+    if (round === loadRound) loading.value = false
   }
 }
 
@@ -80,12 +92,15 @@ function blurSearch(): void {
   if (keyword.value.trim() !== queriedKeyword) void load()
 }
 
-// 切换模块时重新加载日志
-watch(() => props.resourceKind, () => void load())
+// 切换模块时重新加载日志和报告
+watch(() => [props.resourceKind, props.since, props.until], async () => {
+  await load()
+  reports.value = taskScoped.value ? [] : await window.baoyi.logs.reports(props.resourceKind)
+})
 
 onMounted(async () => {
   await load()
-  reports.value = await window.baoyi.logs.reports()
+  if (!taskScoped.value) reports.value = await window.baoyi.logs.reports(props.resourceKind)
 })
 
 function pick(value: Filter): void {
@@ -145,8 +160,22 @@ function argLine(name: string, args: Record<string, unknown>): string {
       return tail
     case 'register_software':
       return String(args.name_zh ?? args.name_en ?? '')
+    case 'register_game':
+      return String(args.name_zh ?? args.name_en ?? '')
+    case 'register_video':
+      return String(args.name_zh ?? args.name_en ?? '')
     case 'web_search':
       return String(args.query ?? '')
+    case 'search_images':
+      return String(args.query ?? '')
+    case 'tmdb_search':
+      return String(args.query ?? '')
+    case 'tmdb_tv_season':
+      return `${args.series_id} S${args.season_number}`
+    case 'hanime_search':
+      return String(args.query ?? '')
+    case 'hanime_detail':
+      return String(args.id ?? '')
     default:
       return Object.entries(args)
         .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
@@ -184,15 +213,16 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
 </script>
 
 <template>
-  <section class="panel">
+  <section class="panel" :class="{ 'panel--task': taskScoped }">
     <div class="sec-head">
       <h2>识别日志</h2>
-      <button v-if="logs.length" class="btn btn--subtle" @click="clearAll">
+      <button v-if="logs.length && !taskScoped" class="btn btn--subtle" @click="clearAll">
         <Eraser :size="14" />
         清空
       </button>
     </div>
-    <p class="sec-desc">
+    <p v-if="taskScoped" class="sec-desc">本次任务的识别过程。展开记录可查看来源查询、返回资料和入库结果。</p>
+    <p v-else class="sec-desc">
       每跑一次识别留一条，记下 agent 调了哪些工具、看到了什么、最后怎么判断。
       识别结果不对时，翻这里比猜要快 —— 你能直接看到它是在哪一步走偏的。
       只保留最近 300 条。
@@ -239,8 +269,9 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
       <Loader2 :size="14" class="spin" />
       读取中…
     </p>
+    <p v-else-if="loadError" class="state" role="alert">读取识别日志失败：{{ loadError }}</p>
     <p v-else-if="empty" class="state">
-      还没有日志。跑一次识别后，过程就会记录在这里。
+      {{ taskScoped ? '本次任务暂无识别日志。仅导入本地资料、跳过未变化文件时不会生成识别过程。' : '还没有日志。跑一次识别后，过程就会记录在这里。' }}
     </p>
 
     <ul v-else class="logs">
@@ -304,7 +335,7 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
           </p>
 
           <div v-if="log.kind === 'unit' && log.status !== 'success'" class="trace__act">
-            <button class="btn btn--ghost" @click="retry(log)">
+            <button v-if="!taskScoped" class="btn btn--ghost" @click="retry(log)">
               <RotateCcw :size="14" />
               退回待识别
             </button>
@@ -319,6 +350,11 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
 </template>
 
 <style scoped>
+.panel--task { padding: 12px; margin-top: 8px; }
+.panel--task .toolbar { flex-wrap: wrap; gap: 8px; }
+.panel--task .finder { min-width: 0; flex: 1; }
+.panel--task .log__head { flex-wrap: wrap; }
+.panel--task .log__time { width: 100%; margin-left: 20px; }
 .sec-head {
   display: flex;
   align-items: center;

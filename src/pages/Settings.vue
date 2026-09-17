@@ -38,12 +38,16 @@ import ReportDialog from '@/components/identify/ReportDialog.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import { useAI } from '@/composables/useAI'
 import { useScan } from '@/composables/useScan'
+import { useMediaScan } from '@/composables/useMediaScan'
+import { useVideoImport } from '@/composables/useVideoImport'
+import { useTaskCenter } from '@/composables/useTaskCenter'
 import { useToast } from '@/composables/useToast'
 import { ICON_NAMES, useCategoriesStore } from '@/stores/categories'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
+import { useGameStore } from '@/stores/game'
 import { useVideoStore } from '@/stores/video'
-import { formatBytes, searchCalls } from '@/utils'
+import { errorMessage, formatBytes, plain, searchCalls, shortenPath } from '@/utils'
 import type {
   AIConfig,
   AIProfile,
@@ -59,6 +63,7 @@ import type {
   TitleLang,
   TmdbConfig
 } from '@/types'
+import { parseProxyInput, serializeProxyInput, type ProxyInput } from '../../electron/services/proxy-rules'
 
 const route = useRoute()
 const router = useRouter()
@@ -66,9 +71,14 @@ const settings = useSettingsStore()
 const store = useSoftwareStore()
 // 「隐藏里番」的开关要在设置页里当场让影视那边重查，所以这儿得拿到它的 store
 const video = useVideoStore()
+const game = useGameStore()
 const catStore = useCategoriesStore()
 const { success, error, toast } = useToast()
 const scan = useScan()
+const gameScan = useMediaScan('game')
+const videoScan = useMediaScan('video')
+const videoImport = useVideoImport()
+const tasks = useTaskCenter()
 const ai = useAI()
 
 /* -------------------------------- 分页 -------------------------------- */
@@ -498,9 +508,51 @@ async function toggleHideHentai(): Promise<void> {
 
 /* ------------------------------ 出站代理 ------------------------------ */
 
+type ProxyMode = ProxyInput['mode']
+const proxyMode = ref<ProxyMode>('direct')
+const proxyHost = ref('127.0.0.1')
+const proxyPort = ref(10808)
 const proxyRules = ref(settings.settings.proxy)
 const proxyChecking = ref(false)
 const proxyResult = ref<{ ok: boolean; message: string } | null>(null)
+const hanimeNetwork = ref<Awaited<ReturnType<typeof window.baoyi.settings.proxyStatus>> | null>(null)
+const hanimeVerifying = computed(() => tasks.runningTasks.value.some(task => task.kind === 'hanime-verify'))
+const hanimeHosts = ref(settings.settings.hanime_builtin_hosts !== false)
+watch(() => settings.settings.hanime_builtin_hosts, (value) => { hanimeHosts.value = value !== false })
+
+/**
+ * 内置 Hosts 开关分两层生效：取页时的换 IP 回退主进程当场切换；
+ * Chromium 启动前注入的那条解析规则改不了，要重启。提示里把这两句都说清楚，
+ * 免得用户关了开关、看到「解析规则」还在，以为没保存。
+ */
+async function toggleHanimeHosts(): Promise<void> {
+  await settings.patch({ hanime_builtin_hosts: hanimeHosts.value })
+  success(hanimeHosts.value ? '内置 Hosts 已开启；Chromium 的解析规则重启后生效' : '内置 Hosts 已关闭，改走系统 DNS；Chromium 的解析规则重启后生效')
+  await checkProxy()
+}
+
+function loadProxyForm(raw: string): void {
+  proxyRules.value = raw
+  try {
+    const parsed = parseProxyInput(raw)
+    proxyMode.value = parsed.mode
+    if (parsed.mode === 'http' || parsed.mode === 'socks5') {
+      proxyHost.value = parsed.host
+      proxyPort.value = parsed.port
+    }
+  } catch {
+    proxyMode.value = 'custom'
+  }
+}
+
+loadProxyForm(settings.settings.proxy)
+watch(() => settings.settings.proxy, loadProxyForm)
+onMounted(() => {
+  if (activeModule.value === 'video') void checkProxy()
+})
+watch(activeModule, (kind) => {
+  if (kind === 'video') void checkProxy()
+})
 
 /**
  * 保存代理。主进程在 `settings:patch` 里看见 `proxy` 这个键就当场铺下去，
@@ -510,8 +562,35 @@ const proxyResult = ref<{ ok: boolean; message: string } | null>(null)
  * 所以保存后再问一次生效情况，把「规则铺上了吗」摆给用户看。
  */
 async function saveProxy(): Promise<void> {
-  await settings.patch({ proxy: proxyRules.value.trim() })
-  success(proxyRules.value.trim() === '' ? '已切回直连' : '代理配置已保存')
+  let input: ProxyInput
+  if (proxyMode.value === 'direct') input = { mode: 'direct' }
+  else if (proxyMode.value === 'system') input = { mode: 'system' }
+  else if (proxyMode.value === 'custom') {
+    const raw = proxyRules.value.trim()
+    if (!raw) {
+      error('自定义代理规则不能为空')
+      return
+    }
+    try {
+      input = parseProxyInput(raw)
+    } catch (err) {
+      error(err instanceof Error ? err.message : String(err))
+      return
+    }
+  } else {
+    const host = proxyHost.value.trim()
+    const port = Number(proxyPort.value)
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+      error('请输入有效的代理主机和端口（1-65535）')
+      return
+    }
+    input = { mode: proxyMode.value, host, port }
+  }
+
+  const serialized = serializeProxyInput(input)
+  await settings.patch({ proxy: serialized })
+  proxyRules.value = serialized
+  success(input.mode === 'direct' ? '已切回直连' : '代理配置已保存')
   await checkProxy()
 }
 
@@ -531,10 +610,38 @@ async function checkProxy(): Promise<void> {
       ok: true,
       message: `当前规则：${rules}　·　hanime1.me 实际走：${s.resolved}`
     }
+    hanimeNetwork.value = s
   } catch (err) {
     proxyResult.value = { ok: false, message: `问不到代理状态：${(err as Error).message}` }
   } finally {
     proxyChecking.value = false
+  }
+}
+
+async function verifyHanime(): Promise<void> {
+  if (hanimeVerifying.value) return
+  const taskId = tasks.start('hanime-verify', '内置 Cloudflare 验证', { message: '请在验证窗口完成验证；关闭窗口或超时会记为未完成' })
+  try {
+    const ok = await window.baoyi.settings.hanimeVerify('https://hanime1.me/')
+    proxyResult.value = {
+      ok,
+      message: ok
+        ? 'Hanime 页面已通过内置会话加载，可以重新刮削。'
+        : '验证窗口未完成，请在窗口中完成 Cloudflare 验证后再试。'
+    }
+    tasks.finish(taskId, ok ? 'success' : 'cancelled', proxyResult.value.message)
+  } catch (err) {
+    proxyResult.value = { ok: false, message: '验证没能完成：' + errorMessage(err) }
+    tasks.finish(taskId, 'failed', 'Cloudflare 验证失败', errorMessage(err))
+  } finally {
+    // 主任务在辅助查询前结束，查询慢或失败都不能继续锁住按钮。
+    // 只刷新网络概况，不能用 checkProxy() 的「代理规则正常」覆盖验证失败。
+    try {
+      hanimeNetwork.value = await window.baoyi.settings.proxyStatus()
+    } catch (err) {
+      tasks.log(taskId, 'warn', '验证后的网络状态查询失败：' + errorMessage(err))
+      // 辅助信息失败不改写主验证结果。
+    }
   }
 }
 
@@ -590,13 +697,58 @@ const noteworthy = computed(() =>
 
 /** 当前模块的扫描目录。整理 Tab 只在软件模块显示，那里用的也是 software_scan_dirs */
 const dirs = computed(() => {
-  const kind = currentKind.value
+  const kind = activeModule.value
   if (kind === 'game') return settings.settings.game_scan_dirs
   if (kind === 'video') return settings.settings.video_scan_dirs
   return settings.settings.software_scan_dirs
 })
 
-const busy = computed(() => scan.running.value || ai.running.value)
+// 设置页的扫描包含配置预检和结果刷新，这两个阶段也不能重复点击。
+const scanningKind = ref<typeof activeModule.value | null>(null)
+const scanKind = computed(() => scanningKind.value ?? activeModule.value)
+const currentMediaScan = computed(() => scanKind.value === 'video' ? videoScan : gameScan)
+const mediaScanProgress = computed(() => currentMediaScan.value.progress.value)
+const scanStopping = computed(() => scanKind.value === 'software'
+  ? scan.running.value && scan.stopping.value
+  : currentMediaScan.value.running.value && currentMediaScan.value.stopping.value
+)
+const scanRunning = computed(() =>
+  scanningKind.value !== null || (activeModule.value === 'software' ? scan.running.value : currentMediaScan.value.running.value)
+)
+const busy = computed(() => scanRunning.value || scan.running.value || ai.running.value || gameScan.running.value || videoScan.running.value)
+const scanPhaseLabel = computed(() => {
+  if (scanStopping.value) return '正在停止，等待当前任务收尾…'
+  const kind = scanKind.value
+  if (!kind || kind === 'software') return scan.phaseLabel.value
+  const moduleName = kind === 'video' ? '影视' : '游戏'
+  const p = mediaScanProgress.value
+  if (!p) return moduleName + '：正在检查扫描配置…'
+  if (p.phase === 'scanning') return moduleName + '：正在扫描 ' + shortenPath(p.current, 40)
+  if (p.phase === 'done') return moduleName + '：正在刷新资源库…'
+  return moduleName + '：识别 ' + Math.min(p.processed + 1, p.total) + '/' + p.total + '　' + (p.log || shortenPath(p.current, 32))
+})
+const scanPercent = computed(() => {
+  if (scanKind.value === 'software') return scan.percent.value
+  const p = mediaScanProgress.value
+  if (!p || p.phase === 'scanning' || p.total === 0) return 0
+  return Math.max(0, Math.min(100, Math.round((p.processed / p.total) * 100)))
+})
+const canCancelScan = computed(() =>
+  scanRunning.value && (scanKind.value === 'software'
+    ? scan.running.value && scan.progress.value?.phase !== 'done'
+    : currentMediaScan.value.running.value && mediaScanProgress.value?.phase !== 'done')
+)
+
+function cancelScan(): void {
+  if (!canCancelScan.value || scanStopping.value) return
+  try {
+    if (scanKind.value === 'software') scan.cancel()
+    else currentMediaScan.value.cancel()
+    // 停止状态由共享任务维护；跨页面取消也能同步，直到原 IPC 返回才解锁。
+  } catch (err) {
+    error('停止扫描失败：' + errorMessage(err))
+  }
+}
 
 async function resetUnits(): Promise<void> {
   const ok = window.confirm(
@@ -626,49 +778,92 @@ async function addDir(): Promise<void> {
     toast('这个目录已经在列表里了')
     return
   }
-  const kind = currentKind.value
-  if (kind === 'game') {
-    await settings.patch({ game_scan_dirs: [...dirs.value, dir] })
-  } else if (kind === 'video') {
-    await settings.patch({ video_scan_dirs: [...dirs.value, dir] })
-  } else {
-    await settings.patch({ software_scan_dirs: [...dirs.value, dir] })
-  }
+  const key = `${activeModule.value}_scan_dirs` as 'software_scan_dirs' | 'game_scan_dirs' | 'video_scan_dirs'
+  await settings.patch({ [key]: [...dirs.value, dir] })
 }
 
 async function removeDir(dir: string): Promise<void> {
-  const kind = currentKind.value
-  if (kind === 'game') {
-    await settings.patch({ game_scan_dirs: dirs.value.filter((d) => d !== dir) })
-  } else if (kind === 'video') {
-    await settings.patch({ video_scan_dirs: dirs.value.filter((d) => d !== dir) })
-  } else {
-    await settings.patch({ software_scan_dirs: dirs.value.filter((d) => d !== dir) })
-  }
+  const key = `${activeModule.value}_scan_dirs` as 'software_scan_dirs' | 'game_scan_dirs' | 'video_scan_dirs'
+  await settings.patch({ [key]: dirs.value.filter((d) => d !== dir) })
   await loadUnits()
 }
 
 async function runScan(): Promise<void> {
+  if (busy.value) return
   if (dirs.value.length === 0) {
     toast('先添加至少一个扫描目录')
     return
   }
-  const r = await scan.run(dirs.value)
-  await Promise.all([store.reload(), loadUnits()])
 
-  // 说清楚三件事：找到多少程序、还要识别几个目录、有几个这次不用再花钱
-  const parts = [`发现 ${r.found} 个程序`]
-  if (r.pending > 0) {
-    parts.push(r.added > 0 ? `${r.pending} 个目录待识别（新增 ${r.added} 个）` : `${r.pending} 个目录待识别`)
-  } else {
-    parts.push('没有需要识别的目录')
+  // 模块和目录在第一处 await 前固定；中途切模块或改目录不能改写本轮的目标。
+  const kind = activeModule.value
+  scanningKind.value = kind
+  let mediaStarted = false
+  const recordAttempt = (status: 'failed' | 'cancelled', message: string): void => {
+    const id = tasks.start(kind === 'video' ? 'video-scan' : 'game-scan', (kind === 'video' ? '影视' : '游戏') + '扫描预检')
+    tasks.finish(id, status, message, status === 'failed' ? message : undefined)
   }
-  if (r.settled > 0) parts.push(`${r.settled} 个已识别过，跳过`)
-  // 散落文件只提一句：它们还不是「装好的软件」，识别它们没有意义，但用户该知道有这回事
-  if (r.loose_files.length > 0) {
-    parts.push(`另有 ${r.loose_files.length} 个未整理的散落文件（安装包或压缩包），本次未处理`)
+  try {
+    // 必须在 renderer 拍平。preload 里的 plain 来不及拦 contextBridge 的克隆异常。
+    const scanDirs = plain(dirs.value)
+    if (kind === 'video') {
+      mediaStarted = true
+      await videoImport.begin(scanDirs)
+      return
+    }
+    if (kind === 'software') {
+      const r = await scan.run(scanDirs)
+      const stopped = scan.stopping.value
+      await Promise.all([store.reload(), loadUnits()])
+
+      const parts = ['发现 ' + r.found + ' 个程序']
+      if (r.pending > 0) {
+        parts.push(r.pending + ' 个目录待识别' + (r.added > 0 ? '（新增 ' + r.added + ' 个）' : ''))
+      } else {
+        parts.push('没有需要识别的目录')
+      }
+      if (r.settled > 0) parts.push(r.settled + ' 个已识别过，跳过')
+      if (r.loose_files.length > 0) {
+        parts.push('另有 ' + r.loose_files.length + ' 个未整理的散落文件（安装包或压缩包），本次未处理')
+      }
+      const message = (stopped ? '扫描已停止：' : '扫描完成：') + parts.join('，')
+      if (stopped) toast(message)
+      else success(message)
+      return
+    }
+
+    if (!settings.settings.ai.enabled || !settings.settings.ai.api_key.trim()) {
+      recordAttempt('failed', '游戏识别要用 AI，请先填写 API Key 并启用 AI')
+      error('游戏识别要用 AI，请先填写 API Key 并启用 AI')
+      go('ai')
+      return
+    }
+
+    const operation = gameScan
+    mediaStarted = true
+    const r = await operation.run(scanDirs)
+    const stopped = operation.stopping.value
+    await game.reload()
+
+    if (stopped) {
+      toast('扫描已停止：已注册 ' + r.registered + ' 个，已完成的结果已保留')
+    } else if (r.candidates === 0) {
+      toast('这些目录里没找到游戏（没有可执行文件，或者只是一层收纳目录）')
+    } else if (r.failed > 0 && r.registered === 0) {
+      error('扫描到 ' + r.candidates + ' 个候选，但没有注册成功，' + r.failed + ' 个识别失败。请检查 AI 配置或识别日志')
+    } else if (r.registered === 0) {
+      toast('扫描到 ' + r.candidates + ' 个候选，全部跳过；可到识别日志查看原因')
+    } else {
+      const message = '扫描完成：' + r.candidates + ' 个候选，' + r.registered + ' 已注册，' + r.skipped + ' 已跳过，' + r.failed + ' 失败'
+      if (r.failed > 0) toast(message)
+      else success(message)
+    }
+  } catch (err) {
+    if (kind !== 'software' && !mediaStarted) recordAttempt('failed', errorMessage(err))
+    error('扫描没能完成：' + errorMessage(err))
+  } finally {
+    scanningKind.value = null
   }
-  success(`扫描完成：${parts.join('，')}`)
 }
 
 async function runAi(): Promise<void> {
@@ -739,19 +934,9 @@ const mergeInto = ref<number | null>(null)
 const newCategory = ref('')
 const newTag = ref('')
 
-/** activeModule -> kind 映射 */
-const currentKind = computed(() => {
-  const map: Record<string, string> = {
-    software: 'software',
-    game: 'game',
-    video: 'video'
-  }
-  return map[activeModule.value] || 'software'
-})
-
 async function loadTaxonomy(): Promise<void> {
-  await catStore.load(currentKind.value)
-  tags.value = await window.baoyi.tags.list(currentKind.value)
+  await catStore.load(activeModule.value)
+  tags.value = await window.baoyi.tags.list(activeModule.value)
 }
 
 onMounted(loadTaxonomy)
@@ -775,7 +960,7 @@ const TAG_SOURCE_META: Record<Tag['source'], { label: string; tone: 'muted' | 'a
 }
 
 async function saveCategory(c: Category, patch: Partial<Category>): Promise<void> {
-  await catStore.upsert({ ...c, ...patch }, currentKind.value)
+  await catStore.upsert({ ...c, ...patch }, activeModule.value)
   await store.refreshCounts()
 }
 
@@ -793,7 +978,7 @@ async function addCategory(): Promise<void> {
     return
   }
   const max = catStore.list.reduce((n, c) => Math.max(n, c.sort_order), 0)
-  await catStore.upsert({ id: '', name, description: '', icon: 'box', sort_order: max + 1 }, currentKind.value)
+  await catStore.upsert({ id: '', name, description: '', icon: 'box', sort_order: max + 1 }, activeModule.value)
   newCategory.value = ''
   await store.refreshCounts()
 }
@@ -813,7 +998,7 @@ async function dropCategory(c: Category): Promise<void> {
 async function addTag(): Promise<void> {
   const name = newTag.value.trim()
   if (!name) return
-  tags.value = await window.baoyi.tags.create(name, currentKind.value)
+  tags.value = await window.baoyi.tags.create(name, activeModule.value)
   newTag.value = ''
 }
 
@@ -862,6 +1047,12 @@ async function doMerge(): Promise<void> {
 /* ------------------------------ 目录整理 ------------------------------ */
 
 const organizeRoot = computed(() => settings.settings.organize_root)
+async function pickVideoOrganizeRoot(): Promise<void> {
+  try {
+    const folder = await window.baoyi.videoOrganize.pickDirectory()
+    if (folder) { await settings.patch({ video_organize_root: folder }); success('已保存影视整理根目录') }
+  } catch (cause) { error(errorMessage(cause)) }
+}
 const plans = ref<OrganizePlan[]>([])
 const openPlan = ref('')
 const undoing = ref('')
@@ -1066,8 +1257,8 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   // 文案必须把「游戏也会清」写出来。0.6 那版只说「软件条目」而代码只清 software，
   // 两边是对上的；现在改成清全部品类，文案不跟着改就成了一句谎话
   const shared =
-    `会清掉：全部软件条目和游戏条目、待识别目录、整理记录、图标缓存、游戏封面。\n` +
-    `不会删除磁盘上的任何实际文件 —— 软件和游戏本体都还在原处。\n` +
+    `会清掉：全部软件、游戏、影视及内容记录，待识别目录、整理记录、任务和下载记录、图标缓存、游戏封面与影视海报。\n` +
+    `不会删除资源文件，软件、游戏和视频都还在原处。\n` +
     `存档备份也一份不删，备份记录一并留着，不然你就再也找不到那些文件了。`
   const warning =
     mode === 'library'
@@ -1083,7 +1274,8 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 
     if (mode === 'all') {
       // 出厂状态下 onboarded 为 false，路由守卫会把用户带回引导页
-      void router.push({ name: 'onboarding' })
+      await router.push({ name: 'onboarding' })
+      window.location.reload()
       return
     }
 
@@ -1103,6 +1295,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
         `${summary.units} 个目录记录、${summary.icons} 个图标、${summary.covers} 张封面、` +
         `${summary.posters} 张海报${kept}`
     )
+    window.location.reload()
   } catch (err) {
     // 不给反馈的话，失败看起来和成功一模一样 —— 按钮变回可点，什么都没发生
     error(`重置失败：${err instanceof Error ? err.message : String(err)}`)
@@ -1154,9 +1347,17 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
                 添加目录
               </button>
             </div>
-            <p class="sec-desc">
+            <p v-if="activeModule === 'software'" class="sec-desc">
               扫描本身不花钱也不联网：它只是把每个目录整理成一份待识别清单，
               真正的判断交给下一步的 AI 识别。
+            </p>
+            <p v-else-if="activeModule === 'video'" class="sec-desc">
+              影视扫描先读取本地文件名、NFO 和 HanimeViewer 资料并入库，不调用 Agent，也不消耗模型或搜索额度。
+              资料不足的作品会列入待处理，可选中后使用「Agent 复查所选」。
+            </p>
+            <p v-else class="sec-desc">
+              扫描会查找本地游戏目录，随后交给 AI 识别并入库。
+              需要启用 AI；识别与刮削可能联网，并消耗你所配置服务的额度。
             </p>
 
             <ul v-if="dirs.length" class="dirs">
@@ -1171,18 +1372,28 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 
             <div class="row">
               <button class="btn btn--primary" :disabled="busy || dirs.length === 0" @click="runScan">
-                <Loader2 v-if="scan.running.value" :size="14" class="spin" />
-                立即扫描
+                <Loader2 v-if="scanRunning" :size="14" class="spin" />
+                {{ scanRunning ? '扫描中…' : '立即扫描' }}
               </button>
-              <span v-if="scan.running.value" class="hint truncate">{{ scan.phaseLabel.value }}</span>
+              <button v-if="canCancelScan" class="btn btn--subtle" :disabled="scanStopping" @click="cancelScan">
+                {{ scanStopping ? '正在停止…' : '停止扫描' }}
+              </button>
+              <span v-if="scanRunning" class="hint truncate" role="status">{{ scanPhaseLabel }}</span>
             </div>
 
-            <div v-if="scan.running.value" class="bar">
-              <i :style="{ width: `${scan.percent.value}%` }" />
+            <div v-if="scanRunning" class="bar">
+              <i :style="{ width: `${scanPercent}%` }" />
             </div>
           </section>
 
-          <section class="panel">
+          <section v-if="activeModule === 'video'" class="panel">
+            <h2 class="sec-head">视频导入与文件整理</h2>
+            <p class="sec-desc">扫描结果先进入导入确认窗口，核对后再录入。需要联网补充资料时，可以启用 Agent。</p>
+            <div class="row"><label class="hint"><input type="checkbox" :checked="videoImport.useAgent.value" @change="videoImport.setAgent(($event.target as HTMLInputElement).checked)" /> 导入时启用 Agent</label><button class="btn btn--ghost" @click="videoImport.show()">打开导入确认</button></div>
+            <p class="sec-desc" style="margin-top: 18px">整理根目录：创建合集时勾选移动或复制，文件将自动放进此目录下以合集名命名的新文件夹。</p>
+            <div class="row"><span class="hint mono" style="overflow-wrap:anywhere">{{ settings.settings.video_organize_root || '尚未设置' }}</span><button class="btn btn--ghost" @click="pickVideoOrganizeRoot"><FolderOpen :size="14" />{{ settings.settings.video_organize_root ? '修改整理根目录' : '设置整理根目录' }}</button></div>
+          </section>
+          <section v-if="activeModule === 'software'" class="panel">
             <h2 class="sec-head">AI 识别</h2>
             <p class="sec-desc">
               把每个待识别目录交给 agent 自主探索：它自己列目录、读 exe 的 PE 信息、
@@ -1251,7 +1462,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </ul>
           </section>
 
-          <section v-if="skippedCount > 0" class="panel">
+          <section v-if="activeModule === 'software' && skippedCount > 0" class="panel">
             <h2 class="sec-head">忽略名单</h2>
             <p class="sec-desc">
               你在确认面板里点过「不注册」的程序会记在这里，下次识别不再冒出来。
@@ -1576,11 +1787,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </p>
           </section>
 
-          <!--
-            TMDB。影视识别专用，和上面的通用搜索是两条独立的路：
-            没有 TMDB 也能扫进来（按文件名 + 模型知识），只是拿不到官方简介、
-            评分和完整季集表 —— 而季集表是「缺哪几集」这件事的唯一来源。
-          -->
+          <!-- TMDB 用于影视资料补全；首轮本地入库不依赖它。 -->
           <section v-if="activeModule === 'video'" class="panel">
             <div class="sec-head">
               <h2>TMDB 刮削（影视）</h2>
@@ -1599,9 +1806,9 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               </label>
             </div>
             <p class="sec-desc">
-              影视条目的官方标题、简介、评分、海报和季集表都从这里来。
+              用于补全影视条目的官方标题、简介、评分、海报和季集表。
               个人 Key 是免费的，在 themoviedb.org 注册后于「设置 › API」页面申领。
-              不填也能扫描 —— 条目照样入库，只是没有海报和季集表，也就看不出缺哪几集。
+              本地扫描不需要填写 Key，已有的 NFO、下载器资料和图片会直接保留。
             </p>
             <p v-if="!tmdbUsable" class="hint hint--block">请先填入 API Key。</p>
 
@@ -1657,17 +1864,36 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               <h2>出站代理</h2>
             </div>
             <p class="sec-desc">
-              留空为直连。填 <span class="mono">socks5://127.0.0.1:10808</span> 这样的地址；
-              不写协议名时按 HTTP 代理处理。改完保存即刻生效，不用重启。
+              代理只用于 Hanime 刮削链路，改完保存即刻生效，不用重启。
             </p>
 
             <div class="form">
               <label class="field">
-                <span class="field__label">代理地址</span>
+                <span class="field__label">代理模式</span>
+                <select v-model="proxyMode" class="input">
+                  <option value="direct">直连</option>
+                  <option value="system">系统代理</option>
+                  <option value="http">HTTP 代理</option>
+                  <option value="socks5">SOCKS5 代理</option>
+                  <option value="custom">自定义规则</option>
+                </select>
+              </label>
+              <div v-if="proxyMode === 'http' || proxyMode === 'socks5'" class="row">
+                <label class="field field--grow">
+                  <span class="field__label">代理主机</span>
+                  <input v-model="proxyHost" class="input mono" placeholder="127.0.0.1" />
+                </label>
+                <label class="field">
+                  <span class="field__label">端口</span>
+                  <input v-model.number="proxyPort" class="input input--num mono" type="number" min="1" max="65535" />
+                </label>
+              </div>
+              <label v-if="proxyMode === 'custom'" class="field">
+                <span class="field__label">Chromium 代理规则</span>
                 <input
                   v-model="proxyRules"
                   class="input mono"
-                  placeholder="socks5://127.0.0.1:10808"
+                  placeholder="https=socks5://127.0.0.1:10808;http=direct://"
                 />
               </label>
             </div>
@@ -1684,13 +1910,49 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               {{ proxyResult.message }}
             </p>
 
+            <div v-if="hanimeNetwork" class="proxy-status">
+              <div class="proxy-status__title" :class="{ 'proxy-status__title--off': !hanimeHosts }">
+                <span class="status-dot"></span>
+                Hanime 内置 Hosts
+                <label class="switch">
+                  <input v-model="hanimeHosts" type="checkbox" @change="toggleHanimeHosts" />
+                  <span>{{ hanimeHosts ? '已开启' : '已关闭（走系统 DNS）' }}</span>
+                </label>
+              </div>
+              <p class="sec-desc">
+                仅覆盖 Hanime 镜像域名，不影响 TMDB、豆瓣或普通图片请求。
+                启动时把域名固定到上次通了的地址（没有就是地址池第一个）；连不上时按顺序换下一个重试，通了就记住。
+                开关对重试即时生效，对启动规则要重启。
+              </p>
+              <p v-if="hanimeNetwork.resolverRules" class="sec-desc">
+                当前解析规则：<span class="mono">{{ hanimeNetwork.resolverRules }}</span>
+              </p>
+              <p class="sec-desc">
+                地址池：<span class="mono">{{ hanimeNetwork.ips.join(', ') }}</span>
+                <template v-if="hanimeNetwork.activeIp">　·　当前改用：<span class="mono">{{ hanimeNetwork.activeIp }}</span></template>
+              </p>
+              <p class="sec-desc">
+                覆盖域名：<span class="mono">{{ hanimeNetwork.hosts.join(', ') }}</span>
+              </p>
+              <div class="row">
+                <button class="btn btn--ghost" :disabled="hanimeVerifying" @click="verifyHanime">
+                  <Loader2 v-if="hanimeVerifying" :size="14" class="spin" />
+                  打开内置 Cloudflare 验证
+                </button>
+              </div>
+              <p class="sec-desc sec-desc--foot">
+                内置 Hosts 负责线路和 DNS；如果站点返回 Cloudflare 挑战，会打开同一专用会话的验证窗口，完成后自动重试刮削。
+              </p>
+            </div>
+
             <!--
               这一段是必要的，不是免责声明：只有走 Chromium 网络栈的请求吃这份
               代理，而「配了没反应」是这里最容易出现的现象
             -->
             <p class="sec-desc sec-desc--foot">
-              目前只有里番（hanime）那条刮削链路走代理，TMDB 和豆瓣仍是直连。
+              目前只有里番（Hanime）那条刮削链路走代理，TMDB 和豆瓣仍是直连。
               本机回环地址一律不走代理，所以海报那条自定义协议不受影响。
+              SOCKS5 和自定义规则由 Chromium 负责最终解析。
             </p>
           </section>
 
@@ -1971,7 +2233,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 
         <!-- -------------------------- 识别日志 -------------------------- -->
         <template v-else-if="tab === 'logs'">
-          <IdentifyLog :resource-kind="currentKind" @retry="retryUnit" />
+          <IdentifyLog :resource-kind="activeModule" @retry="retryUnit" />
         </template>
         <!-- -------------------------- 数据管理 -------------------------- -->
         <template v-else-if="tab === 'data'">
@@ -2693,6 +2955,42 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 .result--bad {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.proxy-status {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-input);
+  background: var(--active-surface);
+}
+
+.proxy-status__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--success);
+  font-size: var(--fs-tag);
+  font-weight: 600;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+/* 内置 Hosts 关掉后标题和圆点一起变灰，开关本身仍可点 */
+.proxy-status__title--off {
+  color: var(--text-faint);
+}
+
+.proxy-status__title .switch {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--text-main);
 }
 
 .dirs {

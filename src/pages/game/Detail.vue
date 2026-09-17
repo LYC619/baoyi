@@ -35,10 +35,12 @@ import {
 import EditableField from '@/components/ui/EditableField.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import { useToast } from '@/composables/useToast'
+import { useTaskCenter } from '@/composables/useTaskCenter'
 import { PLAY_STATUS_LABEL, useGameStore } from '@/stores/game'
 import { useSettingsStore } from '@/stores/settings'
 import type {
   CoverCandidate,
+  GameCoverDiagnostic,
   GameItem,
   LinkedFile,
   PlayStatus,
@@ -63,21 +65,32 @@ const router = useRouter()
 const store = useGameStore()
 const settings = useSettingsStore()
 const { success, error, toast } = useToast()
+const tasks = useTaskCenter()
 
 const item = ref<GameItem | null>(null)
 const loading = ref(true)
+let loadSequence = 0
+let coverSearchSequence = 0
+let coverChoiceSequence = 0
 
 const STATUSES: PlayStatus[] = ['unplayed', 'playing', 'completed', 'shelved']
 
 async function load(): Promise<void> {
+  const sequence = ++loadSequence
+  const selectedId = props.id
+  closeCoverHits()
+  coverChoiceSequence++
+  coverPicking.value = ''
   loading.value = true
   try {
-    item.value = await window.baoyi.game.get(props.id)
+    const result = await window.baoyi.game.get(selectedId)
+    if (sequence === loadSequence) item.value = result
   } catch (err) {
+    if (sequence !== loadSequence) return
     error(`读取游戏失败：${errorMessage(err)}`)
     item.value = null
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -104,6 +117,13 @@ const hue = computed(() => {
 const cover = computed(() =>
   item.value ? coverUrl(item.value.cover_path, item.value.updated_at) : ''
 )
+const brokenCover = ref(false)
+const landscapeCover = ref(false)
+watch(cover, () => { brokenCover.value = false; landscapeCover.value = false })
+function coverLoaded(event: Event): void {
+  const image = event.target as HTMLImageElement
+  landscapeCover.value = image.naturalWidth > image.naturalHeight
+}
 
 /**
  * 换封面。主进程把图拷进 userData 再落库，所以这里拿回来的条目是最终形态，
@@ -114,16 +134,23 @@ const cover = computed(() =>
  */
 async function pickCover(): Promise<void> {
   if (!item.value) return
-  const r = await window.baoyi.game.pickCover(item.value.id)
-  if (!r) return
-  if (!r.ok) {
-    error(r.message)
-    return
+  const selectedId = item.value.id
+  const sequence = ++coverChoiceSequence
+  closeCoverHits()
+  coverPicking.value = ''
+  try {
+    const r = await window.baoyi.game.pickCover(selectedId)
+    if (r?.ok) void store.load()
+    if (!r || item.value?.id !== selectedId || sequence !== coverChoiceSequence) return
+    if (!r.ok) { coverMiss.value = r.message; error(r.message); return }
+    if (r.item) item.value = r.item
+    success(r.message)
+  } catch (err) {
+    if (sequence === coverChoiceSequence && item.value?.id === selectedId) {
+      coverMiss.value = `更换封面失败：${errorMessage(err)}`
+      error(coverMiss.value)
+    }
   }
-  if (r.item) item.value = r.item
-  // 封面墙那边也要跟着换，否则退回去还是旧的
-  void store.load()
-  success(r.message)
 }
 
 async function clearCover(): Promise<void> {
@@ -131,9 +158,17 @@ async function clearCover(): Promise<void> {
   if (!window.confirm('撤掉这张封面？\n\n会退回首字占位。你原来那张图不受影响，删掉的是抱一自己存的那份拷贝。')) {
     return
   }
-  const updated = await window.baoyi.game.clearCover(item.value.id)
-  if (updated) item.value = updated
-  void store.load()
+  const selectedId = item.value.id
+  const sequence = ++coverChoiceSequence
+  closeCoverHits()
+  coverPicking.value = ''
+  try {
+    const updated = await window.baoyi.game.clearCover(selectedId)
+    if (updated && item.value?.id === selectedId && sequence === coverChoiceSequence) item.value = updated
+    void store.load()
+  } catch (err) {
+    if (sequence === coverChoiceSequence) error(`移除封面失败：${errorMessage(err)}`)
+  }
 }
 
 /* ---------------------------- 搜封面 ---------------------------- */
@@ -142,18 +177,32 @@ const coverSearching = ref(false)
 const coverPicking = ref('')
 const coverHits = ref<CoverCandidate[]>([])
 const coverQuery = ref('')
+const coverDiagnostics = ref<GameCoverDiagnostic[]>([])
+const brokenPreviews = ref(new Set<string>())
+const COVER_SOURCE_LABEL = { local: '本地图片', official: '官方', steam: 'Steam', search: '图片搜索' }
+const COVER_STAGE_LABEL = { identity: '身份', lookup: '查找', network: '网络', decode: '解码', cache: '缓存', write: '保存' }
 /** 搜过一轮但一张都没有时显示的那句话。跟 toast 分开 —— 面板里要一直看得见 */
 const coverMiss = ref('')
 
 async function searchCovers(): Promise<void> {
   if (!item.value || coverSearching.value) return
+  const selectedId = item.value.id
+  const sequence = ++coverSearchSequence
   coverSearching.value = true
   coverMiss.value = ''
   coverHits.value = []
+  coverDiagnostics.value = []
+  brokenPreviews.value = new Set()
+  const taskId = tasks.start('game-scan', `查找游戏封面：${title.value}`, { total: 1, current: title.value })
   try {
-    const r = await window.baoyi.game.searchCovers(item.value.id)
+    const r = await window.baoyi.game.searchCovers(selectedId)
+    for (const diagnostic of r.diagnostics || []) tasks.log(taskId, diagnostic.status === 'failed' ? 'warn' : 'info', `${COVER_SOURCE_LABEL[diagnostic.source]} · ${COVER_STAGE_LABEL[diagnostic.stage]}：${diagnostic.message}`)
+    tasks.update(taskId, { processed: 1, percent: 100 })
+    tasks.finish(taskId, r.ok ? 'success' : 'failed', r.ok ? `找到 ${r.candidates.filter(candidate => candidate.status === 'ready').length} 张可用封面` : r.message)
+    if (item.value?.id !== selectedId || sequence !== coverSearchSequence) return
     coverQuery.value = r.query
     coverHits.value = r.candidates
+    coverDiagnostics.value = r.diagnostics || []
     if (!r.ok) {
       // 搜不到不是异常，是一个要说清原因的正常结果 —— 面板里留着，
       // 用户才看得到「改个名字再搜」或者「手动选一张」这两条下一步
@@ -162,42 +211,101 @@ async function searchCovers(): Promise<void> {
     }
     if (r.message) toast(r.message)
   } catch (err: any) {
-    coverMiss.value = `搜索出错：${err?.message ?? '未知错误'}`
+    tasks.finish(taskId, 'failed', `搜索出错：${err?.message ?? '未知错误'}`)
+    if (sequence === coverSearchSequence && item.value?.id === selectedId) coverMiss.value = `搜索出错：${err?.message ?? '未知错误'}`
   } finally {
-    coverSearching.value = false
+    if (sequence === coverSearchSequence) coverSearching.value = false
   }
 }
 
 async function useCover(url: string): Promise<void> {
-  if (!item.value || coverPicking.value) return
+  if (!item.value || coverPicking.value || brokenPreviews.value.has(url) || coverHits.value.find(c => c.url === url)?.status === 'failed') return
+  const selectedId = item.value.id
+  const sequence = ++coverChoiceSequence
   coverPicking.value = url
+  const taskId = tasks.start('game-scan', `设置游戏封面：${title.value}`, { total: 1, current: title.value })
   try {
-    const r = await window.baoyi.game.setCoverFromUrl(item.value.id, url)
+    const r = await window.baoyi.game.setCoverFromUrl(selectedId, url)
+    tasks.update(taskId, { processed: 1, percent: 100 })
+    tasks.finish(taskId, r.ok ? 'success' : 'failed', r.message || (r.ok ? '封面已设置' : '设置封面失败'))
+    if (r.ok) void store.load()
+    if (item.value?.id !== selectedId || sequence !== coverChoiceSequence) return
     if (!r.ok) {
+      coverMiss.value = r.message
       error(r.message)
       return
     }
     if (r.item) item.value = r.item
-    void store.load()
-    coverHits.value = []
-    coverMiss.value = ''
+    closeCoverHits()
     success(r.message)
+  } catch (err) {
+    tasks.finish(taskId, 'failed', `设置封面失败：${errorMessage(err)}`)
+    if (sequence === coverChoiceSequence && item.value?.id === selectedId) {
+      coverMiss.value = `设置封面失败：${errorMessage(err)}`
+      error(coverMiss.value)
+    }
   } finally {
-    coverPicking.value = ''
+    if (sequence === coverChoiceSequence) coverPicking.value = ''
   }
 }
 
+async function recoverCover(): Promise<void> {
+  if (!item.value || coverPicking.value) return
+  const selectedId = item.value.id
+  const sequence = ++coverChoiceSequence
+  closeCoverHits()
+  coverPicking.value = 'recover'
+  const taskId = tasks.start('game-scan', `恢复游戏封面：${title.value}`, { total: 1, current: title.value })
+  try {
+    const result = await window.baoyi.game.rebuildCovers([selectedId])
+    const message = result.failed ? '封面恢复失败，可重试搜索或选择本地图' : result.updated ? '封面已恢复' : '封面未更改，已保留当前选择'
+    tasks.update(taskId, { processed: result.processed, total: result.processed, percent: 100 })
+    tasks.finish(taskId, result.failed ? 'failed' : 'success', message)
+    const updated = await window.baoyi.game.get(selectedId)
+    void store.load()
+    if (sequence !== coverChoiceSequence || item.value?.id !== selectedId) return
+    if (updated) item.value = updated
+    coverMiss.value = result.failed ? (updated?.cover_detail || message) : ''
+    if (result.updated) { brokenCover.value = false; success(message) }
+  } catch (err) {
+    const message = `恢复封面失败：${errorMessage(err)}`
+    tasks.finish(taskId, 'failed', message)
+    if (sequence === coverChoiceSequence && item.value?.id === selectedId) coverMiss.value = message
+  } finally {
+    if (sequence === coverChoiceSequence) coverPicking.value = ''
+  }
+}
+
+function previewFailed(candidate: CoverCandidate): void {
+  const next = new Set(brokenPreviews.value)
+  next.add(candidate.url)
+  brokenPreviews.value = next
+  coverDiagnostics.value.push({ source: candidate.source, stage: 'cache', status: 'failed', message: '本地预览无法显示，请重新搜索封面', route: 'baoyi 本地预览', url: candidate.url })
+}
+
 function closeCoverHits(): void {
+  coverSearchSequence++
+  coverSearching.value = false
   coverHits.value = []
   coverMiss.value = ''
+  coverQuery.value = ''
+  coverDiagnostics.value = []
 }
+
+onBeforeUnmount(() => { loadSequence++; coverChoiceSequence++; closeCoverHits() })
 
 /** 走 store 而不是直接调 IPC：卡片墙和侧边栏计数要跟着一起更新 */
 async function save(patch: Partial<GameItem>): Promise<void> {
   if (!item.value) return
+  const selectedId = item.value.id
+  if (Object.keys(patch).some(key => key.startsWith('identity_') || key === 'name_zh' || key === 'name_en')) {
+    closeCoverHits()
+    coverChoiceSequence++
+    coverPicking.value = ''
+  }
   try {
-    const updated = await store.update(item.value.id, patch)
-    if (updated) item.value = updated
+    const updated = await store.update(selectedId, patch)
+    if (updated && item.value?.id === selectedId) item.value = updated
   } catch (err) {
     error(`保存失败：${errorMessage(err)}`)
   }
@@ -621,15 +729,15 @@ function copyPath(path: string): void {
               悬停才显形，不占静态视觉重量。「搜封面」排在最前 —— 它是不用离开
               应用就能完成的那条路，手动选图要开系统对话框
             -->
-            <div class="hero__cover" :style="{ '--hue': hue }">
-              <img v-if="cover" :src="cover" :alt="title" class="hero__img" />
+            <div class="hero__cover" :class="{ 'hero__cover--landscape': landscapeCover }" :style="{ '--hue': hue }">
+              <img v-if="cover && !brokenCover" :src="cover" :alt="title" class="hero__img" @load="coverLoaded" @error="brokenCover = true" />
               <span v-else class="hero__initial">{{ initial }}</span>
 
               <div class="hero__coverActs">
                 <button
                   class="hero__coverBtn"
                   :disabled="coverSearching"
-                  title="按游戏名联网找封面（英文名优先）"
+                  title="先检查本地图片，再按封面关键词搜索"
                   @click="searchCovers"
                 >
                   <Loader2 v-if="coverSearching" :size="13" class="spin" />
@@ -666,6 +774,42 @@ function copyPath(path: string): void {
                 @change="save({ summary: ($event.target as HTMLInputElement).value.trim() })"
               />
 
+              <div class="identity-row">
+                <label class="identity-row__label" for="game-identity">游戏身份</label>
+                <input
+                  id="game-identity"
+                  class="identity-row__input"
+                  :value="item.identity_name || item.name_en || item.name_zh"
+                  placeholder="确认游戏身份"
+                  @change="save({ identity_name: ($event.target as HTMLInputElement).value.trim() })"
+                />
+                <label class="identity-row__confirm">
+                  <input
+                    type="checkbox"
+                    :checked="item.identity_confirmed"
+                    @change="save({ identity_confirmed: ($event.target as HTMLInputElement).checked })"
+                  />
+                  已确认
+                </label>
+              </div>
+              <div class="identity-row">
+                <label class="identity-row__label" for="game-cover-query">封面关键词</label>
+                <input
+                  id="game-cover-query"
+                  class="identity-row__query"
+                  :value="item.identity_query"
+                  :placeholder="item.identity_name || item.name_en || item.name_zh || '填写实际游戏名称'"
+                  title="单独用于查找封面；留空时使用游戏身份和名称"
+                  @change="save({ identity_query: ($event.target as HTMLInputElement).value.trim() })"
+                />
+              </div>
+              <p class="identity-row__hint">封面关键词可单独调整。启动入口：{{ item.file_name }}。</p>
+              <p v-if="!item.identity_confirmed" class="identity-row__hint">请确认实际游戏身份，通用启动器名称需要补充游戏信息。</p>
+              <div v-if="brokenCover || (!item.cover_path && item.cover_source_url)" class="cover-recovery">
+                <span>封面缓存不可用，可从上次来源恢复。</span>
+                <button class="btn btn--ghost" :disabled="!!coverPicking" @click="recoverCover">{{ coverPicking === 'recover' ? '恢复中' : '恢复封面' }}</button>
+              </div>
+
               <div class="statuses">
                 <button
                   v-for="s in STATUSES"
@@ -685,7 +829,7 @@ function copyPath(path: string): void {
             平时它是空的，占着一块地方只会让详情页更长。
             搜不到时这里显示原因和下一步，而不是一句「没有结果」就没了
           -->
-          <section v-if="coverHits.length > 0 || coverMiss" class="panel">
+          <section v-if="coverHits.length > 0 || coverMiss || coverDiagnostics.length" class="panel">
             <h2 class="sec-title">
               <Image :size="14" />
               候选封面
@@ -705,20 +849,42 @@ function copyPath(path: string): void {
                 v-for="c in coverHits"
                 :key="c.url"
                 class="coverPick"
-                :class="{ 'coverPick--busy': coverPicking === c.url }"
-                :disabled="!!coverPicking"
-                :title="`${c.label}\n${c.url}`"
+                :class="{ 'coverPick--busy': coverPicking === c.url, 'coverPick--failed': c.status === 'failed' || brokenPreviews.has(c.url) }"
+                :style="{ '--candidate-ratio': c.width && c.height ? `${c.width} / ${c.height}` : '2 / 3' }"
+                :disabled="!!coverPicking || c.status === 'failed' || brokenPreviews.has(c.url)"
+                :title="`${c.title || c.label}\n${c.message || c.label}\n${c.route || ''}\n${c.url}`"
                 @click="useCover(c.url)"
               >
-                <!-- referrerpolicy：部分图床对带 referer 的请求回 403。
-                     这里加载的是候选预览图，正式采用之后走的是本地 baoyi:// -->
-                <img :src="c.url" :alt="c.label" class="coverPick__img" referrerpolicy="no-referrer" />
-                <span class="coverPick__label truncate">{{ c.label }}</span>
+                <!-- 预览图已经由主进程缓存到 baoyi://，CSP 只允许 self/data/baoyi。 -->
+                <img
+                  v-if="c.preview_url && !brokenPreviews.has(c.url)"
+                  :src="c.preview_url"
+                  :alt="c.label"
+                  class="coverPick__img"
+                  @error="previewFailed(c)"
+                />
+                <span v-else class="coverPick__placeholder" role="img" :aria-label="`${c.label}预览不可用`">
+                  <ImageOff :size="20" />
+                  <small>预览不可用</small>
+                </span>
+                <span class="coverPick__label">{{ c.title || c.label }}</span>
+                <span class="coverPick__meta">{{ COVER_SOURCE_LABEL[c.source] }} · {{ c.status === 'failed' || brokenPreviews.has(c.url) ? '不可用' : '可用' }}</span>
+                <span v-if="c.width && c.height" class="coverPick__meta">{{ c.width }} × {{ c.height }}<template v-if="c.bytes"> · {{ formatBytes(c.bytes) }}</template></span>
+                <span v-if="c.message" class="coverPick__meta coverPick__error">{{ c.stage ? COVER_STAGE_LABEL[c.stage] + '：' : '' }}{{ c.message }}</span>
                 <span v-if="coverPicking === c.url" class="coverPick__busy">
                   <Loader2 :size="18" class="spin" />
                 </span>
               </button>
             </div>
+            <details v-if="coverDiagnostics.length" class="coverDiagnostics">
+              <summary>查询过程与网络路径</summary>
+              <ul>
+                <li v-for="(entry, index) in coverDiagnostics" :key="index" :class="{ 'coverDiagnostics__failed': entry.status === 'failed' }">
+                  <span>{{ COVER_SOURCE_LABEL[entry.source] }} · {{ COVER_STAGE_LABEL[entry.stage] }}：{{ entry.message }}</span>
+                  <small v-if="entry.route">{{ entry.route }}</small>
+                </li>
+              </ul>
+            </details>
           </section>
 
           <section class="panel">
@@ -1079,6 +1245,7 @@ function copyPath(path: string): void {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   gap: 10px;
+  align-items: start;
 }
 
 .coverPick {
@@ -1104,19 +1271,40 @@ function copyPath(path: string): void {
 
 .coverPick__img {
   width: 100%;
-  aspect-ratio: 2 / 3;
-  object-fit: cover;
+  aspect-ratio: var(--candidate-ratio, 2 / 3);
+  object-fit: contain;
   display: block;
   /* 加载失败的候选留一块空位而不是破图icon —— 破图比空位更像是应用坏了 */
   background: var(--bg-raised);
 }
 
+.coverPick__placeholder {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  color: var(--text-faint);
+  background: var(--bg-raised);
+  font-size: var(--fs-tag);
+}
+
 .coverPick__label {
-  padding: 0 6px 6px;
+  padding: 0 7px;
   font-size: var(--fs-tag);
   color: var(--text-faint);
   text-align: left;
+  overflow-wrap: anywhere;
 }
+.coverPick__meta { padding: 0 7px 5px; text-align: left; font-size: var(--fs-tag); color: var(--text-faint); overflow-wrap: anywhere; }
+.coverPick__error, .coverDiagnostics__failed { color: var(--danger); }
+.coverPick--failed { opacity: 0.75; }
+.coverDiagnostics { margin-top: 14px; color: var(--text-sub); font-size: var(--fs-tag); }
+.coverDiagnostics summary { cursor: pointer; }
+.coverDiagnostics ul { display: grid; gap: 7px; padding-left: 18px; margin-top: 10px; }
+.coverDiagnostics li small { display: block; color: var(--text-faint); overflow-wrap: anywhere; }
+.cover-recovery { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; color: var(--text-sub); font-size: var(--fs-tag); }
 
 .coverPick__busy {
   position: absolute;
@@ -1161,8 +1349,9 @@ function copyPath(path: string): void {
 .hero__img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
+.hero__cover--landscape { width: min(220px, 35%); aspect-ratio: 16 / 9; }
 
 /* 悬停才出现：封面区平时该是封面，不是一块按钮面板 */
 .hero__coverActs {
@@ -1215,6 +1404,35 @@ function copyPath(path: string): void {
   color: inherit;
   transition: border-color var(--t-fast) ease;
 }
+
+.identity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: var(--fs-tag);
+}
+.identity-row__label { color: var(--text-faint); flex: none; }
+.identity-row__input {
+  min-width: 0;
+  flex: 1;
+  color: var(--text-main);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--divider);
+  padding: 3px 0;
+}
+.identity-row__query {
+  flex: 1;
+  min-width: 80px;
+  color: var(--text-sub);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--divider);
+  padding: 3px 0;
+}
+.identity-row__confirm { display: inline-flex; align-items: center; gap: 4px; color: var(--text-sub); white-space: nowrap; }
+.identity-row__hint { margin: 4px 0 0; color: var(--text-faint); font-size: var(--fs-tag); }
 .hero__name:hover,
 .hero__en:hover,
 .hero__summary:hover {

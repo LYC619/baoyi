@@ -6,14 +6,16 @@
  * 一行文字的列表把唯一的识别线索扔了。规划书 Step 1 里推迟到这一步的
  * 「每个模块各记一份 view_mode」也因此不用做：只有一种视图，没什么可记的。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { FolderPlus, Search, Settings, X } from 'lucide-vue-next'
+import { FilePlus, FolderPlus, Image, ListChecks, Search, Settings, X } from 'lucide-vue-next'
 import GameCard from '@/components/game/GameCard.vue'
 import Sidebar from '@/components/game/Sidebar.vue'
-import type { GameQuery, GameScanProgress } from '@/types'
+import type { GameQuery } from '@/types'
 import { recallScroll, rememberScroll } from '@/composables/useModules'
 import { useToast } from '@/composables/useToast'
+import { useMediaScan } from '@/composables/useMediaScan'
+import { useTaskCenter } from '@/composables/useTaskCenter'
 import { useSettingsStore } from '@/stores/settings'
 import { useGameStore } from '@/stores/game'
 import { debounce, errorMessage, shortenPath } from '@/utils'
@@ -25,9 +27,23 @@ const { toast, success, error } = useToast()
 
 const content = ref<HTMLElement | null>(null)
 
-const scanning = ref(false)
-const progress = ref<GameScanProgress | null>(null)
-let unsubscribe: (() => void) | null = null
+const operation = useMediaScan('game')
+const tasks = useTaskCenter()
+const preparing = ref(false)
+const fillingCovers = ref(false)
+const coverSummary = ref('')
+const registering = ref(false)
+const selecting = ref(false)
+const selectedIds = ref(new Set<string>())
+const coverScope = computed(() => store.items.filter(game => !selecting.value || selectedIds.value.has(game.id)).map(game => game.id))
+const coversBusy = computed(() => fillingCovers.value || tasks.runningTasks.value.some(task => task.kind === 'game-scan' && task.title === '批量补齐游戏封面'))
+watch(() => store.items.map(game => game.id), ids => {
+  const visible = new Set(ids)
+  selectedIds.value = new Set([...selectedIds.value].filter(id => visible.has(id)))
+})
+const scanning = computed(() => preparing.value || operation.running.value)
+const progress = operation.progress
+let pageDisposed = false
 
 const SORTS: Array<{ value: NonNullable<GameQuery['sort']>; label: string }> = [
   { value: 'played', label: '最近游玩' },
@@ -39,7 +55,6 @@ const SORTS: Array<{ value: NonNullable<GameQuery['sort']>; label: string }> = [
 let offSession: (() => void) | null = null
 
 onMounted(async () => {
-  unsubscribe = window.baoyi.game.onProgress((p) => (progress.value = p))
   // 在封面墙上也订阅：用户可能从详情页启动完就退回来，等游戏关掉时人在这一屏。
   // 不订阅的话卡片上的时长要等到下一次开库才更新
   offSession = window.baoyi.game.onSession(() => void store.reload())
@@ -51,22 +66,24 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (content.value) rememberScroll('game', content.value.scrollTop)
-  unsubscribe?.()
+  pageDisposed = true
   offSession?.()
 })
 
 const busyText = computed(() => {
   const p = progress.value
+  if (operation.stopping.value && operation.running.value) return '正在停止，等待当前 agent 收尾…'
   if (!p) return '准备中'
+  if (p.phase === 'done') return '正在刷新资源库…'
   if (p.phase === 'scanning') return `正在扫描 ${shortenPath(p.current, 40)}`
-  return `识别 ${p.processed + 1}/${p.total}　${p.log || shortenPath(p.current, 32)}`
+  return `识别 ${Math.min(p.processed + 1, p.total)}/${p.total}　${p.log || shortenPath(p.current, 32)}`
 })
 
 const busyPercent = computed(() => {
   const p = progress.value
   // 扫描阶段的总数要扫完才知道，这时候画一根瞎跳的进度条不如画一根空的
   if (!p || p.phase === 'scanning' || p.total === 0) return 0
-  return Math.round((p.processed / p.total) * 100)
+  return Math.max(0, Math.min(100, Math.round((p.processed / p.total) * 100)))
 })
 
 const onKeyword = debounce(() => void store.load(), 220)
@@ -80,7 +97,70 @@ function open(id: string): void {
   void router.push({ name: 'game-detail', params: { id } })
 }
 
-const cancelScan = (): void => window.baoyi.game.cancel()
+function cancelScan(): void {
+  try { operation.cancel() }
+  catch (err) { error('停止扫描失败：' + errorMessage(err)) }
+}
+
+function toggleSelected(id: string): void {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+
+function toggleSelection(): void {
+  selecting.value = !selecting.value
+  if (!selecting.value) selectedIds.value = new Set()
+}
+
+async function addManualGame(): Promise<void> {
+  if (registering.value) return
+  registering.value = true
+  try {
+    const result = await window.baoyi.game.addManual()
+    if (!result) return
+    if (!result.ok) { if (!pageDisposed) error(result.message); return }
+    await store.reload()
+    if (!pageDisposed) {
+      success(result.message)
+      if (result.item) open(result.item.id)
+    }
+  } catch (err) {
+    if (!pageDisposed) error('登记游戏失败：' + errorMessage(err))
+  } finally { registering.value = false }
+}
+
+async function fillMissingCovers(): Promise<void> {
+  if (coversBusy.value || coverScope.value.length === 0) return
+  const ids = [...coverScope.value]
+  fillingCovers.value = true
+  coverSummary.value = `正在检查 ${ids.length} 个游戏的封面`
+  const taskId = tasks.start('game-scan', '批量补齐游戏封面', { total: ids.length })
+  let off: (() => void) | undefined
+  try {
+    off = window.baoyi.game.onCoverProgress((p) => {
+      const message = p.current ? `${p.current}：${p.message}` : p.message
+      coverSummary.value = message
+      tasks.update(taskId, { processed: p.processed, total: p.total, current: p.current, message: p.message }, { level: p.message.includes('失败') ? 'warn' : 'info', message })
+    })
+    const result = await window.baoyi.game.rebuildCovers(ids)
+    const skipped = Math.max(0, result.processed - result.updated - result.failed)
+    const message = result.processed === 0 ? '当前范围的封面已齐全'
+      : `${result.failed && result.updated ? '部分完成' : '处理结束'}：已处理 ${result.processed} 个，补齐 ${result.updated} 个${result.failed ? `，失败 ${result.failed} 个` : ''}${skipped ? `，跳过 ${skipped} 个（保留较新的选择）` : ''}`
+    coverSummary.value = message
+    tasks.update(taskId, { processed: result.processed, total: result.processed, percent: 100, current: '', message })
+    tasks.finish(taskId, result.failed ? 'failed' : 'success', message)
+    await store.reload()
+    if (!pageDisposed) toast(message)
+  } catch (err) {
+    coverSummary.value = `封面补齐失败：${errorMessage(err)}`
+    tasks.finish(taskId, 'failed', '封面补齐失败', errorMessage(err))
+  } finally {
+    off?.()
+    fillingCovers.value = false
+  }
+}
 
 /**
  * 加游戏：选目录 → 扫 → 逐个交给 agent 识别 → 直接落库。
@@ -89,42 +169,50 @@ const cancelScan = (): void => window.baoyi.game.cancel()
  * 结果是「点了加游戏，什么也没发生」—— 那比明说一句更让人困惑。
  */
 async function addGames(): Promise<void> {
-  if (!settings.settings.ai.enabled || !settings.settings.ai.api_key) {
-    toast('游戏识别要用 AI，先去设置里填好 API Key')
-    void router.push({ name: 'settings', query: { tab: 'ai' } })
-    return
+  if (scanning.value) return
+  preparing.value = true
+  let started = false
+  const recordAttempt = (status: 'failed' | 'cancelled', message: string): void => {
+    const id = tasks.start('game-scan', '游戏扫描预检')
+    tasks.finish(id, status, message, status === 'failed' ? message : undefined)
   }
-
-  const dirs = await window.baoyi.game.pickDirectories()
-  if (dirs.length === 0) return
-
-  scanning.value = true
-  progress.value = null
   try {
-    const r = await window.baoyi.game.scan(dirs)
+    if (!settings.settings.ai.enabled || !settings.settings.ai.api_key.trim()) {
+      const message = '游戏识别要用 AI，先去设置里填好 API Key'
+      recordAttempt('failed', message)
+      toast(message)
+      void router.push({ name: 'settings', query: { tab: 'ai' } })
+      return
+    }
+    const dirs = await window.baoyi.game.pickDirectories()
+    if (pageDisposed || dirs.length === 0) {
+      recordAttempt('cancelled', pageDisposed ? '已离开页面，未启动扫描' : '未选择目录，未启动扫描')
+      return
+    }
+    started = true
+    const r = await operation.run(dirs)
+    const stopped = operation.stopping.value
     await store.reload()
-
-    if (r.candidates === 0) {
+    if (stopped) {
+      toast('扫描已停止：已注册 ' + r.registered + ' 个，已完成的结果已保留')
+    } else if (r.candidates === 0) {
       toast('这些目录里没找到游戏（没有可执行文件，或者只是一层收纳目录）')
     } else if (r.registered > 0) {
-      success(
-        `识别出 ${r.registered} 个游戏` +
-          (r.skipped > 0 ? `，跳过 ${r.skipped} 个` : '') +
-          (r.failed > 0 ? `，${r.failed} 个失败` : '')
-      )
+      const message = '识别出 ' + r.registered + ' 个游戏' +
+        (r.skipped > 0 ? '，跳过 ' + r.skipped + ' 个' : '') +
+        (r.failed > 0 ? '，' + r.failed + ' 个失败' : '')
+      if (r.failed > 0) toast(message)
+      else success(message)
+    } else if (r.failed > 0) {
+      error('扫描到 ' + r.candidates + ' 个候选，但没有注册成功，' + r.failed + ' 个识别失败，请查看识别日志')
     } else {
-      // 扫到了却一个都没进库，得说清楚是「都不是游戏」还是「跑挂了」
-      error(
-        r.failed > 0
-          ? `${r.candidates} 个目录全部识别失败，检查一下 AI 配置`
-          : `扫到 ${r.candidates} 个目录，但 AI 认为都不是游戏`
-      )
+      toast('扫描到 ' + r.candidates + ' 个候选，全部跳过；可到识别日志查看原因')
     }
   } catch (err) {
-    error(`扫描没能跑起来：${errorMessage(err)}`)
+    if (!started) recordAttempt('failed', errorMessage(err))
+    error('扫描没能完成：' + errorMessage(err))
   } finally {
-    scanning.value = false
-    progress.value = null
+    preparing.value = false
   }
 }
 
@@ -133,7 +221,7 @@ const emptyHint = computed(() => {
   if (store.selection.kind === 'status')
     return { title: `「${store.heading}」里还没有游戏`, desc: '在详情页可以改游玩状态' }
   if (store.counts.all === 0)
-    return { title: '游戏库还是空的', desc: '点右上角「加游戏」，指一个游戏目录给它' }
+    return { title: '游戏库还是空的', desc: '点右上角「加游戏」，选择本地启动程序；也可用 AI 扫描整个目录' }
   return { title: '这里还没有内容', desc: '换个分类看看' }
 })
 </script>
@@ -168,9 +256,24 @@ const emptyHint = computed(() => {
             <option v-for="o in SORTS" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
 
-          <button class="btn btn--primary" :disabled="scanning" @click="addGames">
+          <button class="btn btn--primary" :disabled="registering" @click="addManualGame">
+            <FilePlus :size="15" />
+            {{ registering ? '登记中' : '加游戏' }}
+          </button>
+
+          <button class="btn btn--ghost" :disabled="scanning" title="扫描目录并由 AI 识别游戏" @click="addGames">
             <FolderPlus :size="15" />
-            加游戏
+            AI 扫描
+          </button>
+
+          <button class="btn btn--ghost" :disabled="coversBusy || coverScope.length === 0" :title="selecting ? '只补齐当前筛选中已选择游戏的缺失封面' : '为当前筛选列表补齐缺失封面'" @click="fillMissingCovers">
+            <Image :size="15" />
+            {{ coversBusy ? '补图中' : `补齐封面（${coverScope.length}）` }}
+          </button>
+
+          <button class="btn btn--ghost" :aria-pressed="selecting" :disabled="store.items.length === 0" @click="toggleSelection">
+            <ListChecks :size="15" />
+            {{ selecting ? '取消选择' : '选择' }}
           </button>
 
           <button class="btn btn--subtle" title="设置" @click="router.push({ name: 'settings' })">
@@ -183,13 +286,15 @@ const emptyHint = computed(() => {
         <div v-if="scanning" class="progress">
           <div class="progress__bar"><i :style="{ width: `${busyPercent}%` }" /></div>
           <span class="progress__text truncate">{{ busyText }}</span>
-          <button class="btn btn--subtle" @click="cancelScan">停止</button>
+          <button class="btn btn--subtle" :disabled="!operation.running.value || operation.stopping.value || progress?.phase === 'done'" @click="cancelScan">停止</button>
         </div>
       </Transition>
 
+      <p v-if="coverSummary" class="cover-summary" role="status">{{ coverSummary }}</p>
+
       <section ref="content" class="home__content">
         <div v-if="store.items.length > 0" class="wall">
-          <GameCard v-for="g in store.items" :key="g.id" :item="g" @open="open" />
+          <GameCard v-for="g in store.items" :key="g.id" :item="g" :selectable="selecting" :selected="selectedIds.has(g.id)" @open="open" @select="toggleSelected" />
         </div>
         <div v-else-if="!store.loading" class="empty">
           <h2>{{ emptyHint.title }}</h2>
@@ -218,6 +323,7 @@ const emptyHint = computed(() => {
   flex: none;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
   padding: 14px 20px 12px;
 }
@@ -281,10 +387,13 @@ const emptyHint = computed(() => {
 
 .toolbar__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin-left: auto;
 }
+
+.cover-summary { margin: 0 20px 12px; color: var(--text-sub); font-size: var(--fs-tag); overflow-wrap: anywhere; }
 
 .select {
   height: 28px;
