@@ -36,9 +36,9 @@ export interface PosterMigrationResult { copied: number; removed: number; update
 type Row = Record<string, unknown>
 interface Stamp { dev: number; ino: number; size: number; mtimeMs: number }
 interface Mapping { from: string; to: string; sha256: string }
-interface Cell { table: string; key: string; id: unknown; column: string; value: unknown }
+export interface Cell { table: string; key: string; id: unknown; column: string; value: unknown }
 interface Rewrite extends Omit<Cell, 'value'> { before: unknown; after: unknown }
-const keyPath = (file: string) => path.resolve(file).normalize('NFC').toLowerCase()
+export const keyPath = (file: string) => path.resolve(file).normalize('NFC').toLowerCase()
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const stamp = (stat: fs.Stats): Stamp => ({ dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs })
 const sameStamp = (a: Stamp, b: Stamp) => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs
@@ -55,7 +55,7 @@ function requireDirectory(directory: string, create = false): void {
   const info = stat(directory)
   if (info && (!info.isDirectory() || info.isSymbolicLink())) throw new Error('图片目录不是普通目录，保留原文件：' + directory)
 }
-function imageHash(file: string): string {
+export function imageHash(file: string): string {
   const info = stat(file)
   if (!info?.isFile() || info.isSymbolicLink()) return ''
   const descriptor = fs.openSync(file, 'r'), buffer = Buffer.allocUnsafe(1024 * 1024), digest = createHash('sha256')
@@ -64,7 +64,7 @@ function imageHash(file: string): string {
     return digest.digest('hex')
   } finally { fs.closeSync(descriptor) }
 }
-function writeJson(file: string, value: unknown): void {
+export function writeJson(file: string, value: unknown): void {
   requireDirectory(path.dirname(file), true)
   if (stat(file)?.isSymbolicLink()) throw new Error('图片迁移记录不能是链接：' + file)
   const temporary = file + '.' + randomUUID() + '.tmp'
@@ -76,7 +76,7 @@ function writeJson(file: string, value: unknown): void {
 }
 
 /** Preserve text/URLs byte-for-byte; rewrite only exact file paths, including JSON inside JSON. */
-function visit(value: unknown, replace: (value: string) => string, depth = 0): unknown {
+export function visit(value: unknown, replace: (value: string) => string, depth = 0): unknown {
   if (depth > 80) throw new Error('图片引用嵌套过深，保留原文件和资料')
   if (typeof value === 'string') {
     const direct = replace(value)
@@ -97,7 +97,7 @@ function visit(value: unknown, replace: (value: string) => string, depth = 0): u
   const rows = Object.entries(value).map(([key, item]) => [key, visit(item, replace, depth + 1)] as const)
   return rows.every(([key, item]) => item === (value as Row)[key]) ? value : Object.fromEntries(rows)
 }
-function cells(db: SqlDb): Cell[] {
+export function cells(db: SqlDb): Cell[] {
   const specs = [
     ['resource', 'id', ['path', 'icon_path']],
     ['video_meta', 'resource_id', ['poster_path', 'poster_source', 'thumbnail_path', 'thumbnail_source', 'fanart_path', 'parts', 'linked_files']],

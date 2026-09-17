@@ -30,7 +30,9 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     libraryRoots: () => getSettings().video_scan_dirs,
     resolveWork: (code, options) => loadVideoWork(code, options), resolveSources: (code, options) => loadVideoSources(code, undefined, options),
     transfer: options => transferVideo({ ...options, fetch: createChromiumDownloadFetch(opts => net.request(opts), session.fromPartition('persist:hanime-network')) }),
-    savePoster: async (url, _directory, signal) => {
+    // 下载时作品目录已经定下来了，封面直接写进 <目录>/.baoyi/artwork（和清单同一套约定）；
+    // 只有还没目录的极少情况才暂放缓存目录（A2）
+    savePoster: async (url, directory, signal) => {
       const target = new URL(url)
       if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) throw new Error('封面地址无效')
       const timeout = AbortSignal.timeout(20000)
@@ -45,7 +47,9 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
       const bytes = Buffer.concat(chunks)
       const decoded = nativeImage.createFromBuffer(bytes)
       if (decoded.isEmpty() || decoded.getSize().width < 64 || decoded.getSize().height < 64) throw new Error('封面无法解码或尺寸过小')
-      const file = path.join(postersDir(), 'work-' + createHash('sha256').update(bytes).digest('hex').slice(0, 24) + '.png')
+      const artworkDir = directory && fs.existsSync(directory) ? path.join(directory, '.baoyi', 'artwork') : postersDir()
+      fs.mkdirSync(artworkDir, { recursive: true })
+      const file = path.join(artworkDir, createHash('sha256').update(bytes).digest('hex').slice(0, 24) + '.png')
       if (!fs.existsSync(file)) atomicWrite(file, decoded.toPNG())
       return file
     },

@@ -289,6 +289,8 @@ import {
 } from '../electron/services/proxy-rules.ts'
 // 同理：portable.ts 顶层 import electron，只能进 portable-rules
 import { decidePortable, PORTABLE_MARKERS } from '../electron/services/portable-rules.ts'
+import { resolvePosterRequest } from '../electron/services/poster-protocol.ts'
+import { artworkDirFor } from '../electron/kinds/video/artwork-dir.ts'
 import {
   HANIME_CLOUDFLARE_IPS,
   HANIME_HOSTS,
@@ -7666,17 +7668,62 @@ async function videoPosterSection(): Promise<void> {
     }
   })
 
-  await check('海报地址只取 basename，且 TMDB 相对路径退回占位', () => {
-    assert.equal(posterUrl('D:\\baoyi\\posters\\v1.jpg', 7), 'baoyi://poster/v1.jpg?v=7')
-    // 协议那头也拿 basename 兜底（见 main.ts），两边一致，中间那段怎么写都出不去
-    assert.equal(posterUrl('D:\\p\\..\\..\\Windows\\System32\\evil.png', 1), 'baoyi://poster/evil.png?v=1')
+  await check('海报地址带完整路径，TMDB 相对路径退回占位', () => {
+    // 图住在各自的作品目录里，URL 里编完整路径；能不能读由主进程按白名单判（下一条）
+    assert.equal(posterUrl('D:\\baoyi\\posters\\v1.jpg', 7), 'baoyi://poster/?p=D%3A%5Cbaoyi%5Cposters%5Cv1.jpg&v=7')
     // 相对路径连本地文件都算不上，更早一步就退回占位了 —— 比封面那条路多挡一层
     assert.equal(posterUrl('..\\..\\Windows\\System32\\evil.png', 1), '')
     // 刮削阶段落的相对路径拼进协议地址是一张必然 404 的破图，占位比破图诚实
     assert.equal(posterUrl('/wPRcNZ4Q1Rk.jpg', 1), '', 'TMDB 相对路径不该拼成协议地址')
     assert.equal(posterUrl('', 1), '')
-    // 文件名不变，不带版本号换了图不刷新
+    // 路径不变，不带版本号换了图不刷新
     assert.notEqual(posterUrl('D:\\p\\v1.jpg', 1), posterUrl('D:\\p\\v1.jpg', 2))
+  })
+
+  await check('海报协议只放行三类路径：缓存目录直属、.baoyi/artwork 里的、库里记着的', () => {
+    const cache = 'D:\\profile\\posters'
+    const referenced = new Set(['d:\\视频\\沙丘\\poster.jpg'])
+    const ctx = { postersDir: cache, isReferenced: (file: string) => referenced.has(file.toLowerCase()) }
+    const url = (file: string) => posterUrl(file, 1)
+    assert.equal(resolvePosterRequest(url('D:\\profile\\posters\\v1.jpg'), ctx), path.resolve('D:\\profile\\posters\\v1.jpg'), '缓存目录直属文件')
+    assert.equal(resolvePosterRequest(url('E:\\视频\\沙丘\\.baoyi\\artwork\\abc.png'), ctx), path.resolve('E:\\视频\\沙丘\\.baoyi\\artwork\\abc.png'), '作品图片目录')
+    assert.equal(resolvePosterRequest(url('D:\\视频\\沙丘\\poster.jpg'), ctx), path.resolve('D:\\视频\\沙丘\\poster.jpg'), '库里记着的用户文件')
+    // 走不出去：.. 被 resolve 掉之后落在缓存目录外、库里也没记 → 拒
+    assert.equal(resolvePosterRequest(url('D:\\profile\\posters\\..\\evil.png'), ctx), '', '.. 不能穿到缓存目录外')
+    assert.equal(resolvePosterRequest(url('D:\\profile\\posters\\sub\\v1.jpg'), ctx), '', '缓存目录的子目录不算直属')
+    assert.equal(resolvePosterRequest(url('C:\\Windows\\System32\\evil.png'), ctx), '', '任意路径不放行')
+    assert.equal(resolvePosterRequest(url('E:\\视频\\沙丘\\.baoyi\\artwork\\evil.exe'), ctx), '', '扩展名不在海报名单里的不放行')
+    assert.equal(resolvePosterRequest('baoyi://poster/v1.jpg?v=1', ctx), '', '老格式（只有文件名）不再认')
+    assert.equal(resolvePosterRequest('baoyi://cover/?p=D%3A%5Cprofile%5Cposters%5Cv1.jpg', ctx), '', '别的主机名不归它管')
+  })
+
+  await check('artworkDirFor：绑定目录 → 文件所在目录 → 兜底缓存', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-artwork-dir-'))
+    try {
+      const d = new DatabaseSync(':memory:')
+      initSchema(d as any, KINDS)
+      const mk = (id: string, resourcePath: string) => {
+        d.prepare(`INSERT INTO resource (id,kind,created_at,updated_at,path,file_name,name_zh,category,source_dir) VALUES (?,'video',1,1,?,?,?,'其他',?)`).run(id, resourcePath, path.basename(resourcePath), id, path.dirname(resourcePath))
+        d.prepare('INSERT INTO video_meta (resource_id) VALUES (?)').run(id)
+      }
+      const bound = path.join(root, 'bound'); fs.mkdirSync(bound)
+      mk('bound', bound)
+      d.prepare(`INSERT INTO video_directories (resource_id,bundle_id,root,relative_path,directory_path,metadata_state,created_at,updated_at) VALUES ('bound','b1',?,'bound',?,'complete',1,1)`).run(root, bound)
+      assert.equal(artworkDirFor(d as any, 'bound', () => 'CACHE'), path.join(bound, '.baoyi', 'artwork'), '绑定了目录就用它')
+
+      const loose = path.join(root, 'loose', 'movie.mp4'); fs.mkdirSync(path.dirname(loose)); fs.writeFileSync(loose, 'x')
+      mk('loose', loose)
+      assert.equal(artworkDirFor(d as any, 'loose', () => 'CACHE'), path.join(root, 'loose', '.baoyi', 'artwork'), '没绑定但文件在：文件所在目录')
+
+      mk('episodic', path.join(root, 'gone', 'x.mp4'))
+      const epFile = path.join(root, 'eps', 'e1.mp4'); fs.mkdirSync(path.dirname(epFile)); fs.writeFileSync(epFile, 'x')
+      d.prepare(`INSERT INTO episode (id,resource_id,season,episode,title,path,file_size,duration_sec,air_date,watch_status,position_sec,watched_at) VALUES ('e1','episodic',0,1,'e1',?,1,0,0,'unwatched',0,0)`).run(epFile)
+      assert.equal(artworkDirFor(d as any, 'episodic', () => 'CACHE'), path.join(root, 'eps', '.baoyi', 'artwork'), 'resource.path 没了但单集文件在：单集所在目录')
+
+      mk('linkonly', path.join(root, 'nowhere', 'y.mp4'))
+      assert.equal(artworkDirFor(d as any, 'linkonly', () => 'CACHE'), 'CACHE', '什么本地位置都没有：兜底')
+      d.close()
+    } finally { fs.rmSync(root, { recursive: true, force: true }) }
   })
 
   await check('片名兜底到文件名时把扩展名剥掉，剧集的目录名原样留着', () => {

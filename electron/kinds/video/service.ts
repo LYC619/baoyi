@@ -69,6 +69,7 @@ import { loadVideoWork } from './download/sources.ts'
 import { fillEpisodeDetails } from './episode-details.ts'
 import { atomicWrite } from './bundle.ts'
 import { selectVideoArtwork, type VideoArtwork } from './artwork.ts'
+import { artworkDirFor } from './artwork-dir.ts'
 import { fillVideoSystem, videoCandidatePrompt } from './prompts.ts'
 import { buildVideoTools, type VideoToolContext } from './tools.ts'
 import { imageUrl, tmdbAvailable, tmdbDetail } from './tmdb.ts'
@@ -114,9 +115,9 @@ export async function listVideoItems(query: VideoQuery = {}): Promise<VideoItem[
   for (let offset = 0; offset < items.length; offset += 8) {
     result.push(...await Promise.all(items.slice(offset, offset + 8).map(async item => {
       const { metadataPending, ...summary } = summaries.get(item.id)!
-      const poster = await cacheListedPoster(item.poster_path), thumbnail = await cacheListedPoster(item.thumbnail_path)
-      return { ...item, ...summary, poster_path: poster.path, thumbnail_path: thumbnail.path,
-        pending_reasons: [...(!poster.present ? ['poster'] : []), ...(summary.missing_files ? ['files'] : []), ...(item.needs_review || metadataPending ? ['metadata'] : [])] }
+      const posterPresent = await localImagePresent(item.poster_path)
+      return { ...item, ...summary,
+        pending_reasons: [...(!posterPresent ? ['poster'] : []), ...(summary.missing_files ? ['files'] : []), ...(item.needs_review || metadataPending ? ['metadata'] : [])] }
     })))
   }
   const hidden = hideHentai()
@@ -125,63 +126,25 @@ export async function listVideoItems(query: VideoQuery = {}): Promise<VideoItem[
     && (!query.local || (query.local === 'available' ? item.available_files! > 0 : query.local === 'missing' ? item.missing_files! > 0 : item.available_files === 0)))
 }
 
-const listedPosters = new Map<string, { stamp: string; path: string }>()
-/** Avoid rereading/hashing unchanged covers on every background update. */
-async function cacheListedPoster(source = ''): Promise<{ path: string; present: boolean }> {
-  if (!source || !path.isAbsolute(source)) return { path: source, present: false }
-  try {
-    const stat = await fs.promises.stat(source)
-    if (!stat.isFile()) return { path: source, present: false }
-    const directory = postersDir()
-    if (path.dirname(source) === directory || stat.size > MAX_POSTER_BYTES || !isPosterExt(source)) return { path: source, present: true }
-    const key = directory + '\n' + source, stamp = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`
-    const cached = listedPosters.get(key)
-    if (cached?.stamp === stamp && await fs.promises.stat(cached.path).then(value => value.isFile(), () => false)) return { path: cached.path, present: true }
-    const bytes = await fs.promises.readFile(source)
-    const target = path.join(directory, createHash('sha256').update(bytes).digest('hex').slice(0, 24) + path.extname(source).toLowerCase())
-    await fs.promises.mkdir(directory, { recursive: true })
-    try { await fs.promises.writeFile(target, bytes, { flag: 'wx' }) }
-    catch (cause) { if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause }
-    if (listedPosters.size >= 512) listedPosters.delete(listedPosters.keys().next().value!)
-    listedPosters.set(key, { stamp, path: target })
-    return { path: target, present: true }
-  } catch { return { path: source, present: false } }
+/** 图在不在。图现在住在各自的作品目录里，渲染进程按完整路径取（见 poster-protocol.ts），这里不再复制副本 */
+async function localImagePresent(file = ''): Promise<boolean> {
+  if (!file || !path.isAbsolute(file)) return false
+  try { return (await fs.promises.stat(file)).isFile() } catch { return false }
 }
 export const getVideoItem = (id: string): VideoItem | null => {
   const item = getVideo(getDb(), id)
   if (!item) return null
   const contents = getVideoWorkLibrary(getDb(), id).contents.filter(registeredVideoContent)
-  return cacheLocalPoster({ ...item, episode_total: contents.length, episode_watched: contents.filter(episode => episode.watch_status === 'watched').length })
+  return { ...item, episode_total: contents.length, episode_watched: contents.filter(episode => episode.watch_status === 'watched').length }
 }
 
-/** Portable posters remain in their work folder; the renderer uses a scoped cache copy. */
-function cacheLocalPoster<T extends { poster_path?: string }>(item: T): T {
-  const thumbnail = (item as T & { thumbnail_path?: string }).thumbnail_path
-  if (thumbnail) {
-    const cached = cacheLocalPoster({ poster_path: thumbnail }).poster_path
-    if (cached !== thumbnail) item = { ...item, thumbnail_path: cached }
-  }
-  const source = item.poster_path
-  if (!source || !path.isAbsolute(source) || path.dirname(source) === postersDir()) return item
-  try {
-    const stat = fs.statSync(source)
-    if (!stat.isFile() || stat.size > MAX_POSTER_BYTES || !isPosterExt(source)) return item
-    const bytes = fs.readFileSync(source)
-    const target = path.join(postersDir(), createHash('sha256').update(bytes).digest('hex').slice(0, 24) + path.extname(source).toLowerCase())
-    if (!fs.existsSync(target)) fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL)
-    return { ...item, poster_path: target }
-  } catch { return item }
-}
 export const videoCountsOf = (): VideoCounts => videoCounts(getDb(), hideHentai())
 export const getVideoLibrary = (id: string) => {
   const library = getVideoWorkLibrary(getDb(), id)
-  return { ...library, contents: library.contents.filter(registeredVideoContent).map(cacheLocalPoster) }
+  return { ...library, contents: library.contents.filter(registeredVideoContent) }
 }
-export const listVideoEpisodes = (id: string): Episode[] => listEpisodes(getDb(), id).map(cacheLocalPoster)
-export const getVideoEpisode = (episodeId: string): Episode | null => {
-  const episode = getEpisode(getDb(), episodeId)
-  return episode ? cacheLocalPoster(episode) : null
-}
+export const listVideoEpisodes = (id: string): Episode[] => listEpisodes(getDb(), id)
+export const getVideoEpisode = (episodeId: string): Episode | null => getEpisode(getDb(), episodeId)
 export const nextVideoEpisode = (id: string, season: number, episode: number): Episode | null =>
   nextEpisode(getDb(), id, season, episode)
 
@@ -211,7 +174,7 @@ export function updateVideoEpisode(episodeId: string, patch: Partial<Episode>): 
   const updated = updateEpisode(d, episodeId, patch)
   if (updated) syncSeriesStatus(d, updated.resource_id)
   if (updated && d.prepare('SELECT resource_id FROM video_directories WHERE resource_id = ?').get(updated.resource_id)) persistVideoWorkBundle(d, updated.resource_id)
-  return updated ? cacheLocalPoster(updated) : null
+  return updated
 }
 
 export async function searchVideoSource(query: string) {
@@ -293,9 +256,9 @@ export function setVideoEpisodeArtwork(episodeId: string, file: string, role: 'p
   if (!episode || !['poster', 'thumbnail'].includes(role)) throw new Error('单集或图片用途无效')
   const stat = fs.statSync(file)
   if (!stat.isFile() || stat.size > MAX_POSTER_BYTES || !isPosterExt(file)) throw new Error('请选择有效的图片文件')
-  const cached = cacheLocalPoster({ poster_path: file }).poster_path!
+  const stored = storeArtwork(episode.resource_id, file)
   posterRevisions.set(episodeId, (posterRevisions.get(episodeId) || 0) + 1)
-  return updateVideoEpisode(episodeId, { [role + '_path']: cached })
+  return updateVideoEpisode(episodeId, { [role + '_path']: stored })
 }
 
 /**
@@ -1051,10 +1014,25 @@ async function netFetch(url: string, init: RequestInit = {}): Promise<Response> 
   return net.fetch(url, { ...init, signal: AbortSignal.timeout(NET_TIMEOUT) })
 }
 
-/** 清掉这个条目在海报目录里的所有文件（含换过扩展名留下的孤儿） */
+/**
+ * 一张图按内容哈希落进作品的 .baoyi/artwork（和清单、单集 sidecar 同一套约定）；
+ * 已经在那个目录里就原样返回。算不出作品目录（库里只有链接）时落缓存目录。
+ */
+function storeArtwork(resourceId: string, file: string): string {
+  const from = path.resolve(file)
+  const dir = artworkDirFor(getDb(), resourceId, postersDir)
+  if (path.dirname(from).toLowerCase() === path.resolve(dir).toLowerCase()) return from
+  const bytes = fs.readFileSync(from)
+  const target = path.join(dir, createHash('sha256').update(bytes).digest('hex').slice(0, 24) + path.extname(from).toLowerCase())
+  fs.mkdirSync(dir, { recursive: true })
+  if (!fs.existsSync(target)) atomicWrite(target, bytes)
+  return target
+}
+
+/** 清掉这个条目按 id 命名的海报文件（含换过扩展名留下的孤儿）。缓存目录和作品图片目录两处都看 */
 function dropPosterFiles(id: string, keep = ''): void {
-  const dir = postersDir()
-  for (const name of posterSiblings(id)) {
+  const dirs = new Set([postersDir(), artworkDirFor(getDb(), id, postersDir)])
+  for (const dir of dirs) for (const name of posterSiblings(id)) {
     if (name === keep) continue
     try {
       fs.rmSync(path.join(dir, name), { force: true })
@@ -1065,13 +1043,13 @@ function dropPosterFiles(id: string, keep = ''): void {
 }
 
 /**
- * 把一张本地图片装成这个条目的海报：拷进 userData 下的 posters/，再写库。
+ * 把一张本地图片装成这个条目的海报：拷进作品目录的 `.baoyi/artwork/`（用户 9-18 拍板：
+ * 所有海报进视频库、本地明文可读），再写库。作品还没有任何本地位置（只有链接）时暂放缓存目录。
  *
- * 拷而不是记原路径，理由和游戏封面同一条，而对影视更硬：海报的来路多半是
- * 片子**同目录**里的 `poster.jpg`，而那个目录很可能在一块没插的移动硬盘上。
- * 记路径的话，硬盘一拔整墙破图。加上打包后页面跑在 `file://` 下，
- * `<img src="D:\...">` 根本加载不出来，必须走 `baoyi://` 协议，
- * 而那个协议只在白名单目录里找文件（见 main.ts）。
+ * 拷而不是记原路径：海报的来路多半是片子同目录里的 `poster.jpg`，用户随手改名、删掉
+ * 就成了破图；抱一自己那份按条目 id 命名，换图时 `dropPosterFiles` 才认得出要清哪些。
+ * 打包后页面跑在 `file://` 下，`<img src="D:\...">` 加载不出来，必须走 `baoyi://` 协议，
+ * 放行规则见 poster-protocol.ts。
  */
 export function setVideoPoster(id: string, source: string, manual = true): { ok: boolean; message: string } {
   if (!getVideo(getDb(), id)) return { ok: false, message: '找不到这个条目' }
@@ -1081,11 +1059,13 @@ export function setVideoPoster(id: string, source: string, manual = true): { ok:
   if (!existsSync(from)) return { ok: false, message: '这个文件不在了' }
 
   const name = posterFileName(id, from)
-  const target = path.join(postersDir(), name)
+  const dir = artworkDirFor(getDb(), id, postersDir)
+  const target = path.join(dir, name)
   const temporary = target + '.' + randomUUID() + '.tmp'
   try {
-    // 先准备新图，复制失败时原封面仍然完整；同一缓存文件不先删再拷。
+    // 先准备新图，复制失败时原封面仍然完整；同一文件不先删再拷。
     if (from !== target) {
+      fs.mkdirSync(dir, { recursive: true })
       fs.copyFileSync(from, temporary)
       fs.renameSync(temporary, target)
     }
@@ -1205,8 +1185,11 @@ async function downloadPoster(
       if (episodeId ? !getEpisode(getDb(), episodeId) : !getVideo(getDb(), id)) return { ok: false, message: '条目已不存在' }
       const decoded = nativeImage.createFromBuffer(Buffer.concat(chunks))
       if (decoded.isEmpty() || decoded.getSize().width < 64 || decoded.getSize().height < 64) return { ok: false, message: '单集封面无法解码或尺寸过小' }
-      const destination = path.join(postersDir(), createHash('sha256').update(Buffer.concat(chunks)).digest('hex').slice(0, 24) + '.png')
-      atomicWrite(destination, decoded.toPNG())
+      const owner = episodeId ? getEpisode(getDb(), episodeId)!.resource_id : id
+      const artworkDir = artworkDirFor(getDb(), owner, postersDir)
+      fs.mkdirSync(artworkDir, { recursive: true })
+      const destination = path.join(artworkDir, createHash('sha256').update(Buffer.concat(chunks)).digest('hex').slice(0, 24) + '.png')
+      if (!fs.existsSync(destination)) atomicWrite(destination, decoded.toPNG())
       const image = { path: destination, url, ...decoded.getSize() }
       if (cacheOnly) return { ok: true, message: '图片已读取', image }
       getDb().prepare(episodeId ? `UPDATE episode SET ${role}_path = ?, ${role}_source = ? WHERE id = ?`

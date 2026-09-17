@@ -227,7 +227,7 @@ async function main(): Promise<void> {
   )
   assert(
     '海报地址走 baoyi://poster/ 且带版本号',
-    wall.srcs.every((s: string) => /^baoyi:\/\/poster\/vid-\d+\.png\?v=\d+$/.test(s)),
+    wall.srcs.every((s: string) => /^baoyi:\/\/poster\/\?p=.*vid-\d+\.png&v=\d+$/.test(s)),
     JSON.stringify(wall.srcs)
   )
   assert(

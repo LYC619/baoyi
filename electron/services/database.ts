@@ -11,6 +11,7 @@ import { FALLBACK_CATEGORY } from './taxonomy'
 import { buildLibraryBackup } from './library-backup.ts'
 import { VIDEO_JOBS_SQL } from '../kinds/video/download/jobs.ts'
 import { migratePosterStorage, resolvePosterDirectory } from './poster-storage.ts'
+import { migrateArtworkIntoLibrary } from './artwork-migration.ts'
 import { isPortable } from './portable'
 import type {
   AgentEvent,
@@ -225,6 +226,20 @@ export function getDb(): Database.Database {
     if (migration.removed || migration.updated) console.log(`[抱一] 影视图片已搬回 ${postersDir()}（${migration.removed} 张，${migration.updated} 处引用）`)
     for (const warning of migration.warnings) console.warn('[抱一] ' + warning)
   } catch (cause) { console.error('[抱一] 影视图片迁移未完成；尚未迁移的原文件与恢复记录已保留：', cause) }
+  // 用户 9-18 拍板：所有海报进视频库。缓存目录里被库引用的图按作品搬进 <作品目录>/.baoyi/artwork，
+  // 无引用的按内容在视频库里找同款，找到的删、找不到的留着报数（这里不读 getSettings，它会再进 getDb）
+  try {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('video_scan_dirs') as { value?: string } | undefined
+    let scanRoots: string[] = []
+    try { const parsed = JSON.parse(row?.value ?? '[]'); if (Array.isArray(parsed)) scanRoots = parsed.filter((v): v is string => typeof v === 'string') } catch { /* 坏值当没有 */ }
+    const migration = migrateArtworkIntoLibrary(db, {
+      cacheDirs: [postersDir(), legacyProjectPostersDir()], fallbackDir: postersDir(),
+      recoveryRoot: app.getPath('userData'), scanRoots
+    })
+    if (migration.moved || migration.relinked || migration.removed) console.log(`[抱一] 影视图片已归位到作品目录：搬入 ${migration.moved} 张，改指向 ${migration.relinked} 处，清理缓存 ${migration.removed} 张，留在缓存 ${migration.keptInCache} 处`)
+    if (migration.orphans) console.log(`[抱一] 缓存目录里还有 ${migration.orphans} 张无引用、视频库里也没有同款的图，未删除：${postersDir()}`)
+    for (const warning of migration.warnings) console.warn('[抱一] ' + warning)
+  } catch (cause) { console.error('[抱一] 影视图片归位未完成；缓存副本与恢复记录已保留：', cause) }
   return db
 }
 

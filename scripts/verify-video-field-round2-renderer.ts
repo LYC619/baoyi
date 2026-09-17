@@ -17,7 +17,7 @@ const search = () => page.getByRole('textbox', { name: '搜索作品、内容标
 async function searched(keyword: string) {
   await search().fill(keyword)
   // 列表按关键词重查回来、且展开逻辑那一轮 IPC 也回来之后再断言，不用固定 sleep 赌运气
-  await page.waitForFunction(k => (window as any).__fixture.calls.some((c: any[]) => c[0] === 'list' && c[1].keyword === k), keyword)
+  await page.waitForFunction((k: string) => (window as any).__fixture.calls.some((c: any[]) => c[0] === 'list' && c[1].keyword === k), keyword)
   await page.waitForTimeout(250)
 }
 async function cleared() {
@@ -63,7 +63,7 @@ try {
     assert.equal(await page.getByRole('button', { name: '批量管理', exact: true }).count(), 1)
   })
   await test('B6 正文可以选中，卡片和页签壳子不能', async () => {
-    const select = (selector: string) => page.evaluate(s => getComputedStyle(document.querySelector(s)!).userSelect, selector)
+    const select = (selector: string) => page.evaluate((s: string) => getComputedStyle(document.querySelector(s)!).userSelect, selector)
     assert.equal(await select('.card'), 'none')
     assert.equal(await select('.search__input'), 'text')
     await page.getByRole('button', { name: /摄影课程/ }).first().click()

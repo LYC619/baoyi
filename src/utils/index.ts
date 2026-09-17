@@ -223,8 +223,9 @@ export function videoTitle(v: { name_zh: string; name_en: string; file_name: str
 export function posterUrl(posterPath: string, version = 0): string {
   if (!posterPath) return ''
   if (!isLocalPosterPath(posterPath)) return ''
-  const name = posterPath.split(/[\\/]/).pop() ?? ''
-  return name ? `baoyi://poster/${encodeURIComponent(name)}?v=${version}` : ''
+  // 完整路径编进 URL：图现在住在各自的作品目录里（.baoyi/artwork），不再复制进缓存目录。
+  // 能不能读由主进程按白名单判（缓存目录直属 / .baoyi/artwork / 库里记着的路径），见 poster-protocol.ts
+  return `baoyi://poster/?p=${encodeURIComponent(posterPath)}&v=${version}`
 }
 
 /**

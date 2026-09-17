@@ -4,7 +4,8 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc/handlers'
 import { finalizeGameSessions } from './kinds/game/service'
-import { closeDb, coversDir, getSettings, iconsDir, patchSettings, postersDir, interruptRunningTasks } from './services/database'
+import { closeDb, coversDir, getDb, getSettings, iconsDir, patchSettings, postersDir, interruptRunningTasks } from './services/database'
+import { resolvePosterRequest } from './services/poster-protocol'
 import { initPortable } from './services/portable'
 import { initProxy, setHanimeHostsEnabled } from './services/proxy'
 import { buildHanimeHostResolverRules, HANIME_HOSTS, pickStartupIp } from './services/hanime-network-rules'
@@ -57,13 +58,29 @@ protocol.registerSchemesAsPrivileged([
  */
 const PROTOCOL_DIRS: Record<string, () => string> = {
   icon: iconsDir,
-  cover: coversDir,
-  poster: postersDir
+  cover: coversDir
+}
+
+/** 库里是不是记着这条路径。海报协议放行的第三类（片子旁边的 poster.jpg 这种用户文件）靠它 */
+function posterReferenced(file: string): boolean {
+  try {
+    const slashed = file.split('\\').join('/')
+    return !!getDb().prepare(
+      `SELECT 1 FROM video_meta WHERE poster_path IN (?, ?) COLLATE NOCASE OR thumbnail_path IN (?, ?) COLLATE NOCASE
+       UNION SELECT 1 FROM episode WHERE poster_path IN (?, ?) COLLATE NOCASE OR thumbnail_path IN (?, ?) COLLATE NOCASE LIMIT 1`
+    ).get(file, slashed, file, slashed, file, slashed, file, slashed)
+  } catch { return false }
 }
 
 function registerFileProtocol(): void {
   protocol.handle('baoyi', async (request) => {
     const url = new URL(request.url)
+    // 海报按完整路径取（?p=），放行规则见 poster-protocol.ts；图标和封面仍按文件名在各自目录里找
+    if (url.hostname === 'poster') {
+      const file = resolvePosterRequest(request.url, { postersDir: postersDir(), isReferenced: posterReferenced })
+      if (!file || !fs.existsSync(file)) return new Response('Not Found', { status: 404 })
+      return net.fetch(pathToFileURL(file).toString())
+    }
     const resolveDir = PROTOCOL_DIRS[url.hostname]
     if (!resolveDir) return new Response('Not Found', { status: 404 })
 
