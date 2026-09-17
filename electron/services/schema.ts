@@ -178,6 +178,23 @@ export const TABLES_SQL = `
     searches INTEGER DEFAULT 0,
     entries TEXT DEFAULT '[]'
   );
+
+  CREATE TABLE IF NOT EXISTS task_records (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    finished_at INTEGER NOT NULL DEFAULT 0,
+    processed INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL DEFAULT 0,
+    percent INTEGER NOT NULL DEFAULT 0,
+    current TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    events TEXT NOT NULL DEFAULT '[]'
+  );
+  CREATE INDEX IF NOT EXISTS idx_task_records_started ON task_records(started_at DESC);
 `
 
 export const INDEXES_SQL = `

@@ -656,6 +656,56 @@ export interface SidebarCounts {
   tags: Array<{ name: string; count: number }>
 }
 
+/** 运行期全局任务的类别。任务中心只保存当前进程内的状态，不落库。 */
+export type TaskKind =
+  | 'software-scan'
+  | 'game-scan'
+  | 'video-scan'
+  | 'ai-identify'
+  | 'organize'
+  | 'hanime-verify'
+  | 'video-download'
+  | 'video-series-download'
+
+export type TaskStatus = 'running' | 'success' | 'failed' | 'cancelled' | 'interrupted'
+export type TaskEventLevel = 'info' | 'success' | 'warn' | 'error'
+
+export interface TaskEvent {
+  at: number
+  level: TaskEventLevel
+  message: string
+}
+
+export interface TaskRecord {
+  id: string
+  kind: TaskKind
+  title: string
+  status: TaskStatus
+  startedAt: number
+  finishedAt?: number
+  processed: number
+  total: number
+  percent: number
+  current: string
+  message: string
+  error?: string
+  events: TaskEvent[]
+}
+
+export interface TaskStartOptions {
+  processed?: number
+  total?: number
+  current?: string
+  message?: string
+}
+
+export interface TaskUpdate {
+  processed?: number
+  total?: number
+  percent?: number
+  current?: string
+  message?: string
+}
 export interface ScanProgress {
   phase: 'walking' | 'reading' | 'done'
   /** 当前扫描到的目录或文件 */
@@ -1220,6 +1270,7 @@ export interface VideoScanProgress {
 }
 
 export interface VideoScanResult {
+  entries?: Array<{ path: string; resourceId?: string; status: 'new' | 'updated' | 'skipped' | 'review' | 'failed'; message: string }>
   /** 扫出来的候选条目数（电影 + 剧集） */
   candidates: number
   registered: number
@@ -1473,6 +1524,11 @@ export interface BaoyiApi {
     pickPoster(id: string): Promise<{ ok: boolean; message: string; item: VideoItem | null } | null>
     /** 撤掉海报，退回首字占位。磁盘上那份拷贝一起删 */
     clearPoster(id: string): Promise<VideoItem | null>
+  }
+  tasks: {
+    list(): Promise<TaskRecord[]>
+    save(task: TaskRecord): Promise<boolean>
+    clear(ids?: string[]): Promise<boolean>
   }
   categories: {
     list(kind?: string): Promise<Category[]>

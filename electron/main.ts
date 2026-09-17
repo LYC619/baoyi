@@ -4,7 +4,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc/handlers'
 import { finalizeGameSessions } from './kinds/game/service'
-import { closeDb, coversDir, getSettings, iconsDir, patchSettings, postersDir } from './services/database'
+import { closeDb, coversDir, getSettings, iconsDir, patchSettings, postersDir, interruptRunningTasks } from './services/database'
 import { initPortable } from './services/portable'
 import { initProxy, setHanimeHostsEnabled } from './services/proxy'
 import { buildHanimeHostResolverRules, HANIME_HOSTS, pickStartupIp } from './services/hanime-network-rules'
@@ -132,7 +132,9 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     // 默认是空操作，只有带 BAOYI_TIMING=1 起才真的跑
     startHeartbeat()
+
     registerFileProtocol()
+    interruptRunningTasks()
     registerIpcHandlers(getWindow)
     // 代理不 await：它只影响联网刮削，拦住建窗口不值得。里面自己吞异常 ——
     // 填错一个代理地址不该变成「应用打不开」

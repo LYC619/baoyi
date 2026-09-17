@@ -20,6 +20,7 @@
     "verify-video-seed": "node --experimental-strip-types --no-warnings scripts/verify-video-seed.ts",
     "verify-video": "node --experimental-strip-types --no-warnings scripts/verify-video-cdp.ts",
     "verify-hentai-e2e": "node --experimental-strip-types --no-warnings scripts/verify-hentai-e2e.ts",
+    "verify-task-center": "node --experimental-strip-types --no-warnings scripts/verify-task-center.ts",
     "verify-hanime-verification": "node --experimental-strip-types --no-warnings scripts/verify-hanime-verification.ts",
     "verify-game-covers": "node --experimental-strip-types --no-warnings scripts/verify-game-covers.ts",
     "verify-game-covers-electron": "electron scripts/verify-game-covers-electron.cjs",

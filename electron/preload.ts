@@ -136,6 +136,11 @@ const api: BaoyiApi = {
     pickPoster: (id: string) => ipcRenderer.invoke('video:pick-poster', id),
     clearPoster: (id: string) => ipcRenderer.invoke('video:clear-poster', id)
   },
+  tasks: {
+    list: () => ipcRenderer.invoke('tasks:list'),
+    save: (task: import('../src/types').TaskRecord) => ipcRenderer.invoke('tasks:save', plain(task)),
+    clear: ids => ipcRenderer.invoke('tasks:clear', ids === undefined ? undefined : plain(ids))
+  },
   categories: {
     list: (kind?: string) => ipcRenderer.invoke('categories:list', kind),
     upsert: (category: Category, kind?: string) => ipcRenderer.invoke('categories:upsert', plain(category), kind),

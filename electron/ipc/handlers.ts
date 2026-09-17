@@ -55,6 +55,7 @@ import {
   updateSoftware,
   upsertCategory
 } from '../services/database'
+import { listTaskRecords, saveTaskRecord, clearTaskRecords } from '../services/database'
 import { launchSoftware, revealInFolder } from '../kinds/software/launcher'
 import {
   addGameLinks,
@@ -402,6 +403,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   })
 
   ipcMain.handle('video:episodes', (_e, id: string) => listVideoEpisodes(id))
+
+  ipcMain.handle('tasks:list', () => listTaskRecords())
+  ipcMain.handle('tasks:save', (_e, task: import('../../src/types').TaskRecord) => { saveTaskRecord(task); return true })
+  ipcMain.handle('tasks:clear', (_e, ids?: string[]) => { clearTaskRecords(ids); return true })
 
   /**
    * 改一集，顺带把整部剧的条目取回来。
