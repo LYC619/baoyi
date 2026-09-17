@@ -854,8 +854,8 @@ export interface IdentifyLog {
   label: string
   /** unit = 整个目录，item = 单条补全 */
   kind: 'unit' | 'item'
-  /** 资源类型：software / game / video。0.8 加入，区分各模块的识别日志 */
-  resource_kind: string
+  /** 资源类型：software / game / video。0.9 加入，区分各模块的识别日志 */
+  resource_kind: 'software' | 'game' | 'video'
   status: IdentifyLogStatus
   /** 一行结论，例如「注册 2 项」或跳过原因 */
   summary: string
@@ -901,6 +901,7 @@ export interface IdentifyReportEntry {
 export interface IdentifyReport {
   id: string
   created_at: number
+  resource_kind: 'software' | 'game' | 'video'
   processed: number
   registered: number
   skipped: number
@@ -1506,9 +1507,9 @@ export interface BaoyiApi {
   }
   logs: {
     list(query?: IdentifyLogQuery): Promise<IdentifyLog[]>
-    clear(): Promise<number>
+    clear(resourceKind?: string): Promise<number>
     /** 历史汇总报告，新的在前 */
-    reports(): Promise<IdentifyReport[]>
+    reports(resourceKind?: string): Promise<IdentifyReport[]>
   }
   organize: {
     /** 选整理目标根目录 */

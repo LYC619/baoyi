@@ -480,8 +480,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   /* ---------------------------- 识别日志 ---------------------------- */
   ipcMain.handle('logs:list', (_e, query: IdentifyLogQuery = {}) => listIdentifyLogs(query))
-  ipcMain.handle('logs:clear', () => clearIdentifyLogs())
-  ipcMain.handle('logs:reports', () => listIdentifyReports())
+  ipcMain.handle('logs:clear', (_e, resourceKind?: string) => clearIdentifyLogs(resourceKind))
+  ipcMain.handle('logs:reports', (_e, resourceKind?: string) => listIdentifyReports(resourceKind))
 
   /* ---------------------------- 目录整理 ---------------------------- */
   ipcMain.handle('organize:pick-root', async () => {

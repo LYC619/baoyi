@@ -189,8 +189,8 @@ const api: BaoyiApi = {
   },
   logs: {
     list: (query: IdentifyLogQuery = {}) => ipcRenderer.invoke('logs:list', plain(query)),
-    clear: () => ipcRenderer.invoke('logs:clear'),
-    reports: () => ipcRenderer.invoke('logs:reports')
+    clear: (resourceKind?: string) => ipcRenderer.invoke('logs:clear', resourceKind),
+    reports: (resourceKind?: string) => ipcRenderer.invoke('logs:reports', resourceKind)
   },
   organize: {
     pickRoot: () => ipcRenderer.invoke('organize:pick-root'),

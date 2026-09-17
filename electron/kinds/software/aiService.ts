@@ -334,6 +334,7 @@ export async function completeWithAi(
     if (tally.entries.length > 0) {
       try {
         reportId = saveIdentifyReport({
+          resource_kind: 'software',
           processed: tally.processed,
           registered: tally.registered,
           skipped: tally.skipped,

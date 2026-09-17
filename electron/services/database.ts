@@ -1151,12 +1151,18 @@ export function listIdentifyLogs(query: IdentifyLogQuery = {}): IdentifyLog[] {
   return rows.map(rowToLog)
 }
 
-export function clearIdentifyLogs(): number {
+export function clearIdentifyLogs(resourceKind?: string): number {
   const d = getDb()
   // 报告只是这些日志的汇总视图，日志清了它就没有依据了 —— 一起清掉
-  const n = d.prepare('DELETE FROM identify_logs').run().changes
-  d.prepare('DELETE FROM identification_reports').run()
-  return n
+  if (resourceKind) {
+    const n = d.prepare('DELETE FROM identify_logs WHERE resource_kind = ?').run(resourceKind).changes
+    d.prepare('DELETE FROM identification_reports WHERE resource_kind = ?').run(resourceKind)
+    return n
+  } else {
+    const n = d.prepare('DELETE FROM identify_logs').run().changes
+    d.prepare('DELETE FROM identification_reports').run()
+    return n
+  }
 }
 
 /* ------------------------------ 汇总报告 ------------------------------ */
@@ -1172,14 +1178,15 @@ export function saveIdentifyReport(
   const tx = d.transaction(() => {
     d.prepare(
       `INSERT INTO identification_reports
-         (id, created_at, processed, registered, skipped, failed,
+         (id, created_at, resource_kind, processed, registered, skipped, failed,
           duration_ms, tokens, searches, entries)
        VALUES
-         (@id, @created_at, @processed, @registered, @skipped, @failed,
+         (@id, @created_at, @resource_kind, @processed, @registered, @skipped, @failed,
           @duration_ms, @tokens, @searches, @entries)`
     ).run({
       id,
       created_at: Date.now(),
+      resource_kind: report.resource_kind,
       processed: report.processed,
       registered: report.registered,
       skipped: report.skipped,
@@ -1199,12 +1206,12 @@ export function saveIdentifyReport(
   return id
 }
 
-export function listIdentifyReports(): IdentifyReport[] {
-  return (
-    getDb()
-      .prepare('SELECT * FROM identification_reports ORDER BY created_at DESC')
-      .all() as Row[]
-  ).map((row) => {
+export function listIdentifyReports(resourceKind?: string): IdentifyReport[] {
+  const d = getDb()
+  const rows = resourceKind
+    ? (d.prepare('SELECT * FROM identification_reports WHERE resource_kind = ? ORDER BY created_at DESC').all(resourceKind) as Row[])
+    : (d.prepare('SELECT * FROM identification_reports ORDER BY created_at DESC').all() as Row[])
+  return rows.map((row) => {
     let entries: IdentifyReportEntry[] = []
     try {
       const parsed = JSON.parse(row.entries ?? '[]')
@@ -1215,6 +1222,7 @@ export function listIdentifyReports(): IdentifyReport[] {
     return {
       id: row.id,
       created_at: row.created_at,
+      resource_kind: row.resource_kind ?? 'software',
       processed: row.processed ?? 0,
       registered: row.registered ?? 0,
       skipped: row.skipped ?? 0,
@@ -1760,13 +1768,6 @@ export function getSettings(): AppSettings {
       stored[r.key] = r.value
     }
   }
-  // 0.8 迁移兼容：scan_dirs -> software_scan_dirs / game_scan_dirs / video_scan_dirs
-  // 迁移函数已经在库里写入新字段，但如果 settings 读取发生在迁移前（不该发生但防御一下），
-  // 或者用户手动改了配置文件，这里兜底：有旧字段就映射到 software_scan_dirs
-  if (stored.scan_dirs && !stored.software_scan_dirs) {
-    stored.software_scan_dirs = stored.scan_dirs
-  }
-
   return {
     ...DEFAULT_SETTINGS,
     ...stored,
@@ -1793,7 +1794,12 @@ export function patchSettings(patch: Partial<AppSettings>): AppSettings {
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`
   )
   const tx = d.transaction(() => {
-    for (const [k, v] of Object.entries(next)) stmt.run(k, JSON.stringify(v))
+    for (const [k, v] of Object.entries(next)) {
+      // 跳过已废弃的键：迁移已经把 scan_dirs 改名成 software_scan_dirs，
+      // 不能每次保存设置都把旧键再写回去
+      if (k === 'scan_dirs') continue
+      stmt.run(k, JSON.stringify(v))
+    }
   })
   tx()
 

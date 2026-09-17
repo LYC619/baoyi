@@ -116,9 +116,9 @@ async function copyLog(log: IdentifyLog): Promise<void> {
 
 async function clearAll(): Promise<void> {
   if (!window.confirm('清空所有识别日志和汇总报告？只删记录，软件条目和识别结果都不受影响。')) return
-  const n = await window.baoyi.logs.clear()
+  const n = await window.baoyi.logs.clear(props.resourceKind)
   await load()
-  reports.value = await window.baoyi.logs.reports()
+  reports.value = await window.baoyi.logs.reports(props.resourceKind)
   success(`已清空 ${n} 条日志`)
 }
 

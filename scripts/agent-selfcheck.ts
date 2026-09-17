@@ -87,7 +87,7 @@ import {
   versionOf,
   videoTitle
 } from '../src/utils/index.ts'
-import type { LinkedFile } from '../src/types/index.ts'
+import type { LinkedFile, IdentifyLog } from '../src/types/index.ts'
 import { DatabaseSync } from 'node:sqlite'
 import {
   SCHEMA_VERSION,
@@ -1359,7 +1359,7 @@ async function main(): Promise<void> {
 
     const cols = db.prepare('PRAGMA table_info(identify_logs)').all() as Array<{ name: string }>
     assert.ok(cols.length > 0, 'identify_logs 表没建出来')
-    for (const need of ['id', 'dir', 'status', 'events', 'created_at']) {
+    for (const need of ['id', 'dir', 'resource_kind', 'status', 'events', 'created_at']) {
       assert.ok(cols.some((c) => c.name === need), `identify_logs 缺列 ${need}`)
     }
 
@@ -1370,6 +1370,7 @@ async function main(): Promise<void> {
         dir: 'D:\\Tools\\x',
         label: 'x',
         kind: 'unit',
+        resource_kind: 'software',
         status: 'success',
         summary: '注册 1 项',
         registered: 1,
@@ -1736,12 +1737,12 @@ async function main(): Promise<void> {
   /* --------------------------- 日志复制成文本 --------------------------- */
   console.log('\n日志复制成文本')
 
-  const sampleLog = {
+  const sampleLog: IdentifyLog = {
     id: 'l1',
     dir: 'D:\\Software\\1.system\\RegistryFinder64',
     label: 'RegistryFinder64',
     kind: 'unit' as const,
-    resource_kind: 'software',
+    resource_kind: 'software' as const,
     status: 'success' as const,
     summary: '待确认 1 项',
     registered: 1,
@@ -1783,7 +1784,7 @@ async function main(): Promise<void> {
   /* --------------------------- 搜索调用记录 --------------------------- */
   console.log('\n搜索调用记录')
 
-  const searchLog = (id: string, at: number, events: any[]) => ({
+  const searchLog = (id: string, at: number, events: any[]): IdentifyLog => ({
     ...sampleLog,
     id,
     created_at: at,
@@ -2869,6 +2870,32 @@ async function videoDataSection(): Promise<void> {
     initSchema(d as any, KINDS)
     return d
   }
+
+  await check('9 -> 10 迁完，旧的 scan_dirs 分配给 software_scan_dirs', () => {
+    const d = makeV6Db()
+    // 塞一条旧的 scan_dirs 行，值是两个目录
+    d.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(
+      'scan_dirs',
+      '["C:\\\\Tools","D:\\\\Apps"]'
+    )
+    initSchema(d as any, KINDS)
+    const soft = d.prepare('SELECT value FROM settings WHERE key = ?').get('software_scan_dirs') as
+      | { value: string }
+      | undefined
+    assert.ok(soft, 'software_scan_dirs 没创建')
+    assert.deepEqual(JSON.parse(soft.value), ['C:\\Tools', 'D:\\Apps'])
+    const game = d.prepare('SELECT value FROM settings WHERE key = ?').get('game_scan_dirs') as
+      | { value: string }
+      | undefined
+    assert.ok(game, 'game_scan_dirs 没创建')
+    assert.deepEqual(JSON.parse(game.value), [])
+    const video = d.prepare('SELECT value FROM settings WHERE key = ?').get('video_scan_dirs') as
+      | { value: string }
+      | undefined
+    assert.ok(video, 'video_scan_dirs 没创建')
+    assert.deepEqual(JSON.parse(video.value), [])
+    d.close()
+  })
 
   const moviePayload = (over: Partial<VideoPayload> = {}): VideoPayload => ({
     path: 'D:\\Movies\\Dune.2024.mkv',
@@ -7918,8 +7945,9 @@ async function videoUserEditedSection(): Promise<void> {
     // 版本号在 0.8 里推了两次，各自标记一件能回滚的事：
     //   8 = 视频分类多了「里番」一格（rollback-v8 撤这个）
     //   9 = video_meta 多了 hanime_id 列（rollback-v9 撤这个）
-    // 一个数字标两件事的话，两个回滚脚本的界限就说不清了
-    assert.equal(SCHEMA_VERSION, 9, '0.8 收尾时的库形状是 9')
+    // 一个数字标两件事的话，两个回滚脚本的界限就说不清了。
+    // 0.9 抬到 10：拆扫描目录（scan_dirs -> software/game/video_scan_dirs）+ identify_logs.resource_kind 列
+    assert.equal(SCHEMA_VERSION, 10, '0.9 收尾时的库形状是 10')
   })
 }
 

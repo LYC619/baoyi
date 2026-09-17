@@ -168,6 +168,7 @@ export const TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS identification_reports (
     id TEXT PRIMARY KEY,
     created_at INTEGER NOT NULL,
+    resource_kind TEXT DEFAULT 'software',
     processed INTEGER DEFAULT 0,
     registered INTEGER DEFAULT 0,
     skipped INTEGER DEFAULT 0,
@@ -364,6 +365,11 @@ export function migrate(d: SqlDb, from = schemaVersion(d)): void {
   if (!columnsOf(d, 'identify_logs').has('resource_kind')) {
     d.exec(`ALTER TABLE identify_logs ADD COLUMN resource_kind TEXT NOT NULL DEFAULT 'software'`)
   }
+  // 汇总报告同样按模块区分。建表语句里的列对已存在的表不生效，旧库必须在这里补列，
+  // 否则 saveIdentifyReport 的 INSERT 和按模块过滤的查询都会报「no such column」
+  if (!columnsOf(d, 'identification_reports').has('resource_kind')) {
+    d.exec(`ALTER TABLE identification_reports ADD COLUMN resource_kind TEXT DEFAULT 'software'`)
+  }
 
   // 0.8 拆分扫描目录：scan_dirs -> software_scan_dirs / game_scan_dirs / video_scan_dirs
   if (from < 10) {
@@ -407,10 +413,10 @@ export function splitTagsByKind(d: SqlDb): void {
 }
 
 /**
- * 0.8 -> 0.9：scan_dirs 拆成 software_scan_dirs / game_scan_dirs / video_scan_dirs。
+ * 0.9 -> 0.10：scan_dirs 拆成 software_scan_dirs / game_scan_dirs / video_scan_dirs。
  *
- * 旧的 scan_dirs 保留作为软件模块的扫描目录（向后兼容），新字段初始为空数组。
- * 用户需要在各模块的设置页重新配置游戏和视频的扫描目录。
+ * 旧的 scan_dirs 值分配给 software_scan_dirs，旧键被删除。
+ * 游戏和影视的扫描目录初始为空数组。
  */
 export function splitScanDirsByKind(d: SqlDb): void {
   const row = d.prepare('SELECT value FROM settings WHERE key = ?').get('scan_dirs') as
@@ -418,29 +424,13 @@ export function splitScanDirsByKind(d: SqlDb): void {
     | undefined
 
   if (!row) {
-    // 没有旧数据，直接创建三个新字段
-    d.prepare(
-      `INSERT INTO settings (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO NOTHING`
-    ).run('software_scan_dirs', '[]')
-    d.prepare(
-      `INSERT INTO settings (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO NOTHING`
-    ).run('game_scan_dirs', '[]')
-    d.prepare(
-      `INSERT INTO settings (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO NOTHING`
-    ).run('video_scan_dirs', '[]')
+    // 没有旧数据（全新安装），三个新字段会从 DEFAULT_SETTINGS 取默认值，这里什么都不做
     return
   }
 
-  // 读取旧的 scan_dirs，分配给 software_scan_dirs，其他两个模块初始为空
-  const oldDirs = row.value
+  // 读取旧的 scan_dirs，分配给 software_scan_dirs，删除旧键
   tx(d, () => {
-    d.prepare(
-      `INSERT INTO settings (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-    ).run('software_scan_dirs', oldDirs)
+    d.prepare('UPDATE settings SET key = ? WHERE key = ?').run('software_scan_dirs', 'scan_dirs')
     d.prepare(
       `INSERT INTO settings (key, value) VALUES (?, ?)
        ON CONFLICT(key) DO NOTHING`
