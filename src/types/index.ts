@@ -630,6 +630,8 @@ export interface AppSettings {
    * 这一版按用户要求只做侧栏和墙。
    */
   hide_hentai: boolean
+  video_import_agent?: boolean
+  video_organize_root?: string
   theme: 'dark' | 'light'
   view_mode: 'grid' | 'list'
   /**
@@ -1625,6 +1627,9 @@ export interface BaoyiApi {
     onDownloadProgress(cb: (progress: VideoDownloadProgress | VideoSeriesDownloadProgress) => void): Unsubscribe
     revealDownload(requestId: string): Promise<boolean>
   }
+  videoOrganize: import('./video-organize').VideoOrganizeApi
+  videoImport: import('./video-import').VideoImportApi
+  videoAgentOrganize: import('./video-agent-organize').VideoAgentOrganizeApi
   tasks: {
     list(): Promise<TaskRecord[]>
     save(task: TaskRecord): Promise<boolean>

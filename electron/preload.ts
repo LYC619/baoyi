@@ -48,6 +48,24 @@ function plain<T>(value: T): T {
 }
 
 const api: BaoyiApi = {
+  videoAgentOrganize: {
+    prepare: (ids, actions) => ipcRenderer.invoke('video-agent:prepare', plain(ids), plain(actions)),
+    run: (id, groups) => ipcRenderer.invoke('video-agent:run', id, plain(groups)),
+    cancel: () => ipcRenderer.invoke('video-agent:cancel'),
+    onProgress: callback => subscribe('video-agent:progress', callback)
+  },
+  videoImport: {
+    list: () => ipcRenderer.invoke('video-import:list'),
+    get: id => ipcRenderer.invoke('video-import:get', id),
+    prepare: roots => ipcRenderer.invoke('video-import:prepare', plain(roots)),
+    refresh: id => ipcRenderer.invoke('video-import:refresh', id),
+    update: (id, changes) => ipcRenderer.invoke('video-import:update', id, plain(changes)),
+    review: (id, ids) => ipcRenderer.invoke('video-import:review', id, plain(ids)),
+    confirm: (id, ids) => ipcRenderer.invoke('video-import:confirm', id, plain(ids)),
+    discard: id => ipcRenderer.invoke('video-import:discard', id),
+    cancel: id => ipcRenderer.invoke('video-import:cancel', id),
+    onChanged: callback => subscribe('video-import:changed', callback)
+  },
   hanimeBrowser: {
     open: (url?: string) => ipcRenderer.invoke('hanime-browser:open', url),
     onDownload: cb => subscribe('hanime-browser:download', cb)
@@ -174,6 +192,16 @@ const api: BaoyiApi = {
     cancelDownload: (requestId: string) => ipcRenderer.invoke('video-download:cancel', requestId),
     onDownloadProgress: (cb: (progress: VideoDownloadProgress | VideoSeriesDownloadProgress) => void) => subscribe('video-download:progress', cb),
     revealDownload: (requestId: string) => ipcRenderer.invoke('video-download:reveal', requestId)
+  },
+  videoOrganize: {
+    preview: request => ipcRenderer.invoke('video-organize:preview', plain(request)),
+    apply: request => ipcRenderer.invoke('video-organize:apply', plain(request)),
+    retry: id => ipcRenderer.invoke('video-organize:retry', id),
+    rollback: id => ipcRenderer.invoke('video-organize:rollback', id),
+    list: resourceId => ipcRenderer.invoke('video-organize:list', resourceId),
+    previewRelocate: request => ipcRenderer.invoke('video-organize:preview-relocate', plain(request)),
+    relocate: request => ipcRenderer.invoke('video-organize:relocate', plain(request)),
+    pickDirectory: () => ipcRenderer.invoke('video-organize:pick-directory')
   },
   tasks: {
     list: () => ipcRenderer.invoke('tasks:list'),

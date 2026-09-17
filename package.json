@@ -28,6 +28,7 @@
     "verify-video-download-electron": "electron scripts/verify-video-download-electron.cjs",
     "verify-video-library-scan": "node --experimental-strip-types --no-warnings scripts/verify-video-library-scan.ts",
     "verify-video-library-db": "node --experimental-strip-types --no-warnings scripts/verify-video-library-db.ts",
+    "verify-video-library-service": "node --experimental-strip-types --no-warnings scripts/verify-video-library-service.ts",
     "verify-video-packaged-ui": "node --experimental-strip-types --no-warnings scripts/verify-video-packaged-ui.ts",
     "verify-video-posters": "node --experimental-strip-types --no-warnings scripts/verify-video-posters.ts",
     "verify-game-covers": "node --experimental-strip-types --no-warnings scripts/verify-game-covers.ts",

@@ -71,6 +71,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   software_scan_dirs: [],
   game_scan_dirs: [],
   video_scan_dirs: [],
+  video_import_agent: false,
+  video_organize_root: '',
   video_download_root: '',
   video_download_quality: '',
   video_download_strict_quality: false,

@@ -37,6 +37,10 @@ export interface AgentRunOptions {
   tools: AgentTool[]
   /** 一次运行最多允许几轮「模型请求 + 工具执行」 */
   maxTurns?: number
+  /** 需要结构化提交的调用方可以显式要求工具；其他流程仍由模型决定。 */
+  toolChoice?: 'auto' | 'required'
+  /** 指定提交工具成功后即可结束，无须再请求一轮自然语言总结。 */
+  stopAfterToolSuccess?: string
   signal?: AbortSignal
   onEvent?: (e: AgentEvent) => void
 }
@@ -128,7 +132,8 @@ async function requestTurn(
   config: AIConfig,
   messages: ChatMessage[],
   tools: AgentTool[],
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  toolChoice: AgentRunOptions['toolChoice'] = 'auto'
 ): Promise<ChatTurn> {
   const body = JSON.stringify({
     model: config.model,
@@ -137,7 +142,7 @@ async function requestTurn(
       type: 'function',
       function: { name: t.name, description: t.description, parameters: t.parameters }
     })),
-    tool_choice: 'auto',
+    tool_choice: toolChoice,
     temperature: 0.2,
     stream: false
   })
@@ -230,7 +235,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 
     let turn: ChatTurn
     try {
-      turn = await timeAsync(`LLM 第 ${turns} 轮`, () => requestTurn(config, messages, tools, signal))
+      turn = await timeAsync(`LLM 第 ${turns} 轮`, () => requestTurn(config, messages, tools, signal, opts.toolChoice))
     } catch (err) {
       if (signal?.aborted || (err as Error)?.name === 'AbortError') {
         return { stopReason: 'aborted', error: '', turns, tokens, text }
@@ -327,6 +332,9 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         // 成功一次就把错误链断开，只有「连续」同错才算死路
         lastError = ''
         sameError = 0
+        if (opts.stopAfterToolSuccess === name) {
+          return { stopReason: signal?.aborted ? 'aborted' : 'done', error: '', turns, tokens, text }
+        }
       } catch (err) {
         if (signal?.aborted) return { stopReason: 'aborted', error: '', turns, tokens, text }
         const stop = fail(`错误：${err instanceof Error ? err.message : String(err)}`, Date.now() - startedAt)

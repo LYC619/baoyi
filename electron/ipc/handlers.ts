@@ -136,6 +136,9 @@ import { testSearch } from '../services/searchService'
 import { countIpcSend } from '../services/timing.ts'
 import { registerVideoDownloadIpc } from './video-download.ts'
 import { registerVideoWorkflowIpc } from './video-workflow.ts'
+import { registerVideoOrganizeIpc } from './video-organize.ts'
+import { registerVideoImportIpc } from './video-import.ts'
+import { registerVideoAgentOrganizeIpc } from './video-agent-organize.ts'
 import { createHanimeBrowser } from '../services/hanime-browser.ts'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
@@ -147,6 +150,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return hanimeBrowser.open(url)
   })
   const videoWorkflow = registerVideoWorkflowIpc(getWindow, ipcMain)
+  registerVideoOrganizeIpc(getWindow, ipcMain)
+  registerVideoImportIpc(getWindow, ipcMain)
+  registerVideoAgentOrganizeIpc(getWindow, ipcMain)
   const send = (channel: string, payload: unknown) => {
     const win = getWindow()
     if (win && !win.isDestroyed()) {
