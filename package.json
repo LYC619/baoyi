@@ -21,6 +21,8 @@
     "verify-video": "node --experimental-strip-types --no-warnings scripts/verify-video-cdp.ts",
     "verify-hentai-e2e": "node --experimental-strip-types --no-warnings scripts/verify-hentai-e2e.ts",
     "verify-hanime-verification": "node --experimental-strip-types --no-warnings scripts/verify-hanime-verification.ts",
+    "verify-game-covers": "node --experimental-strip-types --no-warnings scripts/verify-game-covers.ts",
+    "verify-game-covers-electron": "electron scripts/verify-game-covers-electron.cjs",
     "verify-identify": "node --experimental-strip-types --no-warnings scripts/verify-identify-cdp.ts",
     "verify-icons": "set ELECTRON_RUN_AS_NODE=1&& electron --experimental-strip-types --no-warnings scripts/verify-icons.ts",
     "probe-icons": "electron scripts/probe-icons.cjs",

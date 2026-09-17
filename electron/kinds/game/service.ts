@@ -8,6 +8,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { createHash, randomUUID } from 'node:crypto'
 import fs, { existsSync } from 'node:fs'
 import path from 'node:path'
 import type {
@@ -25,7 +26,7 @@ import type {
   SavePathCheck,
   SaveRestoreResult
 } from '../../../src/types'
-import { app, net, shell } from 'electron'
+import { app, net, nativeImage, session, shell } from 'electron'
 import { runAgent, type AgentEvent } from '../../services/agent/loop'
 import {
   coversDir,
@@ -33,6 +34,7 @@ import {
   getSettings,
   listCategories,
   saveBackupRoot,
+  saveIdentifyLog,
   tagPool
 } from '../../services/database'
 import {
@@ -45,13 +47,20 @@ import {
   acceptImageUrl,
   candidatesFromSearch,
   coverQueries,
+  isGenericGameName,
+  isLocalCoverUrl,
   extFromContentType,
   finalizeCandidates,
   pickSteamApps,
   steamCoverCandidates,
   steamSearchUrl,
   MAX_COVER_BYTES,
-  type CoverCandidate
+  MIN_COVER_SHORT_EDGE,
+  MIN_COVER_LONG_EDGE,
+  MAX_COVER_EDGE,
+  MAX_COVER_PIXELS,
+  type CoverCandidate,
+  type GameCoverDiagnostic
 } from './covers'
 import {
   createBackup,
@@ -67,12 +76,12 @@ import {
   gameCounts,
   gamesUnder,
   getGame,
+  insertGame,
   listGames,
   updateGame
 } from './db'
 import {
   addLinks,
-  coverFileName,
   coverSiblings,
   guessLinkType,
   hasLink,
@@ -81,6 +90,7 @@ import {
   MAX_LINKS
 } from './links'
 import { candidatePrompt, fillGameSystem } from './prompts'
+import { configUrlsFromLauncher, confirmedGameIdentity, isGenshinAlias, isGenshinLauncherAlias, knownGameIdentity, parseOfficialConfig } from './identity'
 import { loadSaveDb, type SaveDbHandle } from './savedb'
 import { elapsedSeconds, endSession, type SessionOutcome } from './session'
 import { inspectDir, probeSave, scanGameRoot, type GameCandidate } from './scanner'
@@ -121,11 +131,58 @@ function gameSaveDb(): SaveDbHandle | null {
 /* ------------------------------ 读写转发 ------------------------------ */
 
 export const listGameItems = (query: GameQuery = {}): GameItem[] => listGames(getDb(), query)
-export const getGameItem = (id: string): GameItem | null => getGame(getDb(), id)
+export const getGameItem = (id: string): GameItem | null => {
+  const game = getGame(getDb(), id)
+  return game ? refreshKnownIdentity(game).game : null
+}
 export const gameCountsOf = (): GameCounts => gameCounts(getDb())
 
 export function updateGameItem(id: string, patch: Partial<GameItem>): GameItem | null {
+  if (Object.keys(patch).some(key => key.startsWith('cover_') || key.startsWith('identity_') || key === 'name_zh' || key === 'name_en')) {
+    advanceCoverRevision(id)
+  }
+  const current = getGame(getDb(), id)
+  if (!current) return null
+  if ((patch.identity_confirmed ?? current.identity_confirmed) && (patch.identity_name !== undefined || patch.identity_confirmed === true)) {
+    const known = confirmedGameIdentity(patch.identity_name ?? current.identity_name)
+    if (known) patch = { ...normalizedIdentityPatch({ ...current, ...patch }, known), ...patch, identity_name: known.identity_name }
+  }
   return updateGame(getDb(), id, patch)
+}
+
+/** 本地登记只读取所选入口；识别和补图可在登记后单独进行。 */
+export function registerManualGame(exePath: string): { ok: boolean; message: string; item?: GameItem } {
+  try {
+    const target = path.resolve(exePath)
+    if (!/\.(?:exe|lnk|bat|cmd)$/i.test(target)) return { ok: false, message: '请选择游戏程序、快捷方式或启动脚本' }
+    const stat = fs.statSync(target)
+    if (!stat.isFile()) return { ok: false, message: '所选入口不是文件' }
+    const db = getDb()
+    const existing = db.prepare('SELECT id, kind FROM resource WHERE path = ? COLLATE NOCASE').get(target) as { id: string; kind: string } | undefined
+    if (existing) {
+      const item = existing.kind === 'game' ? getGame(db, existing.id) : null
+      return item ? { ok: true, message: '这个游戏已在库中', item } : { ok: false, message: '这个入口已登记在其他资源库中' }
+    }
+    const name = path.basename(target, path.extname(target))
+    db.exec('SAVEPOINT register_manual_game')
+    try {
+      const { id } = insertGame(db, {
+        exe_path: target, source_dir: path.dirname(target), file_size: stat.size,
+        name_zh: /[\u3400-\u9fff]/.test(name) ? name : '', name_en: /[\u3400-\u9fff]/.test(name) ? '' : name,
+        summary: '', description: '', category: '其他', tags: [], official_url: '', save_paths: [], linked_files: []
+      })
+      db.prepare("UPDATE resource SET ai_status = 'pending' WHERE id = ?").run(id)
+      const item = getGameItem(id)!
+      db.exec('RELEASE SAVEPOINT register_manual_game')
+      return { ok: true, message: '游戏已登记，可在详情页确认名称和存档位置', item }
+    } catch (err) {
+      db.exec('ROLLBACK TO SAVEPOINT register_manual_game')
+      db.exec('RELEASE SAVEPOINT register_manual_game')
+      throw err
+    }
+  } catch (err: any) {
+    return { ok: false, message: `登记失败：${err?.message ?? '无法读取所选文件'}` }
+  }
 }
 
 /**
@@ -136,8 +193,9 @@ export function updateGameItem(id: string, patch: Partial<GameItem>): GameItem |
  * 那是他的存档，不是我们生成的缓存。这两件事的判据是「这份文件是谁的」。
  */
 export function removeGame(id: string): void {
-  dropCoverFiles(id)
+  advanceCoverRevision(id)
   deleteGame(getDb(), id)
+  dropCoverFiles(id)
 }
 
 /* ------------------------------ 关联文件 ------------------------------ */
@@ -206,16 +264,146 @@ export async function openGameLink(
 
 /* ------------------------------ 封面 ------------------------------ */
 
+// A slow search/download may finish after the user picked or cleared another image.
+const coverRevisions = new Map<string, number>()
+const coverRevision = (id: string): number => coverRevisions.get(id) ?? 0
+function advanceCoverRevision(id: string): number {
+  const next = coverRevision(id) + 1
+  coverRevisions.set(id, next)
+  return next
+}
+
+function gameDirectories(game: GameItem): string[] {
+  return [...new Set([path.dirname(game.path), game.source_dir].filter(Boolean).map(dir => path.resolve(dir)))].slice(0, 2)
+}
+
+function normalizedIdentityPatch(game: GameItem, known: NonNullable<ReturnType<typeof knownGameIdentity>>): Partial<GameItem> {
+  const patch: Partial<GameItem> = {}
+  for (const field of ['name_zh', 'name_en', 'identity_name'] as const) {
+    if ((isGenericGameName(game[field]) || isGenshinLauncherAlias(game[field])) && game[field] !== known[field]) patch[field] = known[field]
+  }
+  return patch
+}
+
+function refreshKnownIdentity(game: GameItem): { game: GameItem; known: ReturnType<typeof knownGameIdentity> } {
+  // A nearby installation is not evidence for an unrelated entry point, and an
+  // explicitly confirmed product takes precedence over shared launcher files.
+  const entry = path.basename(game.path)
+  if (game.identity_confirmed || (!isGenericGameName(entry) && !/^(?:YuanShen|GenshinImpact)\.exe$/i.test(entry))) {
+    return { game, known: null }
+  }
+  const executables: string[] = []
+  const configs: string[] = []
+  for (const dir of gameDirectories(game)) {
+    for (const name of ['YuanShen.exe', 'GenshinImpact.exe', 'StarRail.exe', 'ZenlessZoneZero.exe', 'BH3.exe']) {
+      for (const subdir of ['', 'YuanShen Game', 'Genshin Impact Game']) {
+        try { if (fs.statSync(path.join(dir, subdir, name)).isFile()) executables.push(name) } catch { /* absent */ }
+      }
+    }
+    for (const name of ['config.ini', 'config.json']) {
+      try {
+        const file = path.join(dir, name)
+        const stat = fs.statSync(file)
+        if (stat.isFile() && stat.size <= 256 * 1024) configs.push(fs.readFileSync(file, 'utf8'))
+      } catch { /* no product config */ }
+    }
+  }
+  const known = knownGameIdentity({ executables, configs, selectedExecutable: executables.some(name => name.toLowerCase() === entry.toLowerCase()) ? entry : undefined })
+  if (!known || game.identity_confirmed) return { game, known }
+  const patch = normalizedIdentityPatch(game, known)
+  return { game: Object.keys(patch).length ? updateGame(getDb(), game.id, patch)! : game, known }
+}
+
 /** 清掉这个游戏在封面目录里的所有文件（含换过扩展名留下的孤儿） */
-function dropCoverFiles(id: string): void {
+function dropCoverFiles(id: string, keep = ''): void {
   const dir = coversDir()
-  for (const name of coverSiblings(id)) {
+  const owned = new Set(coverSiblings(id))
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (name.startsWith(`${id}.`) && /^[a-f0-9-]{36}\.[a-z]+$/i.test(name.slice(id.length + 1)) && isCoverExt(name)) owned.add(name)
+    }
+  } catch { /* no cached covers */ }
+  for (const name of owned) {
+    if (name.toLowerCase() === keep.toLowerCase()) continue
     try {
       fs.rmSync(path.join(dir, name), { force: true })
     } catch {
       /* 正被渲染进程占用之类，删不掉就留着，下次换封面会覆盖 */
     }
   }
+}
+
+export function validateCoverFile(file: string): { ok: boolean; message: string; width?: number; height?: number; bytes?: number } {
+  try {
+    const stat = fs.statSync(file)
+    if (!stat.isFile() || stat.size === 0) return { ok: false, message: '封面文件为空' }
+    if (stat.size > MAX_COVER_BYTES) return { ok: false, message: '封面文件太大' }
+    const image = nativeImage.createFromPath(file)
+    const size = image.getSize()
+    if (!size.width || !size.height) return { ok: false, message: '文件不是可解码的图片' }
+    if (Math.min(size.width, size.height) < MIN_COVER_SHORT_EDGE || Math.max(size.width, size.height) < MIN_COVER_LONG_EDGE) {
+      return { ok: false, message: `图片尺寸太小（${size.width} × ${size.height}），短边至少 ${MIN_COVER_SHORT_EDGE}、长边至少 ${MIN_COVER_LONG_EDGE} 像素` }
+    }
+    if (Math.max(size.width, size.height) > MAX_COVER_EDGE || size.width * size.height > MAX_COVER_PIXELS) {
+      return { ok: false, message: '图片像素尺寸超出封面限制' }
+    }
+    return { ok: true, message: '', width: size.width, height: size.height, bytes: stat.size }
+  } catch (err: any) {
+    return { ok: false, message: `读取图片失败：${err?.message ?? '未知错误'}` }
+  }
+}
+
+/** Publish an immutable file, commit its reference, then retire the previous image. */
+export function replaceCoverFile(
+  id: string, source: string, ext: string, commit?: (file: string) => void
+): { ok: boolean; message: string; path?: string } {
+  const dir = coversDir()
+  if (!COVER_EXTS.includes(ext.toLowerCase())) return { ok: false, message: '不支持的封面格式' }
+  const token = randomUUID()
+  const destination = path.join(dir, `${id}.${token}${ext}`)
+  const staging = path.join(dir, `.${id}.${token}.tmp`)
+  let installed = false
+  try {
+    fs.copyFileSync(source, staging)
+    const valid = validateCoverFile(staging)
+    if (!valid.ok) return valid
+    fs.renameSync(staging, destination)
+    installed = true
+    commit?.(destination)
+    dropCoverFiles(id, path.basename(destination))
+    return { ok: true, message: '', path: destination }
+  } catch (err: any) {
+    try { if (installed) fs.rmSync(destination, { force: true }) } catch { /* unreferenced new file; old cover is intact */ }
+    return { ok: false, message: `写入封面失败：${err?.message ?? '未知错误'}` }
+  } finally {
+    try { if (existsSync(staging)) fs.rmSync(staging, { force: true }) } catch { /* best effort */ }
+  }
+}
+
+function commitGameCover(id: string, sourceFile: string, source: GameItem['cover_source'], sourceUrl: string): { ok: boolean; message: string } {
+  const db = getDb()
+  return replaceCoverFile(id, sourceFile, path.extname(sourceFile).toLowerCase(), file => {
+    db.exec('SAVEPOINT game_cover_write')
+    try {
+      updateGame(db, id, { cover_path: file, cover_source: source, cover_source_url: sourceUrl, cover_status: 'ready', cover_detail: '' })
+      db.exec('RELEASE SAVEPOINT game_cover_write')
+    } catch (error) {
+      db.exec('ROLLBACK TO SAVEPOINT game_cover_write')
+      db.exec('RELEASE SAVEPOINT game_cover_write')
+      throw error
+    }
+  })
+}
+
+function recordCoverFailure(id: string, revision: number, message: string): void {
+  const game = getGame(getDb(), id)
+  if (!game || coverRevision(id) !== revision) return
+  try {
+    updateGame(getDb(), id, {
+      cover_status: game.cover_path && validateCoverFile(game.cover_path).ok ? 'ready' : 'failed',
+      cover_detail: message
+    })
+  } catch { /* Reporting a DB write failure must not hide the original error. */ }
 }
 
 /**
@@ -230,6 +418,7 @@ function dropCoverFiles(id: string): void {
 export function setGameCover(id: string, source: string): { ok: boolean; message: string } {
   const game = getGame(getDb(), id)
   if (!game) return { ok: false, message: '找不到这个游戏' }
+  advanceCoverRevision(id)
 
   const from = path.resolve(source)
   if (!isCoverExt(from)) {
@@ -237,27 +426,22 @@ export function setGameCover(id: string, source: string): { ok: boolean; message
   }
   if (!existsSync(from)) return { ok: false, message: '这个文件不在了' }
 
-  // 换扩展名时旧文件不会被覆盖，先整个清一遍再拷 —— 不清就会留下一个
-  // 谁也不引用的孤儿，而它和新封面同名不同扩展名，看着像是没换成功
-  dropCoverFiles(id)
-
-  const name = coverFileName(id, from)
-  try {
-    fs.copyFileSync(from, path.join(coversDir(), name))
-  } catch (err: any) {
-    return { ok: false, message: `拷贝失败：${err?.message ?? '未知错误'}` }
-  }
-
-  // 存完整路径而不是只存文件名，和 resource.icon_path 一个约定：
-  // 渲染进程那边统一用 coverUrl() 取 basename 拼协议地址
-  updateGame(getDb(), id, { cover_path: path.join(coversDir(), name) })
+  const valid = validateCoverFile(from)
+  if (!valid.ok) return valid
+  const replaced = commitGameCover(id, from, 'manual', '')
+  if (!replaced.ok) return replaced
   return { ok: true, message: '封面已更换' }
 }
 
 /** 撤掉封面，退回首字占位。磁盘上那份拷贝一起删，留着只是占地方 */
 export function clearGameCover(id: string): GameItem | null {
+  advanceCoverRevision(id)
+  if (!getGame(getDb(), id)) return null
+  const updated = updateGame(getDb(), id, {
+    cover_path: '', cover_source: '', cover_source_url: '', cover_status: 'missing', cover_detail: ''
+  })
   dropCoverFiles(id)
-  return updateGame(getDb(), id, { cover_path: '' })
+  return updated
 }
 
 /* ---------------------------- 封面联网搜索 ---------------------------- */
@@ -280,32 +464,197 @@ const NET_TIMEOUT = 20_000
  *
  * `net.fetch` 只在主进程可用，而这个文件本来就是那道 Electron 接缝。
  */
-async function netFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  return net.fetch(url, { ...init, signal: AbortSignal.timeout(NET_TIMEOUT) })
+async function netFetch(url: string, imageOnly = false): Promise<Response> {
+  const signal = AbortSignal.timeout(NET_TIMEOUT)
+  let current = url
+  for (let i = 0; i < 5; i++) {
+    if (imageOnly && !acceptImageUrl(current)) throw new Error('图片跳转到了不支持的来源')
+    if (!imageOnly) {
+      const host = new URL(current).hostname
+      if (new URL(current).protocol !== 'https:' || !(host === 'store.steampowered.com' || host === 'launcher.mihoyo.com' || host.endsWith('.mihoyo.com'))) {
+        throw new Error('查询跳转到了不支持的来源')
+      }
+    }
+    const response = await net.fetch(current, { redirect: 'manual', signal })
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response
+    const next = response.headers.get('location')
+    await response.body?.cancel().catch(() => undefined)
+    if (!next) throw new Error('跳转缺少目标地址')
+    current = new URL(next, current).href
+  }
+  throw new Error('来源跳转次数过多')
 }
 
-/**
- * 探一个候选图是否真的存在。
- *
- * 用 `Range: bytes=0-1023` 的 GET 而不是 HEAD：HEAD 在部分 CDN 上会被拒或不返回
- * content-type。只拉 1 KB，十几个候选探一遍的代价可以忽略。
- *
- * 判据是 content-type 而不只是状态码。实测 Steam 对缺图的地址回的是规规矩矩的
- * 404 + text/html（老游戏没有 library_600x900、DLC 和原声带条目四种图全缺），
- * 状态码这一关就能挡住；但 content-type 这一关同时也挡住了「200 却不是图片」
- * 那一类（图搜返回的地址里有这种），两道一起卡的成本是零。
- */
-async function probeImage(url: string): Promise<{ ok: boolean; ext: string }> {
-  try {
-    const res = await netFetch(url, { headers: { Range: 'bytes=0-1023' } })
-    if (!res.ok && res.status !== 206) return { ok: false, ext: '' }
-    const ext = extFromContentType(res.headers.get('content-type') ?? '')
-    // 读掉这一小段，别让连接挂着
-    await res.arrayBuffer().catch(() => undefined)
-    return { ok: ext !== '', ext }
-  } catch {
-    return { ok: false, ext: '' }
+async function networkRoute(url: string): Promise<string> {
+  try { return (await session.defaultSession.resolveProxy(url)) || 'DIRECT' }
+  catch { return '系统网络（路由信息不可用）' }
+}
+
+async function readCoverBytes(response: Response, limit = MAX_COVER_BYTES): Promise<Buffer> {
+  if (Number(response.headers.get('content-length') ?? 0) > limit) {
+    await response.body?.cancel().catch(() => undefined)
+    throw new Error('响应内容超出大小限制')
   }
+  if (!response.body) throw new Error('来源没有返回内容')
+  const reader = response.body.getReader()
+  const chunks: Buffer[] = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      total += value.byteLength
+      if (total > limit) throw new Error('响应内容超出大小限制')
+      chunks.push(Buffer.from(value))
+    }
+    if (!total) throw new Error('来源返回了空内容')
+    return Buffer.concat(chunks)
+  } finally {
+    await reader.cancel().catch(() => undefined)
+  }
+}
+
+function previewFile(url: string): string | undefined {
+  if (isLocalCoverUrl(url)) return path.join(coversDir(), new URL(url).pathname.slice(1))
+  const key = createHash('sha1').update(url).digest('hex').slice(0, 20)
+  return COVER_EXTS.map(ext => path.join(coversDir(), `preview-${key}${ext}`)).find(file => existsSync(file) && validateCoverFile(file).ok)
+}
+
+function readyCandidate(candidate: CoverCandidate, file: string, route: string): CoverCandidate {
+  const valid = validateCoverFile(file)
+  if (!valid.ok) throw new Error(valid.message)
+  return {
+    ...candidate, title: candidate.title || candidate.label, status: 'ready', stage: undefined, message: '',
+    width: valid.width, height: valid.height, bytes: valid.bytes, portrait: valid.height! > valid.width!, route,
+    preview_url: `baoyi://cover/${encodeURIComponent(path.basename(file))}?v=${fs.statSync(file).mtimeMs}`
+  }
+}
+
+/** Fetch, decode and cache are one operation; a URL alone is never a ready preview. */
+async function cacheCandidatePreview(candidate: CoverCandidate): Promise<CoverCandidate> {
+  let tmp = ''
+  let stage: NonNullable<CoverCandidate['stage']> = 'network'
+  let route = ''
+  try {
+    if (!acceptImageUrl(candidate.url)) throw new Error('图片地址不在允许的来源里')
+    const cached = previewFile(candidate.url)
+    if (cached) return readyCandidate(candidate, cached, '本地缓存')
+    route = await networkRoute(candidate.url)
+    const res = await netFetch(candidate.url, true)
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => undefined)
+      throw new Error(`HTTP ${res.status}`)
+    }
+    stage = 'decode'
+    const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
+    if (contentType === 'text/html' || contentType === 'application/xhtml+xml') {
+      await res.body?.cancel().catch(() => undefined)
+      throw new Error('来源返回 HTML 网页，可能需要验证或登录，没有收到图片')
+    }
+    const ext = extFromContentType(contentType)
+    if (!ext) {
+      await res.body?.cancel().catch(() => undefined)
+      throw new Error('来源返回的不是受支持的图片')
+    }
+    stage = 'network'
+    const bytes = await readCoverBytes(res)
+    stage = 'decode'
+    if (/^\s*(?:<!doctype\s+html\b|<(?:html|head|body)\b)/i.test(bytes.subarray(0, 512).toString('utf8'))) {
+      throw new Error('来源返回 HTML 网页，可能需要验证或登录，没有收到图片')
+    }
+    const key = createHash('sha1').update(candidate.url).digest('hex').slice(0, 20)
+    const file = path.join(coversDir(), `preview-${key}${ext}`)
+    tmp = `${file}.${randomUUID()}.tmp`
+    stage = 'cache'
+    fs.writeFileSync(tmp, bytes)
+    stage = 'decode'
+    const valid = validateCoverFile(tmp)
+    if (!valid.ok) throw new Error(valid.message)
+    stage = 'cache'
+    fs.renameSync(tmp, file)
+    tmp = ''
+    return readyCandidate(candidate, file, route)
+  } catch (err: any) {
+    return { ...candidate, title: candidate.title || candidate.label, status: 'failed', stage, message: err?.message || '候选图不可用', route, preview_url: undefined }
+  } finally {
+    if (tmp) {
+      try { fs.rmSync(tmp, { force: true }) } catch { /* best effort */ }
+    }
+  }
+}
+
+function localCoverCandidates(game: GameItem): CoverCandidate[] {
+  const out: CoverCandidate[] = []
+  for (const dir of gameDirectories(game)) {
+    let names: string[]
+    try { names = fs.readdirSync(dir).filter(name => /^(?:poster|cover|folder)\.(?:png|jpe?g|webp|avif|gif|bmp)$/i.test(name)) }
+    catch { continue }
+    for (const name of names.slice(0, 6)) {
+      let tmp = ''
+      let candidate: CoverCandidate = { url: '', title: game.identity_name || game.name_en || game.name_zh, label: `本地 ${name}`, source: 'local', portrait: false, rank: /^(?:poster)/i.test(name) ? 0 : /^cover/i.test(name) ? 1 : 2, route: '本地文件' }
+      let stage: NonNullable<CoverCandidate['stage']> = 'decode'
+      try {
+        const source = path.join(dir, name)
+        const stat = fs.statSync(source)
+        const key = createHash('sha1').update(`${source}\0${stat.size}\0${stat.mtimeMs}`).digest('hex').slice(0, 20)
+        const cacheName = `preview-local-${key}${path.extname(name).toLowerCase()}`
+        const file = path.join(coversDir(), cacheName)
+        candidate = { ...candidate, url: `baoyi://cover/${cacheName}` }
+        const valid = validateCoverFile(source)
+        if (!valid.ok) throw new Error(valid.message)
+        stage = 'cache'
+        tmp = `${file}.${randomUUID()}.tmp`
+        fs.copyFileSync(source, tmp)
+        const staged = validateCoverFile(tmp)
+        if (!staged.ok) { stage = 'decode'; throw new Error(staged.message) }
+        fs.renameSync(tmp, file)
+        tmp = ''
+        out.push(readyCandidate(candidate, file, '本地文件'))
+      } catch (err: any) {
+        out.push({ ...candidate, status: 'failed', stage, message: err?.message || '本地图片不可用' })
+      } finally {
+        if (tmp) { try { fs.rmSync(tmp, { force: true }) } catch { /* best effort */ } }
+      }
+    }
+  }
+  return finalizeCandidates(out)
+}
+
+const OFFICIAL_GENSHIN_COVERS: CoverCandidate[] = [
+  {
+    url: 'https://act-webstatic.mihoyo.com/puzzle/hyp/pz_Bur_m6Btc7/resource/puzzle/2024/04/11/014eb24be7604aad6c6b289ac01d57f5_3910634999481955313.png',
+    label: '原神官方图', source: 'official', portrait: true, rank: -10
+  },
+  {
+    url: 'https://act-webstatic.mihoyo.com/puzzle/hyp/pz_Bur_m6Btc7/resource/puzzle/2024/04/11/014eb24be7604aad6c6b289ac01d57f5_2164983007399311744.png',
+    label: '原神官方图（备用）', source: 'official', portrait: true, rank: -9
+  }
+]
+
+async function officialGenshinCandidates(diagnostics: GameCoverDiagnostic[]): Promise<CoverCandidate[]> {
+  const route = await networkRoute('https://launcher.mihoyo.com/')
+  try {
+    const page = await netFetch('https://launcher.mihoyo.com/')
+    if (!page.ok) throw new Error(`官方启动器页面 HTTP ${page.status}`)
+    const html = (await readCoverBytes(page, 1_000_000)).toString('utf8')
+    const urls = configUrlsFromLauncher(html).slice(0, 4)
+    for (const configUrl of urls) {
+      try {
+        const script = await netFetch(configUrl)
+        if (!script.ok) throw new Error(`官方配置 HTTP ${script.status}`)
+        const identity = parseOfficialConfig((await readCoverBytes(script, 2_000_000)).toString('utf8'), configUrl)
+        if (!identity) continue
+        return identity.candidates.map((url, rank) => ({ url, title: '原神 / Genshin Impact', label: `原神官方图${rank ? '（备用）' : ''}`, source: 'official', portrait: true, rank: rank - 10 }))
+      } catch (err: any) {
+        diagnostics.push({ source: 'official', stage: 'lookup', status: 'failed', message: err?.message || '官方配置读取失败', route, url: configUrl })
+      }
+    }
+    diagnostics.push({ source: 'official', stage: 'lookup', status: 'failed', message: '官方配置中没有找到可确认的原神图片', route })
+  } catch (err: any) {
+    diagnostics.push({ source: 'official', stage: 'network', status: 'failed', message: err?.message || '官方来源访问失败', route })
+  }
+  return []
 }
 
 /** 分批并发，别一次把十几个请求全甩出去 */
@@ -321,7 +670,7 @@ async function inBatches<T, R>(items: T[], size: number, fn: (x: T) => Promise<R
 async function steamApps(query: string): Promise<Array<{ id: number; name: string }>> {
   const res = await netFetch(steamSearchUrl(query))
   if (!res.ok) throw new Error(`Steam 搜索返回 HTTP ${res.status}`)
-  const json: any = await res.json()
+  const json: any = JSON.parse((await readCoverBytes(res, 2_000_000)).toString('utf8'))
   const items: any[] = Array.isArray(json?.items) ? json.items : []
   return pickSteamApps(items, query)
 }
@@ -333,76 +682,191 @@ async function steamApps(query: string): Promise<Array<{ id: number; name: strin
  * 是最难排查的一种失败，而原因基本只有三类：网络不通、这个游戏不在 Steam 上、
  * 服务商不支持图搜。三类的下一步动作完全不同，必须说清是哪一类。
  */
-export async function searchGameCovers(id: string): Promise<GameCoverSearchResult> {
-  const game = getGame(getDb(), id)
-  if (!game) return { ok: false, message: '找不到这个游戏', candidates: [], query: '' }
-
+export async function searchGameCovers(id: string, recoverStored = false): Promise<GameCoverSearchResult> {
+  const original = getGame(getDb(), id)
+  if (!original) return { ok: false, message: '找不到这个游戏', candidates: [], query: '', diagnostics: [] }
+  const revision = coverRevision(id)
+  const { game, known } = refreshKnownIdentity(original)
   const queries = coverQueries(game)
-  if (queries.length === 0) {
-    return { ok: false, message: '这个游戏没有可用的名字，先在详情页填一个再搜', candidates: [], query: '' }
+  let usedQuery = queries[0] || ''
+  const diagnostics: GameCoverDiagnostic[] = []
+  if (known) diagnostics.push({ source: 'local', stage: 'identity', status: 'ready', message: `${known.evidence}确认了原神身份`, route: '本地文件' })
+  const found: CoverCandidate[] = []
+  const record = (candidates: CoverCandidate[]): void => {
+    for (const c of candidates) diagnostics.push({ source: c.source, stage: c.stage || 'cache', status: c.status === 'ready' ? 'ready' : 'failed', message: c.message || `${c.label}：${c.width} × ${c.height}，已缓存`, route: c.route, url: c.url })
+  }
+  const finish = (): GameCoverSearchResult => {
+    const candidates = finalizeCandidates(found)
+    const ready = candidates.filter(c => c.status === 'ready')
+    const failures = diagnostics.filter(d => d.status === 'failed')
+    const message = ready.length ? '' : `${[...new Set(failures.map(d => d.message))].slice(0, 3).join('；') || '没有找到可用封面'}。可调整封面关键词，或手动选一张图。`
+    if (!ready.length) recordCoverFailure(id, revision, message)
+    return { ok: ready.length > 0, message, candidates, query: usedQuery, diagnostics }
+  }
+  const cache = async (candidates: CoverCandidate[]): Promise<void> => {
+    const checked = await inBatches(finalizeCandidates(candidates), 3, cacheCandidatePreview)
+    found.push(...checked)
+    record(checked)
+  }
+
+  if (recoverStored && game.cover_source_url) {
+    const url = game.cover_source_url
+    const candidate: CoverCandidate = {
+      url, source: isLocalCoverUrl(url) ? 'local' : game.cover_source === 'official' ? 'official' : game.cover_source === 'steam' ? 'steam' : 'search',
+      title: game.identity_name || game.name_en || game.name_zh, label: '上次选择的封面', portrait: false, rank: -20
+    }
+    if (isLocalCoverUrl(url)) {
+      try {
+        const recovered = readyCandidate(candidate, previewFile(url)!, '本地缓存')
+        found.push(recovered)
+        record([recovered])
+      } catch (err: any) {
+        diagnostics.push({ source: 'local', stage: 'cache', status: 'failed', message: `上次选择的本地缓存不可用：${err?.message || '文件丢失'}`, route: '本地缓存' })
+      }
+    } else if (acceptImageUrl(url)) await cache([candidate])
+    if (found.some(c => c.status === 'ready')) return finish()
+  }
+  const localCandidates = localCoverCandidates(game)
+  found.push(...localCandidates)
+  record(localCandidates)
+  if (!localCandidates.length) diagnostics.push({ source: 'local', stage: 'lookup', status: 'skipped', message: '游戏目录中没有 poster、cover 或 folder 图片', route: '本地文件' })
+  if (found.some(c => c.status === 'ready')) return finish()
+  if (!queries.length) {
+    diagnostics.push({ source: 'local', stage: 'identity', status: 'failed', message: '尚未确认游戏名称，启动器名称不能用于查找封面', route: '本地文件' })
+    return finish()
+  }
+
+  const officialGenshin = !!known || (game.identity_confirmed && isGenshinLauncherAlias(game.identity_name)) ||
+    /^(?:原神|genshin\s+impact)$/i.test(usedQuery) ||
+    (isGenshinAlias(usedQuery) && (!!known || game.identity_confirmed))
+  if (officialGenshin) {
+    await cache(OFFICIAL_GENSHIN_COVERS.map(c => ({ ...c, title: '原神 / Genshin Impact' })))
+    if (!found.some(c => c.status === 'ready')) await cache(await officialGenshinCandidates(diagnostics))
+    return finish()
+  }
+
+  let appid = ''
+  if (!game.identity_query.trim()) {
+    for (const dir of gameDirectories(game)) {
+      try {
+        const file = path.join(dir, 'steam_appid.txt')
+        if (fs.statSync(file).size > 64) continue
+        const value = fs.readFileSync(file, 'utf8').trim()
+        if (/^[1-9]\d{0,9}$/.test(value)) { appid = value; break }
+      } catch { /* no declared Steam app */ }
+    }
+  }
+  if (appid) {
+    diagnostics.push({ source: 'steam', stage: 'lookup', status: 'ready', message: `本地 Steam AppID：${appid}`, route: '本地文件' })
+    await cache(steamCoverCandidates(appid, usedQuery).map(c => ({ ...c, title: usedQuery })))
+  } else {
+    for (const query of queries) {
+      usedQuery = query
+      const route = await networkRoute(steamSearchUrl(query))
+      try {
+        const apps = await steamApps(query)
+        diagnostics.push({ source: 'steam', stage: 'lookup', status: apps.length ? 'ready' : 'failed', message: apps.length ? `Steam 找到 ${apps.length} 个相关游戏` : `Steam 未找到「${query}」的相关游戏`, route })
+        await cache(apps.flatMap(a => steamCoverCandidates(a.id, a.name).map(c => ({ ...c, title: a.name }))))
+        if (found.some(c => c.status === 'ready')) break
+      } catch (err: any) {
+        diagnostics.push({ source: 'steam', stage: 'network', status: 'failed', message: `Steam 搜索失败：${err?.message || '网络不可用'}`, route })
+        break
+      }
+    }
   }
 
   const cfg = getSettings().search
-  const notes: string[] = []
-  const found: CoverCandidate[] = []
-  let usedQuery = queries[0]
-  let steamFailed = ''
-
-  for (const q of queries) {
-    usedQuery = q
-    let apps: Array<{ id: number; name: string }> = []
-    try {
-      apps = await steamApps(q)
-    } catch (err: any) {
-      // 网络层的失败要跟「查到了但没有」分开报：前者重试有用，后者重试没用
-      steamFailed = err?.message ?? '网络请求失败'
-      break
-    }
-    if (apps.length === 0) continue
-
-    const probed = await inBatches(
-      apps.flatMap((a) => steamCoverCandidates(a.id, a.name)),
-      5,
-      async (c) => ({ c, hit: await probeImage(c.url) })
-    )
-    found.push(...probed.filter((p) => p.hit.ok).map((p) => p.c))
-    if (found.length > 0) break // 第一个查到东西的名字就够了，不必把三个名字都烧一遍
-  }
-
-  // 图搜补一轮：Steam 上没有的小作品、模拟器 ROM、国产单机全靠这一层
-  if (imageSearchAvailable(cfg)) {
-    try {
-      const hits = await searchImages(`${usedQuery} game cover art`, cfg)
-      found.push(...candidatesFromSearch(hits))
-    } catch (err: any) {
-      notes.push(`图片搜索失败：${err?.message ?? '未知错误'}`)
-    }
-  } else {
+  if (!found.some(c => c.status === 'ready') && imageSearchAvailable(cfg)) {
+    try { await cache(candidatesFromSearch(await searchImages(`${usedQuery} game cover art`, cfg))) }
+    catch (err: any) { diagnostics.push({ source: 'search', stage: 'lookup', status: 'failed', message: `图片搜索失败：${err?.message || '未知错误'}`, route: '已配置的图片搜索服务' }) }
+  } else if (!found.some(c => c.status === 'ready')) {
     const why = imageSearchWhyNot(cfg)
-    if (why) notes.push(`${why}，这次只查了 Steam`)
+    if (why) diagnostics.push({ source: 'search', stage: 'lookup', status: 'skipped', message: why })
   }
+  return finish()
+}
 
-  const candidates = finalizeCandidates(found)
-  if (candidates.length > 0) {
-    return {
-      ok: true,
-      message: notes.join('；'),
-      candidates,
-      query: usedQuery
+export interface GameCoverBatchResult {
+  processed: number
+  updated: number
+  failed: number
+  skipped: number
+}
+
+let coverBatchRunning = false
+
+/** 为当前筛选列表批量补图；只处理没有 ready 本地封面的条目。 */
+export async function rebuildMissingGameCovers(
+  ids: string[] = [],
+  onProgress?: (progress: { processed: number; total: number; current: string; message: string }) => void
+): Promise<GameCoverBatchResult> {
+  if (coverBatchRunning) throw new Error('已有封面补齐任务正在进行，请等待它完成')
+  coverBatchRunning = true
+  try {
+  const db = getDb()
+  const all = [...new Set(ids)].map(id => getGame(db, id)).filter((g): g is GameItem => !!g)
+  // Snapshot every revision at batch start, including games still waiting in line.
+  const pending = all.filter(g => !g.cover_path || !validateCoverFile(g.cover_path).ok)
+    .map(game => ({ game, revision: coverRevision(game.id) }))
+  let updated = 0
+  let failed = 0
+  let skipped = 0
+  const report = (processed: number, current: string, message: string): void => {
+    // A closed renderer cannot turn a completed file write into a failed operation.
+    try { onProgress?.({ processed, total: pending.length, current, message }) } catch { /* progress sink gone */ }
+  }
+  report(0, '', `当前范围 ${all.length} 个游戏，待补齐 ${pending.length} 个`)
+  for (let i = 0; i < pending.length; i++) {
+    const { game, revision } = pending[i]
+    const name = game.name_zh || game.name_en || game.file_name
+    const current = getGame(db, game.id)
+    if (!current || coverRevision(game.id) !== revision || (current.cover_path && validateCoverFile(current.cover_path).ok)) {
+      skipped++
+      report(i + 1, name, '已跳过：条目或封面已有更新')
+      continue
+    }
+    report(i, name, '正在查找和恢复封面')
+    try {
+      const result = await searchGameCovers(game.id, true)
+      if (coverRevision(game.id) !== revision || !getGame(db, game.id)) {
+        skipped++
+        report(i + 1, name, '已跳过：保留较新的选择')
+        continue
+      }
+      let applied = false
+      let reason = result.message || '没有可用封面'
+      for (const candidate of result.candidates.filter(c => c.status === 'ready')) {
+        const chosen = await setGameCoverFromUrl(game.id, candidate.url, revision)
+        if (chosen.ok) { applied = true; break }
+        reason = chosen.message
+        if (coverRevision(game.id) !== revision) break
+      }
+      if (applied) {
+        updated++
+        report(i + 1, name, '封面已补齐')
+      } else if (coverRevision(game.id) === revision) {
+        failed++
+        report(i + 1, name, `补图失败：${reason}`)
+      } else {
+        skipped++
+        report(i + 1, name, '已跳过：保留较新的选择')
+      }
+    } catch (err: any) {
+      if (coverRevision(game.id) === revision) {
+        failed++
+        recordCoverFailure(game.id, revision, `补图失败：${err?.message || '未知错误'}`)
+        report(i + 1, name, `补图失败：${err?.message || '未知错误'}`)
+      } else {
+        skipped++
+        report(i + 1, name, '已跳过：保留较新的选择')
+      }
     }
   }
-
-  // 一张都没有：把已知的原因拼齐，最后一定落到「手动选一张」这个可行动作上
-  const reasons = [
-    steamFailed ? `连不上 Steam（${steamFailed}）` : `Steam 上没找到「${usedQuery}」`,
-    ...notes
-  ]
-  return {
-    ok: false,
-    message: `${reasons.join('；')}。可以改一下游戏名再搜，或者直接手动选一张图。`,
-    candidates: [],
-    query: usedQuery
-  }
+  report(pending.length, '', pending.length
+    ? `封面处理结束：补齐 ${updated} 个，失败 ${failed} 个，跳过 ${skipped} 个`
+    : '当前范围的封面已齐全')
+  return { processed: pending.length, updated, failed, skipped }
+  } finally { coverBatchRunning = false }
 }
 
 /**
@@ -417,60 +881,39 @@ export async function searchGameCovers(id: string): Promise<GameCoverSearchResul
  */
 export async function setGameCoverFromUrl(
   id: string,
-  url: string
+  url: string,
+  expectedRevision?: number
 ): Promise<{ ok: boolean; message: string }> {
   if (!getGame(getDb(), id)) return { ok: false, message: '找不到这个游戏' }
-  if (!acceptImageUrl(url)) return { ok: false, message: '这个图片地址不在允许的来源里' }
-
-  let tmp = ''
+  if (expectedRevision !== undefined && coverRevision(id) !== expectedRevision) return { ok: false, message: '封面已有更新，已取消旧选择' }
+  const revision = expectedRevision ?? advanceCoverRevision(id)
+  const fail = (message: string): { ok: false; message: string } => {
+    recordCoverFailure(id, revision, message)
+    return { ok: false, message }
+  }
+  if (!acceptImageUrl(url) && !isLocalCoverUrl(url)) return fail('这个图片地址不在允许的来源里')
   try {
-    const res = await netFetch(url)
-    if (!res.ok) return { ok: false, message: `下载失败：HTTP ${res.status}` }
-
-    const ext = extFromContentType(res.headers.get('content-type') ?? '')
-    if (!ext) return { ok: false, message: '这个地址返回的不是图片' }
-
-    const declared = Number(res.headers.get('content-length') ?? 0)
-    if (declared > MAX_COVER_BYTES) {
-      return { ok: false, message: `图太大了（${(declared / 1024 / 1024).toFixed(1)} MB）` }
+    const local = isLocalCoverUrl(url)
+    const host = new URL(url).hostname
+    const source: CoverCandidate['source'] = local ? 'local' : host.endsWith('.mihoyo.com') ? 'official' : /(?:steamstatic\.com|steampowered\.com|steamcdn-a\.akamaihd\.net)$/.test(host) ? 'steam' : 'search'
+    let file = previewFile(url)
+    if (local) {
+      if (!file || !existsSync(file)) return fail('本地预览缓存不存在，请重新搜索封面')
+      const valid = validateCoverFile(file)
+      if (!valid.ok) return fail(`本地预览图片校验失败：${valid.message}`)
+    } else if (!file) {
+      const candidate = await cacheCandidatePreview({ url, source, label: '所选封面', portrait: false, rank: 0 })
+      if (coverRevision(id) !== revision || !getGame(getDb(), id)) return { ok: false, message: '封面已有更新，已取消旧选择' }
+      if (candidate.status !== 'ready') return fail(`${candidate.stage === 'decode' ? '图片解码' : candidate.stage === 'cache' ? '缓存写入' : '网络请求'}失败：${candidate.message}`)
+      file = previewFile(url)
     }
-    if (!res.body) return { ok: false, message: '下载失败：没有响应内容' }
-
-    // 用显式 reader 而不是 for-await：net.fetch 回的是 web ReadableStream，
-    // 它的异步迭代支持跟运行时版本有关，reader 在哪儿都成立
-    const reader = res.body.getReader()
-    const chunks: Buffer[] = []
-    let total = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (!value) continue
-      total += value.byteLength
-      // 边下边数：content-length 可以撒谎，也可以干脆不给
-      if (total > MAX_COVER_BYTES) {
-        await reader.cancel().catch(() => undefined)
-        return { ok: false, message: '图太大了，已中止下载' }
-      }
-      chunks.push(Buffer.from(value))
-    }
-    if (total === 0) return { ok: false, message: '下载到的是空文件' }
-
-    tmp = path.join(app.getPath('temp'), `baoyi-cover-${id}${ext}`)
-    fs.writeFileSync(tmp, Buffer.concat(chunks))
-
-    const r = setGameCover(id, tmp)
-    return r.ok ? { ok: true, message: '封面已设置' } : r
+    if (coverRevision(id) !== revision || !getGame(getDb(), id)) return { ok: false, message: '封面已有更新，已取消旧选择' }
+    if (!file) return fail('候选缓存不存在，请重新搜索封面')
+    const replaced = commitGameCover(id, file, source, url)
+    if (!replaced.ok) return fail(`写入失败：${replaced.message}`)
+    return { ok: true, message: '封面已设置' }
   } catch (err: any) {
-    const msg = err?.name === 'TimeoutError' ? '下载超时' : (err?.message ?? '未知错误')
-    return { ok: false, message: `下载失败：${msg}` }
-  } finally {
-    if (tmp) {
-      try {
-        fs.rmSync(tmp, { force: true })
-      } catch {
-        /* 临时文件删不掉不影响封面已经设好这件事，系统会自己清 temp */
-      }
-    }
+    return fail(`封面设置失败：${err?.message || '未知错误'}`)
   }
 }
 
@@ -806,6 +1249,7 @@ export async function scanGames(
       }
     }
 
+    const trail: AgentEvent[] = []
     const run = await runAgent({
       config: settings.ai,
       system,
@@ -813,9 +1257,40 @@ export async function scanGames(
       tools: buildGameTools(ctx, categoryNames, withSearch),
       maxTurns: MAX_TURNS,
       signal,
-      onEvent: (e) => report({ current: c.dir, processed: i, log: describeEvent(e) })
+      onEvent: (e) => {
+        trail.push(e)
+        report({ current: c.dir, processed: i, log: describeEvent(e) })
+      }
     })
     result.tokens += run.tokens
+
+    // 落识别日志
+    if (run.stopReason !== 'aborted') {
+      const status = run.stopReason === 'error' ? 'failed' : result.registered > 0 ? 'success' : 'skipped'
+      const note = run.stopReason === 'error' ? '识别过程出错' :
+                   run.stopReason === 'max_turns' ? '达到轮数上限' :
+                   result.registered > 0 ? '已注册' : '未注册任何条目'
+
+      try {
+        saveIdentifyLog({
+          dir: c.dir,
+          label: path.basename(c.dir),
+          kind: 'unit',
+          resource_kind: 'game',
+          status,
+          summary: note,
+          registered: result.registered > 0 ? 1 : 0,
+          rounds: run.turns,
+          duration_ms: 0, // 游戏识别不记单条时长，只有总耗时
+          tokens: run.tokens,
+          stop_reason: run.stopReason,
+          events: trail
+        })
+      } catch {
+        /* 日志写不进去不该让识别结果跟着失败 */
+      }
+    }
+
     if (run.stopReason === 'error') result.failed++
   }
 

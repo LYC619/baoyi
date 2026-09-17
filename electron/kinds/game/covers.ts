@@ -19,13 +19,32 @@
 /** 一个候选封面。`kind` 只用来在界面上说明这张图哪儿来的 */
 export interface CoverCandidate {
   url: string
+  /** 主进程下载后生成的本地预览地址，避免 CSP 阻断远程图片 */
+  preview_url?: string
   /** 界面上那行说明，例如「Steam 竖版封面」 */
   label: string
-  source: 'steam' | 'search'
+  source: 'local' | 'steam' | 'search' | 'official'
+  title?: string
+  width?: number
+  height?: number
+  bytes?: number
+  status?: 'ready' | 'failed'
+  stage?: 'network' | 'decode' | 'cache' | 'write'
+  message?: string
+  route?: string
   /** 竖版封面（2:3）优先展示，横版图当兜底 */
   portrait: boolean
   /** 同源内部的排序权重，小的在前 */
   rank: number
+}
+
+export interface GameCoverDiagnostic {
+  source: CoverCandidate['source']
+  stage: 'identity' | 'lookup' | 'network' | 'decode' | 'cache' | 'write'
+  status: 'ready' | 'failed' | 'skipped'
+  message: string
+  route?: string
+  url?: string
 }
 
 /**
@@ -50,7 +69,8 @@ export const IMAGE_HOSTS = [
   'images.igdb.com',
   'cdn2.steamgriddb.com',
   'www.mobygames.com',
-  'cdn.mobygames.com'
+  'cdn.mobygames.com',
+  'act-webstatic.mihoyo.com'
 ]
 
 /** 认的图片扩展名。和 links.ts 的 COVER_EXTS 是同一份名单，别在这儿另开一个 */
@@ -58,6 +78,11 @@ const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.avif', '.gif', '.bmp']
 
 /** 下载单张封面的体积上限。12 MB 装得下任何合理的竖版封面 */
 export const MAX_COVER_BYTES = 12 * 1024 * 1024
+/** Reject tracking pixels/tiny icons while retaining readable titles and wide banners. */
+export const MIN_COVER_SHORT_EDGE = 64
+export const MIN_COVER_LONG_EDGE = 128
+export const MAX_COVER_EDGE = 8192
+export const MAX_COVER_PIXELS = 32_000_000
 
 /** 一次最多给用户看多少张 —— 再多就不是「挑一张」而是「翻图库」了 */
 export const MAX_CANDIDATES = 12
@@ -67,26 +92,48 @@ export const MAX_CANDIDATES = 12
  *
  * 英文名优先不是偏好，是命中率决定的：Steam 的商店搜索和大多数图床都以英文原名
  * 建索引，「艾尔登法环」查不到而 `Elden Ring` 一发就中。中文名只在没有英文名时用。
- * 两个都没有就退到目录名 —— 那至少是用户自己认得的字。
+ * 没有作品名称就请用户确认身份，收纳目录和启动器不参与回退。
  *
  * 返回的是**去重后**的候选查询词，按优先级排。调用方按顺序试，中了就停。
  */
 export function coverQueries(g: {
   name_en?: string
   name_zh?: string
+  identity_query?: string
+  identity_name?: string
   source_dir?: string
   file_name?: string
 }): string[] {
   const out: string[] = []
   const push = (raw: string | undefined): void => {
+    if (isGenericGameName(raw ?? '')) return
     const v = cleanQuery(raw ?? '')
-    if (v && !out.some((x) => x.toLowerCase() === v.toLowerCase())) out.push(v)
+    if (v && !isGenericGameName(v) && !out.some((x) => x.toLowerCase() === v.toLowerCase())) out.push(v)
   }
+  if (g.identity_query?.trim() && !isGenericGameName(g.identity_query)) {
+    push(g.identity_query)
+    return out
+  }
+  push(g.identity_name)
   push(g.name_en)
   push(g.name_zh)
-  // 目录名兜底：去掉 `(2002304)` 这种 appid 尾巴和常见的版本噪声
-  push(dirNameToQuery(g.source_dir ?? ''))
   return out
+}
+
+/** 启动入口和收纳目录不能充当游戏身份。 */
+export function isGenericGameName(raw: string): boolean {
+  const name = String(raw ?? '').trim().replace(/\.(?:exe|lnk|bat|cmd)$/i, '')
+  return !name || /^(?:launcher|launch|start|game|games|client|hyp|hoyoplay|启动器|启动|游戏|游戏库|米哈游启动器)$/i.test(name)
+}
+
+/** 本地候选只接受主进程生成的缓存名，不接受任意磁盘路径。 */
+export function isLocalCoverUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'baoyi:' && url.hostname === 'cover' &&
+      /^\/preview-local-[a-f0-9]{20}\.(?:png|jpg|jpeg|webp|avif|gif|bmp)$/i.test(url.pathname) &&
+      !url.username && !url.password
+  } catch { return false }
 }
 
 /**
@@ -148,10 +195,10 @@ export function steamSearchUrl(query: string): string {
  *
  * Steam 每个 app 的图有固定几种，但**不保证都存在** —— library_600x900 是较晚
  * 才铺开的，老游戏往往只有 header。所以这里只负责「可能有哪些」，
- * 哪些真的存在由 service 层逐个 HEAD 过一遍决定（拿不到 200 的不进列表）。
+ * 可用性由 service 下载、解码并缓存预览后决定。
  *
  * 顺序就是推荐顺序：竖版 → 竖版小图 → 横版。封面墙是 2:3 的框，
- * 横版塞进去会被裁掉两边，只能当兜底。
+ * 横版完整显示，排在竖版之后。
  */
 export function steamCoverCandidates(appid: number | string, name = ''): CoverCandidate[] {
   const id = String(appid).trim()
@@ -170,38 +217,31 @@ export function steamCoverCandidates(appid: number | string, name = ''): CoverCa
 /**
  * Steam 搜索结果里挑最像的那个 app。
  *
- * 只做**归一后相等**和**包含**两级，不做模糊距离：模糊匹配会把
+ * 只收归一后相等的名称，不做包含或模糊距离：模糊匹配会把
  * 「Portal」匹到「Portal 2」上，而封面错了比没封面更糟（用户得先发现错了）。
- * 拿不准就返回前若干个都当候选，让用户在图上选 —— 图比名字直观。
+ * 拿不准就返回空，用户可以修改独立的封面关键词。
  */
 export function pickSteamApps(
   items: Array<{ id?: unknown; name?: unknown; type?: unknown }>,
   query: string,
   limit = 3
 ): Array<{ id: number; name: string }> {
-  const want = normalizeName(query)
+  const want = normalizeName(cleanQuery(query))
+  if (!want) return []
   const valid = items
     .map((it) => ({
       id: Number(it?.id),
       name: String(it?.name ?? ''),
       type: String(it?.type ?? 'app').toLowerCase()
     }))
-    .filter((it) => Number.isInteger(it.id) && it.id > 0)
+    .filter((it) => Number.isInteger(it.id) && it.id > 0 && normalizeName(it.name))
     // 只要本体。DLC 和原声带在商店搜索里跟本体一起回来（「ELDEN RING Tarnished Pack」、
     // 「Sultan's Game - Original Soundtrack」），而它们四种封面图全都不存在 ——
     // 实测过。不滤掉就是每条白烧 4 次探测请求，换回来一个空
     .filter((it) => it.type === 'app' || it.type === '')
     .map(({ id, name }) => ({ id, name }))
 
-  const exact = valid.filter((it) => normalizeName(it.name) === want)
-  const partial = valid.filter((it) => {
-    const n = normalizeName(it.name)
-    return n !== want && (n.includes(want) || want.includes(n))
-  })
-  const rest = valid.filter(
-    (it) => !exact.includes(it) && !partial.includes(it)
-  )
-  return [...exact, ...partial, ...rest].slice(0, limit)
+  return valid.filter((it) => normalizeName(cleanQuery(it.name)) === want).slice(0, limit)
 }
 
 /** 名字归一：只留字母数字和 CJK，大小写不敏感。和 savedb 的归一同一个思路 */
@@ -229,6 +269,7 @@ export function acceptImageUrl(raw: string): boolean {
   }
   // 只收 https：http 会被 Chromium 的混合内容策略挡掉，file:// 更是不能碰
   if (u.protocol !== 'https:') return false
+  if (u.username || u.password || (u.port && u.port !== '443')) return false
   if (!IMAGE_HOSTS.includes(u.hostname.toLowerCase())) return false
   const ext = extFromPath(u.pathname)
   return ext !== ''
@@ -272,15 +313,20 @@ export function finalizeCandidates(list: CoverCandidate[]): CoverCandidate[] {
   const seen = new Set<string>()
   const out: CoverCandidate[] = []
   for (const c of list) {
-    if (!acceptImageUrl(c.url)) continue
-    const key = c.url.toLowerCase()
+    if (c.source === 'local' ? !isLocalCoverUrl(c.url) : !acceptImageUrl(c.url)) continue
+    const key = c.url
     if (seen.has(key)) continue
     seen.add(key)
     out.push(c)
   }
   out.sort((a, b) => {
+    // Keep failed local/source entries from consuming the usable preview budget.
+    if ((a.status === 'failed') !== (b.status === 'failed')) return a.status === 'failed' ? 1 : -1
+    if (a.source !== b.source) {
+      const order: Record<CoverCandidate['source'], number> = { local: 0, official: 1, steam: 2, search: 3 }
+      return order[a.source] - order[b.source]
+    }
     if (a.portrait !== b.portrait) return a.portrait ? -1 : 1
-    if (a.source !== b.source) return a.source === 'steam' ? -1 : 1
     return a.rank - b.rank
   })
   return out.slice(0, MAX_CANDIDATES)

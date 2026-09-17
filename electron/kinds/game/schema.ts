@@ -32,6 +32,13 @@ export const GAME_META_SQL = `
     -- 竖版 2:3 封面 / 横版背景图的本地路径。空串 = 还没有，界面上退回首字占位
     cover_path TEXT DEFAULT '',
     background_path TEXT DEFAULT '',
+    cover_source TEXT NOT NULL DEFAULT '',
+    cover_source_url TEXT NOT NULL DEFAULT '',
+    cover_status TEXT NOT NULL DEFAULT 'missing',
+    cover_detail TEXT NOT NULL DEFAULT '',
+    identity_name TEXT NOT NULL DEFAULT '',
+    identity_query TEXT NOT NULL DEFAULT '',
+    identity_confirmed INTEGER NOT NULL DEFAULT 0,
 
     play_status TEXT NOT NULL DEFAULT 'unplayed'
       CHECK (play_status IN ('unplayed', 'playing', 'completed', 'shelved')),
@@ -81,6 +88,13 @@ export const GAME_VIEW_SQL = `
     r.last_used_at, r.use_count, r.is_archived, r.external_active_at,
     COALESCE(m.cover_path, '') AS cover_path,
     COALESCE(m.background_path, '') AS background_path,
+    COALESCE(m.cover_source, '') AS cover_source,
+    COALESCE(m.cover_source_url, '') AS cover_source_url,
+    COALESCE(m.cover_status, 'missing') AS cover_status,
+    COALESCE(m.cover_detail, '') AS cover_detail,
+    COALESCE(m.identity_name, '') AS identity_name,
+    COALESCE(m.identity_query, '') AS identity_query,
+    COALESCE(m.identity_confirmed, 0) AS identity_confirmed,
     COALESCE(m.play_status, 'unplayed') AS play_status,
     COALESCE(m.total_playtime_sec, 0) AS total_playtime_sec,
     COALESCE(m.last_played_at, 0) AS last_played_at,
@@ -100,5 +114,22 @@ export const GAME_INDEXES_SQL = `
 export const gameSchema: KindSchema = {
   tables: GAME_META_SQL + SAVE_BACKUPS_SQL,
   view: GAME_VIEW_SQL,
-  indexes: GAME_INDEXES_SQL
+  indexes: GAME_INDEXES_SQL,
+  migrate(d) {
+    const columns = new Set<string>(
+      (d.prepare('PRAGMA table_info(game_meta)').all() as Array<{ name: string }>).map((r) => r.name)
+    )
+    const additions: Array<[string, string]> = [
+      ['cover_source', "TEXT NOT NULL DEFAULT ''"],
+      ['cover_source_url', "TEXT NOT NULL DEFAULT ''"],
+      ['cover_status', "TEXT NOT NULL DEFAULT 'missing'"],
+      ['cover_detail', "TEXT NOT NULL DEFAULT ''"],
+      ['identity_name', "TEXT NOT NULL DEFAULT ''"],
+      ['identity_query', "TEXT NOT NULL DEFAULT ''"],
+      ['identity_confirmed', 'INTEGER NOT NULL DEFAULT 0']
+    ]
+    for (const [name, type] of additions) if (!columns.has(name)) d.exec(`ALTER TABLE game_meta ADD COLUMN ${name} ${type}`)
+    // 旧版本的 game 视图没有新增字段，重建后让查询立即看到完整形状。
+    d.exec('DROP VIEW IF EXISTS game')
+  }
 }

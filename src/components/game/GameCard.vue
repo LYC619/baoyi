@@ -6,14 +6,14 @@
  * 所以**大多数卡片长期是占位形态**，占位不能当「临时凑合」来做，它得自己站得住：
  * 首字 + 按名字散出来的稳定色，看上去像一张有意为之的卡，而不是一个破图。
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Clock, Unlink } from 'lucide-vue-next'
 import type { GameItem } from '@/types'
 import { coverUrl, formatPlaytime, formatRelative, gameTitle } from '@/utils'
 import { PLAY_STATUS_LABEL, useGameStore } from '@/stores/game'
 
-const props = defineProps<{ item: GameItem }>()
-defineEmits<{ (e: 'open', id: string): void }>()
+const props = defineProps<{ item: GameItem; selectable?: boolean; selected?: boolean }>()
+defineEmits<{ (e: 'open', id: string): void; (e: 'select', id: string): void }>()
 
 const store = useGameStore()
 
@@ -46,12 +46,16 @@ const hue = computed(() => {
  * （按 id 定的），不带它换了图也不会刷新。
  */
 const cover = computed(() => coverUrl(props.item.cover_path, props.item.updated_at))
+const brokenCover = ref(false)
+watch(cover, () => { brokenCover.value = false })
 </script>
 
 <template>
-  <button class="card" :title="item.summary || title" @click="$emit('open', item.id)">
+  <div class="gameCard" :class="{ 'gameCard--selected': selected }">
+    <input v-if="selectable" class="gameCard__select" type="checkbox" :checked="selected" :aria-label="`选择 ${title}`" @change="$emit('select', item.id)" />
+  <button class="card" :title="item.summary || title" :aria-pressed="selectable ? !!selected : undefined" @click="selectable ? $emit('select', item.id) : $emit('open', item.id)">
     <div class="card__cover" :style="{ '--hue': hue }">
-      <img v-if="cover" :src="cover" :alt="title" class="card__img" />
+      <img v-if="cover && !brokenCover" :src="cover" :alt="title" class="card__img" @error="brokenCover = true" />
       <span v-else class="card__initial">{{ initial }}</span>
       <span v-if="item.play_status !== 'unplayed'" class="card__status">
         {{ PLAY_STATUS_LABEL[item.play_status] }}
@@ -72,15 +76,20 @@ const cover = computed(() => coverUrl(props.item.cover_path, props.item.updated_
       <span v-else>{{ formatRelative(item.last_played_at) === '从未使用' ? '未玩过' : formatRelative(item.last_played_at) }}</span>
     </p>
   </button>
+  </div>
 </template>
 
 <style scoped>
+.gameCard { position: relative; min-width: 0; }
+.gameCard__select { position: absolute; z-index: 2; top: 9px; left: 9px; width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+.gameCard--selected .card__cover { outline: 2px solid var(--accent); outline-offset: 2px; }
 .card {
   display: flex;
   flex-direction: column;
   gap: 7px;
   text-align: left;
   min-width: 0;
+  width: 100%;
 }
 
 .card__cover {
@@ -109,7 +118,7 @@ const cover = computed(() => coverUrl(props.item.cover_path, props.item.updated_
 .card__img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .card__initial {

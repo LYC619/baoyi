@@ -241,6 +241,15 @@ export interface LinkedFile {
 export interface GameMeta {
   cover_path: string
   background_path: string
+  /** 封面来源与当前状态，用于区分手动、本地缓存和联网候选失败 */
+  cover_source: 'manual' | 'local' | 'steam' | 'search' | 'official' | ''
+  cover_source_url: string
+  cover_status: 'ready' | 'missing' | 'failed'
+  cover_detail: string
+  /** 识别出的官方身份。确认前不自动把同名游戏当成目标 */
+  identity_name: string
+  identity_query: string
+  identity_confirmed: boolean
   play_status: PlayStatus
   total_playtime_sec: number
   last_played_at: number
@@ -467,10 +476,29 @@ export interface SearchConfig {
  */
 export interface CoverCandidate {
   url: string
+  /** 通过 baoyi:// 协议加载的本地预览，避免 CSP 阻断远程图片 */
+  preview_url?: string
   label: string
-  source: 'steam' | 'search'
+  source: 'local' | 'steam' | 'search' | 'official'
   portrait: boolean
   rank: number
+  title?: string
+  width?: number
+  height?: number
+  bytes?: number
+  status?: 'ready' | 'failed'
+  stage?: 'network' | 'decode' | 'cache' | 'write'
+  message?: string
+  route?: string
+}
+
+export interface GameCoverDiagnostic {
+  source: 'local' | 'steam' | 'search' | 'official'
+  stage: 'identity' | 'lookup' | 'network' | 'decode' | 'cache' | 'write'
+  status: 'ready' | 'failed' | 'skipped'
+  message: string
+  route?: string
+  url?: string
 }
 
 /**
@@ -486,6 +514,7 @@ export interface GameCoverSearchResult {
   candidates: CoverCandidate[]
   /** 实际用来搜的那个名字，界面上要显示出来，用户才知道该怎么改 */
   query: string
+  diagnostics?: GameCoverDiagnostic[]
 }
 
 /** 卡片标题用哪个名字打头，另一个降为副标题 */
@@ -1273,6 +1302,7 @@ export interface BaoyiApi {
     refreshIcons(): Promise<{ total: number; changed: number; manual: number; failed: number }>
   }
   game: {
+    addManual(): Promise<{ ok: boolean; message: string; item?: GameItem } | null>
     list(query?: GameQuery): Promise<GameItem[]>
     get(id: string): Promise<GameItem | null>
     update(id: string, patch: Partial<GameItem>): Promise<GameItem | null>
@@ -1364,6 +1394,8 @@ export interface BaoyiApi {
       id: string,
       url: string
     ): Promise<{ ok: boolean; message: string; item: GameItem | null }>
+    rebuildCovers(ids?: string[]): Promise<{ processed: number; updated: number; failed: number }>
+    onCoverProgress(cb: (progress: { processed: number; total: number; current: string; message: string }) => void): () => void
   }
   video: {
     list(query?: VideoQuery): Promise<VideoItem[]>

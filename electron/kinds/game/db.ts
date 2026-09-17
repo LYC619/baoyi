@@ -84,9 +84,10 @@ export function insertGame(d: SqlDb, p: GamePayload): GameWriteOutcome {
     d.prepare(
       `UPDATE game_meta SET
          save_paths = CASE WHEN save_paths IN ('[]', '') THEN ? ELSE save_paths END,
-         linked_files = CASE WHEN linked_files IN ('[]', '') THEN ? ELSE linked_files END
+         linked_files = CASE WHEN linked_files IN ('[]', '') THEN ? ELSE linked_files END,
+         identity_name = CASE WHEN identity_name = '' THEN ? ELSE identity_name END
        WHERE resource_id = ?`
-    ).run(JSON.stringify(p.save_paths), JSON.stringify(p.linked_files), existing.id)
+    ).run(JSON.stringify(p.save_paths), JSON.stringify(p.linked_files), p.name_en || p.name_zh, existing.id)
 
     return { id: existing.id, created: false }
   }
@@ -102,6 +103,9 @@ export function insertGame(d: SqlDb, p: GamePayload): GameWriteOutcome {
   d.prepare(
     `INSERT INTO game_meta (resource_id, save_paths, linked_files) VALUES (?, ?, ?)`
   ).run(id, JSON.stringify(p.save_paths), JSON.stringify(p.linked_files))
+  d.prepare(
+    `UPDATE game_meta SET identity_name = ? WHERE resource_id = ?`
+  ).run(p.name_en || p.name_zh, id)
 
   return { id, created: true }
 }
@@ -166,6 +170,17 @@ function rowToGame(row: Row): GameItem {
     is_archived: Number(row.is_archived) === 1,
     cover_path: String(row.cover_path ?? ''),
     background_path: String(row.background_path ?? ''),
+    cover_source: ['manual', 'local', 'steam', 'search', 'official', ''].includes(String(row.cover_source ?? ''))
+      ? (String(row.cover_source ?? '') as GameItem['cover_source'])
+      : '',
+    cover_source_url: String(row.cover_source_url ?? ''),
+    cover_status: ['ready', 'missing', 'failed'].includes(String(row.cover_status ?? ''))
+      ? (String(row.cover_status ?? '') as GameItem['cover_status'])
+      : row.cover_path ? 'ready' : 'missing',
+    cover_detail: String(row.cover_detail ?? ''),
+    identity_name: String(row.identity_name ?? ''),
+    identity_query: String(row.identity_query ?? ''),
+    identity_confirmed: Number(row.identity_confirmed) === 1,
     // 库里有 CHECK 兜着，读到别的值只能是手工改库改坏了，退回默认而不是把它透出去
     play_status: PLAY_STATUSES.includes(row.play_status) ? row.play_status : 'unplayed',
     total_playtime_sec: Number(row.total_playtime_sec) || 0,
@@ -301,11 +316,13 @@ const GAME_RESOURCE_COLUMNS = new Set([
 ])
 const GAME_META_COLUMNS = new Set([
   'cover_path', 'background_path', 'play_status', 'total_playtime_sec',
-  'last_played_at', 'save_paths', 'linked_files'
+  'last_played_at', 'save_paths', 'linked_files', 'cover_source', 'cover_source_url',
+  'cover_status', 'cover_detail', 'identity_name', 'identity_query', 'identity_confirmed'
 ])
 
 function toColumn(key: string, value: unknown): string | number {
   if (key === 'is_archived') return value ? 1 : 0
+  if (key === 'identity_confirmed') return value ? 1 : 0
   if (Array.isArray(value)) return JSON.stringify(value)
   if (typeof value === 'number') return value
   return String(value ?? '')

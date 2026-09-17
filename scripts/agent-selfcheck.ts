@@ -4929,12 +4929,10 @@ async function linksAndCoverSection(): Promise<void> {
     assert.equal(qs[1], '艾尔登法环', '中文名要留着当第二顺位，不是丢掉')
   })
 
-  await check('没有英文名时退到中文名，两个都没有时退到目录名', () => {
+  await check('没有英文名时使用中文名；收纳目录不能充当游戏身份', () => {
     assert.deepEqual(coverQueries({ name_zh: '中华三国志' }), ['中华三国志'])
     const only = coverQueries({ source_dir: 'E:\\游戏\\洛克王国：世界(2002304)' })
-    assert.equal(only.length, 1)
-    assert.ok(!only[0].includes('2002304'), 'appid 尾巴该被剥掉')
-    assert.ok(!only[0].includes('E:\\'), '要的是目录名，不是整条路径')
+    assert.deepEqual(only, [], '没有游戏身份时应先确认名称，不能拿目录兜底搜索')
   })
 
   await check('查询词去重，不拿同一个名字白烧两次请求', () => {
@@ -4971,7 +4969,7 @@ async function linksAndCoverSection(): Promise<void> {
     assert.equal(steamCoverCandidates('12; rm -rf').length, 0)
   })
 
-  await check('Steam 选 app 只做相等和包含两级，不做模糊距离', () => {
+  await check('Steam 只选择规范化名称相等的本体，保留续作编号差异', () => {
     // 模糊匹配会把 Portal 匹到 Portal 2 上，而封面错了比没封面更糟
     const items = [
       { id: 620, name: 'Portal 2' },
@@ -4980,7 +4978,7 @@ async function linksAndCoverSection(): Promise<void> {
     ]
     const picked = pickSteamApps(items, 'Portal')
     assert.equal(picked[0].id, 400, '完全相等的必须排第一')
-    assert.ok(picked.some((p) => p.id === 620), '包含关系的留作候选让用户在图上选')
+    assert.deepEqual(picked.map(p => p.id), [400], 'Portal 2 不能当作 Portal 的封面来源')
   })
 
   await check('Steam 结果里 id 不合法的条目直接丢掉', () => {
@@ -5049,17 +5047,19 @@ async function linksAndCoverSection(): Promise<void> {
     }
   })
 
-  await check('候选定型：过白名单、去重、竖版优先、封顶', () => {
+  await check('候选定型：过白名单、精确 URL 去重、保留路径大小写、竖版优先', () => {
     const dup = 'https://cdn.cloudflare.steamstatic.com/steam/apps/400/a.jpg'
     const out = finalizeCandidates([
       { url: 'https://cdn.cloudflare.steamstatic.com/b.jpg', label: '横', source: 'steam', portrait: false, rank: 0 },
       { url: dup, label: '竖', source: 'steam', portrait: true, rank: 1 },
+      { url: dup, label: '同一 URL', source: 'steam', portrait: true, rank: 2 },
       { url: dup.toUpperCase().replace('HTTPS', 'https').replace('CDN.CLOUDFLARE.STEAMSTATIC.COM', 'cdn.cloudflare.steamstatic.com'), label: '重复', source: 'steam', portrait: true, rank: 2 },
       { url: 'https://evil.example.com/x.jpg', label: '越界', source: 'search', portrait: true, rank: 0 }
     ])
     assert.ok(out[0].portrait, '竖版必须排前面')
     assert.ok(!out.some((c) => c.url.includes('evil')), '白名单外的必须被过掉')
-    assert.equal(new Set(out.map((c) => c.url.toLowerCase())).size, out.length, '不该有重复 URL')
+    assert.equal(new Set(out.map((c) => c.url)).size, out.length, '不该有重复 URL')
+    assert.equal(out.length, 3, 'HTTP 路径大小写可以对应不同图片，不能合并')
   })
 
   await check('候选数量封顶 —— 再多就不是挑一张而是翻图库', () => {

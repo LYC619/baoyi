@@ -72,6 +72,7 @@ const api: BaoyiApi = {
     refreshIcons: () => ipcRenderer.invoke('software:refresh-icons')
   },
   game: {
+    addManual: () => ipcRenderer.invoke('game:add-manual'),
     list: (query: GameQuery = {}) => ipcRenderer.invoke('game:list', plain(query)),
     get: (id: string) => ipcRenderer.invoke('game:get', id),
     update: (id: string, patch: Partial<GameItem>) =>
@@ -104,6 +105,8 @@ const api: BaoyiApi = {
     searchCovers: (id: string) => ipcRenderer.invoke('game:search-covers', id),
     setCoverFromUrl: (id: string, url: string) =>
       ipcRenderer.invoke('game:set-cover-url', id, url)
+    ,rebuildCovers: (ids: string[] = []) => ipcRenderer.invoke('game:rebuild-covers', plain(ids))
+    ,onCoverProgress: (cb) => subscribe('game:cover-progress', cb)
   },
   video: {
     list: (query: VideoQuery = {}) => ipcRenderer.invoke('video:list', plain(query)),

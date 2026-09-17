@@ -74,7 +74,9 @@ import {
   onGameSession,
   openGameLink,
   removeGame,
+  registerManualGame,
   restoreSaveBackup,
+  rebuildMissingGameCovers,
   reverifySavePath,
   scanGames,
   searchGameCovers,
@@ -246,6 +248,17 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   // 游戏目录是用户一个个指的，不像软件那样配一批扫描根反复扫 ——
   // 一次装一个游戏，多选省下的是几次点击，不值得为它再加一处设置项
+  ipcMain.handle('game:add-manual', async () => {
+    const win = getWindow()
+    if (!win || win.isDestroyed()) return null
+    const selected = await dialog.showOpenDialog(win, {
+      title: '选择游戏启动文件',
+      properties: ['openFile'],
+      filters: [{ name: '游戏启动文件', extensions: ['exe', 'lnk', 'bat', 'cmd'] }]
+    })
+    if (selected.canceled || !selected.filePaths[0]) return null
+    return registerManualGame(selected.filePaths[0])
+  })
   ipcMain.handle('game:pick-dirs', async () => {
     const win = getWindow()
     if (!win) return []
@@ -343,6 +356,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const outcome = await setGameCoverFromUrl(id, url)
     return { ...outcome, item: outcome.ok ? getGameItem(id) : null }
   })
+  ipcMain.handle('game:rebuild-covers', (_e, ids: string[] = []) =>
+    rebuildMissingGameCovers(ids, (progress) => send('game:cover-progress', progress))
+  )
 
   /* ------------------------------ 影视 ------------------------------ */
   ipcMain.handle('video:list', (_e, query: VideoQuery = {}) => listVideoItems(query))
