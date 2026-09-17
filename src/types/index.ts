@@ -542,19 +542,32 @@ export interface AppSettings {
   /**
    * 出站代理。空串 = 直连。
    *
-   * 形如 `socks5://127.0.0.1:10808` 或 `http://127.0.0.1:8080`；不写协议时
-   * 按 Chromium 的规矩当 HTTP 代理。它喂给 `session.setProxy` 的 `proxyRules`，
+   * 空串为直连，`system://` 使用系统代理；形如 `socks5://127.0.0.1:10808` 或
+   * `http://127.0.0.1:8080` 时使用内置代理。不写协议时按 Chromium 的规矩当 HTTP
+   * 代理。它喂给 `session.setProxy` 的 `proxyRules`，
    * 所以 Chromium 那套写法（`socks5://h:p`、多规则用分号隔开）都认。
    *
    * **只有走 Chromium 网络栈的请求受它管。** 主进程里 `globalThis.fetch` 是
    * Node 的 undici，不看 session 的代理设置，也不看 `--proxy-server` ——
-   * 所以要走代理的取页必须用 `net.fetch`（见 `hentai/hanime.ts` 的注入点）。
+   * Hanime 取页统一走专用 Chromium session.fetch（见 `hentai/hanime.ts` 的注入点），
+   * 这样直连时也能吃启动阶段的内置 Hosts 规则；代理不会影响 TMDB、豆瓣等其他来源。
    * 这一条是坑：配了代理却没生效，看起来像代理设置没保存。
    *
    * 目前只有 hanime 那条链路用它。TMDB / 豆瓣走的还是 undici，
    * 它们本来也不在需要代理的名单上（真要加，照 hanime 那个注入点做）。
    */
   proxy: string
+  /**
+   * Hanime 内置 Hosts：把几个镜像域名固定到 Cloudflare 地址池，绕开被污染的系统 DNS。
+   * 关掉后走系统 DNS。Chromium 那层的规则在启动前注入，改动要重启才生效；
+   * 取页层的换 IP 回退即时生效。地址池见 `electron/services/hanime-network-rules.ts`。
+   */
+  hanime_builtin_hosts: boolean
+  /**
+   * 运行时回退最近一次通了的 Cloudflare 地址。空串 = 还没回退过，启动用地址池第一个。
+   * 由主进程在回退成功时写入，下次启动的 Chromium 解析规则直接用它；不在地址池里就忽略。
+   */
+  hanime_hosts_active_ip: string
   /**
    * 隐藏里番：侧栏不出现那一格，海报墙不铺那些条目。
    *
@@ -1215,6 +1228,10 @@ export type Unsubscribe = () => void
 
 /** preload 暴露给渲染进程的完整 API */
 export interface BaoyiApi {
+  hanimeBrowser: {
+    open(url?: string): Promise<boolean>
+    onDownload(cb: (url: string) => void): Unsubscribe
+  }
   app: {
     /** 版本与构建信息，「关于」页用 */
     info(): Promise<AppInfo>
@@ -1459,7 +1476,21 @@ export interface BaoyiApi {
     getAll(): Promise<AppSettings>
     patch(patch: Partial<AppSettings>): Promise<AppSettings>
     /** 问 Chromium 某个地址实际会走哪条代理。诊断「配了没生效」用 */
-    proxyStatus(url?: string): Promise<{ rules: string; resolved: string }>
+    proxyStatus(url?: string): Promise<{
+      rules: string
+      resolved: string
+      enabled: boolean
+      hosts: readonly string[]
+      ips: readonly string[]
+      /** 写进 Chromium 启动规则的那个地址；内置 Hosts 关闭时为空串 */
+      startupIp: string
+      /** 运行时回退最近一次通了的地址；空串 = 还没回退过 */
+      activeIp: string
+      resolverRules: string
+      proxyRules: string
+      url: string
+    }>
+    hanimeVerify(url?: string): Promise<boolean>
   }
   scan: {
     pickDirectory(): Promise<string | null>

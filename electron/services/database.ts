@@ -71,6 +71,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   save_backup_keep: 10,
   // 空串 = 直连。只有走 Chromium 网络栈的请求受它管，见 AppSettings.proxy 的注释
   proxy: '',
+  // Hanime 内置 Hosts 默认开：国内系统 DNS 对这几个域名常被污染，不开就基本连不上
+  hanime_builtin_hosts: true,
+  hanime_hosts_active_ip: '',
   // 默认不藏。默认藏的话，装完看不见自己刮进来的东西，会当成刮削坏了
   hide_hentai: false,
   theme: 'dark',

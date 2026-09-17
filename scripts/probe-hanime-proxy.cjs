@@ -26,12 +26,14 @@ const TARGETS = [
 
 const OUT = path.join(__dirname, '..', 'doc', 'fixtures')
 
+let hanimeSession
+
 function get(url) {
   return new Promise((resolve) => {
     const started = Date.now()
     let req
     try {
-      req = net.request({ url, method: 'GET', useSessionCookies: true })
+      req = net.request({ url, method: 'GET', session: hanimeSession, useSessionCookies: true })
     } catch (err) {
       return resolve({ ok: false, err: `request() 就抛了：${err.message}` })
     }
@@ -76,8 +78,9 @@ function get(url) {
 
 app.whenReady().then(async () => {
   console.log(`\n代理：${PROXY}\n`)
-  await session.defaultSession.setProxy({ proxyRules: PROXY, proxyBypassRules: '' })
-  const resolved = await session.defaultSession.resolveProxy('https://hanime1.me/')
+  hanimeSession = session.fromPartition('persist:hanime-network-probe')
+  await hanimeSession.setProxy({ proxyRules: PROXY })
+  const resolved = await hanimeSession.resolveProxy('https://hanime1.me/')
   console.log(`resolveProxy 说：${resolved}\n`)
 
   fs.mkdirSync(OUT, { recursive: true })

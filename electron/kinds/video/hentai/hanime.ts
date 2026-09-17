@@ -65,28 +65,43 @@ export function clearHanimeCache(): void {
 
 /**
  * 取页用哪个 fetch。默认 `globalThis.fetch`，主进程会换成 Electron 的
- * `net.fetch`（见 `electron/services/proxy.ts`）。
+ * Hanime 专用 session.fetch（见 `electron/services/proxy.ts`）。
  *
  * ## 为什么非得能换
  *
  * 主进程里的 `globalThis.fetch` 是 **Node 的 undici**，它不看
  * `session.setProxy`，也不看 `--proxy-server` —— 配了代理却不生效，
  * 表现是「代理设置没保存」，很难往这儿想。只有走 Chromium 网络栈的
- * `net.fetch` 才吃 session 上那份代理配置。
+ * session.fetch 才吃对应 session 上那份代理配置。
  *
  * 而这个文件不能直接 `import { net } from 'electron'`：`npm run selfcheck` 和
  * `verify-hentai-e2e` 都在**纯 Node** 下跑，一 import 就崩在加载阶段。
  * 于是留一个注入点：主进程注入，脚本不注入、照旧走 `globalThis.fetch`
  * （e2e 正是靠替掉它来喂 fixture 的）。
  *
- * 类型用 `typeof globalThis.fetch`，因为 `net.fetch` 和它签名兼容，
+ * 类型用 `typeof globalThis.fetch`，因为 session.fetch 和它签名兼容，
  * 注入端不用包一层适配。
  */
 let injected: typeof globalThis.fetch | null = null
+let challengeHandler: ((url: string) => Promise<string | null>) | null = null
 
 /** 传 `null` 恢复默认。主进程在代理配置变化时会重新注入 */
 export function setHanimeFetch(f: typeof globalThis.fetch | null): void {
   injected = f
+}
+
+export function setHanimeChallengeHandler(
+  handler: ((url: string) => Promise<string | null>) | null
+): void {
+  challengeHandler = handler
+}
+
+/** 供 Hanime 封面等同源资源复用与页面相同的网络栈。 */
+export function fetchHanimeResource(
+  input: Parameters<typeof globalThis.fetch>[0],
+  init?: Parameters<typeof globalThis.fetch>[1]
+): ReturnType<typeof globalThis.fetch> {
+  return (injected ?? globalThis.fetch)(input, init)
 }
 
 /**
@@ -94,14 +109,15 @@ export function setHanimeFetch(f: typeof globalThis.fetch | null): void {
  *
  * 挑战页是 200 + 一段 JS，不是 403 —— 所以只能看内容。这几个标记里
  * `cf-browser-verification` 和 `__cf_chl` 是老版盾，`Just a moment` 是新版的
- * 页面标题，`challenge-platform` 是它加载脚本的路径。
+ * 页面标题。`challenge-platform` 不能单独作为判据：正常 Hanime 页面也会加载
+ * 同名脚本。
  * 命中任一就当挑战页，宁可误报一次（表现是报错让用户重试），
  * 也别把挑战页当成「站上没有这部作品」。
  */
 export function looksLikeChallenge(html: string): boolean {
   const s = String(html ?? '')
   if (s.length > 200_000) return false
-  return /cf-browser-verification|__cf_chl|challenge-platform|Just a moment|Checking your browser/i.test(s)
+  return /cf-browser-verification|__cf_chl|Just a moment|Checking your browser|Attention Required|cf-error-details|you have been blocked|verify you are human/i.test(s)
 }
 
 /** 这次识别的取页预算。一条 ctx 一份，用完就不再发请求 */
@@ -131,17 +147,32 @@ async function getHtml(url: string, budget: HanimeBudget): Promise<string> {
   // 注入的优先。**每次都重新读** `injected` 而不是在模块顶层取一次 ——
   // 注入发生在主进程 ready 之后，而这个模块可能更早被 import
   const doFetch = injected ?? globalThis.fetch
-  const res = await doFetch(url, {
-    headers: {
-      'User-Agent': UA,
-      // 站方是繁体中文站。不带这个头有时会拿到简体或日文版式，class 名一样但文本不同
-      'Accept-Language': 'zh-TW,zh;q=0.9,ja;q=0.8,en;q=0.7',
-      Accept: 'text/html,application/xhtml+xml'
-    },
-    signal: AbortSignal.timeout(TIMEOUT)
-  })
+  const request = () =>
+    doFetch(url, {
+      headers: {
+        'User-Agent': UA,
+        'Accept-Language': 'zh-TW,zh;q=0.9,ja;q=0.8,en;q=0.7',
+        Accept: 'text/html,application/xhtml+xml'
+      },
+      signal: AbortSignal.timeout(TIMEOUT)
+    })
+  let res = await request()
 
-  if (!res.ok) {
+  let html = await res.text()
+  let recoveredFromBrowser = false
+  const blocked = (r: Response, body = '') =>
+    r.status === 403 || r.status === 503 || looksLikeChallenge(body) ||
+    r.headers?.get?.('cf-mitigated') === 'challenge'
+
+  if (blocked(res, html) && challengeHandler) {
+    const browserHtml = await challengeHandler(url)
+    if (browserHtml && !looksLikeChallenge(browserHtml)) {
+      html = browserHtml
+      recoveredFromBrowser = true
+    }
+  }
+
+  if (!res.ok && !recoveredFromBrowser) {
     // 403 / 503 是盾的两种拒绝方式，和「这个页面不存在」要分开说
     if (res.status === 403 || res.status === 503) {
       throw new Error(`hanime 拒绝了这次请求（HTTP ${res.status}），大概是 Cloudflare 盾，稍后再试`)
@@ -149,8 +180,6 @@ async function getHtml(url: string, budget: HanimeBudget): Promise<string> {
     if (res.status === 404) throw new Error('hanime 上没有这个页面（404）')
     throw new Error(`hanime HTTP ${res.status}`)
   }
-
-  const html = await res.text()
 
   // 挑战页是 200，不看内容分辨不出来 —— 而它和「没搜到」的下一步动作完全不同
   if (looksLikeChallenge(html)) {

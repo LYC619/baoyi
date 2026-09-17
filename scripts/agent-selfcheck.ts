@@ -280,15 +280,34 @@ import {
 } from '../electron/kinds/video/hentai/selectors.ts'
 import { hanimeChannel } from '../electron/kinds/video/hentai/channel.ts'
 // 从 proxy-rules 而不是 proxy 进 —— 后者顶层 import electron，纯 Node 下加载即崩
-import { normalizeProxyRules } from '../electron/services/proxy-rules.ts'
+import {
+  normalizeProxyRules,
+  parseProxyInput,
+  serializeProxyInput,
+  toElectronProxyConfig,
+  usesChromiumFetch
+} from '../electron/services/proxy-rules.ts'
 // 同理：portable.ts 顶层 import electron，只能进 portable-rules
 import { decidePortable, PORTABLE_MARKERS } from '../electron/services/portable-rules.ts'
 import {
+  HANIME_CLOUDFLARE_IPS,
+  HANIME_HOSTS,
+  buildHanimeHostResolverRules,
+  getHanimeHostsStatus,
+  isUnreachableLoadError,
+  pickStartupIp,
+  isConnectionFailure,
+  isHanimeHost,
+  orderedHanimeIps
+} from '../electron/services/hanime-network-rules.ts'
+import {
   MAX_HANIME_FETCHES,
+  fetchHanimeResource,
   hanimeDetail,
   hanimeSearch,
   looksLikeChallenge,
-  newBudget
+  newBudget,
+  setHanimeChallengeHandler
 } from '../electron/kinds/video/hentai/hanime.ts'
 import {
   HENTAI_CATEGORY,
@@ -8990,8 +9009,10 @@ async function hanimeChannelSection(): Promise<void> {
     for (const s of [
       '<title>Just a moment...</title>',
       '<div class="cf-browser-verification"></div>',
-      '<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/jsch/v1"></script>',
-      'Checking your browser before accessing'
+      '<title>Just a moment...</title><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/jsch/v1"></script>',
+      'Checking your browser before accessing',
+      '<title>Attention Required! | Cloudflare</title>',
+      '<div id="cf-error-details">Sorry, you have been blocked</div>'
     ]) {
       assert.equal(looksLikeChallenge(s), true, `没认出挑战页：${s.slice(0, 40)}`)
     }
@@ -9000,7 +9021,34 @@ async function hanimeChannelSection(): Promise<void> {
   await check('正常页面不会被误判成挑战页', () => {
     assert.equal(looksLikeChallenge(detailHtml), false)
     assert.equal(looksLikeChallenge(searchHtml), false)
+    assert.equal(looksLikeChallenge('<script src="/cloudflare-analytics/beacon.min.js"></script>'), false)
     assert.equal(looksLikeChallenge(''), false)
+  })
+
+  await check('Cloudflare 弹窗拿到正文后直接交给解析器，不再二次请求', async () => {
+    const original = globalThis.fetch
+    let calls = 0
+    let verifiedUrl = ''
+    setHanimeChallengeHandler(async (url) => {
+      verifiedUrl = url
+      return searchHtml
+    })
+    ;(globalThis as any).fetch = async () => {
+      calls += 1
+      return new Response('<title>Just a moment...</title>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' }
+      })
+    }
+    try {
+      const hits = await hanimeSearch(`challenge-${Date.now()}`, newBudget())
+      assert.equal(calls, 1)
+      assert.ok(hits.length > 0)
+      assert.match(verifiedUrl, /hanime1\.me\/search/)
+    } finally {
+      ;(globalThis as any).fetch = original
+      setHanimeChallengeHandler(null)
+    }
   })
 
   await check('取页预算：用完就不再发请求', () => {
@@ -9331,6 +9379,159 @@ async function hanimeChannelSection(): Promise<void> {
 async function proxySection(): Promise<void> {
   console.log('\n出站代理 · v0.8（纯函数；接线由 verify-proxy.cjs 验）')
 
+  await check('空输入解析为 direct', () => {
+    assert.deepEqual(parseProxyInput(''), { mode: 'direct' })
+  })
+
+  await check('system:// 解析为 system', () => {
+    assert.deepEqual(parseProxyInput('system://'), { mode: 'system' })
+  })
+
+  await check('HTTP 地址拆出主机和端口', () => {
+    assert.deepEqual(parseProxyInput('http://127.0.0.1:8080'), {
+      mode: 'http', host: '127.0.0.1', port: 8080
+    })
+  })
+
+  await check('SOCKS5 地址拆出主机和端口', () => {
+    assert.deepEqual(parseProxyInput('socks5://127.0.0.1:10808'), {
+      mode: 'socks5', host: '127.0.0.1', port: 10808
+    })
+  })
+
+  await check('裸 host:port 仍按 HTTP 兼容', () => {
+    assert.deepEqual(parseProxyInput(' proxy.local:3128 '), {
+      mode: 'http', host: 'proxy.local', port: 3128
+    })
+  })
+
+  await check('非法端口给出可读错误', () => {
+    assert.throws(() => parseProxyInput('http://127.0.0.1:70000'), /端口/)
+  })
+
+  await check('Electron 配置映射正确', () => {
+    assert.deepEqual(toElectronProxyConfig({ mode: 'direct' }), { mode: 'direct' })
+    assert.deepEqual(toElectronProxyConfig({ mode: 'system' }), { mode: 'system' })
+    assert.deepEqual(toElectronProxyConfig({ mode: 'http', host: 'h', port: 80 }), {
+      proxyRules: 'http://h:80'
+    })
+    assert.deepEqual(toElectronProxyConfig({ mode: 'socks5', host: 'h', port: 1080 }), {
+      proxyRules: 'socks5://h:1080'
+    })
+    assert.equal(serializeProxyInput({ mode: 'system' }), 'system://')
+  })
+
+  await check('代理模式决定 Hanime fetch 网络栈', () => {
+    assert.equal(usesChromiumFetch({ mode: 'direct' }), true)
+    assert.equal(usesChromiumFetch({ mode: 'system' }), true)
+    assert.equal(usesChromiumFetch({ mode: 'http', host: 'h', port: 80 }), true)
+    assert.equal(usesChromiumFetch({ mode: 'socks5', host: 'h', port: 1080 }), true)
+  })
+
+  await check('Hanime 内置 Hosts 覆盖四个镜像且不扩大范围', () => {
+    const rules = buildHanimeHostResolverRules()
+    assert.ok(rules.length > 0)
+    for (const host of HANIME_HOSTS) {
+      assert.match(rules, new RegExp(`MAP ${host.replaceAll('.', '\\.')} `))
+      assert.equal(isHanimeHost(host), true)
+    }
+    assert.equal(isHanimeHost('api.themoviedb.org'), false)
+    assert.equal(isHanimeHost('hanime1.me.evil.example'), false)
+    assert.ok(rules.includes(HANIME_CLOUDFLARE_IPS[0]))
+  })
+
+  await check('Hanime Hosts 规则使用 Chromium 的逗号分隔 MAP 语法', () => {
+    const rules = buildHanimeHostResolverRules(['hanime1.me', 'hanime1.com'], '192.0.2.1')
+    assert.equal(rules, 'MAP hanime1.me 192.0.2.1, MAP hanime1.com 192.0.2.1')
+    assert.equal(buildHanimeHostResolverRules([], '192.0.2.1'), '')
+    assert.equal(buildHanimeHostResolverRules(['hanime1.me'], ''), '')
+  })
+
+  await check('Hanime Hosts 状态可供设置页展示', () => {
+    const status = getHanimeHostsStatus()
+    assert.equal(status.enabled, true)
+    assert.deepEqual(status.hosts, [...HANIME_HOSTS])
+    assert.deepEqual(status.ips, [...HANIME_CLOUDFLARE_IPS])
+    assert.equal(status.startupIp, HANIME_CLOUDFLARE_IPS[0])
+    assert.ok(status.resolverRules.includes('MAP hanime1.me'))
+    const off = getHanimeHostsStatus({ enabled: false, activeIp: '1.2.3.4' })
+    assert.equal(off.enabled, false)
+    assert.equal(off.resolverRules, '', '关掉后设置页不该再显示一条其实没生效的规则')
+    assert.equal(off.startupIp, '')
+    assert.equal(off.activeIp, '')
+  })
+
+  await check('启动地址：上次通了的优先，不在池里就退回第一个', () => {
+    assert.equal(pickStartupIp(), HANIME_CLOUDFLARE_IPS[0])
+    assert.equal(pickStartupIp(''), HANIME_CLOUDFLARE_IPS[0])
+    assert.equal(pickStartupIp(HANIME_CLOUDFLARE_IPS[2]), HANIME_CLOUDFLARE_IPS[2])
+    assert.equal(pickStartupIp('192.0.2.1'), HANIME_CLOUDFLARE_IPS[0], '设置里的地址不在池里（池子改过）就忽略')
+    assert.equal(pickStartupIp(undefined as unknown as string), HANIME_CLOUDFLARE_IPS[0], '老库没这个键')
+    const status = getHanimeHostsStatus({ startupIp: HANIME_CLOUDFLARE_IPS[1] })
+    assert.equal(status.startupIp, HANIME_CLOUDFLARE_IPS[1])
+    assert.ok(status.resolverRules.includes(HANIME_CLOUDFLARE_IPS[1]), '状态页显示的规则要和真正写进 Chromium 的一致')
+    assert.ok(!status.resolverRules.includes(HANIME_CLOUDFLARE_IPS[0]))
+  })
+
+  await check('验证窗口：连不上就立刻结束，被顶掉的导航和 HTTP 错误不算', () => {
+    assert.equal(isUnreachableLoadError(-102, 'ERR_CONNECTION_REFUSED'), true)
+    assert.equal(isUnreachableLoadError(-7, 'ERR_TIMED_OUT'), true)
+    assert.equal(isUnreachableLoadError(-105, 'ERR_NAME_NOT_RESOLVED'), true)
+    assert.equal(isUnreachableLoadError(-130, 'ERR_PROXY_CONNECTION_FAILED'), true)
+    assert.equal(isUnreachableLoadError(-3, 'ERR_ABORTED'), false, '被新导航顶掉不是失败')
+    assert.equal(isUnreachableLoadError(-324, 'ERR_EMPTY_RESPONSE'), false, '有回应就交给内容判断')
+    assert.equal(isUnreachableLoadError(-501, 'ERR_INSECURE_RESPONSE'), false)
+    assert.equal(isUnreachableLoadError(-102, ''), false, '没有描述就不猜')
+  })
+
+  await check('地址池按 Han1meViewer HDns 的五个 IPv4，顺序即尝试顺序', () => {
+    assert.deepEqual([...HANIME_CLOUDFLARE_IPS], ['172.64.229.154', '104.25.254.167', '172.67.75.184', '104.21.7.20', '172.67.187.141'])
+    assert.equal(new Set(HANIME_CLOUDFLARE_IPS).size, HANIME_CLOUDFLARE_IPS.length)
+  })
+
+  await check('运行时回退顺序：上次通的排最前，Chromium 刚失败的启动地址不再试', () => {
+    const pool = ['a', 'b', 'c', 'd']
+    assert.deepEqual(orderedHanimeIps('', ['a'], pool), ['b', 'c', 'd'])
+    assert.deepEqual(orderedHanimeIps('c', ['a'], pool), ['c', 'b', 'd'])
+    assert.deepEqual(orderedHanimeIps('a', ['a'], pool), ['b', 'c', 'd'], '被排除的地址即使是上次通的也不试')
+    assert.deepEqual(orderedHanimeIps('zzz', [], pool), ['a', 'b', 'c', 'd'], '不在池里的偏好地址忽略')
+    assert.deepEqual(orderedHanimeIps(), [...HANIME_CLOUDFLARE_IPS])
+  })
+
+  await check('只有线路不通才换 IP；有回应的 403 / 挑战页不算', () => {
+    assert.equal(isConnectionFailure(new TypeError('fetch failed')), true)
+    assert.equal(isConnectionFailure(new Error('net::ERR_CONNECTION_TIMED_OUT')), true)
+    assert.equal(isConnectionFailure(new Error('net::ERR_CONNECTION_RESET')), true)
+    assert.equal(isConnectionFailure(Object.assign(new Error('connect ECONNREFUSED 1.2.3.4:443'), { code: 'ECONNREFUSED' })), true)
+    assert.equal(isConnectionFailure(Object.assign(new Error('连接 1.2.3.4 超时'), { code: 'ETIMEDOUT' })), true, '直连模块的超时错误靠 code 被认出')
+    assert.equal(isConnectionFailure(Object.assign(new Error('x'), { name: 'TimeoutError' })), true)
+    assert.equal(isConnectionFailure(new Error('net::ERR_ABORTED')), false, '用户取消不是线路问题')
+    assert.equal(isConnectionFailure(new Error('hanime 拒绝了这次请求（HTTP 403）')), false)
+    assert.equal(isConnectionFailure(null), false)
+  })
+
+  await check('代理只绑定 Hanime 专用 session', () => {
+    const src = fs.readFileSync(new URL('../electron/services/proxy.ts', import.meta.url), 'utf-8')
+    assert.match(src, /fromPartition\(['"]persist:hanime-network['"]\)/)
+    assert.doesNotMatch(src, /defaultSession\.setProxy/)
+    assert.match(src, /looksLikeChallenge/)
+  })
+
+  await check('Hanime 远端封面复用页面的 fetch 注入', async () => {
+    let called = 0
+    const original = globalThis.fetch
+    try {
+      ;(globalThis as any).fetch = async () => {
+        called += 1
+        return new Response('ok')
+      }
+      await fetchHanimeResource('https://hanime1.me/uploads/x.jpg')
+      assert.equal(called, 1)
+    } finally {
+      ;(globalThis as any).fetch = original
+    }
+  })
+
   await check('空串和纯空白都当直连', () => {
     assert.equal(normalizeProxyRules(''), '')
     assert.equal(normalizeProxyRules('   '), '')
@@ -9472,6 +9673,14 @@ async function portableSection(): Promise<void> {
     assert.ok(init > 0, 'main.ts 里没有 initPortable() —— 绿色版根本没接上')
     assert.ok(lock > 0 && init < lock, 'initPortable() 必须排在 requestSingleInstanceLock 之前')
     assert.ok(ready > 0 && init < ready, 'initPortable() 必须排在 whenReady 之前，不能挪进回调里')
+  })
+
+  await check('Hanime Hosts 规则排在 whenReady 之前', () => {
+    const src = fs.readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf-8')
+    const switchAt = src.indexOf("host-resolver-rules")
+    const readyAt = src.indexOf('app.whenReady()')
+    assert.ok(switchAt > 0, 'main.ts 没有 host-resolver-rules')
+    assert.ok(readyAt > 0 && switchAt < readyAt, 'Hosts 规则必须在 whenReady 之前设置')
   })
 }
 

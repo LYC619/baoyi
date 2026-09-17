@@ -6,7 +6,7 @@
  * ## 为什么非要单独验这一路
  *
  * 主进程里有两套网络栈：`globalThis.fetch` 是 Node 的 undici（**不吃**
- * session 的代理），`net.fetch` 是 Chromium 的（吃）。配了代理却仍从 undici
+ * session 的代理），Hanime 专用 session.fetch 是 Chromium 的（吃）。配了代理却仍从 undici
  * 出去的话，代理**完全不生效**，而现象是「设置里明明填了」——四道闸门一条都
  * 抓不到，typecheck 只知道类型对得上，不知道包走哪条路。
  *
@@ -16,35 +16,15 @@
  *
  * 用打包前的 `dist-electron/main.js` 里那套逻辑的源文件，不是复制一份实现。
  */
-const { app, session, net } = require('electron')
+const { app, session } = require('electron')
+
+// 验证脚本不创建窗口；某些无头/精简运行环境没有可用 GPU 进程，
+// 禁用 GPU 可以避免 Chromium 在网络断言之前直接退出。
+app.commandLine.appendSwitch('disable-gpu')
+app.disableHardwareAcceleration()
 
 const PROXY = process.argv[2] || 'socks5://127.0.0.1:10808'
 const MIRROR = 'https://api.ipify.org?format=json'
-
-function get(url) {
-  return new Promise((resolve) => {
-    const req = net.request({ url, method: 'GET', credentials: 'omit' })
-    const timer = setTimeout(() => {
-      try {
-        req.abort()
-      } catch {}
-      resolve({ ok: false, err: '超时' })
-    }, 25_000)
-    req.on('response', (res) => {
-      const chunks = []
-      res.on('data', (c) => chunks.push(c))
-      res.on('end', () => {
-        clearTimeout(timer)
-        resolve({ ok: true, status: res.statusCode, body: Buffer.concat(chunks).toString('utf-8') })
-      })
-    })
-    req.on('error', (e) => {
-      clearTimeout(timer)
-      resolve({ ok: false, err: e.message })
-    })
-    req.end()
-  })
-}
 
 let failed = 0
 function check(name, cond, note = '') {
@@ -54,22 +34,41 @@ function check(name, cond, note = '') {
 
 app.whenReady().then(async () => {
   console.log('\n代理接线验证\n')
+  const hanimeSession = session.fromPartition('persist:hanime-network-verify')
 
-  // ---------- 1. 直连时的出口 ----------
-  await session.defaultSession.setProxy({ mode: 'direct' })
-  const direct = await get(MIRROR)
+  // ---------- 1. 直连和系统代理模式 ----------
+  await hanimeSession.setProxy({ mode: 'direct' })
+  const directResolved = await hanimeSession.resolveProxy('https://hanime1.me/')
+  check('直连模式返回 DIRECT', /DIRECT/i.test(directResolved), directResolved)
+
+  await hanimeSession.setProxy({ mode: 'system' })
+  const systemResolved = await hanimeSession.resolveProxy('https://hanime1.me/')
+  check('系统代理模式可解析', typeof systemResolved === 'string' && systemResolved.length > 0, systemResolved)
+
+  // ---------- 2. 直连时的出口 ----------
+  await hanimeSession.setProxy({ mode: 'direct' })
+  const direct = await hanimeSession.fetch(MIRROR, { credentials: 'omit' }).then(async (res) => ({
+    ok: res.ok,
+    status: res.status,
+    body: await res.text()
+  })).catch((e) => ({ ok: false, err: e.message }))
   const directIp = direct.ok ? (JSON.parse(direct.body).ip ?? '') : ''
   console.log(`  直连出口：${directIp || `拿不到（${direct.err ?? direct.status}）`}`)
 
-  // ---------- 2. 铺上代理之后的出口 ----------
+  // ---------- 3. 铺上代理之后的出口 ----------
   // 和 services/proxy.ts 一样**不设** proxyBypassRules：Chromium 默认绕开
   // loopback，而 `<-loopback>` 是反过来的（把回环塞进代理）。第一版写了它，
   // 下面那条回环断言当场就红了
-  await session.defaultSession.setProxy({ proxyRules: PROXY })
-  const resolved = await session.defaultSession.resolveProxy('https://hanime1.me/')
-  check('resolveProxy 认下了这条规则', /SOCKS|PROXY/i.test(resolved), resolved)
+  await hanimeSession.setProxy({ proxyRules: PROXY })
+  const resolved = await hanimeSession.resolveProxy('https://hanime1.me/')
+  const proxyKind = /^http:\/\//i.test(PROXY) ? /PROXY/i : /SOCKS|PROXY/i
+  check('resolveProxy 认下了这条规则', proxyKind.test(resolved), resolved)
 
-  const viaProxy = await get(MIRROR)
+  const viaProxy = await hanimeSession.fetch(MIRROR, { credentials: 'omit' }).then(async (res) => ({
+    ok: res.ok,
+    status: res.status,
+    body: await res.text()
+  })).catch((e) => ({ ok: false, err: e.message }))
   const proxyIp = viaProxy.ok ? (JSON.parse(viaProxy.body).ip ?? '') : ''
   console.log(`  代理出口：${proxyIp || `拿不到（${viaProxy.err ?? viaProxy.status}）`}`)
 
@@ -81,7 +80,7 @@ app.whenReady().then(async () => {
    * 判据分两种情况，因为「直连拿不到」本身就是一种答案：
    *
    * - 直连也通：两个出口 IP 必须**不同**。相同就说明代理没接上。
-   * - 直连不通而走代理通了：这比上一种更强 —— 同一个 net.fetch，铺上规则前
+   * - 直连不通而走代理通了：这比上一种更强 —— 同一个 session.fetch，铺上规则前
    *   连不出去、铺上之后连出去了，包只可能是从代理走的。
    *
    * 第一版只写了前一种，于是在这台机器上（直连被 REFUSED）红了一条，而红的
@@ -101,13 +100,13 @@ app.whenReady().then(async () => {
     )
   }
 
-  // ---------- 3. 回环不走代理 ----------
-  const loop = await session.defaultSession.resolveProxy('http://127.0.0.1:1/')
+  // ---------- 4. 回环不走代理 ----------
+  const loop = await hanimeSession.resolveProxy('http://127.0.0.1:1/')
   check('回环地址绕开代理（否则海报那条协议会裂）', /DIRECT/i.test(loop), loop)
 
-  // ---------- 4. 切回直连要真的切回去 ----------
-  await session.defaultSession.setProxy({ mode: 'direct' })
-  const back = await session.defaultSession.resolveProxy('https://hanime1.me/')
+  // ---------- 5. 切回直连要真的切回去 ----------
+  await hanimeSession.setProxy({ mode: 'direct' })
+  const back = await hanimeSession.resolveProxy('https://hanime1.me/')
   check('清空代理后回到 DIRECT（不然「删掉代理」是假的）', /DIRECT/i.test(back), back)
 
   console.log(`\n${failed === 0 ? '全部通过' : `${failed} 条失败`}`)

@@ -4,9 +4,10 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc/handlers'
 import { finalizeGameSessions } from './kinds/game/service'
-import { closeDb, coversDir, getSettings, iconsDir, postersDir } from './services/database'
+import { closeDb, coversDir, getSettings, iconsDir, patchSettings, postersDir } from './services/database'
 import { initPortable } from './services/portable'
-import { initProxy } from './services/proxy'
+import { initProxy, setHanimeHostsEnabled } from './services/proxy'
+import { buildHanimeHostResolverRules, HANIME_HOSTS, pickStartupIp } from './services/hanime-network-rules'
 import { startHeartbeat } from './services/timing.ts'
 
 // **必须排在最前面，不能挪进 whenReady。** 绿色版要把 userData 指到 exe 旁边，
@@ -14,6 +15,24 @@ import { startHeartbeat } from './services/timing.ts'
 // getSettings() 顺手开库 —— 晚一步，这两样就先落在旧位置了，表现是「绿色版旁边
 // 有个空 data/，真数据还在 %APPDATA%」
 initPortable()
+
+// 必须在 app ready 前设置：Chromium 只会在网络栈初始化时读取这项，之后追加不认
+// （scripts 里做过实验）。这让 Hanime 直连请求也能绕开受污染的系统 DNS；代理模式
+// 仍由 session.setProxy 决定。用户关掉内置 Hosts 后走系统 DNS，改动要重启才到这一层。
+// 这里读设置会提前把库打开 —— initPortable 已经排在前面，位置是对的；读不到就按开启处理。
+// 启动地址用上次运行时回退通了的那个（记在设置里），没有就是地址池第一个：
+// 第一个地址死了的话，验证窗口和下载都跟着死，只有换启动地址才救得回来。
+const hanimeStartup = (() => {
+  try {
+    const s = getSettings()
+    return { enabled: s.hanime_builtin_hosts !== false, ip: pickStartupIp(s.hanime_hosts_active_ip) }
+  } catch { return { enabled: true, ip: pickStartupIp() } }
+})()
+if (hanimeStartup.enabled) app.commandLine.appendSwitch('host-resolver-rules', buildHanimeHostResolverRules(HANIME_HOSTS, hanimeStartup.ip))
+setHanimeHostsEnabled(hanimeStartup.enabled, {
+  startupIp: hanimeStartup.ip,
+  remember: (ip) => { patchSettings({ hanime_hosts_active_ip: ip }) }
+})
 
 const APP_ROOT = path.join(__dirname, '..')
 const RENDERER_DIST = path.join(APP_ROOT, 'dist')

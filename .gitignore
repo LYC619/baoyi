@@ -17,3 +17,7 @@ release/
 # 同上：clone 下来当规格读的第三方仓库（Han1meViewer 等）。它们自带 .git，
 # 而且许可证各不相同 —— 一律本地留存，不进版本库
 reference/
+
+# Codex 验证证据（截图、日志、JSON）与 Hanime 探针的临时 Chromium profile，本地留存
+/output/
+/.tmp-hanime-api-probe/

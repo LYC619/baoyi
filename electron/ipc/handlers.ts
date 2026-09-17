@@ -107,7 +107,15 @@ import {
 import { POSTER_EXTS } from '../kinds/video/posters'
 import { testTmdb } from '../kinds/video/tmdb'
 import { isPortable } from '../services/portable'
-import { normalizeProxyRules, reapplyProxy, resolveProxyFor } from '../services/proxy'
+import {
+  getHanimeNetworkStatus,
+  getHanimeSession,
+  normalizeProxyRules,
+  openHanimeVerification,
+  reapplyProxy,
+  resolveProxyFor,
+  setHanimeHostsEnabled
+} from '../services/proxy'
 import {
   materialize,
   previewOrganize,
@@ -120,8 +128,16 @@ import { ICON_EXTS } from '../kinds/software/icons'
 import { clearSoftwareIcon, refreshSoftwareIcons, setSoftwareIcon } from '../kinds/software/service'
 import { testSearch } from '../services/searchService'
 import { countIpcSend } from '../services/timing.ts'
+import { createHanimeBrowser } from '../services/hanime-browser.ts'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
+  const hanimeBrowser = createHanimeBrowser({ getSession:getHanimeSession,getMainWindow:getWindow,isHidden:()=>getSettings().hide_hentai === true })
+  ipcMain.handle('hanime-browser:open', async (event, url?: string) => {
+    const main = getWindow()
+    if (!main || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) throw new Error('只能从主窗口打开 Hanime')
+    await reapplyProxy(getSettings().proxy)
+    return hanimeBrowser.open(url)
+  })
   const send = (channel: string, payload: unknown) => {
     const win = getWindow()
     if (win && !win.isDestroyed()) {
@@ -437,17 +453,24 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:patch', async (_e, patch: Partial<AppSettings>) => {
     const next = patchSettings(patch)
+    if (next.hide_hentai) hanimeBrowser.close()
     // 代理改了就当场铺下去，不用重启。只在这个键真出现在 patch 里时动 ——
     // 别的设置保存一次就顺手重设一遍代理，会把正在进行的连接掐掉
     if ('proxy' in patch) await reapplyProxy(next.proxy)
+    // 取页层的换 IP 回退即时生效；Chromium 启动规则那层要重启，设置页会提示
+    if ('hanime_builtin_hosts' in patch) setHanimeHostsEnabled(next.hanime_builtin_hosts !== false)
     return next
   })
   // 诊断用：让设置页能问「这个地址实际走哪条代理」。填错代理最常见的现象是
   // 「看着保存了但没生效」，而这一条能当场分辨是规则没铺上还是目标本身不通
   ipcMain.handle('settings:proxy-status', async (_e, url?: string) => ({
+    ...getHanimeNetworkStatus(String(url || 'https://hanime1.me/')),
     rules: normalizeProxyRules(getSettings().proxy),
     resolved: await resolveProxyFor(String(url || 'https://hanime1.me/'))
   }))
+  ipcMain.handle('settings:hanime-verify', async (_e, url?: string) =>
+    openHanimeVerification(String(url || 'https://hanime1.me/'))
+  )
 
   /* ------------------------------ 扫描 ------------------------------ */
   ipcMain.handle('scan:pick-dir', async () => {

@@ -40,6 +40,10 @@ function plain<T>(value: T): T {
 }
 
 const api: BaoyiApi = {
+  hanimeBrowser: {
+    open: (url?: string) => ipcRenderer.invoke('hanime-browser:open', url),
+    onDownload: cb => subscribe('hanime-browser:download', cb)
+  },
   app: {
     info: () => ipcRenderer.invoke('app:info'),
     copyText: (text: string) => ipcRenderer.invoke('app:copy', String(text))
@@ -156,7 +160,8 @@ const api: BaoyiApi = {
   settings: {
     getAll: () => ipcRenderer.invoke('settings:get'),
     patch: (patch: Partial<AppSettings>) => ipcRenderer.invoke('settings:patch', plain(patch)),
-    proxyStatus: (url?: string) => ipcRenderer.invoke('settings:proxy-status', url)
+    proxyStatus: (url?: string) => ipcRenderer.invoke('settings:proxy-status', url),
+    hanimeVerify: (url?: string) => ipcRenderer.invoke('settings:hanime-verify', url)
   },
   scan: {
     pickDirectory: () => ipcRenderer.invoke('scan:pick-dir'),

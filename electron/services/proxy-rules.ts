@@ -24,3 +24,61 @@ export function normalizeProxyRules(raw: string): string {
   if (!s.includes('://') && !s.includes('=')) return `http://${s}`
   return s
 }
+
+export type ProxyInput =
+  | { mode: 'direct' }
+  | { mode: 'system' }
+  | { mode: 'http' | 'socks5'; host: string; port: number }
+  | { mode: 'custom'; rules: string }
+
+export type ElectronProxyConfig =
+  | { mode: 'direct' | 'system' }
+  | { proxyRules: string }
+
+export function parseProxyInput(raw: string): ProxyInput {
+  const value = String(raw ?? '').trim()
+  if (!value) return { mode: 'direct' }
+  if (value.toLowerCase() === 'direct://') return { mode: 'direct' }
+  if (value.toLowerCase() === 'system://' || value.toLowerCase() === 'system') {
+    return { mode: 'system' }
+  }
+
+  const normalized = normalizeProxyRules(value)
+  const match = /^(https?|socks5):\/\/([^/:]+|\[[^\]]+\]):(\d+)$/.exec(normalized)
+  if (!match) {
+    if (normalized.includes('=') || normalized.includes(';')) {
+      return { mode: 'custom', rules: normalized }
+    }
+    throw new Error('代理地址必须是 system://、http://host:port 或 socks5://host:port')
+  }
+
+  const port = Number(match[3])
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('代理端口必须在 1-65535 之间')
+  }
+
+  return {
+    mode: match[1].toLowerCase() === 'socks5' ? 'socks5' : 'http',
+    host: match[2],
+    port
+  }
+}
+
+export function serializeProxyInput(input: ProxyInput): string {
+  if (input.mode === 'direct') return ''
+  if (input.mode === 'system') return 'system://'
+  if (input.mode === 'custom') return input.rules
+  return `${input.mode === 'socks5' ? 'socks5' : 'http'}://${input.host}:${input.port}`
+}
+
+export function toElectronProxyConfig(input: ProxyInput): ElectronProxyConfig {
+  if (input.mode === 'direct' || input.mode === 'system') return { mode: input.mode }
+  return { proxyRules: serializeProxyInput(input) }
+}
+
+export function usesChromiumFetch(input: ProxyInput): boolean {
+  // Hanime 的内置 Hosts/DNS 规则由 Chromium 网络栈承载，直连也必须走这里。
+  // 代理模式只决定 session 的路由，不决定是否启用这条网络栈。
+  void input
+  return true
+}

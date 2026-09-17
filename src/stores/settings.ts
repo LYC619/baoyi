@@ -16,6 +16,8 @@ const FALLBACK: AppSettings = {
   save_backup_root: '',
   save_backup_keep: 10,
   proxy: '',
+  hanime_builtin_hosts: true,
+  hanime_hosts_active_ip: '',
   hide_hentai: false,
   theme: 'dark',
   view_mode: 'grid',
