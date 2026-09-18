@@ -11,11 +11,12 @@ import { registerVideoContent, registerVideoPayload, registerVideoBundle } from 
 import { getVideoWorkLibrary } from '../electron/kinds/video/library.ts'
 import { readVideoBundle, writeBundleFiles } from '../electron/kinds/video/bundle.ts'
 import { videoEpisodeLabel } from '../src/utils/video-content.ts'
-import { syncVideoWorkFiles } from '../electron/kinds/video/local-sync.ts'
+import { persistVideoWorkBundle, syncVideoWorkFiles } from '../electron/kinds/video/local-sync.ts'
 import { applyVideoCatalogue } from '../electron/kinds/video/catalogue.ts'
 import { previewVideoCollectionName, renameVideoCollection } from '../electron/kinds/video/collection-name.ts'
 import { createVideoWorkflow } from '../electron/kinds/video/download/workflow.ts'
 import { createVideoJobStore } from '../electron/kinds/video/download/jobs.ts'
+import * as renumber from '../electron/kinds/video/episode-details.ts'
 import type { VideoDownloadJob } from '../src/types/video-workflow.ts'
 
 let passed = 0, failed = 0
@@ -277,6 +278,28 @@ await test('saved download retries follow renamed and relocated collections with
     }
     assert.equal(transfers, 0)
   } finally { await workflow.idle() }
+})
+
+await test('renumbering episodes into parts persists season and number to the manifest and refuses conflicts', f => {
+  const { reconcileEpisodeSlots } = renumber
+  const before = listEpisodes(f.db, f.id)
+  const third = before.find(ep => ep.episode === 3)!, second = before.find(ep => ep.episode === 2)!
+  // 第 3 集 → 第 2 部第 1 集
+  assert.deepEqual(reconcileEpisodeSlots(f.db, f.id, new Map([[third.id, { season: 2, number: 1 }]])), [])
+  // 和 renumber IPC 一样：库 → 清单先写回；之后再"检查文件"（清单 → 库）也不会被旧编号盖掉
+  persistVideoWorkBundle(f.db, f.id)
+  syncVideoWorkFiles(f.db, f.id)
+  const saved = readVideoBundle(f.directory)!
+  const item = saved.items.find(entry => entry.id === third.id)!
+  assert.equal(item.season, 2); assert.equal(item.number, 1)
+  assert.deepEqual(listEpisodes(f.db, f.id).map(ep => `S${ep.season}E${ep.episode}`), ['S0E2', 'S0E4', 'S2E1'], '列表按部分段')
+  // 冲突：把第 4 集也改成第 0 部第 2 集，和现有第 2 集撞 → 原样报错、一条不改
+  const fourth = listEpisodes(f.db, f.id).find(ep => ep.episode === 4)!
+  assert.deepEqual(reconcileEpisodeSlots(f.db, f.id, new Map([[fourth.id, { season: 0, number: 2 }]])), ['部分本地集数编号存在冲突，请在合集内容中核对'])
+  assert.deepEqual(listEpisodes(f.db, f.id).map(ep => `S${ep.season}E${ep.episode}`), ['S0E2', 'S0E4', 'S2E1'])
+  // 跨部换号：第 2 集和第 2 部第 1 集互换编号，一组提交
+  assert.deepEqual(reconcileEpisodeSlots(f.db, f.id, new Map([[second.id, { season: 2, number: 1 }], [third.id, { season: 0, number: 2 }]])), [])
+  assert.deepEqual(listEpisodes(f.db, f.id).filter(ep => [second.id, third.id].includes(ep.id)).map(ep => `${ep.id === second.id ? 'second' : 'third'}:S${ep.season}E${ep.episode}`).sort(), ['second:S2E1', 'third:S0E2'])
 })
 
 console.log(`Video local structure: ${passed} passed / ${failed} failed`)

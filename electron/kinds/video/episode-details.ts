@@ -105,7 +105,7 @@ export function reconcileEpisodeSlots(d: SqlDb, resourceId: string, changes: Map
       while (rows.some(row => row.episode === temporary)) temporary--
       d.prepare('UPDATE episode SET episode = ? WHERE id = ?').run(temporary--, id)
     }
-    for (const [id, change] of changes) d.prepare('UPDATE episode SET episode = ? WHERE id = ?').run(change.number, id)
+    for (const [id, change] of changes) d.prepare('UPDATE episode SET season = ?, episode = ? WHERE id = ?').run(change.season, change.number, id)
     d.exec('RELEASE SAVEPOINT episode_numbering')
   } catch (error) { d.exec('ROLLBACK TO SAVEPOINT episode_numbering'); d.exec('RELEASE SAVEPOINT episode_numbering'); throw error }
   return []
