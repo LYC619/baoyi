@@ -7,6 +7,9 @@ export interface VideoOrganizeRequest {
   resourceIds: string[]
   survivorId: string
   collectionTitle?: string
+  /** 合集名是用户改过的（不是程序按作品名算出来的建议名）。只有这时才标 user_edited: name_zh，
+   * 否则之后下载补全 / 重新识别永远不能再把名字纠正过来（B7） */
+  titleEdited?: boolean
   episodeNumbers?: Record<string, { season: number; episode: number }>
   targetDirectory?: string
   /** Parent chosen in settings. A safe collection-named child is created under it. */

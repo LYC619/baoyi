@@ -202,6 +202,7 @@ function prepareOrganize(d: SqlDb, input: VideoOrganizeRequest): Prepared {
   if (input.collectionTitle !== undefined) {
     if (typeof input.collectionTitle !== 'string' || !input.collectionTitle.trim() || input.collectionTitle.length > 240) throw new Error('请填写合集名称（最多 240 字）')
     request.collectionTitle = input.collectionTitle.trim()
+    if (input.titleEdited === true) request.titleEdited = true
   }
   if (input.episodeNumbers) {
     if (typeof input.episodeNumbers !== 'object' || Array.isArray(input.episodeNumbers)) throw new Error('集数列表无效')
@@ -504,7 +505,8 @@ function applyLogical(d: SqlDb, j: Journal, prepared: Prepared): void {
         && (originalMeta.video_type === 'movie' || !!numberedEpisode(original.name_zh || original.file_name))
       patch(d, j, 'resource', { id: targetId }, { name_zh: prepared.preview.request.collectionTitle,
         ...(standalone ? { summary: '', description: '', name_en: '' } : {}) })
-      const edited = [...new Set([...jsonArray(meta.user_edited) as unknown as string[], 'name_zh'])]
+      // 只有用户亲手改过合集名才算"手改"；程序按作品名算出来的建议名不算，否则以后再也纠正不了（B7）
+      const edited = prepared.preview.request.titleEdited ? [...new Set([...jsonArray(meta.user_edited) as unknown as string[], 'name_zh'])] : jsonArray(meta.user_edited) as unknown as string[]
       patch(d, j, 'video_meta', { resource_id: targetId }, { user_edited: JSON.stringify(edited), ...(standalone ? { original_description: '' } : {}) })
     }
     j.logicalApplied = true
@@ -769,7 +771,7 @@ async function syncManifest(d: SqlDb, j: Journal): Promise<void> {
   }
   j.manifest.afterHash = hash(output); j.manifest.pendingHash = ''
   save(d, j)
-  tx(d, j, () => patch(d, j, 'video_directories', { resource_id: j.survivorId }, { metadata_state: missing.size ? 'pending' : 'complete' }))
+  tx(d, j, () => patch(d, j, 'video_directories', { resource_id: j.survivorId }, { metadata_state: missing.size ? 'pending' : 'complete', missing: JSON.stringify([...missing]) }))
 }
 async function cleanupStage(f: FileResult): Promise<void> {
   if (!f.stage || !f.stageIdentity || !fs.existsSync(f.stage)) return

@@ -112,7 +112,7 @@ export function useOrganizeSession(options: SessionOptions) {
     const names = Object.fromEntries(Object.entries(fileNames.value).filter(([, name]) => name.trim()).map(([id, name]) => [id, name.trim()]))
     return {
       transfer: transfer.value, resourceIds: works.value.map(work => work.id), survivorId: survivorId.value,
-      ...(collectionAction.value === 'create' ? { collectionTitle: collectionTitle.value.trim() } : {}),
+      ...(collectionAction.value === 'create' ? { collectionTitle: collectionTitle.value.trim(), ...(collectionTitle.value.trim() !== suggestedTitle.trim() ? { titleEdited: true } : {}) } : {}),
       ...(Object.keys(episodeNumbers.value).length ? { episodeNumbers: plain(episodeNumbers.value) } : {}),
       ...(copyFiles.value && targetDirectory.value.trim() ? { targetRoot: targetDirectory.value.trim() } : {}),
       ...(copyFiles.value && root.value.trim() ? { root: root.value.trim() } : {}),

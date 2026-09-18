@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { initSchema } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { getVideo, listEpisodes } from '../electron/kinds/video/db.ts'
+import * as videoDb from '../electron/kinds/video/db.ts'
 import { registerVideoContent, bindVideoSource } from '../electron/kinds/video/registration.ts'
 import { applyVideoCatalogue } from '../electron/kinds/video/catalogue.ts'
 import { syncVideoWorkFiles } from '../electron/kinds/video/local-sync.ts'
@@ -139,5 +140,42 @@ await test('checking files does not claim an independently registered sibling', 
   assert.equal(listEpisodes(f.db, other)[0].path, second)
 })
 
+await test('a single-episode scrape becomes a series: the title switches by source id and the description moves to its episode', f => {
+  // 先单集刮削：作品名是页面的中文标题（带全角空格、＃），简介是那一集的；hanime_id 指向第 2 集
+  const file = f.file('Library/Original Story LEVEL：2 [中文字幕]_720P.mp4')
+  const { resourceId: id } = registerVideoContent(f.db, { title: '故事　LEVEL：＃2', description: '第二集的简介', items: [{ title: '故事　LEVEL：＃2', number: 2, order: 2,
+    sources: [f.source(2)], files: [{ path: file }] }] })
+  f.db.prepare("UPDATE video_meta SET hanime_id = ? WHERE resource_id = ?").run(f.source(2).externalId, id)
+  f.db.prepare("UPDATE resource SET description = ?, summary = ? WHERE id = ?").run('第二集的简介', '第二集的简介', id)
+  assert.equal(getVideo(f.db, id)!.name_zh, '故事　LEVEL：＃2')
+  // 再补全成系列（来源目录里 1、2 两集）：字符串对不上，但来源编号命中 → 同一部作品
+  const result = applyVideoCatalogue(f.db, id, f.info(2))
+  const work = getVideo(f.db, id)!
+  assert.equal(result.title, '故事 LEVEL: 1-2', '标题按系列名 + 集号范围提升，不再受全角空格 / ＃ 影响；实际：' + result.title)
+  assert.equal(work.name_zh, '故事 LEVEL: 1-2')
+  assert.equal(work.description, '', '作品简介置空 —— 那是第二集的，不是整部的')
+  const second = listEpisodes(f.db, id).find(ep => ep.episode === 2)!
+  assert.equal(second.description, '第二集的简介', '单集简介挪到对应那一集，不是丢掉')
+  assert.equal(listEpisodes(f.db, id).find(ep => ep.episode === 1)!.description, '', '别的集不沾')
+  assert.ok(!work.user_edited.includes('name_zh'), '程序改的名不算用户手改')
+})
+
+await test('a user-edited title is never promoted and organize marks name_zh edited only when the user typed it', async f => {
+  const a = f.work(1)
+  videoDb.updateVideo(f.db, a, { name_zh: '我自己起的名字' })
+  applyVideoCatalogue(f.db, a, f.info(1))
+  assert.equal(getVideo(f.db, a)!.name_zh, '我自己起的名字', '用户手改过的名字不动')
+  // 创建合集：建议名（titleEdited 未设）不标 user_edited；用户改过的（titleEdited）才标
+  const c = f.work(3), d = f.work(4)
+  const suggested = await applyVideoOrganize(f.db, { preview: previewVideoOrganize(f.db, { resourceIds: [c, d], survivorId: c, collectionTitle: '故事 3-4' }), mode: 'logical' })
+  assert.equal(suggested.status, 'applied', suggested.warnings.join('; '))
+  assert.ok(!getVideo(f.db, c)!.user_edited.includes('name_zh'), '按建议名创建的合集，之后补全还能再纠正标题')
+  const e = f.work(5), g = f.work(6)
+  const typed = await applyVideoOrganize(f.db, { preview: previewVideoOrganize(f.db, { resourceIds: [e, g], survivorId: e, collectionTitle: '我改的合集名', titleEdited: true }), mode: 'logical' })
+  assert.equal(typed.status, 'applied', typed.warnings.join('; '))
+  assert.ok(getVideo(f.db, e)!.user_edited.includes('name_zh'), '用户亲手改的合集名要保护')
+})
+
 console.log(`Video field retest: ${passed} passed / ${failed} failed`)
+
 process.exitCode = failed ? 1 : 0

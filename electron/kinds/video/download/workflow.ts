@@ -15,7 +15,7 @@ import { catalogueIdentity, episodeFilename, numberedEpisode } from '../episode-
 import { fillEpisodeDetails, linkLegacyEpisode, reconcileEpisodeNumbers, sourceEpisodeFacts, type SourceEpisodeDetails } from '../episode-details.ts'
 import { listVideoAssets } from '../library.ts'
 import { downloadPlacement, promoteDownloadDirectory } from './placement.ts'
-import { applyVideoCatalogue, videoCollectionTitle } from '../catalogue.ts'
+import { applyVideoCatalogue, canPromoteWorkTitle, moveWorkDescriptionToEpisode, videoCollectionTitle } from '../catalogue.ts'
 import { persistVideoWorkBundle, syncVideoWorkFiles } from '../local-sync.ts'
 import { DestinationExistsError, safeDownloadError, type TransferOptions, type TransferResult } from './transfer.ts'
 import type { VideoSources } from './sources.ts'
@@ -108,8 +108,7 @@ export function createVideoWorkflow(deps: Dependencies) {
       if (item?.path && fs.existsSync(item.path)) numberingWarnings.push(...syncVideoWorkFiles(deps.db, resourceId, { roots: deps.libraryRoots?.() || [], persist: false }).warnings)
     }
     const binding = resourceId ? deps.db.prepare('SELECT directory_path, root FROM video_directories WHERE resource_id = ?').get(resourceId) as { directory_path: string; root: string } | undefined : undefined
-    const named = item ? numberedEpisode(item.name_zh) : null
-    const promoteTitle = !otherWorks.size && !!item && !item.user_edited.includes('name_zh') && (valid.some(ep => ep.title === item.name_zh) || named?.title === catalogue.title)
+    const promoteTitle = !otherWorks.size && !!item && canPromoteWorkTitle(deps.db, item.id, valid, catalogue.title)
     const title = promoteTitle ? videoCollectionTitle(info.title, info.episodes) : item?.name_zh || videoCollectionTitle(info.title, info.episodes) || '未命名作品'
     const placement = downloadPlacement(item, binding, title, deps.libraryRoots?.() || [], deps.downloadsDirectory())
     const episodeMetadata = !!info.currentEpisode && info.episodes.length > 1
@@ -218,6 +217,7 @@ export function createVideoWorkflow(deps: Dependencies) {
           files: [...previousFiles, { path: item.path, title: item.title, order: item.order, number: item.order, quality: item.sourceLabel, sourceId: item.videoCode, size: item.receivedBytes,
             ...sourceEpisodeFacts(item), tags: item.tags, thumbnailPath: item.thumbnailPath, thumbnailSource: item.thumbnailUrl, posterSource: item.posterUrl, originalTitle: item.originalTitle, description: item.description, posterPath: item.posterPath, sourceUrl: watchUrl(item.videoCode) }] })
         job.bundleId = wrote.bundle.bundle_id
+        item.missing = wrote.bundle.missing
         if (wrote.bundle.work.poster) job.posterPath = path.join(job.directory, wrote.bundle.work.poster)
         item.warnings.push(...wrote.warnings)
         item.metadata = wrote.bundle.missing.length || wrote.warnings.some(w => /保存失败/.test(w)) ? 'failed' : 'complete'
@@ -231,7 +231,7 @@ export function createVideoWorkflow(deps: Dependencies) {
       const linked = deps.db.prepare("SELECT DISTINCT episode_id FROM video_sources WHERE resource_id = ? AND provider = 'hanime' AND external_id = ? AND episode_id IS NOT NULL").all(job.resourceId, item.videoCode) as Array<{ episode_id: string }>
       for (const row of linked) fillEpisodeDetails(deps.db, row.episode_id, { ...sourceEpisodeFacts(item), tags: item.tags, thumbnailPath: item.thumbnailPath, thumbnailSource: item.thumbnailUrl, posterSource: item.posterUrl, originalTitle: item.originalTitle, description: item.description, posterPath: item.posterPath, sourceUrl: watchUrl(item.videoCode) })
       if (job.posterPath) deps.db.prepare("UPDATE video_meta SET poster_path = ?, poster_source = ? WHERE resource_id = ? AND poster_path = ''").run(job.posterPath, job.posterUrl, job.resourceId)
-      deps.db.prepare('UPDATE video_directories SET metadata_state = ? WHERE resource_id = ?').run(item.metadata === 'complete' ? 'complete' : 'pending', job.resourceId)
+      deps.db.prepare('UPDATE video_directories SET metadata_state = ?, missing = ? WHERE resource_id = ?').run(item.metadata === 'complete' ? 'complete' : 'pending', JSON.stringify(item.metadata === 'complete' ? [] : item.missing || []), job.resourceId)
       try { deps.onLibraryChange?.(job.resourceId) } catch { /* The writes are complete. */ }
       return
     }
@@ -241,7 +241,7 @@ export function createVideoWorkflow(deps: Dependencies) {
         deps.beforeRegister?.()
         const registered = registerVideoContent(deps.db, { restoreRemoved: true, resourceId: job.resourceId || undefined, bundleId: job.bundleId, directory: job.directory, root: job.root,
           title: job.title, description: job.description, category: job.category, posterPath: job.posterPath, posterSource: job.posterUrl, thumbnailPath: item.thumbnailPath, thumbnailSource: item.thumbnailUrl, sources: job.sources,
-          metadataState: item.metadata === 'complete' ? 'complete' : 'pending',
+          metadataState: item.metadata === 'complete' ? 'complete' : 'pending', missing: item.metadata === 'complete' ? [] : item.missing || [],
           items: [{ ...sourceEpisodeFacts(item), title: item.title, order: item.order, number: item.order, tags: item.tags, thumbnailPath: item.thumbnailPath, thumbnailSource: item.thumbnailUrl, posterSource: item.posterUrl, originalTitle: item.originalTitle, description: item.description, posterPath: item.posterPath, sourceUrl: watchUrl(item.videoCode),
             sources: [sourceRef(item.videoCode)], files: [{ path: item.path, quality: item.sourceLabel, size: item.receivedBytes }] }] })
         job.resourceId = registered.resourceId; job.bundleId = registered.bundleId; item.registration = 'complete'
@@ -284,9 +284,12 @@ export function createVideoWorkflow(deps: Dependencies) {
       }
       if (job.resourceId) {
         const work = getVideo(deps.db, job.resourceId)
-        if (work && !work.user_edited.includes('name_zh') && (numberedEpisode(work.name_zh)?.title === job.title || videoCollectionTitle(work.name_zh, job.catalogue || []) === job.title)) {
+        const sameSeries = !!work && (canPromoteWorkTitle(deps.db, work.id, job.catalogue || job.sources.map(source => ({ videoCode: source.externalId, title: '' })), job.title)
+          || (!work.user_edited.includes('name_zh') && (numberedEpisode(work.name_zh)?.title === job.title || videoCollectionTitle(work.name_zh, job.catalogue || []) === job.title)))
+        if (work && sameSeries && work.name_zh !== job.title) {
           deps.db.prepare('UPDATE resource SET name_zh = ?, updated_at = ? WHERE id = ?').run(job.title, Date.now(), work.id)
           if (job.episodeMetadata) {
+            moveWorkDescriptionToEpisode(deps.db, work.id)
             for (const field of ['name_en', 'summary', 'description']) if (!work.user_edited.includes(field)) deps.db.prepare(`UPDATE resource SET ${field} = '' WHERE id = ?`).run(work.id)
             if (!work.user_edited.includes('original_description')) deps.db.prepare("UPDATE video_meta SET original_description = '' WHERE resource_id = ?").run(work.id)
           }

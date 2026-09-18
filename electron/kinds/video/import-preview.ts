@@ -164,6 +164,12 @@ export function createVideoImportManager(options: Options) {
         if (!Array.isArray(tags) || tags.length > 80 || tags.some(tag => typeof tag !== 'string' || tag.length > 80)) throw new Error('标签格式无效')
         edits.tags = [...new Set(tags.map(tag => tag.trim()).filter(Boolean))]
       }
+      // 只记真正改了的：表单每次把五个字段整个发过来，没动的字段也写进 edits 的话，
+      // 入库时会连带标成 user_edited，之后重新识别 / 下载补全就再也纠正不了（B7）
+      for (const [field, value] of Object.entries(edits) as Array<[keyof VideoImportEdits, unknown]>) {
+        const before = (entry as unknown as Record<string, unknown>)[field]
+        if (JSON.stringify(value) === JSON.stringify(before) && draft.rows[entry.id].edits[field] === undefined) delete edits[field]
+      }
       Object.assign(draft.rows[entry.id].edits, edits); Object.assign(entry, edits)
     }
     return save(draft)
