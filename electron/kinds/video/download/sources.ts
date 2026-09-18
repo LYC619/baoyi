@@ -125,7 +125,7 @@ async function loadPageHtml(videoCode: string, fetcher: typeof globalThis.fetch,
 }
 
 /** The watch page can expose only a player frame; search cards carry the published cover. */
-async function supplementPoster<T extends { title: string; posterUrl?: string; thumbnailUrl?: string; artworkUrls?: string[] }>(
+export async function supplementPoster<T extends { title: string; posterUrl?: string; thumbnailUrl?: string; artworkUrls?: string[] }>(
   metadata: T, videoCode: string, fetcher: typeof globalThis.fetch, options: LoadPageOptions
 ): Promise<T> {
   options.signal?.throwIfAborted()

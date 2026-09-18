@@ -22,7 +22,7 @@ interface DraftState {
 
 // A preview belongs to the work (or the URL entry), never to a mounted route.
 const drafts = new Map<string, DraftState>()
-export const videoLibraryView = reactive({ compact: false, pendingOnly: false, issue: 'any' })
+export const videoLibraryView = reactive({ compact: false, pendingOnly: false, issue: 'any' as NonNullable<import('@/types').VideoQuery['issue']> })
 const allJobs = ref<VideoDownloadJob[]>([])
 const hideHentai = ref(false)
 const privacyReady = ref(typeof window === 'undefined' || !window.baoyi?.settings?.getAll)

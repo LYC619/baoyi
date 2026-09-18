@@ -24,6 +24,8 @@ export interface VideoDirectory {
   relativePath: string
   path: string
   metadataState: string
+  /** 清单里缺什么：description / poster / files:<集 id>。老库没有这一列时为空数组 */
+  missing?: string[]
 }
 export interface VideoOwnership {
   state: 'known' | 'new' | 'conflict'
@@ -78,6 +80,7 @@ export interface VideoRegistration {
   sources?: VideoSourceRef[]
   items: VideoContentInput[]
   metadataState?: string
+  missing?: string[]
 }
 export interface VideoRegistrationResult {
   skipped?: boolean

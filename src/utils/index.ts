@@ -168,6 +168,7 @@ export function formatPlaytime(sec: number): string {
  * 验不到「名单和文案对不对得上」，而那正是最容易漏的一处。
  */
 export const PROTECTED_FIELD_LABEL: Record<string, string> = {
+  poster_path: '海报',
   collection_name: '分组',
   name_zh: '片名',
   name_en: '原名',

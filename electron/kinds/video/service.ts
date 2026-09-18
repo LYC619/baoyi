@@ -65,8 +65,8 @@ import { toVideoCode } from './hentai/selectors.ts'
 import { HENTAI_CATEGORY } from './taxonomy.ts'
 import { persistVideoWorkBundle, syncVideoWorkFiles } from './local-sync.ts'
 import { applyVideoCatalogue } from './catalogue.ts'
-import { loadVideoWork } from './download/sources.ts'
-import { fillEpisodeDetails } from './episode-details.ts'
+import { loadVideoWork, supplementPoster } from './download/sources.ts'
+import { fillEpisodeDetails, reconcileEpisodeSlots } from './episode-details.ts'
 import { atomicWrite } from './bundle.ts'
 import { selectVideoArtwork, type VideoArtwork } from './artwork.ts'
 import { artworkDirFor } from './artwork-dir.ts'
@@ -114,10 +114,16 @@ export async function listVideoItems(query: VideoQuery = {}): Promise<VideoItem[
   const result: VideoItem[] = []
   for (let offset = 0; offset < items.length; offset += 8) {
     result.push(...await Promise.all(items.slice(offset, offset + 8).map(async item => {
-      const { metadataPending, ...summary } = summaries.get(item.id)!
+      const { metadataPending, metadataMissing, ...summary } = summaries.get(item.id)!
       const posterPresent = await localImagePresent(item.poster_path)
+      // "资料待补齐"要说清缺的是哪一样（B3）：metadata 留作筛选大类，具体原因另列
+      const metadata = [
+        ...(item.needs_review ? ['metadata:review'] : []),
+        ...(metadataMissing.includes('description') ? ['metadata:description'] : []),
+        ...(metadataMissing.includes('poster') && !posterPresent ? ['metadata:poster'] : [])
+      ]
       return { ...item, ...summary,
-        pending_reasons: [...(!posterPresent ? ['poster'] : []), ...(summary.missing_files ? ['files'] : []), ...(item.needs_review || metadataPending ? ['metadata'] : [])] }
+        pending_reasons: [...(!posterPresent ? ['poster'] : []), ...(summary.missing_files ? ['files'] : []), ...(item.needs_review || metadataPending ? ['metadata', ...metadata] : [])] }
     })))
   }
   const hidden = hideHentai()
@@ -175,6 +181,37 @@ export function updateVideoEpisode(episodeId: string, patch: Partial<Episode>): 
   if (updated) syncSeriesStatus(d, updated.resource_id)
   if (updated && d.prepare('SELECT resource_id FROM video_directories WHERE resource_id = ?').get(updated.resource_id)) persistVideoWorkBundle(d, updated.resource_id)
   return updated
+}
+
+/**
+ * 合集内改集号 / 分部（B8）。一次提交一组 { episodeId, season, number }，
+ * 冲突检测和保存点在 reconcileEpisodeSlots 里（冲突时原样返回那句"部分本地集数编号存在冲突"，一条都不改）。
+ * 里番这类没有"季"的作品，season 当"第 N 部"用；0 = 不分部。
+ */
+export function renumberVideoEpisodes(resourceId: string, changes: Array<{ episodeId: string; season: number; number: number }>): { ok: boolean; message: string; item: VideoItem | null } {
+  const d = getDb()
+  if (!getVideo(d, resourceId)) return { ok: false, message: '找不到这个作品', item: null }
+  if (!Array.isArray(changes) || !changes.length || changes.length > 1000) return { ok: false, message: '没有要改的集', item: null }
+  const rows = new Map(listEpisodes(d, resourceId).map(episode => [episode.id, episode]))
+  const map = new Map<string, { number: number; season: number }>()
+  for (const change of changes) {
+    const row = rows.get(String(change?.episodeId))
+    const season = Number(change?.season), number = Number(change?.number)
+    if (!row) return { ok: false, message: '这一集不属于当前作品', item: null }
+    if (!Number.isInteger(season) || season < 0 || season > 1000 || !Number.isInteger(number) || number < 0 || number > 10000) return { ok: false, message: '集号和分部必须是 0 到 10000 之间的整数', item: null }
+    if (row.season === season && row.episode === number) continue
+    map.set(row.id, { number, season })
+  }
+  if (!map.size) return { ok: true, message: '集号没有变化', item: getVideoItem(resourceId) }
+  const warnings = reconcileEpisodeSlots(d, resourceId, map)
+  if (warnings.length) return { ok: false, message: warnings[0], item: null }
+  syncSeriesStatus(d, resourceId)
+  d.prepare('UPDATE resource SET updated_at = ? WHERE id = ?').run(Date.now(), resourceId)
+  const persisted: string[] = []
+  if (d.prepare('SELECT resource_id FROM video_directories WHERE resource_id = ?').get(resourceId)) {
+    try { persisted.push(...persistVideoWorkBundle(d, resourceId).warnings) } catch (cause) { persisted.push('清单未更新：' + (cause instanceof Error ? cause.message : String(cause))) }
+  }
+  return { ok: true, message: `已更新 ${map.size} 集的编号` + (persisted.length ? '；' + persisted.join('；') : ''), item: getVideoItem(resourceId) }
 }
 
 export async function searchVideoSource(query: string) {
@@ -249,6 +286,26 @@ export async function scrapeVideoEpisode(resourceId: string, episodeId = '', sou
   }
   if (d.prepare('SELECT resource_id FROM video_directories WHERE resource_id = ?').get(resourceId)) warnings.push(...persistVideoWorkBundle(d, resourceId).warnings)
   return { episode: getVideoEpisode(episode.id), item: getVideoItem(resourceId), warnings }
+}
+
+/**
+ * 把某一集的封面 / 预览图用作整部作品的封面（B1）。
+ * 校验单集属于该作品、文件在；走 setVideoPoster（A2 之后它会写进作品目录），来源跟着单集走，
+ * 并标 user_edited: poster_path —— 用户亲手挑的图，重扫 / 补封面不许再换掉。
+ */
+export function useVideoEpisodeArtwork(resourceId: string, episodeId: string, role: 'poster' | 'thumbnail'): { ok: boolean; message: string; item: VideoItem | null } {
+  const d = getDb()
+  const episode = getEpisode(d, episodeId)
+  if (!episode || episode.resource_id !== resourceId || !['poster', 'thumbnail'].includes(role)) return { ok: false, message: '这一集不属于当前作品', item: null }
+  const file = (role === 'thumbnail' ? episode.thumbnail_path : episode.poster_path) || ''
+  if (!file || !isLocalPoster(file) || !existsSync(file)) return { ok: false, message: `这一集还没有可用的${role === 'thumbnail' ? '预览图' : '封面'}`, item: null }
+  const installed = setVideoPoster(resourceId, file, true)
+  if (!installed.ok) return { ...installed, item: null }
+  d.prepare('UPDATE video_meta SET poster_source = ? WHERE resource_id = ?').run((role === 'thumbnail' ? episode.thumbnail_source : episode.poster_source) || '', resourceId)
+  if (d.prepare('SELECT resource_id FROM video_directories WHERE resource_id = ?').get(resourceId)) {
+    try { persistVideoWorkBundle(d, resourceId) } catch { /* 清单写不进去不影响库里已经换好的封面，下次同步会补 */ }
+  }
+  return { ok: true, message: '已用这一集的图作为作品封面', item: getVideoItem(resourceId) }
 }
 
 export function setVideoEpisodeArtwork(episodeId: string, file: string, role: 'poster' | 'thumbnail') {
@@ -837,18 +894,31 @@ export async function enrichVideoWithAgent(id: string, actions: { artwork: boole
       }
       if (actions.artwork && !havePoster) {
         report('正在下载封面：' + target.title)
-        const image = /^https?:/i.test(payload.poster_path)
-          ? await downloadArtworkPair(episodeId || id, { posterUrl: payload.poster_path, thumbnailUrl: details?.thumbnailUrl, artworkUrls: details?.artworkUrls }, episodeId || undefined, false, posterRevisions.get(episodeId || id) ?? 0, episodeId ? id : undefined)
-          : await downloadPoster(episodeId || id, payload.poster_path, 'tmdb', posterRevisions.get(episodeId || id) ?? 0, episodeId || undefined)
+        let image: { ok: boolean; message: string }
+        if (/^https?:/i.test(payload.poster_path)) {
+          // 工具路径拿到的是播放页，og:image 多半只是横向帧图；搜索页卡片上才有带标题的竖向封面。
+          // 和「只勾补封面」那条路（loadVideoWork 内部）走同一个 supplementPoster，不然两条路结果不一样（B4）
+          let sources: { title: string; posterUrl?: string; thumbnailUrl?: string; artworkUrls?: string[] } =
+            { title: details?.title || payload.name_zh || target.title, posterUrl: payload.poster_path, thumbnailUrl: details?.thumbnailUrl, artworkUrls: details?.artworkUrls }
+          if (payload.hanime_id) { try { sources = await supplementPoster(sources, payload.hanime_id, fetchHanimeResource, { signal }) } catch { /* 搜索页补图是可选的 */ } }
+          image = await downloadArtworkPair(episodeId || id, sources, episodeId || undefined, false, posterRevisions.get(episodeId || id) ?? 0, episodeId ? id : undefined)
+        } else {
+          image = await downloadPoster(episodeId || id, payload.poster_path, 'tmdb', posterRevisions.get(episodeId || id) ?? 0, episodeId || undefined)
+        }
         if (!image.ok) throw new Error(image.message || '来源没有可用封面')
       }
       completed++
     } catch (cause) { failures.push(target.title + '：' + (cause instanceof Error ? cause.message : String(cause))) }
   }
-  const cover = listEpisodes(db, id).find(episode => episode.poster_path && isLocalPoster(episode.poster_path) && fs.existsSync(episode.poster_path))
+  // 收尾：把单集封面提升为作品封面。之前只在"作品没封面"时提升，作品已经挂着一张横图时竖图永远上不去；
+  // 现在按实际尺寸判：作品封面不是竖图、也没被用户手改，就换成单集里的竖图（B4）
+  const portrait = (file?: string) => { try { if (!file || !isLocalPoster(file) || !fs.existsSync(file)) return false; const size = nativeImage.createFromPath(file).getSize(); return size.width >= 64 && size.height > size.width * 1.05 } catch { return false } }
+  const episodesWithArt = listEpisodes(db, id).filter(episode => episode.poster_path && isLocalPoster(episode.poster_path) && fs.existsSync(episode.poster_path))
+  const cover = episodesWithArt.find(episode => portrait(episode.poster_path)) || episodesWithArt[0]
   const latest = getVideo(db, id)
-  if (actions.artwork && cover && latest && !latest.user_edited.includes('poster_path') && (!latest.poster_path || !fs.existsSync(latest.poster_path))) {
-    db.prepare('UPDATE video_meta SET poster_path=?,poster_source=?,thumbnail_path=?,thumbnail_source=? WHERE resource_id=?')
+  if (actions.artwork && cover && latest && !latest.user_edited.includes('poster_path')
+    && (!latest.poster_path || !fs.existsSync(latest.poster_path) || (!portrait(latest.poster_path) && portrait(cover.poster_path)))) {
+    db.prepare('UPDATE video_meta SET poster_path=?,poster_source=?,thumbnail_path=COALESCE(NULLIF(?, \'\'), thumbnail_path),thumbnail_source=COALESCE(NULLIF(?, \'\'), thumbnail_source) WHERE resource_id=?')
       .run(cover.poster_path, cover.poster_source || '', cover.thumbnail_path || '', cover.thumbnail_source || '', id)
   }
   return { tokens, ok: !failures.length && !signal.aborted, message: `已处理 ${completed}/${targets.length} 项内容` + (failures.length ? '；' + failures.join('；') : '') }

@@ -196,6 +196,7 @@ import {
   PROTECTED_META_FIELDS,
   PROTECTED_RESOURCE_FIELDS,
   restoreScrapedFields,
+  USER_EDITED_FIELDS,
   syncSeriesStatus,
   updateEpisode,
   updateVideo,
@@ -7949,11 +7950,14 @@ async function videoUserEditedSection(): Promise<void> {
     for (const f of PROTECTED_FIELDS) {
       assert.ok(PROTECTED_FIELD_LABEL[f], `字段 ${f} 没有界面文案`)
     }
-    // 反向：文案表里不该有名单外的键 —— 那种键永远显示不出来，
-    // 是维护时的误导（看着支持，其实那个字段根本不受保护）
+    // 反向：文案表里不该有 user_edited 里出不来的键 —— 那种键永远显示不出来，
+    // 是维护时的误导（看着支持，其实那个字段根本不受保护）。
+    // 名单是 USER_EDITED_FIELDS 而不是 PROTECTED_FIELDS：poster_path 不走 markUserEdited，
+    // 但手选封面会直接写进 user_edited，界面同样要有文案（B1）
     for (const f of Object.keys(PROTECTED_FIELD_LABEL)) {
-      assert.ok(PROTECTED_FIELDS.includes(f), `文案表里的 ${f} 不在保护名单里`)
+      assert.ok(USER_EDITED_FIELDS.includes(f), `文案表里的 ${f} 不在 user_edited 允许名单里`)
     }
+    assert.ok(USER_EDITED_FIELDS.includes('poster_path') && PROTECTED_FIELD_LABEL.poster_path, '手选封面要能在界面上显示为受保护字段')
     assert.equal(new Set(PROTECTED_FIELDS).size, PROTECTED_FIELDS.length, '名单里有重复')
   })
 

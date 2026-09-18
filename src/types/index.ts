@@ -1271,7 +1271,7 @@ export interface VideoQuery {
   publishedFrom?: string
   publishedTo?: string
   local?: 'available' | 'missing' | 'none'
-  issue?: 'any' | 'poster' | 'files' | 'metadata'
+  issue?: 'any' | 'poster' | 'files' | 'metadata' | 'metadata:description' | 'metadata:poster' | 'metadata:review'
   keyword?: string
   type?: VideoFilterType
   collection?: string
@@ -1574,6 +1574,10 @@ export interface BaoyiApi {
     searchSource(query: string): Promise<Array<{ videoCode: string; title: string; coverUrl: string }>>
     scrapeEpisode(id: string, episodeId?: string, source?: string): Promise<{ episode: Episode | null; item: VideoItem | null; warnings: string[] }>
     pickEpisodeArtwork(id: string, role: 'poster' | 'thumbnail'): Promise<Episode | null>
+    /** 把某一集的封面 / 预览图用作整部作品的封面 */
+    useEpisodeArtwork(id: string, episodeId: string, role: 'poster' | 'thumbnail'): Promise<{ ok: boolean; message: string; item: VideoItem | null }>
+    /** 合集内改集号 / 分部，一次提交一组；有冲突整组不改 */
+    renumberEpisodes(id: string, changes: Array<{ episodeId: string; season: number; number: number }>): Promise<{ ok: boolean; message: string; item: VideoItem | null }>
     previewRemoval(request: import('./video-management').VideoRemovalRequest): Promise<import('./video-management').VideoRemovalPreview>
     applyRemoval(preview: import('./video-management').VideoRemovalPreview): Promise<{ detachedId: string; warnings: string[] }>
     bulkUpdate(ids: string[], patch: import('./video-management').VideoBulkPatch): Promise<number>

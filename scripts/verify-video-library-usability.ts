@@ -221,5 +221,24 @@ await test('local availability filter can distinguish present missing and undown
   assert.deepEqual(Array.from(await h.service.listVideoItems({local:'none'}),w=>w.id).sort(),[b,c].sort())
 })
 
+await test('pending metadata reasons say what is missing: description, poster, or unreviewed', async f => {
+  const h = localService(f)
+  const id = f.work()
+  f.db.prepare("UPDATE resource SET ai_status = 'done' WHERE id = ?").run(id)
+  // 待补齐只对绑定了目录的作品有意义：直接绑一个目录（清单缺什么由 missing 列说）
+  f.db.prepare("INSERT INTO video_directories (resource_id,bundle_id,root,relative_path,directory_path,metadata_state,missing,created_at,updated_at) VALUES (?,?,?,?,?,?,?,1,1)")
+    .run(id, 'bundle-' + id, f.root, 'Library', path.join(f.root, 'Library'), 'pending', JSON.stringify(['description']))
+  const reasons = async () => Array.from((await h.service.listVideoItems()).find(w => w.id === id)!.pending_reasons ?? [])
+  assert.deepEqual((await reasons()).filter(r => r.startsWith('metadata')), ['metadata', 'metadata:description'], '只缺简介')
+  f.db.prepare("UPDATE video_directories SET missing = ? WHERE resource_id = ?").run(JSON.stringify(['description', 'poster']), id)
+  f.db.prepare("UPDATE video_meta SET poster_path = '' WHERE resource_id = ?").run(id)
+  assert.deepEqual((await reasons()).filter(r => r.startsWith('metadata')), ['metadata', 'metadata:description', 'metadata:poster'], '缺简介也缺封面')
+  f.db.prepare("UPDATE resource SET ai_status = 'pending' WHERE id = ?").run(id)
+  f.db.prepare("UPDATE video_directories SET metadata_state = 'complete', missing = '[]' WHERE resource_id = ?").run(id)
+  assert.deepEqual((await reasons()).filter(r => r.startsWith('metadata')), ['metadata', 'metadata:review'], '清单齐了但从没经过识别确认')
+  assert.deepEqual(Array.from(await h.service.listVideoItems({ issue: 'metadata:review' }), w => w.id), [id], '细分原因可以直接当筛选条件')
+  assert.deepEqual(Array.from(await h.service.listVideoItems({ issue: 'metadata:description' }), w => w.id), [], '不缺简介的不进缺简介筛选')
+})
+
 console.log(`Video library usability: ${passed} passed / ${failed} failed`)
 process.exitCode = failed ? 1 : 0

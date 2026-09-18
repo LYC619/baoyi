@@ -224,6 +224,9 @@ export const VIDEO_LIBRARY_SQL = `
     relative_path TEXT NOT NULL,
     directory_path TEXT NOT NULL UNIQUE,
     metadata_state TEXT NOT NULL DEFAULT 'pending',
+    -- 清单里缺什么（description / poster / files:<集 id>），JSON 数组。
+    -- 只有 metadata_state 一个布尔说不清"待补齐"到底缺的是哪一样（B3）
+    missing TEXT NOT NULL DEFAULT '[]',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -448,6 +451,10 @@ export function migrateVideo(d: SqlDb, from: number): void {
   }
   if (!columnsOf(d, 'episode').has('display_label')) {
     d.exec(`ALTER TABLE episode ADD COLUMN display_label TEXT NOT NULL DEFAULT ''`)
+  }
+  // 待补齐的具体原因；照 display_label 那种"列不存在才加"的写法，不动 _schema 版本号
+  if (objectType(d, 'video_directories') === 'table' && !columnsOf(d, 'video_directories').has('missing')) {
+    d.exec(`ALTER TABLE video_directories ADD COLUMN missing TEXT NOT NULL DEFAULT '[]'`)
   }
   const episodeColumns = columnsOf(d, 'episode')
   if (!episodeColumns.has('published_at')) d.exec('ALTER TABLE episode ADD COLUMN published_at INTEGER NOT NULL DEFAULT 0')

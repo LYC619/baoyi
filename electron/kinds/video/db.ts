@@ -185,12 +185,20 @@ export const PROTECTED_FIELDS: readonly string[] = [
 ]
 
 /** 解析 user_edited 那一列。脏数据一律当「没改过」，不让它拦住重扫 */
+/**
+ * user_edited 列里允许出现的字段：受保护的刮削字段，加上 poster_path。
+ * poster_path 不走 markUserEdited（见那边的注释），是 setVideoPoster 手选时直接写进去的；
+ * 之前解析时按 PROTECTED_FIELDS 过滤把它滤掉了，于是所有 `user_edited.includes('poster_path')`
+ * 的判断都恒为 false，用户亲手挑的封面照样被补封面换掉。
+ */
+export const USER_EDITED_FIELDS: readonly string[] = [...PROTECTED_FIELDS, 'poster_path']
+
 export function parseUserEdited(raw: unknown): string[] {
   if (typeof raw !== 'string' || raw === '') return []
   try {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter((f): f is string => typeof f === 'string' && PROTECTED_FIELDS.includes(f))
+    return parsed.filter((f): f is string => typeof f === 'string' && USER_EDITED_FIELDS.includes(f))
   } catch {
     return []
   }

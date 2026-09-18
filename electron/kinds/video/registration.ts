@@ -222,7 +222,7 @@ export function registerVideoContent(d: SqlDb, input: VideoRegistration): VideoR
     const historicalDirectory = oldDirectory && directory.toLowerCase() !== oldDirectory.directory_path.toLowerCase()
       && resolveVideoOrganizePathOwner(d, directory) === resourceId
     if (directory && !historicalDirectory) {
-      upsertVideoDirectory(d, { resourceId, directory, root: input.root || oldDirectory?.root, bundleId, metadataState: input.metadataState })
+      upsertVideoDirectory(d, { resourceId, directory, root: input.root || oldDirectory?.root, bundleId, metadataState: input.metadataState, missing: input.missing })
       d.prepare('UPDATE resource SET path = ?, source_dir = ?, file_name = ?, updated_at = ? WHERE id = ?').run(directory, directory, path.basename(directory), Date.now(), resourceId)
       d.prepare("UPDATE video_meta SET video_type = 'series' WHERE resource_id = ?").run(resourceId)
     }
@@ -343,7 +343,7 @@ export function registerVideoBundleData(d: SqlDb, root: string, bundle: import('
     resourceId, bundleId: bundle.bundle_id, directory: root, root: path.dirname(root), title: bundle.work.title,
     nameEn: bundle.work.name_en, description: bundle.work.description, originalDescription: bundle.work.original_description,
     category: bundle.work.category, tags: bundle.work.tags, posterPath: bundle.work.poster ? resolveBundlePath(root, bundle.work.poster) : '', posterSource: bundle.work.poster_source, thumbnailPath: bundle.work.thumbnail ? resolveBundlePath(root, bundle.work.thumbnail) : '', thumbnailSource: bundle.work.thumbnail_source,
-    sources: bundle.work.sources, metadataState: bundle.missing?.length ? 'pending' : 'complete',
+    sources: bundle.work.sources, metadataState: bundle.missing?.length ? 'pending' : 'complete', missing: bundle.missing || [],
       items
     })
     if (!restoreRemoved) {

@@ -87,7 +87,7 @@ import {
 } from '../kinds/game/service'
 import { COVER_EXTS } from '../kinds/game/links'
 import {
-  searchVideoSource, scrapeVideoEpisode, setVideoEpisodeArtwork, importVideoBundle,
+  searchVideoSource, scrapeVideoEpisode, setVideoEpisodeArtwork, useVideoEpisodeArtwork, renumberVideoEpisodes, importVideoBundle,
   cancelVideoScan,
   clearVideoPoster,
   fetchVideoPoster,
@@ -429,6 +429,16 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const picked = await dialog.showOpenDialog(win, { title: role === 'poster' ? '选择单集封面' : '选择单集预览图', properties: ['openFile'], filters: [{ name: '图片', extensions: ['png','jpg','jpeg','webp'] }] })
     if (picked.canceled || !picked.filePaths[0]) return null
     return setVideoEpisodeArtwork(episodeId, picked.filePaths[0], role)
+  })
+  ipcMain.handle('video:renumber-episodes', (_e, id: string, changes: Array<{ episodeId: string; season: number; number: number }>) => {
+    const result = renumberVideoEpisodes(String(id), changes)
+    if (result.ok) send('video:library-changed', String(id))
+    return result
+  })
+  ipcMain.handle('video:use-episode-artwork', (_e, id: string, episodeId: string, role: 'poster' | 'thumbnail') => {
+    const result = useVideoEpisodeArtwork(String(id), String(episodeId), role)
+    if (result.ok) send('video:library-changed', String(id))
+    return result
   })
   ipcMain.handle('video:removal-preview', (_e, input) => previewVideoRemoval(getDb(), input))
   ipcMain.handle('video:removal-apply', async (_e, preview) => {

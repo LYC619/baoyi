@@ -48,7 +48,7 @@ const { compact, pendingOnly, issue } = toRefs(videoLibraryView)
 const workflow = useVideoWorkflow()
 const privateHidden = computed(() => !workflow.privacyReady.value || workflow.hideHentai.value)
 const visibleItems = computed(() => store.items.filter(item => !privateHidden.value || item.category !== '里番'))
-const issueLabels: Record<string, string> = { poster: '待补海报', files: '文件失联', metadata: '资料待补齐', download: '下载待处理', review: '归属待确认' }
+const issueLabels: Record<string, string> = { poster: '待补海报', files: '文件失联', metadata: '资料待补齐', 'metadata:description': '缺简介', 'metadata:poster': '缺封面', 'metadata:review': '未经识别确认', download: '下载待处理', review: '归属待确认' }
 function pendingReasons(item: VideoItem): string[] {
   const reasons = [...(item.pending_reasons ?? [])]
   if (store.missingPosters?.includes(item.id) && !reasons.includes('poster')) reasons.push('poster')
@@ -150,8 +150,10 @@ watch(() => store.activeKey, () => { pendingOnly.value = false })
 function itemStatus(item: VideoItem): string {
   const active = workflow.jobs.value.find(job => job.resourceId === item.id && (job.status === 'running' || job.status === 'queued'))
   if (active) return active.status === 'queued' ? '已排队' : '下载处理中'
-  const reason = pendingReasons(item)[0]
-  return reason ? issueLabels[reason] || reason : ''
+  // 角标写具体的那几条（缺简介、未经识别确认…），多条用「、」连；"资料待补齐"这个大类只在没有细分时兜底
+  const reasons = pendingReasons(item)
+  const specific = reasons.filter(reason => reason !== 'metadata' || !reasons.some(other => other.startsWith('metadata:')))
+  return specific.map(reason => issueLabels[reason] || reason).join('、')
 }
 function recentContent(item: VideoItem): string {
   const job = workflow.jobs.value.find(job => job.resourceId === item.id && job.items.some(value => value.transfer === 'complete'))

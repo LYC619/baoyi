@@ -109,7 +109,7 @@ export function persistVideoWorkBundle(d: SqlDb, resourceId: string, directory?:
   for (const entry of result.bundle.items) if (entry.poster && library.contents.some(ep => ep.id === entry.id)) {
     d.prepare('UPDATE episode SET poster_path = ? WHERE id = ?').run(path.join(directory, entry.poster), entry.id)
   }
-  d.prepare('UPDATE video_directories SET metadata_state = ?,updated_at = ? WHERE resource_id = ?').run(result.bundle.missing.length ? 'pending' : 'complete', Date.now(), resourceId)
+  d.prepare('UPDATE video_directories SET metadata_state = ?, missing = ?, updated_at = ? WHERE resource_id = ?').run(result.bundle.missing.length ? 'pending' : 'complete', JSON.stringify(result.bundle.missing), Date.now(), resourceId)
   return result
 }
 

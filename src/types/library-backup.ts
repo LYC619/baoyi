@@ -64,7 +64,7 @@ export const LIBRARY_BACKUP_COLUMNS = {
   },
   video_directories: {
     resource_id: 'text', bundle_id: 'text', root: 'text', relative_path: 'text', directory_path: 'text',
-    metadata_state: 'text', created_at: 'integer', updated_at: 'integer'
+    metadata_state: 'text', missing: 'text', created_at: 'integer', updated_at: 'integer'
   },
   video_assets: {
     id: 'text', resource_id: 'text', path: 'text', role: 'text', quality: 'text', file_size: 'integer',

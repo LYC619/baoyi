@@ -140,6 +140,7 @@ function validateRow(table: LibraryBackupTableName, input: unknown, at: string, 
   const columns = columnNames(table)
   if (table === 'episode' && !partial) input = { published_at: 0, studio: '', tags: '[]', poster_source: '', thumbnail_path: '', thumbnail_source: '', original_title: '', description: '', original_description: '', poster_path: '', source_url: '', notes: '', ...object(input, at) }
   if (table === 'video_meta' && !partial) input = { thumbnail_path: '', thumbnail_source: '', ...object(input, at) }
+  if (table === 'video_directories' && !partial) input = { missing: '[]', ...object(input, at) }
   const row = keys(input, partial ? [] : columns, at, partial ? columns : [])
   const result: Row = {}
   for (const column of Object.keys(row)) {

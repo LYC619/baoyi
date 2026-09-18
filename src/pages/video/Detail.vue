@@ -42,6 +42,7 @@ import VideoArtwork from '@/components/video/VideoArtwork.vue'
 import VideoScopeSwitch from '@/components/video/VideoScopeSwitch.vue'
 import OrganizePanel from '@/components/video/OrganizePanel.vue'
 import CollectionNameDialog from '@/components/video/CollectionNameDialog.vue'
+import EpisodeArtworkDialog from '@/components/video/EpisodeArtworkDialog.vue'
 import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
 import { useToast } from '@/composables/useToast'
 import { reidentifyVideo, useMediaScan } from '@/composables/useMediaScan'
@@ -161,6 +162,9 @@ const itemHidden = computed(() => item.value?.category === HENTAI_CATEGORY
   && (!downloadFlow.value.privacyReady.value || downloadFlow.value.hideHentai.value))
 const organizeMode = ref<'relocate' | 'history' | ''>('')
 const renameOpen = ref(false)
+const episodeArtworkOpen = ref(false)
+/** 单集里有图可选（封面或预览图任一）才显示「从单集选」 */
+const episodeArtworkAvailable = computed(() => !!library.value?.contents.some(episode => episode.poster_path || episode.thumbnail_path))
 const organizeReturnFocus = ref<HTMLElement | null>(null)
 watch(itemHidden, hidden => {
   if (hidden) { organizeMode.value = ''; renameOpen.value = false; downloadFlow.value.reset() }
@@ -704,6 +708,7 @@ function copyPath(path: string): void {
       <VideoSourceDialog v-if="sourceOpen" :item="item" :episodes="library?.contents || []" :episode-id="selectedEpisodeId" @close="sourceOpen = false" @changed="refreshLibrary" />
       <VideoRemovalDialog v-if="removalEpisode || removalWork" :resource-ids="[item.id]" :episode-id="removalEpisode || undefined" @close="removalEpisode = ''; removalWork = false" @changed="afterRemoval" />
       <CollectionNameDialog v-if="renameOpen" :item="item" @close="renameOpen = false" @changed="refreshLibrary" />
+      <EpisodeArtworkDialog v-if="episodeArtworkOpen" :item="item" :episodes="library?.contents || []" :without-season="item.category === HENTAI_CATEGORY" @close="episodeArtworkOpen = false" @changed="refreshLibrary" />
       <div class="body">
         <!-- ------------------------------ 主列 ------------------------------ -->
         <div class="col col--main">
@@ -741,6 +746,15 @@ function copyPath(path: string): void {
                   @click="clearPoster"
                 >
                   <ImageOff :size="13" />
+                </button>
+                <button
+                  v-if="episodeArtworkAvailable"
+                  class="hero__posterBtn hero__posterBtn--wide"
+                  title="从这部作品的单集封面 / 预览图里挑一张当作品封面"
+                  @click="episodeArtworkOpen = true"
+                >
+                  <Clapperboard :size="13" />
+                  从单集选
                 </button>
               </div>
             </div>
@@ -1702,6 +1716,7 @@ function copyPath(path: string): void {
 .hero__posterBtn { justify-content: center; font-size: 10px; min-height: 22px; white-space: nowrap; }
 .hero__posterBtn:first-child { grid-column: 1 / -1; }
 .hero__posterBtn:nth-child(2):last-child { grid-column: 1 / -1; }
+.hero__posterBtn--wide { grid-column: 1 / -1; }
 .read-text { font-size: var(--fs-body); color: var(--text-sub); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .detail-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; align-items: start; }
 .hero__facts { min-width: 0; border-left: 1px solid var(--divider); padding-left: 16px; display: flex; flex-direction: column; gap: 9px; }

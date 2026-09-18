@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { SqlDb } from '../../services/schema.ts'
 import type { VideoItem } from '../../../src/types'
+import { parseMissing } from './library.ts'
 
 interface ListState {
   episode_total: number
@@ -10,6 +11,8 @@ interface ListState {
   available_files: number
   missing_files: number
   metadataPending: boolean
+  /** 清单里记的具体缺项（description / poster …），metadataPending 为真时才有 */
+  metadataMissing: string[]
 }
 interface EpisodeRow { id: string; resource_id: string; path: string; watch_status: string }
 type FileState = 'present' | 'missing' | 'offline' | 'directory'
@@ -20,7 +23,7 @@ export async function readVideoListState(d: SqlDb, items: VideoItem[]): Promise<
   const episodes: EpisodeRow[] = []
   const contentFiles = new Map<string, Set<string>>()
   const workFiles = new Map(items.map(item => [item.id, new Set<string>()]))
-  const pending = new Set<string>(), paths = new Map<string, string>()
+  const pending = new Map<string, string[]>(), paths = new Map<string, string>()
   const addFile = (resourceId: string, file: string, episodeId?: string) => {
     if (!file) return
     const key = fileKey(file)
@@ -41,8 +44,8 @@ export async function readVideoListState(d: SqlDb, items: VideoItem[]): Promise<
       LEFT JOIN episode e ON e.id=ea.episode_id AND e.resource_id=a.resource_id
       WHERE a.resource_id IN (${slots}) AND a.role='video'`).all(...ids) as { resource_id: string; path: string; episode_id: string | null }[]
     for (const asset of assets) addFile(asset.resource_id, asset.path, asset.episode_id || undefined)
-    const directories = d.prepare(`SELECT resource_id FROM video_directories WHERE resource_id IN (${slots}) AND metadata_state='pending'`).all(...ids) as { resource_id: string }[]
-    directories.forEach(row => pending.add(row.resource_id))
+    const directories = d.prepare(`SELECT resource_id, missing FROM video_directories WHERE resource_id IN (${slots}) AND metadata_state='pending'`).all(...ids) as { resource_id: string; missing: string }[]
+    directories.forEach(row => pending.set(row.resource_id, parseMissing(row.missing)))
   }
   // Older movies may only have resource.path/parts. Count those files without migrating data during a list read.
   for (const item of items) if (item.video_type === 'movie' || item.hanime_id) {
@@ -71,7 +74,7 @@ export async function readVideoListState(d: SqlDb, items: VideoItem[]): Promise<
     return [item.id, { episode_total: 0, episode_watched: 0, episode_present: 0,
       available_files: files.filter(state => state === 'present').length,
       missing_files: files.filter(state => state === 'missing' || state === 'offline').length,
-      metadataPending: pending.has(item.id) }] as const
+      metadataPending: pending.has(item.id), metadataMissing: pending.get(item.id) ?? [] }] as const
   }))
   for (const episode of episodes) {
     const files = contentFiles.get(episode.id)

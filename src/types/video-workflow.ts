@@ -55,6 +55,8 @@ export interface VideoJobItem {
   totalBytes: number
   error: string
   warnings: string[]
+  /** 写清单时算出的缺项（description / poster），入库时一并落到 video_directories.missing */
+  missing?: string[]
 }
 export interface VideoDownloadJob {
   id: string

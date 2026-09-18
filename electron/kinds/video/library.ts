@@ -8,7 +8,12 @@ import { getVideo, listEpisodes } from './db.ts'
 import { resolveVideoOrganizeOwner } from './organize-owner.ts'
 import { isDirectory, linkLegacyEpisode } from './episode-details.ts'
 
-export function upsertVideoDirectory(d: SqlDb, input: { resourceId: string; root?: string; directory: string; bundleId?: string; metadataState?: string }): VideoDirectory {
+/** missing 列是 JSON 数组；坏值当空 */
+export function parseMissing(raw: unknown): string[] {
+  try { const value = JSON.parse(String(raw ?? '[]')); return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [] } catch { return [] }
+}
+
+export function upsertVideoDirectory(d: SqlDb, input: { resourceId: string; root?: string; directory: string; bundleId?: string; metadataState?: string; missing?: string[] }): VideoDirectory {
   const directory = path.resolve(input.directory)
   const root = input.root ? path.resolve(input.root) : path.dirname(directory)
   const relativePath = path.relative(root, directory)
@@ -19,14 +24,16 @@ export function upsertVideoDirectory(d: SqlDb, input: { resourceId: string; root
   const conflict = d.prepare('SELECT resource_id FROM video_directories WHERE bundle_id = ? OR directory_path = ? COLLATE NOCASE').get(bundleId, directory) as { resource_id: string } | undefined
   if (conflict && conflict.resource_id !== input.resourceId) throw new Error('目录或资源清单已绑定其他作品')
   const now = Date.now()
-  d.prepare(`INSERT INTO video_directories (resource_id, bundle_id, root, relative_path, directory_path, metadata_state, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  const missing = input.missing ?? (input.metadataState === 'complete' ? [] : undefined)
+  d.prepare(`INSERT INTO video_directories (resource_id, bundle_id, root, relative_path, directory_path, metadata_state, missing, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(resource_id) DO UPDATE SET bundle_id = excluded.bundle_id, root = excluded.root,
       relative_path = excluded.relative_path, directory_path = excluded.directory_path,
-      metadata_state = excluded.metadata_state, updated_at = excluded.updated_at`).run(
-    input.resourceId, bundleId, root, relativePath, directory, input.metadataState || 'pending', now, now
+      metadata_state = excluded.metadata_state, missing = COALESCE(?, video_directories.missing), updated_at = excluded.updated_at`).run(
+    input.resourceId, bundleId, root, relativePath, directory, input.metadataState || 'pending', JSON.stringify(missing ?? []), now, now,
+    missing ? JSON.stringify(missing) : null
   )
-  return { resourceId: input.resourceId, bundleId, root, relativePath, path: directory, metadataState: input.metadataState || 'pending' }
+  return { resourceId: input.resourceId, bundleId, root, relativePath, path: directory, metadataState: input.metadataState || 'pending', missing: missing ?? [] }
 }
 
 function rowToAsset(row: Record<string, unknown>): VideoAsset {
@@ -89,9 +96,10 @@ export function getVideoWorkLibrary(d: SqlDb, resourceId: string): VideoWorkLibr
   }
   checkVideoAssets(d, resourceId)
   const assets = listVideoAssets(d, resourceId)
-  const directory = d.prepare(`SELECT resource_id AS resourceId, bundle_id AS bundleId, root, relative_path AS relativePath,
-    directory_path AS path, metadata_state AS metadataState FROM video_directories WHERE resource_id = ?`).get(resourceId) as VideoDirectory | undefined
-  return { resourceId, directory: directory || null, assets, contents: episodes.map(ep => ({ ...ep, assets: listVideoAssets(d, resourceId, ep.id),
+  const row = d.prepare(`SELECT resource_id AS resourceId, bundle_id AS bundleId, root, relative_path AS relativePath,
+    directory_path AS path, metadata_state AS metadataState, missing FROM video_directories WHERE resource_id = ?`).get(resourceId) as (Omit<VideoDirectory, 'missing'> & { missing: string }) | undefined
+  const directory: VideoDirectory | null = row ? { ...row, missing: parseMissing(row.missing) } : null
+  return { resourceId, directory, assets, contents: episodes.map(ep => ({ ...ep, assets: listVideoAssets(d, resourceId, ep.id),
     sources: d.prepare('SELECT provider, external_id AS externalId, scope, page_url AS pageUrl, evidence FROM video_sources WHERE episode_id = ?').all(ep.id) as VideoWorkLibrary['contents'][number]['sources'] })) }
 }
 
