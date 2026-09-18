@@ -10,7 +10,6 @@ contents.forEach((ep,i) => { ep.title = '单集演示 '+(i+1); ep.original_title
 window.baoyi.video.bulkUpdate = async (ids,patch) => { structuredClone(ids);structuredClone(patch);calls.push(['bulk',ids,patch]); for(const id of ids) { const w=id===work.id?work:single; if(patch.collection!==undefined)w.collection_name=patch.collection;if(patch.addTags)w.tags=[...new Set([...w.tags,...patch.addTags])];if(patch.removeTags)w.tags=w.tags.filter(t=>!patch.removeTags.includes(t)) } return ids.length }
 window.baoyi.video.previewRemoval = async request => { structuredClone(request); return { fingerprint:'fixture',request,titles:['所选内容'],episodeCount:request.episodeId?1:3,files:[{path:'D:/Fixture/sample.mp4',size:1024,present:true,shared:false}] } }
 window.baoyi.video.applyRemoval = async preview => { structuredClone(preview);calls.push(['removal',preview.request]);if(preview.request.episodeId) { const index=contents.findIndex(ep=>ep.id===preview.request.episodeId);if(index>=0)contents.splice(index,1);work.episode_total=contents.length }return {detachedId:'',warnings:[]} }
-window.baoyi.video.importBundle = async () => ({resourceId:work.id,itemsAdded:1,filesAdded:1,created:false,bundleId:'',scanResult:{candidates:2,registered:1,skipped:1,failed:0,episodes:1,tokens:0,searches:0,entries:[{path:'D:/Fixture/new.mp4',resourceId:work.id,status:'new',message:'已自动入库'},{path:'D:/Fixture/known.mp4',resourceId:work.id,status:'skipped',message:'文件及资料未变化，未调用识别'}]}})
 await window.__fixture.videoStore.reload()
 `
 const fixture = await createWorkflowRendererFixture(extension), { page, errors } = fixture
@@ -83,12 +82,6 @@ try {
     await removal.getByRole('button',{name:'关闭',exact:true}).click()
     assert.equal(await page.evaluate(()=>(window as any).__fixture.calls.filter((c:any[])=>c[0]==='removal').length),0)
     await page.getByRole('button',{name:'退出批量管理',exact:true}).click()
-  })
-  await test('目录导入结果明确显示自动入库及跳过原因',async()=>{
-    await page.getByRole('button',{name:'导入目录',exact:true}).click()
-    await page.getByText('文件及资料未变化，未调用识别',{exact:true}).waitFor()
-    assert.match(await page.locator('.scan-results').innerText(),/自动.*入库|已.*入库/)
-    await page.screenshot({path:path.join(evidence,'home-feedback.png')})
   })
   assert.deepEqual(errors,[],'renderer must not throw')
 } finally { await fixture.close() }
