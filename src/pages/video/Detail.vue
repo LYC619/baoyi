@@ -516,8 +516,12 @@ async function reveal(): Promise<void> {
 /* ---------------------------- 播放 ---------------------------- */
 
 const playing = ref(false)
+const hasVideo = (content: VideoWorkContent) => content.assets.some(asset => asset.role === 'video' && asset.state === 'present')
+// 正在看哪一集的简介，顶部「播放」就开哪一集（实测第三轮）：之前只按观看进度挑，看着第二集简介想播放
+// 得先切回「作品内容」页。没选集（作品简介）或选中的那集没文件时才按进度挑
 const resumeContent = computed(() => {
-  const available = library.value?.contents.filter(content => content.assets.some(asset => asset.role === 'video' && asset.state === 'present')) ?? []
+  if (selectedEpisode.value && hasVideo(selectedEpisode.value)) return selectedEpisode.value
+  const available = library.value?.contents.filter(hasVideo) ?? []
   return available.find(content => content.position_sec > 0 && content.watch_status !== 'watched')
     ?? available.find(content => content.watch_status !== 'watched' && content.watch_status !== 'dropped') ?? available[0]
 })
@@ -857,7 +861,7 @@ function copyPath(path: string): void {
               <VideoScopeSwitch v-if="library?.contents.length" v-model="selectedEpisodeId" :episodes="library.contents" :without-season="item.category === '里番'" />
             </header>
             <template v-if="selectedEpisode">
-              <div class="episode-actions"><button class="btn btn--subtle" @click="episodeEditing = !episodeEditing">{{ episodeEditing ? '完成单集编辑' : '编辑这一集' }}</button><button class="btn btn--subtle" :disabled="!!busyEpisode" @click="scrapeSelected">{{ busyEpisode ? '正在刮削…' : '单集刮削' }}</button><button class="btn btn--ghost" @click="sourceOpen = true">更改来源</button><button class="btn btn--ghost" @click="pickEpisodeImage('poster')">选择封面</button><button class="btn btn--ghost" @click="pickEpisodeImage('thumbnail')">选择预览图</button><button class="btn btn--ghost" @click="removalEpisode = selectedEpisode.id">移除 / 移出合集…</button></div>
+              <div class="episode-actions"><button class="btn btn--primary" :disabled="playing || !hasVideo(selectedEpisode)" :title="playHint" @click="play"><Play :size="13" />{{ playing ? '正在打开…' : '播放这一集' }}</button><button class="btn btn--subtle" @click="episodeEditing = !episodeEditing">{{ episodeEditing ? '完成单集编辑' : '编辑这一集' }}</button><button class="btn btn--subtle" :disabled="!!busyEpisode" @click="scrapeSelected">{{ busyEpisode ? '正在刮削…' : '单集刮削' }}</button><button class="btn btn--ghost" @click="sourceOpen = true">更改来源</button><button class="btn btn--ghost" @click="pickEpisodeImage('poster')">选择封面</button><button class="btn btn--ghost" @click="pickEpisodeImage('thumbnail')">选择预览图</button><button class="btn btn--ghost" @click="removalEpisode = selectedEpisode.id">移除 / 移出合集…</button></div>
               <div class="episode-summary" :class="{ 'episode-summary--text-only': !selectedEpisode.poster_path && !selectedEpisode.thumbnail_path }">
               <VideoArtwork :poster="selectedEpisode.poster_path" :thumbnail="selectedEpisode.thumbnail_path" />
               <div class="episode-copy">

@@ -105,7 +105,7 @@ export function localBundleItems(directory: string, bundle: VideoBundle): VideoC
 }
 
 /** A matching manifest may reattach a moved directory, but never steal a live copy. */
-export function rebaseMovedVideoDirectory(d: SqlDb, resourceId: string, from: string, to: string): void {
+export function rebaseMovedVideoDirectory(d: SqlDb, resourceId: string, from: string, to: string, root = path.dirname(to)): void {
   if (videoPathKey(from) === videoPathKey(to)) return
   if (fs.existsSync(from)) throw new Error('清单已绑定到另一目录；这是资源副本，请选择重新定位或作为副本导入')
   const rebase = (value: string): string => {
@@ -130,8 +130,14 @@ export function rebaseMovedVideoDirectory(d: SqlDb, resourceId: string, from: st
     : Array.isArray(value) ? value.map(nested) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, v]) => [key, nested(v)])) : value
   const meta = d.prepare('SELECT parts,linked_files,subtitle_tracks,audio_tracks FROM video_meta WHERE resource_id = ?').get(resourceId) as Record<string, string>
   for (const [field, value] of Object.entries(meta || {})) d.prepare(`UPDATE video_meta SET ${field} = ? WHERE resource_id = ?`).run(JSON.stringify(nested(JSON.parse(value || '[]'))), resourceId)
-  d.prepare('UPDATE video_directories SET directory_path = ?,root = ?,relative_path = ?,updated_at = ? WHERE resource_id = ?').run(to, path.dirname(to), path.basename(to), Date.now(), resourceId)
-  rebaseStoredVideoJobs(d, resourceId, from, to, path.dirname(to))
+  // 排除记录和扫描指纹也跟着走：不然整理后再扫一次，之前明确移除的文件会被当成新文件重新导进来
+  for (const table of ['video_scan_ignores', 'video_scan_state']) {
+    for (const row of d.prepare(`SELECT rowid AS row_id, path FROM ${table} WHERE resource_id = ?`).all(resourceId) as Array<{ row_id: number; path: string }>) {
+      if (path.isAbsolute(row.path) && rebase(row.path) !== row.path) d.prepare(`UPDATE OR REPLACE ${table} SET path = ? WHERE rowid = ?`).run(rebase(row.path), row.row_id)
+    }
+  }
+  d.prepare('UPDATE video_directories SET directory_path = ?,root = ?,relative_path = ?,updated_at = ? WHERE resource_id = ?').run(to, root, path.relative(root, to), Date.now(), resourceId)
+  rebaseStoredVideoJobs(d, resourceId, from, to, root)
 }
 
 /** Repair old duplicate cards only when every donor file is the same owned media. */

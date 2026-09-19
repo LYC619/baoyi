@@ -27,6 +27,7 @@ const FALLBACK: AppSettings = {
   hide_hentai: false,
   theme: 'dark',
   view_mode: 'grid',
+  video_card_size: 150,
   group_by_category: false,
   unused_days: 60,
   title_lang: 'zh',

@@ -144,7 +144,24 @@ export interface VideoRelocateApplyRequest {
   preview: VideoRelocatePreview
 }
 
+/** 统一移动（实测第三轮）：把已入库作品挪成「整理根目录 / 收藏分组 / 作品文件夹」 */
+export interface VideoLayoutEntry {
+  resourceId: string
+  title: string
+  group: string
+  from: string
+  to: string
+  /** move-directory：整个作品目录改名搬走；move-files：散文件走整理流程搬进新目录；in-place：已就位；skip：这次不动 */
+  action: 'move-directory' | 'move-files' | 'in-place' | 'skip'
+  reason: string
+  files: number
+}
+export interface VideoLayoutPreview { root: string; entries: VideoLayoutEntry[]; movable: number }
+export interface VideoLayoutResult { root: string; record: string; outcomes: Array<{ resourceId: string; title: string; ok: boolean; message: string }> }
+
 export interface VideoOrganizeApi {
+  layoutPreview(resourceIds: string[]): Promise<VideoLayoutPreview>
+  layoutApply(resourceIds: string[]): Promise<VideoLayoutResult>
   preview(request: VideoOrganizeRequest): Promise<VideoOrganizePreview>
   apply(request: VideoOrganizeApplyRequest): Promise<VideoOrganizeJournal>
   retry(id: string): Promise<VideoOrganizeJournal>

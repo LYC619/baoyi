@@ -1,9 +1,11 @@
-import { dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { app, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { getDb, getSettings } from '../services/database.ts'
 import {
   applyVideoOrganize, listVideoOrganizeJournal, previewVideoOrganize,
   previewVideoRelocate, relocateVideoDirectory, retryVideoOrganize, rollbackVideoOrganize
 } from '../kinds/video/organize.ts'
+import path from 'node:path'
+import { applyVideoLayout, previewVideoLayout } from '../kinds/video/layout.ts'
 import type {
   VideoOrganizeApplyRequest, VideoOrganizeJournal, VideoOrganizeRequest,
   VideoRelocateApplyRequest, VideoRelocateRequest
@@ -66,6 +68,25 @@ export function registerVideoOrganizeIpc(getWindow: () => BrowserWindow | null, 
   ipcMain.handle('video-organize:relocate', (event, request: VideoRelocateApplyRequest) => {
     assertMain(event)
     return mutate([request?.preview?.resourceId], () => relocateVideoDirectory(getDb(), request))
+  })
+  const layoutRoot = () => {
+    const root = getSettings().video_organize_root || ''
+    if (!path.isAbsolute(root)) throw new Error('请先在设置 → 视频导入与文件整理里保存影视整理根目录')
+    return root
+  }
+  ipcMain.handle('video-organize:layout-preview', (event, ids: string[]) => {
+    assertMain(event); assertVisible(ids)
+    return previewVideoLayout(getDb(), ids, layoutRoot())
+  })
+  ipcMain.handle('video-organize:layout-apply', async (event, ids: string[]) => {
+    assertMain(event); assertVisible(ids)
+    activeOperations++
+    try { return await applyVideoLayout(getDb(), ids, layoutRoot(), path.join(app.getPath('userData'), 'library-layout')) }
+    finally {
+      activeOperations--
+      const win = getWindow()
+      if (win && !win.isDestroyed()) for (const id of new Set(ids)) win.webContents.send('video:library-changed', id)
+    }
   })
   ipcMain.handle('video-organize:pick-directory', async event => {
     assertMain(event)

@@ -15,6 +15,7 @@ import { CircleAlert, FolderPlus, ImageDown, Link, List, Search, Settings, X } f
 import Sidebar from '@/components/video/Sidebar.vue'
 import VideoBulkPanel from '@/components/video/VideoBulkPanel.vue'
 import VideoRemovalDialog from '@/components/video/VideoRemovalDialog.vue'
+import VideoLayoutDialog from '@/components/video/VideoLayoutDialog.vue'
 import type { VideoWorkContent } from '@/types/video-workflow'
 import VideoCard from '@/components/video/VideoCard.vue'
 import DownloadPanel from '@/components/video/DownloadPanel.vue'
@@ -29,10 +30,16 @@ import { useVideoAgentOrganize } from '@/composables/useVideoAgentOrganize'
 import { rangeSelection } from '@/utils/range-selection'
 import { useVideoWorkflow, videoLibraryView, videoJobRetryStages } from '@/composables/useVideoWorkflow'
 import { useVideoStore } from '@/stores/video'
+import { useSettingsStore } from '@/stores/settings'
 import { debounce, errorMessage, shortenPath } from '@/utils'
+import { zhSearchKey } from '@/utils/zh'
 
 const router = useRouter()
 const store = useVideoStore()
+const settings = useSettingsStore()
+// 海报墙格子宽度：拖的时候只改本地值（即时生效），松手才写设置
+const cardSize = ref(settings.settings.video_card_size || 150)
+watch(() => settings.settings.video_card_size, size => { if (size) cardSize.value = size })
 const { toast, success, error } = useToast()
 
 const content = ref<HTMLElement | null>(null)
@@ -80,8 +87,8 @@ async function toggleCollection(id: string) {
 }
 function matchingEpisodes(id: string, episodes = expandedEpisodes.value[id] || []): VideoWorkContent[] {
   const tag = store.selection.kind === 'tag' ? store.selection.value : ''
-  const keyword = store.keyword.trim().toLocaleLowerCase()
-  return episodes.filter(e => (!tag || e.tags?.includes(tag)) && (!keyword || [e.title,e.original_title,...e.tags || []].join(' ').toLocaleLowerCase().includes(keyword)))
+  const keyword = zhSearchKey(store.keyword.trim())
+  return episodes.filter(e => (!tag || e.tags?.includes(tag)) && (!keyword || zhSearchKey([e.title,e.original_title,...e.tags || []].join(' ')).includes(keyword)))
 }
 const searching = computed(() => store.selection.kind === 'tag' || !!store.keyword.trim())
 let expandRun = 0
@@ -100,6 +107,8 @@ watch(() => [shownItems.value, store.selection, store.keyword], async () => {
 })
 const selectedWorks = computed(() => selectedIds.value.map(id => shownItems.value.find(item => item.id === id)).filter((item): item is VideoItem => !!item))
 const organizeMode = ref<'organize' | 'history' | ''>('')
+// 统一移动：选择态就只动选中的，否则动当前范围里的全部作品
+const layoutIds = ref<string[] | null>(null)
 const organizeWorks = ref<VideoItem[]>([])
 const organizeTrigger = ref<HTMLElement | null>(null)
 const organizeReturnFocus = ref<HTMLElement | null>(null)
@@ -307,7 +316,7 @@ const emptyHint = computed(() => {
 </script>
 
 <template>
-  <div class="home" @keydown="selectionKey">
+  <div class="home" :style="{ '--card-min': cardSize + 'px' }" @keydown="selectionKey">
     <Sidebar :pending-active="pendingOnly" :pending-count="pendingItems.length" :private-hidden="privateHidden" @pending="togglePending" />
 
     <main class="home__main">
@@ -365,6 +374,7 @@ const emptyHint = computed(() => {
           <button class="btn btn--subtle" :title="compact ? '海报视图' : '紧凑列表'" :aria-label="compact ? '海报视图' : '紧凑列表'" :aria-pressed="compact" @click="compact = !compact">
             <List :size="16" />
           </button>
+          <input v-if="!compact" v-model.number="cardSize" class="card-size" type="range" min="110" max="320" step="10" title="卡片大小" aria-label="卡片大小" @change="settings.patch({ video_card_size: cardSize })" />
 
           <button class="btn btn--subtle" title="设置" aria-label="设置" @click="router.push({ name: 'settings' })">
             <Settings :size="16" />
@@ -393,6 +403,7 @@ const emptyHint = computed(() => {
           <button ref="organizeTrigger" type="button" :aria-pressed="selecting" @click="toggleSelecting">{{ selecting ? (bulkOpen ? '退出批量管理' : '取消选择') : '创建合集' }}</button>
           <button v-if="!selecting" type="button" @click="toggleSelecting(); bulkOpen = true">批量管理</button>
           <button v-if="!selecting" type="button" @click="organize('history')">整理记录</button>
+          <button type="button" :disabled="scanning || !(selecting ? selectedWorks : shownItems).length" @click="layoutIds = (selecting ? selectedWorks : shownItems).map(item => item.id)">统一移动</button>
         </div>
       </div>
 
@@ -426,6 +437,7 @@ const emptyHint = computed(() => {
     </main>
     <VideoRemovalDialog v-if="removing" :resource-ids="selectedIds" @close="removing = false" @changed="selectedIds = []; store.reload()" />
     <DownloadPanel v-if="workflow.open.value" @close="workflow.open.value = false" />
+    <VideoLayoutDialog v-if="layoutIds" :ids="layoutIds" @close="layoutIds = null" @changed="store.reload" />
     <OrganizePanel v-if="organizeMode" :mode="organizeMode" :works="organizeWorks" :return-focus="organizeReturnFocus" @close="organizeMode = ''" @changed="store.reload" />
   </div>
 </template>
@@ -579,7 +591,7 @@ const emptyHint = computed(() => {
 /* 海报墙。和游戏封面墙同一个格子尺寸 —— 两个库并排看时格子不该跳 */
 .wall {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 150px), 1fr));
   gap: 18px 14px;
   align-content: start;
 }
@@ -589,7 +601,8 @@ const emptyHint = computed(() => {
 .list .work-card :deep(.card__poster) { width: 56px; aspect-ratio: 2 / 3; border-radius: 4px; }
 .list .work-card :deep(.card__initial) { font-size: 20px; }
 .list .work-card :deep(.card__name), .list .work-card :deep(.card__meta) { min-width: 0; min-height: 0; }
-.list .collection-episodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 18px 14px; padding-block: 14px; }
+.list .collection-episodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 150px), 1fr)); gap: 18px 14px; padding-block: 14px; }
+.card-size { width: 90px; accent-color: var(--accent); }
 
 .empty {
   display: flex;

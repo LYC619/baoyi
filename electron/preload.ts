@@ -203,7 +203,9 @@ const api: BaoyiApi = {
     list: resourceId => ipcRenderer.invoke('video-organize:list', resourceId),
     previewRelocate: request => ipcRenderer.invoke('video-organize:preview-relocate', plain(request)),
     relocate: request => ipcRenderer.invoke('video-organize:relocate', plain(request)),
-    pickDirectory: () => ipcRenderer.invoke('video-organize:pick-directory')
+    pickDirectory: () => ipcRenderer.invoke('video-organize:pick-directory'),
+    layoutPreview: ids => ipcRenderer.invoke('video-organize:layout-preview', plain(ids)),
+    layoutApply: ids => ipcRenderer.invoke('video-organize:layout-apply', plain(ids))
   },
   tasks: {
     list: () => ipcRenderer.invoke('tasks:list'),

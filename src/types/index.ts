@@ -634,6 +634,8 @@ export interface AppSettings {
   video_organize_root?: string
   theme: 'dark' | 'light'
   view_mode: 'grid' | 'list'
+  /** 影视海报墙一格的最小宽度（像素）。缺省 150，和游戏封面墙同尺寸；用户在影视库工具栏拖滑块改 */
+  video_card_size?: number
   /**
    * 卡片墙按分类分区块展示。和 view_mode 是两个维度 —— 分组之后每个区块内部
    * 照样可以是网格或列表，所以不做成 view_mode 的第三个值。
