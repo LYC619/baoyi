@@ -14,6 +14,7 @@
 import { readExternalActiveAt } from './activity.ts'
 import { mapCategory } from './taxonomy.ts'
 import type { Category, TagSource } from '../../src/types'
+import { zhSearchKey } from '../../src/utils/zh.ts'
 
 /**
  * 库结构 / 内置数据的版本。
@@ -215,6 +216,15 @@ export const INDEXES_SQL = `
 
 /* ------------------------------ 版本记账 ------------------------------ */
 
+/**
+ * 搜索用的 SQL 函数。better-sqlite3 和 node:sqlite 的 .function() 签名一样，所以自检里的内存库
+ * 和真库走同一条路。zh_key 把字段归一成「简体 + 小写」，简体关键词就能搜到繁体标题（实测第三轮）。
+ */
+export function registerSqlFunctions(d: SqlDb): void {
+  const register = (d as unknown as { function?: (name: string, options: { deterministic: boolean }, fn: (value: unknown) => string) => void }).function
+  if (typeof register === 'function') register.call(d, 'zh_key', { deterministic: true }, zhSearchKey)
+}
+
 export function schemaVersion(d: SqlDb): number {
   const row = d.prepare('SELECT value FROM settings WHERE key = ?').get(SCHEMA_KEY) as Row | undefined
   return Number(row?.value) || 0
@@ -313,6 +323,7 @@ export function seedDefaults(d: SqlDb, kinds: KindLike[]): void {
  *    语句连同 migrate() 全都不会跑，库就停在半迁移状态，而应用看着还能用。
  */
 export function initSchema(d: SqlDb, kinds: KindLike[] = []): void {
+  registerSqlFunctions(d)
   d.exec(TABLES_SQL)
   for (const k of kinds) d.exec(k.schema.tables)
 

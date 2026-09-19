@@ -12,6 +12,7 @@ import { buildLibraryBackup } from './library-backup.ts'
 import { VIDEO_JOBS_SQL } from '../kinds/video/download/jobs.ts'
 import { migratePosterStorage, resolvePosterDirectory } from './poster-storage.ts'
 import { migrateArtworkIntoLibrary } from './artwork-migration.ts'
+import { pruneStrayPlaceholders } from '../kinds/video/catalogue.ts'
 import { isPortable } from './portable'
 import type {
   AgentEvent,
@@ -91,6 +92,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hide_hentai: false,
   theme: 'dark',
   view_mode: 'grid',
+  video_card_size: 150,
   group_by_category: false,
   unused_days: 60,
   title_lang: 'zh',
@@ -221,6 +223,10 @@ export function getDb(): Database.Database {
   // 这些分类名，它只负责把每个品类交上来的那几段 SQL 按顺序执行一遍
   initSchema(db, KINDS)
   db.exec(VIDEO_JOBS_SQL)
+  try {
+    const pruned = pruneStrayPlaceholders(db)
+    if (pruned) console.log(`[抱一] 已清理 ${pruned} 条不属于同系列的占位集（播放列表带来的、本地没有文件的集）`)
+  } catch (cause) { console.error('[抱一] 占位集清理未完成：', cause) }
   try {
     const migration = migratePosterStorage(db, legacyProjectPostersDir(), postersDir())
     if (migration.removed || migration.updated) console.log(`[抱一] 影视图片已搬回 ${postersDir()}（${migration.removed} 张，${migration.updated} 处引用）`)

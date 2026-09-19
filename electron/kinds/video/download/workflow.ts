@@ -15,7 +15,7 @@ import { catalogueIdentity, episodeFilename, numberedEpisode } from '../episode-
 import { fillEpisodeDetails, linkLegacyEpisode, reconcileEpisodeNumbers, sourceEpisodeFacts, type SourceEpisodeDetails } from '../episode-details.ts'
 import { listVideoAssets } from '../library.ts'
 import { downloadPlacement, promoteDownloadDirectory } from './placement.ts'
-import { applyVideoCatalogue, canPromoteWorkTitle, moveWorkDescriptionToEpisode, videoCollectionTitle } from '../catalogue.ts'
+import { applyVideoCatalogue, canPromoteWorkTitle, moveWorkDescriptionToEpisode, releasePlaceholderClaims, videoCollectionTitle } from '../catalogue.ts'
 import { persistVideoWorkBundle, syncVideoWorkFiles } from '../local-sync.ts'
 import { DestinationExistsError, safeDownloadError, type TransferOptions, type TransferResult } from './transfer.ts'
 import type { VideoSources } from './sources.ts'
@@ -239,6 +239,7 @@ export function createVideoWorkflow(deps: Dependencies) {
       item.registration = 'running'; changed(job)
       try {
         deps.beforeRegister?.()
+        for (const released of releasePlaceholderClaims(deps.db, item.videoCode, job.resourceId)) { try { deps.onLibraryChange?.(released) } catch { /* 让出占位的作品刷新失败不影响登记 */ } }
         const registered = registerVideoContent(deps.db, { restoreRemoved: true, resourceId: job.resourceId || undefined, bundleId: job.bundleId, directory: job.directory, root: job.root,
           title: job.title, description: job.description, category: job.category, posterPath: job.posterPath, posterSource: job.posterUrl, thumbnailPath: item.thumbnailPath, thumbnailSource: item.thumbnailUrl, sources: job.sources,
           metadataState: item.metadata === 'complete' ? 'complete' : 'pending', missing: item.metadata === 'complete' ? [] : item.missing || [],

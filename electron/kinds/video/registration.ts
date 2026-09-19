@@ -15,6 +15,7 @@ import { HENTAI_CATEGORY } from './taxonomy.ts'
 import { numberedEpisode } from './episode-identity.ts'
 import { absorbDuplicateVideoCards, localBundleItems, readLocalVideoBundle, rebaseMovedVideoDirectory, videoPathKey } from './local-files.ts'
 import { ignoredVideoFile, clearVideoScanIgnores } from './scan-ignores.ts'
+import { releasePlaceholderClaims } from './placeholders.ts'
 
 export function managedVideoOwner(d: SqlDb, files: string[]): string {
   const detached = files.length ? d.prepare('SELECT a.resource_id FROM video_assets a JOIN video_detached_owners o ON o.resource_id=a.resource_id WHERE a.path=? COLLATE NOCASE').get(path.resolve(files[0])) as { resource_id: string } | undefined : undefined
@@ -229,6 +230,8 @@ export function registerVideoContent(d: SqlDb, input: VideoRegistration): VideoR
     let itemsAdded = 0; let filesAdded = 0
     const numbering = new Map<string, { number: number; season: number }>()
     for (const [index, item] of input.items.entries()) {
+      // 真有文件的集登记进来，别的作品对同一来源的占位（没文件、没看过）就让出去（实测第三轮）
+      if (item.files.length) for (const source of item.sources || []) if (source.provider.toLowerCase() === 'hanime') releasePlaceholderClaims(d, source.externalId, resourceId)
       const itemFiles = item.files.map(file => {
         const published = videoOrganizeAssetPath(d, resourceId, file.path)
         if (published && published !== file.path) {

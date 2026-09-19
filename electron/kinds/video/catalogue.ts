@@ -5,6 +5,8 @@ import { getVideo, listEpisodes } from './db.ts'
 import { catalogueIdentity, collectionRangeTitle, numberedEpisode } from './episode-identity.ts'
 import { linkLegacyEpisode, sourceEpisodeFacts } from './episode-details.ts'
 import { registerVideoContent } from './registration.ts'
+import { releasePlaceholderClaims } from './placeholders.ts'
+export { placeholderEpisodeIds, releasePlaceholderClaims } from './placeholders.ts'
 
 const key = (value: string) => value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase()
 
@@ -42,6 +44,37 @@ export function moveWorkDescriptionToEpisode(d: SqlDb, resourceId: string): void
   if (item.original_description) d.prepare("UPDATE episode SET original_description = ? WHERE id = ? AND original_description = ''").run(item.original_description, row.episode_id)
 }
 
+/**
+ * 「占位集」= 播放列表带来的、本地没有任何文件的集（实测第三轮）。
+ * 之前 applyVideoCatalogue 把列表里每一条都建成占位集并绑定来源，哪怕标题根本不是同一系列
+ * （作者频道的整个列表也会进来）；下载别的作品时 resolveVideoOwnership 查到这些来源就报「已在其他作品」，
+ * 同系列不同部再也建不了自己的合集。现在：
+ *   1. 只给 catalogueIdentity 判定为同系列（numbered）的条目建占位集；
+ *   2. 别的作品要下载某一集时，占位集不算「已归属」，登记前把占位集让出去（releasePlaceholderClaims）。
+ */
+/** 启动时一次性清掉历史遗留的、不是同系列的占位集（幂等；真库里查到 51 条这种） */
+export function pruneStrayPlaceholders(d: SqlDb): number {
+  const rows = d.prepare(`SELECT e.id, e.resource_id, e.title, r.name_zh FROM episode e JOIN resource r ON r.id = e.resource_id
+    WHERE e.path = '' AND e.episode < 0 AND e.position_sec = 0 AND e.watch_status = 'unwatched' AND e.description = '' AND e.poster_path = ''
+      AND NOT EXISTS (SELECT 1 FROM video_episode_assets ea JOIN video_assets a ON a.id = ea.asset_id WHERE ea.episode_id = e.id AND a.role = 'video')
+      AND NOT EXISTS (SELECT 1 FROM video_sources s WHERE s.episode_id = e.id AND s.evidence != 'playlist')`).all() as Array<{ id: string; resource_id: string; title: string; name_zh: string }>
+  const byWork = new Map<string, typeof rows>()
+  for (const row of rows) byWork.set(row.resource_id, [...(byWork.get(row.resource_id) || []), row])
+  let removed = 0
+  for (const [resourceId, group] of byWork) {
+    const codes = d.prepare("SELECT episode_id, external_id FROM video_sources WHERE resource_id = ? AND provider = 'hanime' AND episode_id IS NOT NULL").all(resourceId) as Array<{ episode_id: string; external_id: string }>
+    const entries = (d.prepare('SELECT id, title FROM episode WHERE resource_id = ?').all(resourceId) as Array<{ id: string; title: string }>)
+      .flatMap(ep => { const code = codes.find(c => c.episode_id === ep.id)?.external_id; return code ? [{ videoCode: code, title: ep.title }] : [] })
+    const catalogue = catalogueIdentity(group[0].name_zh, entries)
+    for (const row of group) {
+      const code = codes.find(c => c.episode_id === row.id)?.external_id
+      if (catalogue.episodes.find(ep => ep.videoCode === code)?.numbered) continue
+      d.prepare('DELETE FROM episode WHERE id = ?').run(row.id); removed++
+    }
+  }
+  return removed
+}
+
 export function videoCollectionTitle(title: string, entries: Array<{ videoCode: string; title: string }>): string {
   const catalogue = catalogueIdentity(title, entries)
   const sameSeries = entries.some(ep => numberedEpisode(ep.title)?.title.normalize('NFKC').toLowerCase() === catalogue.title.normalize('NFKC').toLowerCase())
@@ -60,7 +93,11 @@ export function applyVideoCatalogue(d: SqlDb, resourceId: string, info: VideoWor
   linkLegacyEpisode(d, resourceId, catalogue.episodes, info.currentEpisode)
   const rows = listEpisodes(d, resourceId)
   let unknown = Math.min(0, ...rows.map(ep => ep.episode)) - 1
-  const contents: VideoContentInput[] = catalogue.episodes.map(entry => {
+  // 没编号（不是同系列）的条目不建占位集，也不绑来源；已经有本地文件或已绑定的照旧保留
+  const wanted = catalogue.episodes.filter(entry => entry.numbered || entry.videoCode === info.videoCode
+    || d.prepare("SELECT 1 FROM video_sources WHERE resource_id = ? AND provider = 'hanime' AND external_id = ? AND episode_id IS NOT NULL").get(resourceId, entry.videoCode))
+  for (const entry of wanted) releasePlaceholderClaims(d, entry.videoCode, resourceId)
+  const contents: VideoContentInput[] = wanted.map(entry => {
     const source = { provider: 'hanime', externalId: entry.videoCode, scope: 'episode' as const, pageUrl: 'https://hanime1.me/watch?v=' + entry.videoCode, evidence: 'playlist' as const }
     const bound = d.prepare("SELECT episode_id FROM video_sources WHERE resource_id = ? AND provider = 'hanime' AND external_id = ? AND episode_id IS NOT NULL").get(resourceId, entry.videoCode) as { episode_id: string } | undefined
     const old = rows.find(ep => ep.id === bound?.episode_id)
@@ -78,5 +115,5 @@ export function applyVideoCatalogue(d: SqlDb, resourceId: string, info: VideoWor
       if (!item.user_edited.includes('original_description')) d.prepare("UPDATE video_meta SET original_description = '' WHERE resource_id = ?").run(resourceId)
     }
   }
-  return { ...result, title: getVideo(d, resourceId)!.name_zh, catalogue }
+  return { ...result, title: getVideo(d, resourceId)!.name_zh, catalogue: { ...catalogue, episodes: wanted } }
 }

@@ -31,7 +31,11 @@ export function resolveVideoOwnership(d: SqlDb, input: {
       LEFT JOIN video_directories vd ON vd.resource_id = r.id
       WHERE r.kind = 'video'`).all() as Array<Record<string, unknown>>
     for (const row of rows) {
-      const rowSources = d.prepare(`SELECT provider, external_id, scope FROM video_sources WHERE resource_id = ?`).all(String(row.id)) as Array<Record<string, unknown>>
+      // 占位集（播放列表带来的、没文件也没看过的集）不算拥有这个来源：别的作品照样能下载这一集，
+      // 登记时会把占位让出去（catalogue.ts releasePlaceholderClaims）。有文件、看过、或工作级来源仍算归属
+      const rowSources = d.prepare(`SELECT provider, external_id, scope FROM video_sources vs WHERE resource_id = ?
+        AND (episode_id IS NULL OR NOT EXISTS (SELECT 1 FROM episode e WHERE e.id = vs.episode_id AND e.path = '' AND e.position_sec = 0 AND e.watch_status = 'unwatched'
+          AND NOT EXISTS (SELECT 1 FROM video_episode_assets ea JOIN video_assets a ON a.id = ea.asset_id WHERE ea.episode_id = e.id AND a.role = 'video')))`).all(String(row.id)) as Array<Record<string, unknown>>
       if (rowSources.some(source => ids.has(sourceKey({
         provider: String(source.provider), externalId: String(source.external_id), scope: source.scope as 'work' | 'episode',
         pageUrl: '', evidence: 'legacy'

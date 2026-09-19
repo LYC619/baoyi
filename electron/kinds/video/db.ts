@@ -10,6 +10,7 @@
 
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
+import { zhSearchKey } from '../../../src/utils/zh.ts'
 import type {
   Episode,
   LinkedFile,
@@ -750,13 +751,14 @@ export function listVideos(
     where.push("(EXISTS (SELECT 1 FROM json_each(video.tags) t WHERE t.value = ?) OR EXISTS (SELECT 1 FROM json_each(video.hanime_tags) t WHERE t.value = ?) OR EXISTS (SELECT 1 FROM episode e,json_each(e.tags) t WHERE e.resource_id=video.id AND t.value=?))")
     params.push(query.tag, query.tag, query.tag)
   }
-  const keyword = query.keyword?.trim()
+  // 关键词和字段两边都过 zh_key()（繁→简 + 小写，见 utils/zh.ts），简体能搜到繁体标题，反过来也行
+  const keyword = zhSearchKey(query.keyword?.trim() || '')
   if (keyword) {
     // 中英文标题都要搜得到（规格明确要求），顺带 summary / tags / 文件名
     where.push(
-      `(name_zh LIKE ? OR name_en LIKE ? OR summary LIKE ? OR tags LIKE ? OR file_name LIKE ?
-        OR EXISTS (SELECT 1 FROM episode e WHERE e.resource_id = video.id AND (e.title LIKE ? OR e.path LIKE ? OR e.original_title LIKE ? OR e.tags LIKE ?))
-        OR EXISTS (SELECT 1 FROM video_assets a WHERE a.resource_id = video.id AND a.path LIKE ?))`
+      `(zh_key(name_zh) LIKE ? OR zh_key(name_en) LIKE ? OR zh_key(summary) LIKE ? OR zh_key(tags) LIKE ? OR zh_key(file_name) LIKE ?
+        OR EXISTS (SELECT 1 FROM episode e WHERE e.resource_id = video.id AND (zh_key(e.title) LIKE ? OR zh_key(e.path) LIKE ? OR zh_key(e.original_title) LIKE ? OR zh_key(e.tags) LIKE ?))
+        OR EXISTS (SELECT 1 FROM video_assets a WHERE a.resource_id = video.id AND zh_key(a.path) LIKE ?))`
     )
     for (let i = 0; i < 10; i++) params.push(`%${keyword}%`)
   }
@@ -768,7 +770,7 @@ export function listVideos(
   return rows.map(row => {
     const item = rowToVideo(row)
     if (keyword) {
-      const match = d.prepare('SELECT title, path FROM episode WHERE resource_id = ? AND (title LIKE ? OR path LIKE ?) LIMIT 1').get(item.id, `%${keyword}%`, `%${keyword}%`) as Row | undefined
+      const match = d.prepare('SELECT title, path FROM episode WHERE resource_id = ? AND (zh_key(title) LIKE ? OR zh_key(path) LIKE ?) LIMIT 1').get(item.id, `%${keyword}%`, `%${keyword}%`) as Row | undefined
       if (match) item.matched_content = String(match.title || path.basename(match.path || ''))
     }
     return item
