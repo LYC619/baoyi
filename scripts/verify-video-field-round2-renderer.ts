@@ -74,28 +74,27 @@ try {
     await page.evaluate(() => (window as any).__fixture.router.push({ name: 'video-home' }))
     await page.waitForFunction(() => document.querySelectorAll('.work-group').length === 2)
   })
-  await test('B5 任务面板：历史再多，下载区固定贴着底栏、自己滚动，不超过 45% 高', async () => {
+  await test('B5 日志面板：历史再多，任务页签自己滚动、面板不超出窗口；下载在独立页签里（实测第四轮改成页签）', async () => {
     await page.evaluate(() => {
       const center = (window as any).__fixture.center
       for (let i = 0; i < 40; i++) center.finish(center.start('software-scan', '历史任务 ' + i), 'success', '完成 ' + i)
     })
     await page.locator('.task-trigger').click()
     const panel = page.locator('.task-panel'); await panel.waitFor()
-    await page.waitForFunction(() => document.querySelectorAll('.task-panel__downloads .download-task').length >= 3)
     const layout = await page.evaluate(() => {
       const rect = (s: string) => document.querySelector(s)!.getBoundingClientRect()
-      const body = rect('.task-panel__body'), downloads = rect('.task-panel__downloads'), footer = rect('.task-panel__footer'), panel = rect('.task-panel')
-      const bodyEl = document.querySelector('.task-panel__body')!
-      return { body, downloads, footer, panel, innerHeight: window.innerHeight, bodyScrollable: bodyEl.scrollHeight > bodyEl.clientHeight, history: document.querySelectorAll('.task-panel__body .task-card').length }
+      const footer = rect('.task-panel__footer'), bodyEl = document.querySelector('.task-panel__body')!
+      return { footer, innerHeight: window.innerHeight, bodyScrollable: bodyEl.scrollHeight > bodyEl.clientHeight, history: document.querySelectorAll('.task-panel__body .task-card').length, downloads: document.querySelectorAll('.download-task').length }
     })
     assert.ok(layout.history >= 30, '历史要铺满：' + layout.history)
     assert.ok(layout.bodyScrollable, '任务区自己滚动')
-    assert.ok(Math.abs(layout.downloads.bottom - layout.footer.top) < 1, '下载区底边贴着 footer 顶：' + layout.downloads.bottom + ' vs ' + layout.footer.top)
     assert.ok(layout.footer.bottom <= layout.innerHeight + 1, '面板不能超出窗口')
-    assert.ok(layout.downloads.height <= layout.innerHeight * 0.45 + 1, '下载区最多 45% 高')
-    assert.ok(layout.body.bottom <= layout.downloads.top + 1, '任务区在下载区上方')
+    assert.equal(layout.downloads, 0, '任务页签里没有下载卡片')
+    await panel.locator('.task-tabs').getByRole('button', { name: /^下载记录/ }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.task-panel__downloads .download-task').length >= 3)
+    assert.ok((await page.evaluate(() => document.querySelector('.task-panel__footer')!.getBoundingClientRect().bottom)) <= layout.innerHeight + 1)
     await page.screenshot({ path: path.join(evidence, 'b5-task-panel.png') })
-    await page.getByRole('button', { name: '关闭任务面板' }).click()
+    await page.getByRole('button', { name: '关闭日志面板' }).click()
   })
   assert.deepEqual(errors, [], 'renderer must not throw')
 } finally { await fixture.close() }

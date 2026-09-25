@@ -39,6 +39,7 @@ export function createVideoJobStore(db: SqlDb) {
     db.prepare(`INSERT INTO video_download_jobs (id, status, updated_at, payload) VALUES (?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, payload = excluded.payload`).run(job.id, job.status, job.updatedAt, JSON.stringify(job))
   }
+  function remove(id: string): void { db.prepare('DELETE FROM video_download_jobs WHERE id = ?').run(id) }
   function interrupt(): void {
     for (const job of list()) if (job.status === 'running' || job.status === 'queued') {
       job.status = 'interrupted'; job.updatedAt = Date.now(); job.message = '应用关闭前未完成，已保存的内容保留；可重试剩余项'
@@ -50,5 +51,5 @@ export function createVideoJobStore(db: SqlDb) {
       save(job)
     }
   }
-  return { list, save, interrupt }
+  return { list, save, remove, interrupt }
 }

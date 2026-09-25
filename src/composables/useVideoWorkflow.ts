@@ -232,10 +232,14 @@ export function useVideoWorkflow(resourceId = '') {
     if (!(await window.baoyi.video.cancelDownloadJob(id))) throw new Error('任务已结束，无法停止')
     await refresh()
   })
+  const dismiss = (id: string) => act(id, async () => {
+    if (!(await window.baoyi.video.dismissDownloadJob(id))) throw new Error('任务仍在处理，先停止再移除')
+    allJobs.value = allJobs.value.filter(job => job.id !== id)
+  })
   const reveal = (id: string) => act(id, async () => {
     if (!(await window.baoyi.video.revealDownloadJob(id))) throw new Error('保存位置暂不可用，请检查磁盘是否在线')
   })
 
   return { ...toRefs(current), jobs, currentJob, draftHidden, hideHentai, privacyReady, needsPrepare, episodes, jobsError, actionIds,
-    prepare, pickRoot, enqueue, reset, refresh, retry, cancel, reveal, applyPreferences }
+    prepare, pickRoot, enqueue, reset, refresh, retry, cancel, dismiss, reveal, applyPreferences }
 }

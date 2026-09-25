@@ -1457,7 +1457,8 @@ async function main(): Promise<void> {
       // 0.5 拆表之后，同一件事要落到两张表上，所以两条都得核
       'UPDATE resource SET path = @exe_path',
       'UPDATE software_meta SET launchers = @launchers',
-      'INSERT INTO resource\n         (id, kind, created_at',
+      // 0.7 起影视模块也有一条 INSERT INTO resource（列名是拼出来的、带 ${}，prepare 不了），锚点写到 file_name 才落在软件那条上
+      'INSERT INTO resource\n         (id, kind, created_at, updated_at, path, icon_path, file_name',
       'INSERT INTO software_meta\n         (resource_id',
       'INSERT OR IGNORE INTO resource',
       'INSERT OR IGNORE INTO software_meta',

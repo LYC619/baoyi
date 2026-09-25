@@ -405,6 +405,14 @@ export function createVideoWorkflow(deps: Dependencies) {
     drafts.clear()
     jobs.clear()
   }
-  return { prepare, setRoot, enqueue, retry, cancel, clearHistory, list: () => { refreshIdleJobs(); return [...jobs.values()].sort((a, b) => b.updatedAt - a.updatedAt).map(j => structuredClone(j)) },
+  /** 把一条已经结束的下载记录从列表里拿掉。文件、作品、日志都不动——只是用户看过了、不想再被角标数着（实测第四轮）。 */
+  function dismiss(id: string): boolean {
+    refreshIdleJobs()
+    const job = jobs.get(id)
+    if (!job || job.status === 'running' || job.status === 'queued') return false
+    jobs.delete(id); store.remove(id)
+    return true
+  }
+  return { prepare, setRoot, enqueue, retry, cancel, dismiss, clearHistory, list: () => { refreshIdleJobs(); return [...jobs.values()].sort((a, b) => b.updatedAt - a.updatedAt).map(j => structuredClone(j)) },
     idle: async () => { while (pumping) await pumping } }
 }

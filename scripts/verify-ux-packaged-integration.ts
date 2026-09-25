@@ -341,7 +341,7 @@ try {
     assert.equal(read(d => d.prepare("SELECT value FROM settings WHERE key = 'video_download_root'").get()!.value), JSON.stringify(media))
     for (const [file, contents] of Object.entries(originalFiles)) assert.equal(fs.readFileSync(file, 'utf8'), contents)
     await go('/video')
-    await expect(page.getByRole('button', { name: '从链接添加', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '从 Hanime 添加', exact: true })).toBeVisible()
     await expect(page.locator('.wall .card')).toHaveCount(0)
     await page.locator('.task-trigger').click()
     assert.ok(!(await page.locator('.task-panel').innerText()).includes('已完成的课程任务'))

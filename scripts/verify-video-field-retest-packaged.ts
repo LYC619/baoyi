@@ -58,7 +58,8 @@ let app: any, page: any
 const checks: string[] = [], errors: string[] = []
 const report: Record<string, unknown> = { executable, profile, liveSources: live ? ['406504', '406505'] : [], videoTransferred: false }
 async function launch() {
-  app = await _electron.launch({ executablePath: executable, args: ['--user-data-dir=' + profile], env: environment, timeout: 30000 })
+  const args = ['--user-data-dir=' + profile, ...(process.env.BAOYI_TEST_IN_PROCESS_GPU === '1' ? ['--disable-gpu', '--in-process-gpu'] : [])]
+  app = await _electron.launch({ executablePath: executable, args, env: environment, timeout: 30000 })
   assert.equal(await app.evaluate(({ app }: any) => app.getPath('userData')), profile)
   page = await app.firstWindow(); page.setDefaultTimeout(20000)
   page.on('pageerror', (cause: Error) => errors.push(cause.message))
@@ -111,7 +112,7 @@ try {
     for (const number of [1, 2]) await page.getByRole('button', { name: '选择作品：独立样例 LEVEL：' + number, exact: true }).click()
     await page.getByRole('button', { name: '下一步', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '组建合集', exact: true })
-    await expect(dialog.getByLabel('合集名称', { exact: true })).toHaveValue('独立样例')
+    await expect(dialog.getByLabel('合集名称', { exact: true })).toHaveValue('独立样例 1-2')
     const create = dialog.getByRole('button', { name: '创建合集', exact: true })
     await expect(create).toBeEnabled(); await create.click()
     await expect(dialog.locator('.organize-journal__status')).toHaveText('已完成')
@@ -120,19 +121,24 @@ try {
     await page.screenshot({ path: path.join(evidence, 'collection-created.png') })
     await dialog.getByRole('button', { name: '关闭整理面板', exact: true }).click()
   })
-  await check('directory import persists its progress and results in the task panel', async () => {
+  await check('directory import requires confirmation and keeps its preview task in the log panel', async () => {
     await route('/video')
     await app.evaluate(({ dialog }: any, directory: string) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }) }, path.dirname(importFile))
     await page.getByRole('button', { name: '导入目录', exact: true }).click()
-    await page.getByRole('button', { name: /^任务中心：/ }).click()
-    const dialog = page.getByRole('dialog', { name: '任务与下载', exact: true })
-    const task = dialog.locator('.task-card').filter({ has: page.getByRole('heading', { name: '影视目录导入', exact: true }) })
+    const importPanel = page.getByRole('dialog', { name: '视频导入确认', exact: true })
+    const selection = importPanel.getByRole('checkbox', { name: '选择导入：任务导入样例', exact: true })
+    await selection.waitFor()
+    if (!(await selection.isChecked())) await selection.click()
+    await importPanel.getByRole('button', { name: '确认录入 1 项', exact: true }).click()
+    await expect(importPanel.locator('.import-list li')).toContainText('已入库')
+    await importPanel.getByRole('button', { name: '关闭导入确认', exact: true }).click()
+    await page.getByRole('button', { name: /^日志：/ }).click()
+    const dialog = page.getByRole('dialog', { name: '日志', exact: true })
+    const task = dialog.locator('.task-card').filter({ has: page.getByRole('heading', { name: '视频导入 · 识别预览', exact: true }) })
     await expect(task).toContainText('已完成')
-    await expect(task).toContainText('1 项入库')
-    await task.getByRole('button', { name: /查看日志/ }).click()
-    await expect(task).toContainText('已读取本地资料')
+    await expect(task).toContainText('1 项识别结果，等待确认入库')
     await page.screenshot({ path: path.join(evidence, 'import-task.png') })
-    await dialog.getByRole('button', { name: '关闭任务面板', exact: true }).click()
+    await dialog.getByRole('button', { name: '关闭日志面板', exact: true }).click()
   })
   await app.close(); app = undefined
   await launch()
@@ -140,7 +146,7 @@ try {
     assert.equal((await library(independent[0])).contents.length, 2)
     assert.equal((await library(loose)).contents.find((episode: any) => episode.id === secondId).assets.filter((asset: any) => asset.role === 'video' && asset.state === 'present').length, 1)
     const tasks = await page.evaluate(() => (window as any).baoyi.tasks.list())
-    assert.ok(tasks.some((task: any) => task.title === '影视目录导入' && task.status === 'success'))
+    assert.ok(tasks.some((task: any) => task.title === '视频导入 · 识别预览' && task.status === 'success'))
     assert.deepEqual(errors, [])
   })
   report.status = 'passed'

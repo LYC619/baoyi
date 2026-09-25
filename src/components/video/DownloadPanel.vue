@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Download, ExternalLink, FolderOpen, Link, Loader2, RefreshCw, Settings, X } from 'lucide-vue-next'
+import { Download, ExternalLink, FolderOpen, Globe, Link, Loader2, RefreshCw, Settings, X } from 'lucide-vue-next'
+import { errorMessage } from '@/utils'
 import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
 
 const props = withDefaults(defineProps<{ id?: string }>(), { id: '' })
@@ -23,6 +24,13 @@ const location = computed(() => {
   return (title.value.trim() || '未填写作品名称') + '（入队时生成目录）'
 })
 const missingMetadata = computed(() => (draft.value?.missing ?? []).map(value => ({ poster: '海报', description: '简介' }[value] || value)))
+const hanimeError = ref('')
+/** 站内窗口挑好视频后，窗口菜单「下载当前视频」会把链接送回这个面板（main.ts 里接 hanimeBrowser.onDownload） */
+async function openHanime(): Promise<void> {
+  hanimeError.value = ''
+  try { await window.baoyi.hanimeBrowser.open() }
+  catch (cause) { hanimeError.value = errorMessage(cause) }
+}
 
 function selectMissing(): void {
   selectedVideoCodes.value = selectable.value.filter(episode => episode.state !== 'local').map(episode => episode.videoCode)
@@ -62,7 +70,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
     <div class="download-overlay" @click.self="close">
       <section ref="panel" class="download-panel" role="dialog" aria-modal="true" aria-labelledby="download-title">
         <header class="download-panel__head">
-          <div><h2 id="download-title">{{ id ? '补齐作品内容' : '从链接添加作品' }}</h2><p>先确认内容和保存位置，再加入下载队列。</p></div>
+          <div><h2 id="download-title">{{ id ? '补齐作品内容' : '从 Hanime 添加作品' }}</h2><p>先确认内容和保存位置，再加入下载队列。</p></div>
           <button class="btn btn--subtle" type="button" aria-label="关闭下载面板" :disabled="enqueuing" @click="close"><X :size="18" /></button>
         </header>
         <div class="download-panel__body">
@@ -71,8 +79,10 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
             <div class="download-url__input">
               <input id="video-source-url" v-model="url" type="url" class="input" placeholder="https://hanime1.me/watch?v=…" :disabled="busy" required />
               <button class="btn btn--ghost" type="submit" :disabled="busy || !url.trim()"><Loader2 v-if="preparing" :size="14" class="spin" /><RefreshCw v-else :size="14" />{{ preparing ? '正在解析' : draft ? '重新解析' : '解析链接' }}</button>
+              <button v-if="!id" class="btn btn--ghost" type="button" :disabled="busy || flow.hideHentai.value" :title="flow.hideHentai.value ? '里番内容已隐藏，请先在设置中恢复显示' : '在应用内打开 Hanime 站点，挑好视频后用窗口菜单「下载当前视频」'" @click="openHanime"><Globe :size="14" />在 Hanime 里找</button>
             </div>
-            <p class="download-hint">支持 Hanime 来源页。{{ id ? '补充链接后仍归入当前作品。' : '解析阶段只创建草稿。' }}</p>
+            <p class="download-hint">{{ id ? '粘贴 Hanime 视频页链接，补充后仍归入当前作品。' : '目前只支持 Hanime：粘贴视频页链接，或到站内挑好后用窗口菜单「下载当前视频」，会自动回到这里。解析阶段只创建草稿。' }}</p>
+            <p v-if="hanimeError" class="download-error" role="alert">{{ hanimeError }}</p>
           </form>
           <p v-if="preparing" class="download-hint" role="status">正在读取来源内容和核对本地文件…</p>
           <p v-if="draftHidden" class="download-hint">此作品所属分类已隐藏，可在设置中恢复显示。</p>

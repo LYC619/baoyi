@@ -56,7 +56,7 @@ onBeforeUnmount(() => dialog.value?.close())
 <template>
   <Teleport to="body">
     <dialog ref="dialog" class="import-panel" aria-labelledby="video-import-title" @cancel.prevent="close">
-      <header><div><h2 id="video-import-title">视频导入确认</h2><p>先识别、再勾选入库。关闭后可从“导入确认”继续。</p></div><button type="button" aria-label="关闭导入确认" @click="close"><X :size="19" /></button></header>
+      <header><div><h2 id="video-import-title">视频导入确认</h2><p>先识别、再勾选入库。关闭后可从影视墙的「导入待确认」或设置页继续。</p></div><button type="button" aria-label="关闭导入确认" @click="close"><X :size="19" /></button></header>
       <div class="import-tools">
         <select :value="batch?.id || ''" :disabled="working" aria-label="导入批次" @change="switchBatch(($event.target as HTMLSelectElement).value)"><option value="" disabled>选择一批导入</option><option v-for="row in batches" :key="row.id" :value="row.id">{{ new Date(row.createdAt).toLocaleString('zh-CN', { hour12: false }) }} · {{ row.total }} 项 / {{ row.pending }} 项待确认</option></select>
         <label class="agent-toggle"><input type="checkbox" :checked="useAgent" :disabled="working" @change="session.setAgent(($event.target as HTMLInputElement).checked)" />新批次启用 Agent</label>

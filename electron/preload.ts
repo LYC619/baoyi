@@ -177,6 +177,7 @@ const api: BaoyiApi = {
     downloadJobs: () => ipcRenderer.invoke('video-workflow:list'),
     retryDownloadJob: (id, stage) => ipcRenderer.invoke('video-workflow:retry', id, stage),
     cancelDownloadJob: (id) => ipcRenderer.invoke('video-workflow:cancel', id),
+    dismissDownloadJob: (id) => ipcRenderer.invoke('video-workflow:dismiss', id),
     revealDownloadJob: (id) => ipcRenderer.invoke('video-workflow:reveal', id),
     onDownloadJob: (cb) => subscribe('video-workflow:changed', cb),
     onLibraryChanged: (cb) => subscribe('video:library-changed', cb),

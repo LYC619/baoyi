@@ -651,7 +651,6 @@ function copyPath(path: string): void {
             <div class="head__moreMenu">
           <button class="btn btn--ghost" @click="openOrganize('relocate')"><FolderOpen :size="14" />目录管理 / 重新绑定</button>
           <button v-if="library?.directory" class="btn btn--ghost" @click="renameOpen = true; moreMenu && (moreMenu.open = false)"><Pencil :size="14" />修改合集名称</button>
-          <button class="btn btn--ghost" @click="openOrganize('history')">整理记录</button>
           <button
             class="btn btn--ghost"
             :disabled="!tmdbUrl"

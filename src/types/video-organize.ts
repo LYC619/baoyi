@@ -155,6 +155,8 @@ export interface VideoLayoutEntry {
   action: 'move-directory' | 'move-files' | 'in-place' | 'skip'
   reason: string
   files: number
+  /** move-files 且带这个字段：顺着这条没收尾的整理日志重试，而不是另起一次 */
+  journal?: string
 }
 export interface VideoLayoutPreview { root: string; entries: VideoLayoutEntry[]; movable: number }
 export interface VideoLayoutResult { root: string; record: string; outcomes: Array<{ resourceId: string; title: string; ok: boolean; message: string }> }

@@ -106,7 +106,7 @@ watch(() => [shownItems.value, store.selection, store.keyword], async () => {
   }
 })
 const selectedWorks = computed(() => selectedIds.value.map(id => shownItems.value.find(item => item.id === id)).filter((item): item is VideoItem => !!item))
-const organizeMode = ref<'organize' | 'history' | ''>('')
+const organizeMode = ref<'organize' | ''>('')
 // 统一移动：选择态就只动选中的，否则动当前范围里的全部作品
 const layoutIds = ref<string[] | null>(null)
 const organizeWorks = ref<VideoItem[]>([])
@@ -123,10 +123,10 @@ function selectWork(id: string, event?: MouseEvent): void {
   selectedIds.value = rangeSelection(shownItems.value.map(item => item.id), selectedIds.value, id, selectionAnchor.value, event?.shiftKey)
   if (!event?.shiftKey || !selectionAnchor.value) selectionAnchor.value = id
 }
-function organize(mode: 'organize' | 'history'): void {
-  if (mode === 'organize' && !selectedWorks.value.length) return
-  organizeWorks.value = mode === 'organize' ? [...selectedWorks.value] : []
-  organizeReturnFocus.value = mode === 'organize' ? organizeTrigger.value : document.activeElement as HTMLElement | null
+function organize(mode: 'organize'): void {
+  if (!selectedWorks.value.length) return
+  organizeWorks.value = [...selectedWorks.value]
+  organizeReturnFocus.value = organizeTrigger.value
   organizeMode.value = mode
 }
 function selectionKey(event: KeyboardEvent): void {
@@ -199,11 +199,6 @@ async function reviewSelected(): Promise<void> {
   } catch (cause) { error(errorMessage(cause)) }
   finally { reviewingSelected.value = false }
 }
-async function openHanime(): Promise<void> {
-  try { await window.baoyi.hanimeBrowser.open() }
-  catch (cause) { error(errorMessage(cause)) }
-}
-
 onMounted(async () => {
   unlistenLibrary = window.baoyi.video.onLibraryChanged?.(requestLibraryRefresh)
   document.addEventListener('visibilitychange', resumeLibraryRefresh)
@@ -310,7 +305,7 @@ const emptyHint = computed(() => {
   if (store.selection.kind === 'type')
     return { title: `还没有${store.heading}`, desc: '换一格看看，或者点右上角加影视' }
   if (store.counts.all === 0)
-    return { title: '影视库还是空的', desc: '从链接添加作品，或扫描本地目录、导入资源包。' }
+    return { title: '影视库还是空的', desc: '从 Hanime 添加作品，或扫描本地目录、导入资源包。' }
   return { title: '这里还没有内容', desc: '换个分类看看' }
 })
 </script>
@@ -327,7 +322,6 @@ const emptyHint = computed(() => {
         </div>
 
         <div class="library-search">
-        <button v-if="store.inHentaiScope && !privateHidden" class="btn btn--ghost hanime-entry" type="button" @click="openHanime">打开 Hanime</button>
         <div class="search">
           <Search :size="15" class="search__icon" />
           <input
@@ -362,7 +356,7 @@ const emptyHint = computed(() => {
             {{ filling ? '补海报…' : `补海报 ${missingPosterIds.length}` }}
           </button>
 
-          <button class="btn btn--primary" @click="addFromLink"><Link :size="15" />从链接添加</button>
+          <button class="btn btn--primary" title="粘贴 Hanime 视频页链接，或到站内挑好再下载" @click="addFromLink"><Link :size="15" />从 Hanime 添加</button>
           <button class="btn btn--ghost" :disabled="scanning" @click="addVideos">
             <FolderPlus :size="15" />
             扫描本地
@@ -370,7 +364,6 @@ const emptyHint = computed(() => {
           <button class="btn btn--subtle" title="导入视频目录或抱一资源包" :disabled="scanning || importing" @click="importBundle">
             <FolderPlus :size="15" /> {{ importing ? '导入中…' : '导入目录' }}
           </button>
-          <button class="btn btn--subtle" @click="videoImport.show()">导入确认<template v-if="videoImport.pendingCount.value"> {{ videoImport.pendingCount.value }}</template></button>
           <button class="btn btn--subtle" :title="compact ? '海报视图' : '紧凑列表'" :aria-label="compact ? '海报视图' : '紧凑列表'" :aria-pressed="compact" @click="compact = !compact">
             <List :size="16" />
           </button>
@@ -402,7 +395,7 @@ const emptyHint = computed(() => {
           <button type="button" :disabled="!shownItems.length" @click="videoAgent.show(selecting ? selectedWorks : shownItems)">Agent 整理</button>
           <button ref="organizeTrigger" type="button" :aria-pressed="selecting" @click="toggleSelecting">{{ selecting ? (bulkOpen ? '退出批量管理' : '取消选择') : '创建合集' }}</button>
           <button v-if="!selecting" type="button" @click="toggleSelecting(); bulkOpen = true">批量管理</button>
-          <button v-if="!selecting" type="button" @click="organize('history')">整理记录</button>
+          <button v-if="!selecting && videoImport.pendingCount.value" type="button" class="import-pending" @click="videoImport.show()"><CircleAlert :size="13" />导入待确认 {{ videoImport.pendingCount.value }}</button>
           <button type="button" :disabled="scanning || !(selecting ? selectedWorks : shownItems).length" @click="layoutIds = (selecting ? selectedWorks : shownItems).map(item => item.id)">统一移动</button>
         </div>
       </div>
@@ -497,7 +490,6 @@ const emptyHint = computed(() => {
 }
 .library-search { display:flex; align-items:center; gap:8px; flex:1; min-width:260px; }
 .library-search .search { min-width:80px; max-width:none; }
-.hanime-entry { flex:none; white-space:nowrap; }
 
 .search__icon {
   position: absolute;
@@ -631,6 +623,7 @@ const emptyHint = computed(() => {
 .library-summary button { margin-left: auto; color: var(--text-main); text-decoration: underline; }
 .library-summary__actions { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .library-summary__actions button, .library-summary .selection-action { margin-left: 0; min-height: 28px; }
+.library-summary__actions .import-pending { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); text-decoration: none; }
 .library-summary button:disabled { opacity: .5; cursor: default; }
 .scan-results { margin: 0 0 16px; padding: 12px; border: 1px solid var(--divider); border-radius: var(--radius-input); background: var(--bg-card); color: var(--text-sub); font-size: var(--fs-tag); }
 .scan-results summary { cursor: pointer; color: var(--text-main); }

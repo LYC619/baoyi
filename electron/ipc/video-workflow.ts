@@ -66,6 +66,7 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   ipcMain.handle('video-workflow:list', event => { assertMain(event); return workflow.list().filter(visible) })
   ipcMain.handle('video-workflow:retry', (event, id: string, stage: VideoJobRetry) => { assertMain(event); return workflow.retry(id, stage) })
   ipcMain.handle('video-workflow:cancel', (event, id: string) => { assertMain(event); return workflow.cancel(id) })
+  ipcMain.handle('video-workflow:dismiss', (event, id: string) => { assertMain(event); return workflow.dismiss(id) })
   ipcMain.handle('video-workflow:reveal', async (event, id: string) => {
     assertMain(event); const job = workflow.list().find(job => job.id === id)
     if (!job || !job.directory || !fs.existsSync(job.directory)) return false

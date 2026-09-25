@@ -25,7 +25,7 @@ let passed = 0, failed = 0
 async function test(name: string, run: () => Promise<void>) {
   try { await run(); passed++ }
   catch (cause) { failed++; console.error('FAIL ' + name + ': ' + (cause instanceof Error ? cause.message : cause)); await page.screenshot({ path: path.join(evidence, 'failure-' + failed + '.png') }) }
-  finally { for (const name of ['关闭任务面板', '关闭下载面板']) { const button = page.getByRole('button', { name, exact: true }); if (await button.isVisible().catch(() => false)) { await button.click(); await button.waitFor({ state: 'hidden' }) } } }
+  finally { for (const name of ['关闭日志面板', '关闭下载面板']) { const button = page.getByRole('button', { name, exact: true }); if (await button.isVisible().catch(() => false)) { await button.click(); await button.waitFor({ state: 'hidden' }) } } }
 }
 async function route(name: string, params = {}) {
   await page.evaluate(({ name, params }: any) => (window as any).__fixture.router.push({ name, params }), { name, params })
@@ -69,22 +69,22 @@ try {
   await test('import has scoped identify logs and finished downloads stay collapsed after task history', async () => {
     await route('video-home')
     await page.getByRole('button', { name: '导入目录', exact: true }).click()
-    await page.getByRole('button', { name: /^任务中心：/ }).click()
-    const panel = page.getByRole('dialog', { name: '任务与下载' })
+    await page.getByRole('button', { name: /^日志：/ }).click()
+    const panel = page.getByRole('dialog', { name: '日志' })
     const task = panel.locator('.task-card').filter({ has: page.getByRole('heading', { name: '影视目录导入', exact: true }) })
     await task.getByText('查看识别日志', { exact: true }).click()
     await task.getByRole('button', { name: /导入识别示例/ }).click()
     assert.match(await task.innerText(), /站点发布日期：2026-06-04/)
-    assert.equal(await panel.locator('.download-task').first().isVisible(), false)
-    assert.ok(await panel.locator('.task-group--downloads').evaluate((element: Element) => !!(document.querySelector('.task-identify')!.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)))
-    await panel.locator('.task-group--downloads > summary').click()
+    // 下载记录不再和任务挤在一起：任务页签里没有下载卡片，切到「下载记录」才有
+    assert.equal(await panel.locator('.download-task').count(), 0)
+    await panel.locator('.task-tabs').getByRole('button', { name: /^下载记录/ }).click()
     assert.equal(await panel.locator('.download-task').first().isVisible(), true)
     await page.screenshot({ path: path.join(evidence, 'task-import-logs.png') })
   })
   await test('independent playlist entries are displayed without becoming selectable', async () => {
     await route('video-home')
-    await page.getByRole('button', { name: /从链接添加|链接下载/ }).click()
-    const dialog = page.getByRole('dialog', { name: '从链接添加作品' })
+    await page.getByRole('button', { name: /从 Hanime 添加/ }).click()
+    const dialog = page.getByRole('dialog', { name: '从 Hanime 添加作品' })
     await dialog.getByLabel('来源页面链接').fill('https://hanime1.me/watch?v=200')
     await dialog.getByRole('button', { name: '解析链接', exact: true }).click()
     const other = dialog.locator('label').filter({ hasText: '独立条目的第二集' }).getByRole('checkbox')

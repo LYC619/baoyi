@@ -19,6 +19,21 @@ interface SessionOptions {
   changed?: (journal: VideoOrganizeJournal) => void
 }
 
+/**
+ * Journals have no category field. Check every contributor, including archived sources,
+ * before rendering paths, messages or even a count. Shared by the organize panel and the log panel.
+ */
+export async function filterVisibleJournals(saved: VideoOrganizeJournal[], privateHidden: boolean): Promise<VideoOrganizeJournal[]> {
+  if (!privateHidden) return saved
+  const ids = [...new Set(saved.flatMap(journal => [journal.survivorId, ...journal.sourceIds, ...journal.files.flatMap(file => file.resourceIds)]))]
+  const checked = await Promise.all(ids.map(async id => {
+    try { const work = await window.baoyi.video.get(id); return work && work.category !== '里番' ? id : null }
+    catch { return null }
+  }))
+  const allowed = new Set(checked.filter((id): id is string => id !== null))
+  return saved.filter(journal => [journal.survivorId, ...journal.sourceIds, ...journal.files.flatMap(file => file.resourceIds)].every(id => allowed.has(id)))
+}
+
 /** Read-only collection previews follow inputs; all writes require a reviewed snapshot. */
 export function useOrganizeSession(options: SessionOptions) {
   const works = computed(() => options.works().filter(work => !options.privateHidden() || work.category !== '里番'))
@@ -208,18 +223,7 @@ export function useOrganizeSession(options: SessionOptions) {
     try {
       const saved: VideoOrganizeJournal[] = await bridge().list(options.resourceId)
       if (!usable(revision)) return
-      let visible = saved
-      if (options.privateHidden()) {
-        // Journals have no category field. Check every contributor, including
-        // archived sources, before rendering paths, messages or even a count.
-        const ids = [...new Set(saved.flatMap(journal => [journal.survivorId, ...journal.sourceIds, ...journal.files.flatMap(file => file.resourceIds)]))]
-        const checked = await Promise.all(ids.map(async id => {
-          try { const work = await window.baoyi.video.get(id); return work && work.category !== '里番' ? id : null }
-          catch { return null }
-        }))
-        const allowed = new Set(checked.filter((id): id is string => id !== null))
-        visible = saved.filter(journal => [journal.survivorId, ...journal.sourceIds, ...journal.files.flatMap(file => file.resourceIds)].every(id => allowed.has(id)))
-      }
+      const visible = await filterVisibleJournals(saved, options.privateHidden())
       if (!usable(revision)) return
       journals.value = visible
       historyLoaded.value = true

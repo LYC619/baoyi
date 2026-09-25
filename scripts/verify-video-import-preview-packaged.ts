@@ -107,7 +107,7 @@ try {
     assert.ok(!fs.existsSync(path.join(imports, 'Alpha/baoyi.json')))
   })
   await check('import dialog supports Shift selection, row review and editing without replacing the batch', async () => {
-    await page.getByRole('button', { name: /^导入确认/ }).click()
+    await page.getByRole('button', { name: /^导入待确认/ }).click()
     const panel = page.getByRole('dialog', { name: '视频导入确认' })
     await expect(panel.locator('.import-list li')).toHaveCount(3)
     await panel.getByRole('button', { name: '全选 / 取消当前列表', exact: true }).click()
@@ -143,7 +143,7 @@ try {
     const restored = await getDraft(); assert.equal(restored.entries.length, 3)
     assert.equal(restored.entries.find((entry: any) => entry.id === unknownId).title, '人工确认样例')
     assert.ok(restored.entries.find((entry: any) => entry.id === unknownId).log.includes('Agent'))
-    await page.getByRole('button', { name: /^导入确认/ }).click()
+    await page.getByRole('button', { name: /^导入待确认/ }).click()
     await expect(page.getByRole('dialog', { name: '视频导入确认' }).locator('.import-list li')).toHaveCount(3)
     await page.keyboard.press('Escape')
   })

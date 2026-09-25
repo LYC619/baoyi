@@ -31,6 +31,24 @@ const samePath = (a: string, b: string) => !!a && !!b && keyPath(a) === keyPath(
 const textError = (error: unknown) => error instanceof Error ? error.message : String(error)
 const stableId = (kind: string, value: string) => `organize-${kind}-${hash(value).slice(0, 32)}`
 const stagingPath = (directory: string, identity: string) => path.join(directory, `.baoyi-organize-${hash(identity).slice(0, 24)}.part`)
+const MAX_TARGET_PATH = 240
+/**
+ * 目标装不下 240 字时按目录名同样的规矩截短文件名：留扩展名，补 8 位哈希。
+ * 下载来的文件名动辄两百字，目录名截到 90 字也照样超，之前只报「路径过长」——
+ * 用户既改不了下载时的文件名，也不知道上限是多少（实测第四轮）。目录本身就装不下的还是交给 checkDestination 报。
+ */
+function fitRelativePath(target: string, relative: string): string {
+  if (path.join(target, relative).length <= MAX_TARGET_PATH) return relative
+  const dir = path.dirname(relative), name = path.basename(relative)
+  const ext = path.extname(name), stem = name.slice(0, name.length - ext.length)
+  const base = dir === '.' ? target : path.join(target, dir)
+  const room = MAX_TARGET_PATH - base.length - 10 - ext.length
+  if (room < 12 || stem.length <= room) return relative
+  let short = stem.slice(0, room)
+  if (/[\uD800-\uDBFF]$/.test(short)) short = short.slice(0, -1)
+  const fitted = short.replace(/[. ]+$/g, '') + '-' + hash(stem).slice(0, 8) + ext
+  return dir === '.' ? fitted : dir.split(path.sep).join('/') + '/' + fitted
+}
 const bundleUuid = (value: string) => { const h = hash(value); return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}` }
 const locks = new WeakMap<SqlDb, Set<string>>()
 
@@ -339,7 +357,7 @@ function prepareOrganize(d: SqlDb, input: VideoOrganizeRequest): Prepared {
       const metadataName = /^info\d*\.json$/i.test(path.basename(f.source))
       const defaultName = metadataName ? '.baoyi/originals/' + hash(f.episodeIds[0] || keyPath(path.dirname(f.source))).slice(0,24) + '/' + path.basename(f.source)
         : roles.length && roles.every(role => role === 'poster') ? '.baoyi/artwork/' + hash(keyPath(f.source)).slice(0,24) + path.extname(f.source) : path.basename(f.source)
-      const relative = request.fileNames?.[f.id] || (inside(target, f.source) ? path.relative(target, f.source) : defaultName)
+      const relative = fitRelativePath(target, request.fileNames?.[f.id] || (inside(target, f.source) ? path.relative(target, f.source) : defaultName))
       safeComponents(relative)
       f.destination = resolveBundlePath(target, relative)
       f.relativePath = path.relative(target, f.destination).split(path.sep).join('/')
@@ -397,11 +415,75 @@ function readJournal(d: SqlDb, id: string): Journal {
   if (!row) throw new Error('整理日志不存在')
   const j = JSON.parse(row.data) as Journal
   if (j.version !== 1 || j.id !== id || !Array.isArray(j.changes) || !tables.every(t => Array.isArray(j.snapshot[t]))) throw new Error('整理日志格式无效，未修改任何资源')
-  return j
+  return healJournal(d, j)
+}
+/**
+ * 日志记的目标目录已经被整目录改名（统一移动 / 合集更名）搬走时，把整本日志对齐到作品当前绑定的目录。
+ * 不对齐的话这条 partial 日志既不能重试（撞「作品已绑定另一目录」）、也不能回退（目标文件找不到），
+ * 还会挡住这部作品之后所有整理（实测第四轮就是这么卡住的）。只在「旧目录不存在、新目录存在、清单 UUID 一致」
+ * 时改；清单基线换成现在这份（改名时 persistVideoWorkBundle 已经重写过，不换 syncManifest 会当成被人改过）；
+ * 之前因为「路径过长」没搬成的文件按新目录重新算一次目标。原地改数据，不动 updated_at。
+ */
+function healJournal(d: SqlDb, j: Journal): Journal {
+  if (j.kind !== 'organize' || j.preview?.kind !== 'organize' || !['running', 'partial'].includes(j.status) || !j.bound || !j.targetDirectory) return j
+  const binding = one(d, 'SELECT directory_path, bundle_id, root FROM video_directories WHERE resource_id = ?', j.survivorId)
+  if (!binding || samePath(String(binding.directory_path), j.targetDirectory) || String(binding.bundle_id).toLowerCase() !== j.preview.bundleId.toLowerCase()) return j
+  const from = j.targetDirectory, to = String(binding.directory_path)
+  if (fs.existsSync(from) || !fs.existsSync(to) || !fs.statSync(to).isDirectory()) return j
+  const move = (value: string): string => path.isAbsolute(value) && inside(from, value, true) ? path.join(to, path.relative(from, value)) : value
+  const deep = (value: unknown): unknown => typeof value === 'string' ? move(value) : Array.isArray(value) ? value.map(deep)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, part]) => [key, deep(part)])) : value
+  const healed = deep({ ...j, manifest: null }) as Journal
+  healed.manifest = { ...j.manifest }
+  if (!inside(healed.preview.root, to)) healed.preview.root = String(binding.root || path.dirname(to))
+  for (const c of healed.changes) if (c.table === 'video_directories' && typeof c.after.directory_path === 'string' && typeof c.after.relative_path === 'string') {
+    c.after.relative_path = path.relative(String(c.after.root || healed.preview.root), c.after.directory_path)
+  }
+  const preview = healed.preview as VideoOrganizePreview
+  for (const f of healed.files) {
+    if (f.status !== 'failed' && f.status !== 'pending') continue
+    const index = preview.collisions.findIndex(c => c.fileId === f.id && c.code === 'unsafe-path')
+    if (index < 0) continue
+    try {
+      const relative = fitRelativePath(to, f.relativePath)
+      const destination = resolveBundlePath(to, relative)
+      checkDestination(preview.root, destination)
+      f.destination = destination; f.relativePath = relative; f.error = ''
+      preview.collisions.splice(index, 1)
+      const planned = preview.files.find(file => file.id === f.id)
+      if (planned) { planned.destination = destination; planned.relativePath = relative }
+    } catch { /* 新目录也装不下：留着原来的冲突，重试时照实报 */ }
+  }
+  const current = manifestText(to)
+  healed.manifest.afterHash = current === null ? '' : hash(current); healed.manifest.pendingHash = ''
+  healed.warnings = [...new Set([...healed.warnings, `作品目录已从 ${from} 移到 ${to}，本条记录已按新目录对齐`])]
+  d.prepare('UPDATE video_organize_journal SET data = ? WHERE id = ?').run(JSON.stringify(healed), j.id)
+  return healed
 }
 export function listVideoOrganizeJournal(d: SqlDb, resourceId?: string): VideoOrganizeJournal[] {
-  return all(d, 'SELECT data FROM video_organize_journal ORDER BY created_at DESC, rowid DESC').map(row => JSON.parse(row.data) as Journal)
+  return all(d, 'SELECT data FROM video_organize_journal ORDER BY created_at DESC, rowid DESC').map(row => healJournal(d, JSON.parse(row.data) as Journal))
     .filter(j => !resourceId || j.sourceIds.includes(resourceId)).map(publicJournal)
+}
+/** A fully rolled-back SQL failure never owned files or changed the library. A new preview can replace that attempt; real partial copies and moves still block it. */
+function replaceable(pending: Journal): boolean {
+  return pending.status !== 'rollback-partial' && pending.logicalApplied === false && pending.bound === false &&
+    pending.changes.length === 0 && !pending.manifest.afterHash && !pending.manifest.pendingHash &&
+    pending.files.every(file => file.status === 'pending' && file.attempts === 0 && !file.sha256 && !file.stage && !file.sourceRemoved)
+}
+/**
+ * 真的动过库或文件、还没收尾的整理日志，按作品分好。它会挡住这部作品的新整理，统一移动得先让用户处理它（或者顺着它重试）。
+ * 一次算完：统一移动一批几十部作品，每部都重新解析全部日志会慢到秒级。
+ */
+export function pendingVideoOrganizeMap(d: SqlDb): Map<string, VideoOrganizeJournal> {
+  const result = new Map<string, VideoOrganizeJournal>()
+  for (const old of listVideoOrganizeJournal(d)) {
+    if (!['running', 'partial', 'rollback-partial'].includes(old.status) || replaceable(readJournal(d, old.id))) continue
+    for (const id of old.sourceIds) if (!result.has(id)) result.set(id, old)
+  }
+  return result
+}
+export function pendingVideoOrganize(d: SqlDb, resourceId: string): VideoOrganizeJournal | undefined {
+  return pendingVideoOrganizeMap(d).get(resourceId)
 }
 function save(d: SqlDb, j: Journal): void {
   j.updatedAt = Date.now()
@@ -442,12 +524,7 @@ function makeJournal(d: SqlDb, preview: Journal['preview'], snap: Snapshot, mode
   const ids = preview.kind === 'organize' ? preview.request.resourceIds : [preview.resourceId]
   for (const old of listVideoOrganizeJournal(d)) {
     if (!['running', 'partial', 'rollback-partial'].includes(old.status)) continue
-    const pending = readJournal(d, old.id)
-    // A fully rolled-back SQL failure never owned files or changed the library. A new
-    // preview can replace that attempt; real partial copies and moves still block it.
-    if (pending.status !== 'rollback-partial' && pending.logicalApplied === false && pending.bound === false &&
-      pending.changes.length === 0 && !pending.manifest.afterHash && !pending.manifest.pendingHash &&
-      pending.files.every(file => file.status === 'pending' && file.attempts === 0 && !file.sha256 && !file.stage && !file.sourceRemoved)) continue
+    if (replaceable(readJournal(d, old.id))) continue
     if (old.sourceIds.some(id => ids.includes(id))) throw new Error('这些作品还有未完成的整理，请先重试或回退原日志')
     if (mode !== 'logical' && old.mode !== 'logical' && old.targetDirectory && preview.targetDirectory && (
       actualKey(old.targetDirectory) === actualKey(preview.targetDirectory) || inside(actualKey(old.targetDirectory), actualKey(preview.targetDirectory)) || inside(actualKey(preview.targetDirectory), actualKey(old.targetDirectory))
@@ -496,7 +573,8 @@ function applyLogical(d: SqlDb, j: Journal, prepared: Prepared): void {
         scope: 'episode', page_url: 'https://hanime1.me/watch?v=' + meta.hanime_id, evidence: 'legacy', confirmed: 0, created_at: j.createdAt, updated_at: j.createdAt }, meta.resource_id)
     }
     for (const id of j.sourceIds) if (id !== targetId) patch(d, j, 'resource', { id }, { is_archived: 1 })
-    if (prepared.episodes.length) patch(d, j, 'video_meta', { resource_id: targetId }, { video_type: 'series' })
+    // 合并多部、整理出多集、或者明确要建合集才改成剧集；单部电影只是搬文件（统一移动）的，类型不动
+    if (prepared.episodes.length > 1 || j.sourceIds.length > 1 || prepared.preview.request.collectionTitle) patch(d, j, 'video_meta', { resource_id: targetId }, { video_type: 'series' })
     if (prepared.preview.request.collectionTitle) {
       const meta = getRow(d, 'video_meta', { resource_id: targetId })!
       const original = prepared.snapshot.resource.find(resource => resource.id === targetId)!

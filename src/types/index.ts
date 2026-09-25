@@ -1598,6 +1598,8 @@ export interface BaoyiApi {
     downloadJobs(): Promise<import('./video-workflow').VideoDownloadJob[]>
     retryDownloadJob(id: string, stage: import('./video-workflow').VideoJobRetry): Promise<import('./video-workflow').VideoDownloadJob>
     cancelDownloadJob(id: string): Promise<boolean>
+    /** 把已结束的下载记录从列表和角标里拿掉；文件和作品不动。运行中 / 排队中的返回 false */
+    dismissDownloadJob(id: string): Promise<boolean>
     revealDownloadJob(id: string): Promise<boolean>
     onDownloadJob(cb: (job: import('./video-workflow').VideoDownloadJob) => void): Unsubscribe
     onLibraryChanged(cb: (resourceId: string) => void): Unsubscribe

@@ -73,7 +73,7 @@ try {
       await page.waitForFunction(() => document.querySelectorAll('.wall .card').length > 0 && document.querySelectorAll('.wall .card').length < 10)
       await page.waitForTimeout(300)
       const names = await page.evaluate(() => [...document.querySelectorAll('.wall .card')].map(card => card.textContent || ''))
-      assert.ok(names.some(name => name.includes('被幹鬥士')), `搜「${keyword}」得到：${names.join(' | ')}`)
+      assert.ok(names.some((name: string) => name.includes('被幹鬥士')), `搜「${keyword}」得到：${names.join(' | ')}`)
     }
     await page.screenshot({ path: path.join(evidence, '01-search-simplified-hits-traditional.png') })
     await page.getByRole('button', { name: '清空搜索', exact: true }).click()

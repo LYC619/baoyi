@@ -26,3 +26,6 @@ reference/
 
 # Codex 打包界面排练的截图证据，24 MB 一组 PNG；同 output/ 一样本地留存，不进版本库
 /.planning/**/packaged-ui/
+
+# 手动打的源码压缩包，本地留存，不进版本库
+/抱一.7z

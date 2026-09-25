@@ -47,7 +47,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
 import { useGameStore } from '@/stores/game'
 import { useVideoStore } from '@/stores/video'
-import { errorMessage, formatBytes, plain, searchCalls, shortenPath } from '@/utils'
+import { errorMessage, formatBytes, plain, shortenPath } from '@/utils'
 import type {
   AIConfig,
   AIProfile,
@@ -57,7 +57,6 @@ import type {
   IdentifyReport,
   OrganizePlan,
   ScanUnit,
-  SearchCallRecord,
   SearchProvider,
   Tag,
   TitleLang,
@@ -340,8 +339,6 @@ const searchEndpoint = ref(settings.settings.search.endpoint)
 const searchEnabled = ref(settings.settings.search.enabled)
 const searchTesting = ref(false)
 const searchResult = ref<{ ok: boolean; message: string } | null>(null)
-const searchLogOpen = ref(false)
-const searchLog = ref<SearchCallRecord[]>([])
 
 const providerHint = computed(
   () => PROVIDERS.find((p) => p.value === searchProvider.value)?.hint ?? ''
@@ -643,35 +640,6 @@ async function verifyHanime(): Promise<void> {
       // 辅助信息失败不改写主验证结果。
     }
   }
-}
-
-/**
- * 最近的搜索调用记录。从识别日志的 web_search 事件里现取，不新建表 ——
- * 每一次搜索本来就完整记在那里了，再存一份就有两个会不一致的真相。
- */
-async function loadSearchLog(): Promise<void> {
-  searchLog.value = searchCalls(await window.baoyi.logs.list({ limit: 100 }))
-}
-
-function toggleSearchLog(): void {
-  searchLogOpen.value = !searchLogOpen.value
-  if (searchLogOpen.value) void loadSearchLog()
-}
-
-const SEARCH_STATUS_META: Record<
-  SearchCallRecord['status'],
-  { label: string; tone: 'success' | 'warning' | 'muted' }
-> = {
-  ok: { label: '成功', tone: 'success' },
-  empty: { label: '无结果', tone: 'muted' },
-  timeout: { label: '超时', tone: 'warning' },
-  failed: { label: '失败', tone: 'warning' }
-}
-
-function callTime(ts: number): string {
-  const d = new Date(ts)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 /* ---------------------------- 扫描与识别 ---------------------------- */
@@ -1388,7 +1356,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 
           <section v-if="activeModule === 'video'" class="panel">
             <h2 class="sec-head">视频导入与文件整理</h2>
-            <p class="sec-desc">扫描结果先进入导入确认窗口，核对后再录入。需要联网补充资料时，可以启用 Agent。</p>
+            <p class="sec-desc">扫描结果先进入导入确认窗口，核对后再录入。关掉窗口后，影视墙上会有「导入待确认」入口，这里也能重新打开。需要联网补充资料时，可以启用 Agent。</p>
             <div class="row"><label class="hint"><input type="checkbox" :checked="videoImport.useAgent.value" @change="videoImport.setAgent(($event.target as HTMLInputElement).checked)" /> 导入时启用 Agent</label><button class="btn btn--ghost" @click="videoImport.show()">打开导入确认</button></div>
             <p class="sec-desc" style="margin-top: 18px">整理根目录：创建合集时勾选移动或复制，文件将自动放进此目录下以合集名命名的新文件夹。</p>
             <div class="row"><span class="hint mono" style="overflow-wrap:anywhere">{{ settings.settings.video_organize_root || '尚未设置' }}</span><button class="btn btn--ghost" @click="pickVideoOrganizeRoot"><FolderOpen :size="14" />{{ settings.settings.video_organize_root ? '修改整理根目录' : '设置整理根目录' }}</button></div>
@@ -1980,36 +1948,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </p>
           </section>
 
-          <!-- 额度花在哪了。数据全部从识别日志里现取，不单独记账 -->
-          <section class="panel">
-            <button class="sec-head sec-head--btn" @click="toggleSearchLog">
-              <h2>最近调用日志</h2>
-              <ChevronDown :size="14" :class="['chev', { 'chev--open': searchLogOpen }]" />
-            </button>
-
-            <template v-if="searchLogOpen">
-              <p class="sec-desc">
-                最近 20 次 <span class="mono">web_search</span> 调用，从识别日志里提取 ——
-                所以时间精确到「哪一次识别」，同一次识别里的几次搜索共用一个时间戳。
-                清空识别日志会连带清掉它。
-              </p>
-              <ul v-if="searchLog.length" class="calls">
-                <li v-for="(c, i) in searchLog" :key="i">
-                  <span class="calls__time mono">{{ callTime(c.at) }}</span>
-                  <span class="calls__q truncate" :title="c.query">{{ c.query }}</span>
-                  <span class="calls__from truncate" :title="c.label">{{ c.label }}</span>
-                  <span class="calls__ms mono">{{ c.ms > 0 ? `${(c.ms / 1000).toFixed(1)}s` : '—' }}</span>
-                  <TagBadge
-                    :label="SEARCH_STATUS_META[c.status].label"
-                    :tone="SEARCH_STATUS_META[c.status].tone"
-                  />
-                </li>
-              </ul>
-              <p v-else class="empty-line">
-                还没有搜索调用记录。开启搜索并跑一次识别之后，认不出来的程序会触发它。
-              </p>
-            </template>
-          </section>
+          <!-- 额度花在哪了：搜索调用记录挪进了顶部「日志 → 识别与调用」，和识别日志放一起看（实测第四轮） -->
         </template>
 
         <!-- ---------------------------- 外观 ---------------------------- -->
@@ -2890,55 +2829,6 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 }
 .chev--open {
   transform: rotate(180deg);
-}
-
-/* ------------------------------ 搜索调用日志 ------------------------------ */
-.calls {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.calls li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  border-radius: var(--radius-tag);
-  background: var(--bg-main);
-  border: 1px solid var(--divider);
-  font-size: var(--fs-tag);
-}
-
-.calls__time {
-  flex: none;
-  font-size: 11px;
-  color: var(--text-faint);
-}
-
-.calls__q {
-  flex: 1;
-  min-width: 0;
-  color: var(--text-main);
-}
-
-.calls__from {
-  flex: none;
-  max-width: 26%;
-  color: var(--text-faint);
-  font-size: 11px;
-}
-
-.calls__ms {
-  flex: none;
-  width: 44px;
-  text-align: right;
-  font-size: 11px;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
 }
 
 .result {

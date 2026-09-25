@@ -100,6 +100,7 @@ window.baoyi = {
     onDownloadJob: cb => { jobListeners.add(cb); return () => jobListeners.delete(cb) },
     retryDownloadJob: async (id, stage) => { calls.push(['retry', id, stage]); const job = jobs.find(j => j.id === id); job.status = 'queued'; job.retryStage = stage; job.updatedAt = Date.now(); notify(job); return clone(job) },
     cancelDownloadJob: async id => { calls.push(['cancel', id]); const job = jobs.find(j => j.id === id); job.status = 'cancelled'; job.updatedAt = Date.now(); notify(job); return true },
+    dismissDownloadJob: async id => { calls.push(['dismiss', id]); const index = jobs.findIndex(j => j.id === id); if (index < 0 || ['running', 'queued'].includes(jobs[index].status)) return false; jobs.splice(index, 1); localStorage.setItem('fixture-jobs', JSON.stringify(jobs)); return true },
     revealDownloadJob: async id => { calls.push(['reveal-job', id]); return true },
     playAsset: async id => { calls.push(['play', id]); return { ok: true, item: clone(work), episode: null } },
     revealAsset: async id => { calls.push(['reveal', id]); return true },
@@ -179,7 +180,7 @@ async function test(name: string, action: () => Promise<void>) {
   try { await action(); passed++; console.log('PASS ' + name) }
   catch (cause) { failed++; console.error('FAIL ' + name + ': ' + (cause instanceof Error ? cause.message.split('\n').slice(0, 4).join(' ') : cause)) }
   finally {
-    for (const name of ['关闭下载面板', '关闭任务面板']) {
+    for (const name of ['关闭下载面板', '关闭日志面板']) {
       const close = page.getByRole('button', { name, exact: true })
       if (await close.isVisible().catch(() => false)) await close.click().catch(() => {})
     }
@@ -197,10 +198,13 @@ try {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
   await page.waitForFunction(() => !!(window as any).__fixture, null, { timeout: 20000 })
   await test('首页链接入口、默认缺项、取消不创建作品、设置往返保留草稿', async () => {
-    const add = page.getByRole('button', { name: /从链接添加|链接下载/ })
+    const add = page.getByRole('button', { name: /从 Hanime 添加/ })
     assert.equal(await add.count(), 1, '首页必须提供统一链接入口')
+    assert.equal(await page.getByRole('button', { name: '打开 Hanime', exact: true }).count(), 0, '「打开 Hanime」已并进「从 Hanime 添加」')
+    assert.equal(await page.getByRole('button', { name: /^导入确认/ }).count(), 0, '工具栏不再有「导入确认」')
     await add.click()
-    const dialog = page.getByRole('dialog', { name: /从链接添加作品/ })
+    const dialog = page.getByRole('dialog', { name: /从 Hanime 添加作品/ })
+    assert.equal(await dialog.getByRole('button', { name: '在 Hanime 里找', exact: true }).count(), 1, '面板里能打开站内窗口')
     await dialog.getByLabel('来源页面链接').fill('https://hanime1.me/watch?v=200')
     await dialog.getByRole('button', { name: '解析链接', exact: true }).click()
     await dialog.getByLabel('作品名称', { exact: true }).fill('用户保留的名称')
@@ -239,10 +243,10 @@ try {
   })
   await test('确认下载提交画质与仅保存选项，队列内可取消，键盘可关闭面板', async () => {
     await route('video-home')
-    const trigger = page.getByRole('button', { name: '从链接添加', exact: true })
+    const trigger = page.getByRole('button', { name: '从 Hanime 添加', exact: true })
     await trigger.focus()
     await page.keyboard.press('Enter')
-    const dialog = page.getByRole('dialog', { name: /从链接添加作品/ })
+    const dialog = page.getByRole('dialog', { name: /从 Hanime 添加作品/ })
     await dialog.getByLabel('来源页面链接').fill('https://hanime1.me/watch?v=200')
     await dialog.getByRole('button', { name: '解析链接', exact: true }).click()
     await dialog.getByLabel('作品名称', { exact: true }).fill('完整队列示例')
@@ -263,8 +267,14 @@ try {
     assert.equal(await dialog.count(), 0)
     assert.equal(await trigger.evaluate((element: Element) => element === document.activeElement), true)
     await page.locator('.task-trigger').click()
+    await page.locator('.task-tabs').getByRole('button', { name: /^下载记录/ }).click()
     await page.locator('.download-task').filter({ hasText: '完整队列示例' }).getByRole('button', { name: '取消排队' }).click()
     assert.ok(await page.evaluate(() => (window as any).__fixture.jobs.some((job: any) => job.title === '完整队列示例' && job.status === 'cancelled')))
+    // 取消后的记录还算「待处理」（剩余项没下载），看过了可以移除：只删记录，夹具里的作品一个不少
+    const cancelled = page.locator('.download-task').filter({ hasText: '完整队列示例' })
+    await cancelled.getByRole('button', { name: '移除记录', exact: true }).click()
+    await cancelled.waitFor({ state: 'detached' })
+    assert.ok(await page.evaluate(() => (window as any).__fixture.calls.some((c: any[]) => c[0] === 'dismiss') && !(window as any).__fixture.jobs.some((job: any) => job.title === '完整队列示例')))
   })
   await test('详情统一下载入口和阅读态资料', async () => {
     await route('video-detail', { id: 'work-1' })
@@ -296,7 +306,7 @@ try {
   await test('持久队列有分阶段恢复，隐藏分类同步移除标题和计数', async () => {
     await page.locator('.task-trigger').click()
     const panel = page.locator('.task-panel')
-    await panel.locator('.task-group--downloads > summary').click()
+    await panel.locator('.task-tabs').getByRole('button', { name: /^下载记录/ }).click()
     const metadata = panel.locator('article').filter({ hasText: '资料失败的作品' })
     assert.equal(await metadata.count(), 1, '任务中心必须显示主进程工作流任务')
     await metadata.getByRole('button', { name: '补齐资料', exact: true }).click()
@@ -309,7 +319,7 @@ try {
     await page.waitForFunction(() => !document.querySelector('.task-panel')?.textContent?.includes('隐藏的任务标题'))
     assert.ok(!(await panel.innerText()).includes('隐藏的任务标题'))
     assert.ok(!(await page.locator('.task-trigger').getAttribute('aria-label'))!.includes('4 个排队'))
-    await page.getByRole('button', { name: '关闭任务面板' }).click()
+    await page.getByRole('button', { name: '关闭日志面板' }).click()
     await page.evaluate(() => (window as any).__fixture.setHidden(false))
   })
   await test('扫描逐项结果可打开作品与修正，不把汇总当作每项成功', async () => {
@@ -357,6 +367,7 @@ try {
     await page.reload()
     await page.waitForFunction(() => !!(window as any).__fixture)
     await page.locator('.task-trigger').click()
+    await page.locator('.task-tabs').getByRole('button', { name: /^下载记录/ }).click()
     assert.match(await page.locator('.task-panel').innerText(), /资料失败的作品/)
     assert.match(await page.locator('.task-panel').innerText(), /排队/)
   })
@@ -370,8 +381,8 @@ try {
   })
   await test('解析来源期间仍可用 Escape 取消，迟到草稿不重新打开面板', async () => {
     await route('video-home')
-    await page.getByRole('button', { name: '从链接添加', exact: true }).click()
-    const dialog = page.getByRole('dialog', { name: '从链接添加作品' })
+    await page.getByRole('button', { name: '从 Hanime 添加', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: '从 Hanime 添加作品' })
     await dialog.getByLabel('来源页面链接').fill('https://hanime1.me/watch?v=200')
     await page.evaluate(() => {
       const f = (window as any).__fixture, api = (window as any).baoyi.video
@@ -390,7 +401,7 @@ try {
       await page.evaluate(() => { const f = (window as any).__fixture; (window as any).baoyi.video.prepareDownload = f.originalPrepare; f.finishPrepare?.() })
     }
     assert.equal(await dialog.count(), 0)
-    assert.equal(await page.getByRole('button', { name: '从链接添加', exact: true }).evaluate((element: Element) => element === document.activeElement), true)
+    assert.equal(await page.getByRole('button', { name: '从 Hanime 添加', exact: true }).evaluate((element: Element) => element === document.activeElement), true)
   })
   assert.deepEqual(errors, [], 'renderer must not throw')
 } finally {
