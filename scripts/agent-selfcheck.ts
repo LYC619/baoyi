@@ -2645,7 +2645,7 @@ async function main(): Promise<void> {
         const shared = b.defaultCategories.map((c) => c.name).filter((n) => aCats.has(n))
         assert.deepEqual(
           shared,
-          ['其他'],
+          a.kind === 'image' || b.kind === 'image' ? [] : ['其他'],
           `${a.kind} 和 ${b.kind} 除了「其他」不该有共有分类，实际：${shared.join(',')}`
         )
         const aTags = new Set(a.defaultTags)
@@ -8033,7 +8033,7 @@ async function videoUserEditedSection(): Promise<void> {
     //   9 = video_meta 多了 hanime_id 列（rollback-v9 撤这个）
     // 一个数字标两件事的话，两个回滚脚本的界限就说不清了。
     // 0.9 抬到 10：拆扫描目录（scan_dirs -> software/game/video_scan_dirs）+ identify_logs.resource_kind 列
-    assert.equal(SCHEMA_VERSION, 10, '0.9 收尾时的库形状是 10')
+    assert.equal(SCHEMA_VERSION, 11, '图片模块的库形状是 11')
   })
 }
 

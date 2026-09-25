@@ -1,0 +1,13 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useImageDownloads } from '@/composables/useImageDownloads'
+import { useRouter } from 'vue-router'
+import type { ImageDownloadJob } from '@/types/image'
+const downloads=useImageDownloads(),error=ref(''),router=useRouter()
+const labels:Record<ImageDownloadJob['status'],string>={queued:'排队中',running:'下载中',success:'已入库',failed:'失败',cancelled:'已停止',interrupted:'中断待恢复'}
+async function action(job:ImageDownloadJob,type:'retry'|'cancel'|'dismiss'){error.value='';try{if(type==='retry')await window.baoyi.image.retryJob(job.id);else if(type==='cancel')await window.baoyi.image.cancelJob(job.id);else await window.baoyi.image.dismissJob(job.id);await downloads.refresh()}catch(cause){error.value=(cause as Error).message}}
+</script>
+<template><section v-if="downloads.jobs.value.length" class="image-download-list"><h3>漫画下载</h3><p v-if="error" role="alert" class="download-error">{{error}}</p><article v-for="job in downloads.jobs.value" :key="job.id"><div><strong>{{job.work.title}}</strong><span>{{labels[job.status]}}</span></div><p>{{job.completedChapters}} / {{job.chapters.length}} 章 · {{job.processed}} / {{job.total||'待获取'}} 页 · {{job.current}}</p><progress :value="job.processed" :max="job.total||1"/><p v-if="job.error" class="download-error">{{job.error}}</p><footer><button v-if="job.resourceId" @click="router.push({name:'image-detail',params:{id:job.resourceId}})">打开作品</button><button v-if="['queued','running'].includes(job.status)" @click="action(job,'cancel')">停止</button><template v-else><button v-if="job.status!=='success'" @click="action(job,'retry')">重试缺失页</button><button @click="action(job,'dismiss')">移除记录</button></template></footer></article></section></template>
+<style scoped>
+.image-download-list{margin:15px 0;color:var(--text-main);font-size:12px}.image-download-list h3{font-size:13px;color:var(--text-sub);font-weight:500}.image-download-list article{padding:13px;border:1px solid var(--divider);background:var(--bg-card);border-radius:7px;margin:10px 0}.image-download-list article>div{display:flex;justify-content:space-between;gap:12px}.image-download-list strong{font-weight:500}.image-download-list span,.image-download-list p{color:var(--text-sub);line-height:1.6}.image-download-list progress{width:100%;height:5px;accent-color:var(--accent)}.image-download-list footer{display:flex;gap:10px;margin-top:8px}.image-download-list button{padding:5px 8px;border-radius:4px;background:var(--hover-surface);color:var(--text-main);cursor:pointer}.image-download-list .download-error{color:var(--danger)}
+</style>

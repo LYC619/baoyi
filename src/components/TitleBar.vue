@@ -13,12 +13,14 @@ import {
 import { useSoftwareStore } from '@/stores/software'
 import { useGameStore } from '@/stores/game'
 import { useVideoStore } from '@/stores/video'
+import { useImageStore } from '@/stores/image'
 
 const route = useRoute()
 const router = useRouter()
 const software = useSoftwareStore()
 const game = useGameStore()
 const video = useVideoStore()
+const images = useImageStore()
 
 const maximized = ref(false)
 let unsubscribe: (() => void) | null = null
@@ -29,6 +31,7 @@ onMounted(async () => {
   // 顶栏一直在，游戏页和影视页却未必进过 —— 数字得自己去取一次，不能等那一页来喂
   void game.refreshCounts()
   void video.refreshCounts()
+  void images.refresh()
 })
 
 onUnmounted(() => unsubscribe?.())
@@ -51,7 +54,8 @@ const showTabs = computed(() => route.name !== 'onboarding')
 const stats = computed<Record<ModuleKey, { total: number | null; pending: number }>>(() => ({
   software: { total: software.counts.all, pending: software.counts.pending_confirm },
   game: { total: game.counts.all, pending: 0 },
-  video: { total: video.counts.all, pending: 0 }
+  video: { total: video.counts.all, pending: 0 },
+  image: { total: images.count, pending: 0 }
 }))
 
 function go(key: ModuleKey): void {

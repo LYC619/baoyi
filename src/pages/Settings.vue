@@ -87,11 +87,11 @@ const ALL_TABS = [
   { id: 'organize', label: '目录整理', icon: FolderTree, modules: ['software'] },
   { id: 'ai', label: 'AI 配置', icon: Bot, modules: ['software', 'game', 'video'] },
   { id: 'search', label: '搜索服务', icon: Globe, modules: ['game', 'video'] },
-  { id: 'appearance', label: '外观', icon: Palette, modules: ['software', 'game', 'video'] },
+  { id: 'appearance', label: '外观', icon: Palette, modules: ['software', 'game', 'video', 'image'] },
   { id: 'taxonomy', label: '分类与标签', icon: Tags, modules: ['software', 'game', 'video'] },
   { id: 'logs', label: '识别日志', icon: ScrollText, modules: ['software', 'game', 'video'] },
-  { id: 'data', label: '数据管理', icon: Database, modules: ['software', 'game', 'video'] },
-  { id: 'about', label: '关于', icon: Info, modules: ['software', 'game', 'video'] }
+  { id: 'data', label: '数据管理', icon: Database, modules: ['software', 'game', 'video', 'image'] },
+  { id: 'about', label: '关于', icon: Info, modules: ['software', 'game', 'video', 'image'] }
 ] as const
 
 // 根据当前模块过滤标签页

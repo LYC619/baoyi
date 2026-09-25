@@ -11,7 +11,7 @@
 
 import { ref } from 'vue'
 
-export type ModuleKey = 'software' | 'game' | 'video'
+export type ModuleKey = 'software' | 'game' | 'video' | 'image'
 
 export interface ModuleTab {
   key: ModuleKey
@@ -23,7 +23,8 @@ export interface ModuleTab {
 export const MODULE_TABS: ModuleTab[] = [
   { key: 'software', label: '软件', home: 'home' },
   { key: 'game', label: '游戏', home: 'game-home' },
-  { key: 'video', label: '影视', home: 'video-home' }
+  { key: 'video', label: '影视', home: 'video-home' },
+  { key: 'image', label: '图片', home: 'image-home' }
 ]
 
 /**
@@ -34,8 +35,8 @@ export const MODULE_TABS: ModuleTab[] = [
  */
 export const activeModule = ref<ModuleKey>('software')
 
-const lastPath: Record<ModuleKey, string> = { software: '', game: '', video: '' }
-const scrollTop: Record<ModuleKey, number> = { software: 0, game: 0, video: 0 }
+const lastPath: Record<ModuleKey, string> = { software: '', game: '', video: '', image: '' }
+const scrollTop: Record<ModuleKey, number> = { software: 0, game: 0, video: 0, image: 0 }
 
 /**
  * 路由上挂的模块标记。没标记的（设置 / 引导）返回 null。

@@ -27,6 +27,8 @@ assert.deepEqual(moduleTarget('software'), { name: 'home' })
 
 // 2. meta.module 认得出来，认不出来的老实返回 null
 assert.equal(moduleOf({ module: 'game' }), 'game')
+assert.equal(moduleOf({ module: 'image' }), 'image')
+assert.deepEqual(moduleTarget('image'), { name: 'image-home' })
 assert.equal(moduleOf({}), null)
 assert.equal(moduleOf({ module: 'nope' }), null)
 
@@ -75,7 +77,7 @@ assert.equal(recallScroll('software'), 820)
 //    重了的表现是「点这个 Tab 跳到了另一个模块」，而它不报错
 const keys = MODULE_TABS.map((t) => t.key)
 const homes = MODULE_TABS.map((t) => t.home)
-assert.deepEqual(keys, ['software', 'game', 'video'], 'Tab 顺序就是顶栏从左到右的顺序')
+assert.deepEqual(keys, ['software', 'game', 'video', 'image'], 'Tab 顺序就是顶栏从左到右的顺序')
 assert.equal(new Set(keys).size, keys.length)
 assert.equal(new Set(homes).size, homes.length)
 for (const tab of MODULE_TABS) {

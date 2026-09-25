@@ -69,6 +69,8 @@ const router = createRouter({
       name: 'onboarding',
       component: () => import('@/pages/Onboarding.vue')
     },
+    { path: '/image', name: 'image-home', component: () => import('@/pages/image/Home.vue'), meta: { module: 'image' } },
+    { path: '/image/:id', name: 'image-detail', component: () => import('@/pages/image/Detail.vue'), props: true, meta: { module: 'image' } },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ]
 })
