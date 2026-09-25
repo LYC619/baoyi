@@ -141,6 +141,8 @@ import { registerVideoImportIpc } from './video-import.ts'
 import { registerVideoAgentOrganizeIpc } from './video-agent-organize.ts'
 import { assertLibraryIdle, registerLibraryBackupIpc } from './library-backup.ts'
 import { createHanimeBrowser } from '../services/hanime-browser.ts'
+import { registerImageIpc } from './image.ts'
+import { registerImageSourceIpc } from './image-source.ts'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
   const hanimeBrowser = createHanimeBrowser({ getSession:getHanimeSession,getMainWindow:getWindow,isHidden:()=>getSettings().hide_hentai === true })
@@ -155,6 +157,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   registerVideoImportIpc(getWindow, ipcMain)
   registerVideoAgentOrganizeIpc(getWindow, ipcMain)
   registerLibraryBackupIpc(getWindow, ipcMain)
+  registerImageIpc(getWindow, ipcMain)
+  registerImageSourceIpc(getWindow, ipcMain)
   const send = (channel: string, payload: unknown) => {
     const win = getWindow()
     if (win && !win.isDestroyed()) {

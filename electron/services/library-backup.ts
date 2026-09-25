@@ -23,7 +23,7 @@ type ColumnRule = 'text' | 'text?' | 'integer' | 'integer?' | 'real'
 type Budget = { textBytes: number; jsonNodes: number }
 const rules: Readonly<Record<LibraryBackupTableName, Readonly<Record<string, ColumnRule>>>> = LIBRARY_BACKUP_COLUMNS
 const limits = LIBRARY_BACKUP_LIMITS
-const kinds = ['software', 'game', 'video'] as const
+const kinds = ['software', 'game', 'video', 'image'] as const
 const journalTables = ['resource', 'video_meta', 'episode', 'video_sources', 'video_assets', 'video_episode_assets', 'video_directories'] as const
 const arrayColumns: Partial<Record<LibraryBackupTableName, readonly string[]>> = {
   resource: ['tags', 'alternatives'], software_meta: ['launchers'], game_meta: ['save_paths', 'linked_files'],
@@ -36,6 +36,8 @@ const watchStates = ['unwatched', 'watching', 'watched', 'dropped'] as const
 // disable CHECK enforcement. These also validate historical journal patches.
 const enumColumns: Partial<Record<LibraryBackupTableName, Record<string, readonly string[]>>> = {
   resource: { kind: kinds }, categories: { kind: kinds }, tags: { kind: kinds },
+  image_meta: { item_type: ['photo','comic'], publication: ['unknown','ongoing','completed'] },
+  image_download_jobs: { status: ['queued','running','success','failed','cancelled','interrupted'] },
   game_meta: { play_status: ['unplayed', 'playing', 'completed', 'shelved'] },
   video_meta: { video_type: ['movie', 'series'], watch_status: watchStates },
   episode: { watch_status: watchStates }, video_sources: { scope: ['work', 'episode'] },
@@ -352,7 +354,8 @@ function validateInput(input: unknown): LibraryBackup {
   if (header.schema_version < 1 || header.schema_version > SCHEMA_VERSION) invalid('unsupported schema version')
   integer(header.exported_at, 'exported_at')
   if (header.exported_at < 0) invalid('exported_at must not be negative')
-  const source = keys({ video_scan_state: [], video_scan_ignores: [], video_detached_owners: [], ...object(header.tables, 'tables') }, LIBRARY_BACKUP_TABLE_NAMES, 'tables')
+  const legacyImages = header.schema_version < 11 ? { image_groups: [], image_meta: [], image_chapters: [], image_pages: [], image_progress: [], image_download_jobs: [] } : {}
+  const source = keys({ video_scan_state: [], video_scan_ignores: [], video_detached_owners: [], ...legacyImages, ...object(header.tables, 'tables') }, LIBRARY_BACKUP_TABLE_NAMES, 'tables')
   let totalRows = 0
   // Bound every table before traversing any rows or issuing metadata writes.
   for (const table of LIBRARY_BACKUP_TABLE_NAMES) {
@@ -403,7 +406,8 @@ function checkIntegrity(db: SqlDb): void {
   if (db.prepare('PRAGMA main.foreign_key_check').get()) invalid('foreign key check failed')
   for (const [table, kind] of [
     ['software_meta', 'software'], ['game_meta', 'game'], ['video_meta', 'video'], ['episode', 'video'],
-    ['video_sources', 'video'], ['video_directories', 'video'], ['video_assets', 'video']
+    ['video_sources', 'video'], ['video_directories', 'video'], ['video_assets', 'video'],
+    ['image_meta', 'image'], ['image_chapters', 'image'], ['image_pages', 'image'], ['image_progress', 'image']
   ] as const) {
     if (db.prepare(`SELECT 1 FROM ${tableSql(table)} m JOIN main.resource r ON r.id = m.resource_id WHERE r.kind <> ? LIMIT 1`).get(kind)) invalid(`${table} has an incompatible resource kind`)
   }
@@ -414,6 +418,8 @@ function checkIntegrity(db: SqlDb): void {
     JOIN main.video_assets a ON a.id = l.asset_id WHERE e.resource_id <> a.resource_id LIMIT 1`).get()) invalid('video_episode_assets has inconsistent resource ownership')
   // SQLite UNIQUE considers two NULL episode IDs distinct; work identities do not.
   if (db.prepare(`SELECT 1 FROM main.video_sources GROUP BY provider, external_id, scope, resource_id, episode_id HAVING COUNT(*) > 1 LIMIT 1`).get()) invalid('video_sources contains duplicate source identities')
+  if (db.prepare('SELECT 1 FROM image_pages p JOIN image_chapters c ON c.id=p.chapter_id WHERE c.resource_id<>p.resource_id LIMIT 1').get()) invalid('image_pages has inconsistent chapter ownership')
+  if (db.prepare('SELECT 1 FROM image_progress v JOIN image_pages p ON p.id=v.page_id WHERE v.resource_id<>p.resource_id LIMIT 1').get()) invalid('image_progress has inconsistent page ownership')
 }
 
 function checkWriteScope(db: SqlDb): void {
@@ -498,7 +504,7 @@ export function buildLibraryBackup(db: SqlDb): LibraryBackup {
 
 function summarize(backup: LibraryBackup): LibraryBackupSummary {
   const table_counts = {} as LibraryBackupSummary['table_counts']
-  const resources: LibraryBackupSummary['resources'] = { software: 0, game: 0, video: 0 }
+  const resources: LibraryBackupSummary['resources'] = { software: 0, game: 0, video: 0, image: 0 }
   for (const table of LIBRARY_BACKUP_TABLE_NAMES) table_counts[table] = backup.tables[table].length
   for (const row of backup.tables.resource) resources[row.kind as keyof typeof resources]++
   return { format: backup.format, version: backup.version, schema_version: backup.schema_version,
@@ -510,6 +516,10 @@ function summarize(backup: LibraryBackup): LibraryBackupSummary {
 }
 
 function interruptedRow(table: LibraryBackupTableName, row: Row): Row {
+  if (table === 'image_download_jobs' && (row.status === 'running' || row.status === 'queued')) {
+    const job = JSON.parse(row.payload as string)
+    return { ...row, status: 'interrupted', payload: JSON.stringify({ ...job, status: 'interrupted' }) }
+  }
   if (table === 'task_records' && row.status === 'running') return { ...row, status: 'interrupted' }
   if (table === 'video_download_jobs' && (row.status === 'running' || row.status === 'queued')) {
     const job = JSON.parse(row.payload as string) as { status: string; items: Array<Record<string, unknown>> }

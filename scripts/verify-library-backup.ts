@@ -19,6 +19,7 @@ import { LIBRARY_BACKUP_LIMITS, type LibraryBackup } from '../src/types/library-
 import { buildLibraryBackup, previewLibraryBackup, restoreLibraryBackup } from '../electron/services/library-backup.ts'
 
 const expectedTables = [
+  'image_groups', 'image_meta', 'image_chapters', 'image_pages', 'image_progress', 'image_download_jobs',
   'resource', 'software_meta', 'game_meta', 'video_meta', 'episode', 'video_sources',
   'video_directories', 'video_assets', 'video_episode_assets', 'video_download_jobs',
   'task_records', 'video_organize_journal', 'video_scan_state', 'video_scan_ignores', 'video_detached_owners', 'categories', 'tags', 'organize_plans',
@@ -221,7 +222,7 @@ await test('round trip preserves every column, IDs, watch/manual metadata, versi
   const summary = previewLibraryBackup(target, backup)
   assert.equal(databaseState(target), previewBefore, 'preview must leave data, rowids, settings and sequences unchanged')
   assert.equal(summary.total_rows, expectedTables.reduce((n, table) => n + backup.tables[table].length, 0))
-  assert.deepEqual(summary.resources, { software: 1, game: 1, video: 2 })
+  assert.deepEqual(summary.resources, { software: 1, game: 1, video: 2, image: 0 })
   for (const table of expectedTables) assert.equal(summary.table_counts[table], backup.tables[table].length)
   assert.deepEqual(restoreLibraryBackup(target, backup), summary)
   for (const table of expectedTables) assert.deepEqual(rows(target, table), rows(source, table), table)

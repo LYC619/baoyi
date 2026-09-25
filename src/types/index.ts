@@ -1379,6 +1379,7 @@ export type Unsubscribe = () => void
 
 /** preload 暴露给渲染进程的完整 API */
 export interface BaoyiApi {
+  image: import('./image').ImageApi
   hanimeBrowser: {
     open(url?: string): Promise<boolean>
     onDownload(cb: (url: string) => void): Unsubscribe

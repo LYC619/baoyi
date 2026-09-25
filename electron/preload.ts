@@ -48,6 +48,22 @@ function plain<T>(value: T): T {
 }
 
 const api: BaoyiApi = {
+  image: {
+    saveChapter: (id, chapterId, title, move) => ipcRenderer.invoke('image:save-chapter', id, chapterId, title, move),
+    list: query => ipcRenderer.invoke('image:list', plain(query)), get: id => ipcRenderer.invoke('image:get', id),
+    pages: (id, chapter) => ipcRenderer.invoke('image:pages', id, chapter), update: (id, patch) => ipcRenderer.invoke('image:update', id, plain(patch)),
+    remove: id => ipcRenderer.invoke('image:remove', id), groups: () => ipcRenderer.invoke('image:groups'),
+    saveGroup: group => ipcRenderer.invoke('image:save-group', plain(group)), removeGroup: id => ipcRenderer.invoke('image:remove-group', id),
+    prepareImport: (type, multiple, archive) => ipcRenderer.invoke('image:prepare-import', type, multiple, archive),
+    confirmImport: (token, selected) => ipcRenderer.invoke('image:confirm-import', token, plain(selected)),
+    rescan: id => ipcRenderer.invoke('image:rescan', id), relocate: id => ipcRenderer.invoke('image:relocate', id),
+    saveProgress: (id, page, offset) => ipcRenderer.invoke('image:progress', id, page, offset), preferences: value => ipcRenderer.invoke('image:preferences', plain(value)),
+    sourceStatus: () => ipcRenderer.invoke('image:source-status'), sourceLogin: (email, password) => ipcRenderer.invoke('image:source-login', email, password),
+    sourceLogout: () => ipcRenderer.invoke('image:source-logout'), sourceSearch: (query,page) => ipcRenderer.invoke('image:source-search', query,page),
+    sourceDetail: id => ipcRenderer.invoke('image:source-detail', id), download: (work,chapters,group) => ipcRenderer.invoke('image:download', work,plain(chapters),group),
+    jobs: () => ipcRenderer.invoke('image:jobs'), retryJob: id => ipcRenderer.invoke('image:retry-job',id), cancelJob: id => ipcRenderer.invoke('image:cancel-job',id),
+    dismissJob: id => ipcRenderer.invoke('image:dismiss-job',id), onChanged: callback => subscribe('image:changed',callback)
+  },
   videoAgentOrganize: {
     prepare: (ids, actions) => ipcRenderer.invoke('video-agent:prepare', plain(ids), plain(actions)),
     run: (id, groups) => ipcRenderer.invoke('video-agent:run', id, plain(groups)),

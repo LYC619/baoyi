@@ -2094,6 +2094,7 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
     d.prepare('DELETE FROM organize_plans').run()
     d.prepare('DELETE FROM video_organize_journal').run()
     d.prepare('DELETE FROM video_download_jobs').run()
+    d.prepare('DELETE FROM image_download_jobs').run()
     d.prepare('DELETE FROM task_records').run()
     if (mode === 'all') {
       // 识别日志只在恢复出厂时清。反复调 prompt 时要的正是「改之前那次是怎么判断的」，
@@ -2103,13 +2104,14 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
       d.prepare('DELETE FROM settings').run()
       d.prepare('DELETE FROM categories').run()
       d.prepare('DELETE FROM tags').run()
+      d.prepare('DELETE FROM image_groups').run()
     }
   })
   tx()
 
   // 恢复出厂把内置分类、内置标签和版本号一并装回去。少了最后一项，下次启动
   // 会以为还没迁移过，白跑一遍重建。分类同样来自品类注册表，不是写死的
-  if (mode === 'all') seedDefaults(d, KINDS)
+  if (mode === 'all') { seedDefaults(d, KINDS); for (const kind of KINDS.filter(k => k.kind === 'image')) kind.schema.migrate?.(d, 0) }
 
   const icons = clearIcons()
   const covers = clearCovers()

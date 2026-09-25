@@ -28,6 +28,12 @@ export const LIBRARY_BACKUP_COLUMNS = {
     notes: 'text?', alternatives: 'text?', mastery_level: 'text?', last_used_at: 'integer?',
     use_count: 'integer?', is_archived: 'integer?', external_active_at: 'integer?'
   },
+  image_groups: { id: 'text', name: 'text', sort_order: 'integer', hidden: 'integer' },
+  image_meta: { resource_id: 'text', item_type: 'text', group_id: 'text?', favorite: 'integer', publication: 'text', cover_page_id: 'text', source: 'text', source_id: 'text' },
+  image_chapters: { id: 'text', resource_id: 'text', chapter_key: 'text', title: 'text', ordinal: 'integer', source_id: 'text', customized: 'integer' },
+  image_pages: { id: 'text', resource_id: 'text', chapter_id: 'text?', file: 'text', entry: 'text', ordinal: 'integer', size: 'integer', missing: 'integer' },
+  image_progress: { resource_id: 'text', page_id: 'text', scroll_offset: 'real', updated_at: 'integer' },
+  image_download_jobs: { id: 'text', status: 'text', updated_at: 'integer', payload: 'text' },
   software_meta: {
     resource_id: 'text', file_description: 'text?', company: 'text?', version: 'text?',
     launchers: 'text?', is_portable: 'integer?', move_risk: 'text?', link_target: 'text?'
@@ -126,7 +132,7 @@ export type LibraryBackupRow<T extends LibraryBackupTableName> = {
   -readonly [C in keyof (typeof LIBRARY_BACKUP_COLUMNS)[T]]: ColumnValue<(typeof LIBRARY_BACKUP_COLUMNS)[T][C]>
 }
 export type LibraryBackupTables = { [T in LibraryBackupTableName]: LibraryBackupRow<T>[] }
-export type LibraryBackupResourceKind = 'software' | 'game' | 'video'
+export type LibraryBackupResourceKind = 'software' | 'game' | 'video' | 'image'
 
 export interface LibraryBackup {
   format: typeof LIBRARY_BACKUP_FORMAT

@@ -8,13 +8,15 @@ import { atomicWrite } from '../kinds/video/bundle.ts'
 import { videoOrganizationBusy } from './video-organize.ts'
 import { videoAgentOrganizationBusy } from './video-agent-organize.ts'
 import { videoImportBusy } from './video-import.ts'
+import { imageLibraryBusy } from '../kinds/image/activity.ts'
 
 const MAX_BACKUP_BYTES = 256 * 1024 * 1024
 
 /** Synchronous replacement cannot race an in-flight scan, download or copy. */
 export function assertLibraryIdle(): void {
   const db = getDb()
-  if (videoOrganizationBusy() || videoAgentOrganizationBusy() || videoImportBusy()
+  if (videoOrganizationBusy() || videoAgentOrganizationBusy() || videoImportBusy() || imageLibraryBusy()
+    || db.prepare("SELECT id FROM image_download_jobs WHERE status IN ('queued','running') LIMIT 1").get()
     || db.prepare("SELECT id FROM task_records WHERE status = 'running' LIMIT 1").get()
     || db.prepare("SELECT id FROM video_download_jobs WHERE status IN ('queued', 'running') LIMIT 1").get()) {
     throw new Error('请先结束正在运行的扫描、下载或整理任务，再操作资料库')
@@ -56,8 +58,8 @@ export function registerLibraryBackupIpc(getWindow: () => BrowserWindow | null, 
       const confirmation = await dialog.showMessageBox(getWindow()!, {
         type: 'warning', title: '确认恢复资料库', message: '使用这份备份替换当前资料库并重启？',
         detail: `备份：${path.basename(file)}\n导出时间：${new Date(summary.exported_at).toLocaleString()}\n` +
-          `软件 ${summary.resources.software} 个，游戏 ${summary.resources.game} 个，影视 ${summary.resources.video} 个；共 ${summary.total_rows} 条资料记录。\n\n` +
-          '当前资料及历史记录将被替换。保留本机设置，不移动或删除视频、软件、游戏和存档文件。备份中的未完成任务会标记为中断，供你手动重试。\n\n' +
+          `软件 ${summary.resources.software} 个，游戏 ${summary.resources.game} 个，影视 ${summary.resources.video} 个，图片 ${summary.resources.image} 项；共 ${summary.total_rows} 条资料记录。\n\n` +
+          '当前资料及历史记录将被替换。保留本机设置，不移动或删除图片、视频、软件、游戏和存档文件。备份中的未完成任务会标记为中断，供你手动重试。\n\n' +
           `恢复前会把当前完整数据库另存到：${recoveryDirectory}\n恢复完成后应用立即重启。`,
         buttons: ['取消', '恢复并重启'], defaultId: 0, cancelId: 0, noLink: true
       })
