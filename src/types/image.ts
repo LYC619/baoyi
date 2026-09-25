@@ -38,7 +38,7 @@ export interface ImageApi {
   rescan(id: string): Promise<ImageItem>; relocate(id: string): Promise<ImageItem | null>;
   saveProgress(id: string, pageId: string, offset: number): Promise<void>;
   preferences(value?: ImagePreferences): Promise<ImagePreferences>;
-  sourceStatus(): Promise<boolean>; sourceLogin(email: string, password: string): Promise<void>; sourceLogout(): Promise<void>;
+  sourceStatus(): Promise<boolean>; sourceLogin(account: string, password: string): Promise<void>; sourceLogout(): Promise<void>;
   sourceSearch(query: string, page: number): Promise<{ items: ImageSourceWork[]; pages: number }>;
   sourceDetail(id: string): Promise<{ work: ImageSourceWork; chapters: ImageSourceChapter[] }>;
   download(workId: string, chapters: string[], groupId: string | null): Promise<ImageDownloadJob | null>;

@@ -1,6 +1,7 @@
 Protocol reference: https://github.com/lanyeeee/picacomic-downloader
 Local reference inspected on 2026-09-25: src-tauri/src/pica_client.rs and response DTOs.
 The request headers, signing constants and endpoint shapes in electron/kinds/image/source.ts derive from this reference.
+Its login dialog labels the input as username; the auth/sign-in request still sends that value in the JSON field named email.
 
 MIT License
 

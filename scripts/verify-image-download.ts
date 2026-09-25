@@ -15,14 +15,14 @@ const work={_id:'work1',title:'合成漫画',author:'测试',description:'离线
 const request=async(url:string,init?:RequestInit)=>{
   if(url.includes('/static/')){calls++;if(url.endsWith('/2')&&failPage)throw new Error('synthetic interruption');return new Response(new Uint8Array(pngImage(12,18)),{headers:{'content-type':'image/png'}})}
   assert.ok((init?.headers as Record<string,string>).signature)
-  if(url.endsWith('auth/sign-in'))return Response.json({code:200,data:{token:'test-token'}})
+  if(url.endsWith('auth/sign-in')){assert.equal(JSON.parse(String(init?.body)).email,'comic_reader');return Response.json({code:200,data:{token:'test-token'}})}
   if(url.includes('advanced-search')){if(rateLimit){rateLimit=false;return new Response('',{status:429,headers:{'retry-after':'0'}})}return Response.json({code:200,data:{comics:{docs:[work],pages:1}}})}
   if(url.endsWith('/eps?page=1'))return Response.json({code:200,data:{eps:{docs:[{_id:'chapter1',title:'第1话',order:1}],pages:1}}})
   if(url.includes('/order/1/pages'))return Response.json({code:200,data:{pages:{docs:[1,2].map(n=>({_id:`page${n}`,media:{fileServer:'https://images.picacomic.com',path:`test/${n}`}})),pages:1}}})
   return Response.json({code:200,data:{comic:work}})
 }
 const source=new PicacomicSource({fetch:request,token:()=> 'test-token',wait:async()=>{}})
-assert.equal(await source.login('test@example.test','synthetic'),'test-token')
+assert.equal(await source.login('comic_reader','synthetic'),'test-token')
 assert.equal((await source.search('test',1)).items.length,1)
 const detail=await source.detail('work1')
 assert.equal(detail.chapters.length,1)

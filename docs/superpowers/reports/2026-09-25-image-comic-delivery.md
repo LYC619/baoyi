@@ -9,7 +9,7 @@
 - `verify-image-ui.ts`：独立资料库中的实际 Electron 图片协议、缩略图、导入确认、单页／双页／连续阅读、章节边界、阅读位置恢复、960px 布局通过；解包后的应用也通过相同检查。
 - `npm run typecheck`、`npm run build`、`npm run selfcheck`：通过，自检为 634 项、0 失败。
 - `verify-library-backup.ts`：75 项通过；`check-module-memory.ts`：9 组／4 模块通过。
-- `electron-builder --dir`：已在 `output/image-comic-verification/package/win-unpacked` 生成独立 Windows 测试包；未覆盖既有发布目录。
+- `electron-builder --dir`：已在 `output/image-comic-verification/package-username/win-unpacked` 生成独立 Windows 测试包；未覆盖既有发布目录。登录表单允许输入用户名，请求仍使用站方规定的 `email` 字段。
 
 截图与运行报告位于 `output/image-comic-verification/`，包含 1440px 书架、960px 窗口和阅读器。该目录仅保存合成资料与测试产物，不进入版本库。
 

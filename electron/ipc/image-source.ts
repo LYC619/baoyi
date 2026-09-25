@@ -14,9 +14,9 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
   const queue=createImageDownloads({db:getDb(),source,changed})
   function handle(name:string,fn:(...args:any[])=>unknown){ipc.handle('image:'+name,(event:IpcMainInvokeEvent,...args)=>{const win=getWindow();if(!win||win.isDestroyed()||event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw new Error('只允许主窗口操作图片来源');return fn(...args)})}
   handle('source-status',()=>!!token)
-  handle('source-login',async(email:string,password:string)=>{
+  handle('source-login',async(account:string,password:string)=>{
     if(!safeStorage.isEncryptionAvailable())throw new Error('系统加密服务不可用，无法安全保存登录状态')
-    const next=await source.login(email,password),encrypted=safeStorage.encryptString(next),temporary=credentialFile+'.tmp'
+    const next=await source.login(account,password),encrypted=safeStorage.encryptString(next),temporary=credentialFile+'.tmp'
     fs.writeFileSync(temporary,encrypted);fs.renameSync(temporary,credentialFile);token=next
   })
   handle('source-logout',()=>{token='';if(fs.existsSync(credentialFile))fs.unlinkSync(credentialFile)})

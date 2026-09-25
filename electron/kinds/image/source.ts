@@ -47,9 +47,10 @@ export class PicacomicSource {
     }
     throw new Error('哔咔请求过于频繁，请稍后重试')
   }
-  async login(email:string,password:string):Promise<string>{
-    if(!email.trim()||!password)throw new Error('请输入邮箱和密码')
-    const data=await this.request('auth/sign-in',{email:email.trim(),password})
+  async login(account:string,password:string):Promise<string>{
+    if(!account.trim()||!password)throw new Error('请输入用户名和密码')
+    // The Pica API names this field "email", even when the user signs in with a username.
+    const data=await this.request('auth/sign-in',{email:account.trim(),password})
     if(typeof data.token!=='string'||!data.token||data.token.length>10000)throw new Error('登录响应无效')
     return data.token
   }
