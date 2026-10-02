@@ -2,6 +2,11 @@ import type { KindSchema } from '../types.ts'
 
 export const imageSchema: KindSchema = {
   tables: `
+    CREATE TABLE IF NOT EXISTS image_collections (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS image_collection_members (
+      collection_id TEXT NOT NULL REFERENCES image_collections(id) ON DELETE CASCADE,
+      resource_id TEXT PRIMARY KEY REFERENCES resource(id) ON DELETE CASCADE, position INTEGER NOT NULL DEFAULT 0
+    );
     CREATE TABLE IF NOT EXISTS image_groups (
       id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, sort_order INTEGER NOT NULL DEFAULT 0,
       hidden INTEGER NOT NULL DEFAULT 0 CHECK(hidden IN (0,1))
@@ -46,7 +51,7 @@ export const imageSchema: KindSchema = {
   migrate(db) {
     const seeded = db.prepare("SELECT 1 FROM settings WHERE key = '_image_groups_seeded'").get()
     if (!seeded) {
-      for (const [i, name] of ['日漫', '韩漫', '欧美漫画', '其他'].entries()) {
+      for (const [i, name] of ['待整理', '喜欢的作品'].entries()) {
         db.prepare('INSERT OR IGNORE INTO image_groups(id,name,sort_order) VALUES(?,?,?)').run(`image-group-${i}`, name, i)
       }
       db.prepare("INSERT INTO settings(key,value) VALUES('_image_groups_seeded','true')").run()

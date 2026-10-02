@@ -4,6 +4,8 @@ export interface ImagePreferences { mode: ImageReadMode; direction: 'ltr' | 'rtl
 export interface ImageReaderPreferences { preferences: Required<ImagePreferences>; customized: boolean }
 export interface ImageBookmark { id: string; resourceId: string; pageId: string; ordinal: number; offset: number; label: string; missing: boolean; createdAt: number }
 export interface ImageGroup { id: string; name: string; sortOrder: number; hidden: boolean }
+export interface ImageCollection { id:string; name:string; members:string[] }
+export interface ImageMoveResult { moved:number; paths:string[]; warnings:string[] }
 export interface ImagePage { id: string; resourceId: string; chapterId: string | null; ordinal: number; size: number; missing: boolean }
 export interface ImagePageInfo { width: number; height: number; format: string; size: number }
 export interface ImageAuditEntry {
@@ -17,11 +19,12 @@ export interface ImageAudit {
 export interface ImageChapter { id: string; title: string; ordinal: number; pageCount: number; sourceId: string }
 export interface ImageProgress { pageId: string; chapterId: string | null; ordinal: number; offset: number; updatedAt: number }
 export interface ImageItem {
+  collectionId?: string; collectionName?: string; collectionOrder?: number;
   id: string; type: ImageType; path: string; sourceDir: string; name: string; description: string; tags: string[]; groupId: string | null;
   favorite: boolean; read: boolean; publication: 'unknown' | 'ongoing' | 'completed'; coverPageId: string; pageCount: number;
   chapterCount: number; chapters: ImageChapter[]; progress: ImageProgress | null; updatedAt: number; source: string; sourceId: string;
 }
-export interface ImageQuery { type?: ImageType; search?: string; groupId?: string; tag?: string; sourceDir?: string; favorite?: boolean; read?: boolean; publication?: string; sort?: 'updated' | 'name' | 'read' }
+export interface ImageQuery { type?: ImageType; search?: string; groupId?: string; uncategorized?:boolean; tag?: string; sourceDir?: string; favorite?: boolean; read?: boolean; publication?: string; sort?: 'updated' | 'name' | 'read' }
 export interface ImageBulkPatch { groupId?: string | null; read?: boolean; tags?: { mode: 'add' | 'remove' | 'replace'; values: string[] } }
 export interface ImagePatch { name?: string; description?: string; tags?: string[]; groupId?: string | null; favorite?: boolean; read?: boolean; publication?: ImageItem['publication']; coverPageId?: string }
 export interface ScannedImagePage { file: string; entry: string; size: number }
@@ -52,7 +55,8 @@ export interface ImageDownloadProgress {
   reusedPages: number; storedBytes: number; receivedBytes: number; bytesPerSecond: number; retryAt: number;
   effectiveConcurrency: number;
 }
-export interface ImageDownloadOptions { concurrency: number }
+export interface ImageDownloadOptions { concurrency: number; jobConcurrency?: number }
+export interface ImageBatchDownloadResult { enqueued: number; skipped: number; errors: string[] }
 export interface ImageDownloadJob {
   id: string; work: ImageSourceWork; chapters: ImageSourceChapter[]; root: string; groupId: string | null;
   status: 'queued' | 'running' | 'paused' | 'success' | 'failed' | 'cancelled' | 'interrupted';
@@ -70,7 +74,9 @@ export interface ImageApi {
   checkUpdates(id: string): Promise<ImageUpdateCheck>;
   downloadUpdates(id: string, chapters: string[]): Promise<ImageDownloadJob>;
   saveChapter(id: string, chapterId: string, title: string, move: number): Promise<void>;
-  update(id: string, patch: ImagePatch): Promise<ImageItem>; remove(id: string): Promise<void>;
+  update(id: string, patch: ImagePatch): Promise<ImageItem>; remove(id: string, deleteFiles?:boolean): Promise<boolean | void>;
+  collections():Promise<ImageCollection[]>; saveCollection(name:string,members:string[],id?:string):Promise<ImageCollection>; removeCollection(id:string):Promise<void>;
+  move(ids:string[],byCategory?:boolean):Promise<ImageMoveResult|null>;
   bulkUpdate(ids: string[], patch: ImageBulkPatch): Promise<number>;
   groups(): Promise<ImageGroup[]>; saveGroup(group: Partial<ImageGroup> & { name: string }): Promise<ImageGroup>; removeGroup(id: string): Promise<void>;
   prepareImport(type: ImageType, multiple: boolean, archive: boolean): Promise<ImageImportPreview | null>;
@@ -89,6 +95,7 @@ export interface ImageApi {
   sourceCover(url: string): Promise<string>;
   sourceDetail(id: string): Promise<{ work: ImageSourceWork; chapters: ImageSourceChapter[] }>;
   download(workId: string, chapters: string[], groupId: string | null): Promise<ImageDownloadJob | null>;
+  downloadBatch(workIds: string[], groupId: string | null): Promise<ImageBatchDownloadResult | null>;
   jobs(): Promise<ImageDownloadJob[]>; retryJob(id: string): Promise<void>; cancelJob(id: string): Promise<void>; dismissJob(id: string): Promise<void>;
   pauseJob(id: string): Promise<void>; resumeJob(id: string): Promise<void>;
   moveJob(id: string, direction: 'up' | 'down'): Promise<void>;

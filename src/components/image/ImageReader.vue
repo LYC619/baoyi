@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, ArrowRight, X, Maximize, RotateCw, ZoomIn, ZoomOut, RotateCcw, Bookmark, BookMarked, Check, Settings2, Save, Trash2, RectangleVertical, Columns2, Rows3 } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, X, Maximize, Minimize2, Move, RotateCw, ZoomIn, ZoomOut, RotateCcw, Bookmark, BookMarked, Check, Settings2, Save, Trash2, RectangleVertical, Columns2, Rows3 } from 'lucide-vue-next'
 import Panzoom, { type PanzoomObject } from '@panzoom/panzoom'
 import type { ImageBookmark, ImageItem, ImagePage } from '@/types/image'
 import { DEFAULT_IMAGE_PREFERENCES, normalizeImagePreferences } from '@/utils/image-preferences'
@@ -8,6 +8,8 @@ import { imageCanvasLayout, imageSpread } from '@/utils/image-reader'
 import ImagePageMetadata from './ImagePageMetadata.vue'
 
 const props = defineProps<{ item: ImageItem; pages: ImagePage[]; startId?: string }>(), emit = defineEmits<{ close: [] }>()
+const maximized = ref(false), minimized = ref(false), position = ref<{left:number;top:number}|null>(null)
+let windowDrag: {x:number;y:number;left:number;top:number} | undefined
 const root = ref<HTMLElement>(), viewport = ref<HTMLElement>(), canvas = ref<HTMLElement>()
 const index = ref(Math.max(0, props.pages.findIndex(p => p.id === (props.startId || props.item.progress?.pageId))))
 const jumpPage = ref<number|string>(index.value + 1)
@@ -23,9 +25,6 @@ const page = computed(() => props.pages[index.value]), chapter = computed(() => 
 const currentBookmark = computed(() => bookmarks.value.find(b => b.pageId === page.value?.id))
 const spreadRange = computed(() => prefs.value.mode === 'double' && props.item.type === 'comic' ? imageSpread(props.pages, index.value, prefs.value.coverSingle) : { start: index.value, length: 1 })
 const spread = computed(() => props.pages.slice(spreadRange.value.start, spreadRange.value.start + spreadRange.value.length))
-const leftStep = computed(() => prefs.value.direction === 'rtl' ? 1 : -1)
-const rightStep = computed(() => -leftStep.value)
-function canStep(delta: number) { return delta > 0 ? spreadRange.value.start + spreadRange.value.length < props.pages.length : index.value > 0 }
 const natural = (p: ImagePage) => dimensions.value[p.id] || { width: 800, height: 1200 }
 const layout = computed(() => imageCanvasLayout(spread.value.map(natural), { width: view.value.width - 32, height: view.value.height - 24 }, prefs.value.fit, rotation.value))
 const stripWidths = computed(() => props.pages.map(p => (prefs.value.fit === 'original' ? natural(p).width : Math.min(1100, view.value.width - 32)) * prefs.value.zoom))
@@ -163,14 +162,8 @@ async function defaults(reset: boolean) {
   } catch (cause) { error.value = (cause as Error).message } finally { busy.value = false }
 }
 function keys(event: KeyboardEvent) {
+  if (!root.value?.contains(document.activeElement) || minimized.value) return
   if (event.key === 'Escape') { event.preventDefault(); if (panel.value) { panel.value = ''; root.value?.focus() } else void close(); return }
-  if (event.key === 'Tab' && root.value) {
-    const controls = [...root.value.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),[tabindex="0"]')].filter(el => el.offsetParent !== null)
-    const firstControl = controls[0], lastControl = controls.at(-1)
-    if (event.shiftKey && (document.activeElement === firstControl || document.activeElement === root.value)) { event.preventDefault(); lastControl?.focus() }
-    else if (!event.shiftKey && (document.activeElement === lastControl || document.activeElement === root.value)) { event.preventDefault(); firstControl?.focus() }
-    return
-  }
   if ((event.target as HTMLElement)?.matches('input,select,textarea,[contenteditable=true]')) return
   if (event.ctrlKey || event.metaKey || event.altKey) return
   if (event.key.toLowerCase() === 'f') { event.preventDefault(); void fullscreen() }
@@ -184,6 +177,18 @@ function keys(event: KeyboardEvent) {
   else if (event.key === 'Home') { event.preventDefault(); void go(0) }
   else if (event.key === 'End') { event.preventDefault(); void go(props.pages.length - 1) }
 }
+function moveWindow(event: PointerEvent) {
+  if(maximized.value || document.fullscreenElement || event.button!==0 || (event.target as HTMLElement).closest('button'))return
+  const box=root.value!.getBoundingClientRect()
+  position.value={left:box.left,top:box.top};windowDrag={x:event.clientX,y:event.clientY,left:box.left,top:box.top}
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+}
+function moveWindowTo(event: PointerEvent) {
+  if(!windowDrag || !root.value)return
+  position.value={left:Math.max(0,Math.min(window.innerWidth-root.value.offsetWidth,windowDrag.left+event.clientX-windowDrag.x)),top:Math.max(36,Math.min(window.innerHeight-60,windowDrag.top+event.clientY-windowDrag.y))}
+}
+function constrainWindow(){if(position.value && root.value)position.value={left:Math.max(0,Math.min(position.value.left,window.innerWidth-root.value.offsetWidth)),top:Math.max(36,Math.min(position.value.top,window.innerHeight-root.value.offsetHeight))}}
+function minimize(){minimized.value=!minimized.value;if(!minimized.value)void nextTick(()=>root.value?.focus())}
 async function fullscreen() { try { if (document.fullscreenElement) await document.exitFullscreen(); else await root.value?.requestFullscreen() } catch { error.value = '当前窗口无法进入全屏' } }
 async function close() { clearTimeout(saveTimer); if (prefsTimer) await savePreferences(); await preferenceWrites; await persist(); if (document.fullscreenElement) await document.exitFullscreen(); emit('close') }
 watch([canvas, layout, () => prefs.value.mode], setupPan, { flush: 'post' })
@@ -194,7 +199,7 @@ watch([index, () => prefs.value.mode], () => {
   for (const at of [spreadRange.value.start - 1, spreadRange.value.start + spreadRange.value.length]) { const adjacent = props.pages[at]; if (adjacent) { const image = new Image(); image.src = `baoyi://image/${adjacent.id}`; neighbors.push(image) } }
 }, { immediate: true })
 onMounted(async () => {
-  window.addEventListener('keydown', keys)
+  window.addEventListener('keydown', keys); window.addEventListener('resize', constrainWindow)
   try { const state = await window.baoyi.image.readerPreferences(props.item.id); prefs.value = normalizeImagePreferences(state.preferences); customized.value = state.customized; bookmarks.value = await window.baoyi.image.bookmarks(props.item.id) } catch (cause) { error.value = (cause as Error).message }
   if (disposed) return
   if (props.item.type === 'photo') prefs.value.mode = 'single'
@@ -208,13 +213,19 @@ onMounted(async () => {
   if (viewport.value) resize.observe(viewport.value)
   await go(index.value, props.startId ? 0 : props.item.progress?.offset || 0); restoring = false; setupPan(); wake(); root.value?.focus()
 })
-onBeforeUnmount(() => { disposed = true; window.removeEventListener('keydown', keys); resize?.disconnect(); destroyPan(); clearTimeout(hideTimer); clearTimeout(saveTimer); if (prefsTimer) void savePreferences(); cancelAnimationFrame(frame); neighbors = []; void persist() })
+onBeforeUnmount(() => { disposed = true; window.removeEventListener('keydown', keys); window.removeEventListener('resize', constrainWindow); resize?.disconnect(); destroyPan(); clearTimeout(hideTimer); clearTimeout(saveTimer); if (prefsTimer) void savePreferences(); cancelAnimationFrame(frame); neighbors = []; void persist() })
 </script>
 
 <template>
-  <Teleport to="body"><section ref="root" class="image-reader" :class="{ idle: idle && !panel }" tabindex="-1" role="dialog" aria-modal="true" :aria-label="`阅读 ${item.name}`" @pointermove="wake" @focusin="wake">
+  <Teleport to="body"><section ref="root" class="image-reader" :class="{ idle: idle && !panel, maximized, minimized }" :style="position&&!maximized&&!minimized?{left:position.left+'px',top:position.top+'px',right:'auto'}:{}" tabindex="-1" role="dialog" aria-modal="false" :aria-label="`阅读 ${item.name}`" @pointermove="wake" @focusin="wake">
+    <header class="reader-title" @pointerdown="moveWindow" @pointermove="moveWindowTo" @pointerup="windowDrag=undefined" @lostpointercapture="windowDrag=undefined" @dblclick="maximized=!maximized">
+      <Move :size="14"/><strong :title="item.name">{{item.name}}</strong><span v-if="!minimized">拖动标题移动窗口</span>
+      <button :aria-label="minimized?'展开阅读器':'收起阅读器'" :title="minimized?'展开':'收起'" @click="minimize"><Minimize2 :size="16"/></button>
+      <button v-if="!minimized" :aria-label="maximized?'还原阅读窗口':'最大化阅读窗口'" title="最大化 / 还原" @click="maximized=!maximized"><Maximize :size="16"/></button>
+      <button aria-label="关闭阅读器" title="关闭阅读器" @click="close"><X :size="20"/></button>
+    </header>
     <header class="reader-tools">
-      <button aria-label="关闭阅读器" title="关闭阅读器" @click="close"><X :size="20" /></button><strong :title="item.name">{{ item.name }}</strong>
+
       <select v-if="item.type==='comic'" :value="chapter" aria-label="阅读章节" @change="changeChapter"><option v-for="c in item.chapters.filter(c=>c.pageCount)" :key="c.id" :value="c.id">{{ c.title }}</option></select>
       <div v-if="item.type==='comic'" class="reader-modes" role="group" aria-label="阅读模式">
         <button aria-label="单页阅读" title="单页" :aria-pressed="prefs.mode==='single'" @click="prefs.mode='single';changePrefs()"><RectangleVertical :size="17" /><span>单页</span></button>
@@ -240,10 +251,7 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('keydown', k
         <div v-else ref="canvas" class="reader-spread" :class="{rtl:prefs.direction==='rtl'}" :style="{width:layout.width+'px',height:layout.height+'px',marginLeft:-layout.width/2+'px',marginTop:-layout.height/2+'px'}" @panzoomchange="panChanged">
           <div v-for="(p,i) in spread" :key="p.id" class="reader-sheet" :style="{width:layout.sheets[i].width+'px',height:layout.sheets[i].height+'px'}"><img v-if="!failed.has(p.id)" :src="`baoyi://image/${p.id}`" :alt="`第 ${p.ordinal+1} 页`" draggable="false" :style="{width:layout.sheets[i].imageWidth+'px',height:layout.sheets[i].imageHeight+'px',transform:`rotate(${rotation}deg)`}" @load="loaded($event,p.id)" @error="failed.add(p.id)" /><div v-else class="reader-missing">这一页无法读取</div></div>
         </div>
-        <template v-if="prefs.mode!=='scroll'">
-          <button class="reader-edge reader-edge-left panzoom-exclude" aria-label="左侧翻页" :title="leftStep>0?'后一页':'前一页'" :disabled="!canStep(leftStep)" @pointerdown.stop @click.stop="step(leftStep)"><ArrowLeft :size="23"/></button>
-          <button class="reader-edge reader-edge-right panzoom-exclude" aria-label="右侧翻页" :title="rightStep>0?'后一页':'前一页'" :disabled="!canStep(rightStep)" @pointerdown.stop @click.stop="step(rightStep)"><ArrowRight :size="23"/></button>
-        </template>
+
       </div>
       <aside v-if="panel" class="reader-panel" :aria-label="panel==='settings'?'作品阅读设置':'作品书签'">
         <header><h2>{{ panel==='settings'?'阅读设置':'书签' }}</h2><button aria-label="关闭阅读面板" title="关闭面板" @click="panel=''"><X :size="17" /></button></header>
@@ -252,7 +260,7 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('keydown', k
           <label>图片缩放<select v-model="prefs.fit" aria-label="图片缩放" @change="changePrefs"><option value="screen">适屏</option><option value="width">适宽</option><option value="original">原始尺寸</option></select></label>
           <template v-if="item.type==='comic'"><label>阅读方向<select v-model="prefs.direction" aria-label="阅读方向" @change="changePrefs"><option value="ltr">从左到右</option><option value="rtl">从右到左</option></select></label><label class="reader-check"><input v-model="prefs.coverSingle" type="checkbox" @change="changePrefs" />封面独立成页</label></template>
           <div class="reader-defaults"><button :disabled="busy" @click="defaults(false)"><Save :size="16" />设为全局默认</button><button :disabled="busy||!customized" @click="defaults(true)"><RotateCcw :size="16" />使用全局默认</button></div>
-          <div class="reader-help"><h3>操作提示</h3><p>左右方向键或页边按钮翻页</p><p>适屏时滚轮翻页，放大后滚轮移动图片</p><p>连续模式：滚轮、空格 / Page Down 向下阅读</p><p>拖动移动 · Ctrl + 滚轮缩放</p><p>+ / − 缩放 · 0 重置 · F 全屏</p><p>Home / End 首末页 · Esc 返回</p></div>
+          <div class="reader-help"><h3>操作提示</h3><p>左右方向键或右栏按钮翻页</p><p>适屏时滚轮翻页，放大后滚轮移动图片</p><p>连续模式：滚轮、空格 / Page Down 向下阅读</p><p>拖动移动 · Ctrl + 滚轮缩放</p><p>+ / − 缩放 · 0 重置 · F 全屏</p><p>Home / End 首末页 · Esc 返回</p></div>
         </template>
         <template v-else><p v-if="!bookmarks.length" class="reader-scope">暂无书签</p><div v-for="b in bookmarks" :key="b.id" class="reader-bookmark"><button :aria-label="`跳转到第 ${b.ordinal+1} 页`" :disabled="b.missing" @click="jumpBookmark(b)"><Bookmark :size="16" />第 {{ b.ordinal+1 }} 页{{ b.missing?' · 缺失':'' }}</button><input :value="b.label" aria-label="书签名称" placeholder="书签名称" maxlength="200" :disabled="busy" @change="renameBookmark(b,$event)" /><button :aria-label="`删除第 ${b.ordinal+1} 页书签`" title="删除书签" :disabled="busy" @click="removeBookmark(b)"><Trash2 :size="16" /></button></div></template>
       </aside>
@@ -283,4 +291,21 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('keydown', k
 .reader-help{margin-top:24px;padding-top:16px;border-top:1px solid #414147;color:#b9b9c8;line-height:1.8}
 .reader-help h3{font-size:12px;color:#e4e4e7;margin:0 0 8px;font-weight:500}.reader-help p{margin:6px 0}
 @media(max-width:1050px){.reader-tools{gap:5px}.reader-tools select{width:120px}.reader-tools strong{flex-basis:160px}.reader-modes button{padding-inline:7px}.reader-bottom{gap:7px}.reader-zoom{border-right:0;padding-inline:2px}}
+</style>
+
+<style scoped>
+.image-reader{inset:70px 24px auto auto;width:min(78vw,1120px);height:min(82vh,900px);min-width:min(640px,96vw);min-height:380px;max-width:100vw;max-height:calc(100vh - 40px);resize:both;overflow:hidden;display:grid;grid-template:34px minmax(0,1fr) / 100px minmax(0,1fr) 92px;border:1px solid #55555c;border-radius:10px;box-shadow:0 16px 60px #0008;z-index:180}
+.image-reader.maximized{inset:var(--titlebar-h) 0 0!important;width:100%!important;height:calc(100vh - var(--titlebar-h))!important;max-height:none;border-radius:0;resize:none}
+.image-reader:fullscreen{inset:0!important;width:100%!important;height:100%!important;max-height:none;border-radius:0;resize:none}
+.reader-title{grid-column:1 / -1;display:flex;gap:8px;align-items:center;padding:0 5px 0 12px;background:#29292e;cursor:move;touch-action:none;min-width:0;user-select:none}
+.reader-title strong{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500}.reader-title span{font-size:10px;color:#a1a1ac}.reader-title button{height:28px;width:30px}
+.reader-tools{grid-column:1;grid-row:2;display:flex;flex-direction:column;flex-wrap:nowrap;overflow-y:auto;gap:8px;padding:12px 6px;min-height:0;border:0;border-right:1px solid #37373b;align-items:center}
+.reader-tools select{width:86px;min-width:0;font-size:11px;padding:5px}.reader-modes{flex-direction:column;width:86px;flex-shrink:0}.reader-modes button{width:100%}.reader-zoom{display:grid;grid-template-columns:32px 32px;gap:3px;justify-content:center;border:0;padding:3px 0}.reader-zoom output{grid-column:1 / -1;grid-row:1;width:auto}.reader-zoom button:last-child{grid-column:1 / -1;justify-self:center}
+.reader-body{grid-column:2;grid-row:2;overflow:hidden}.reader-panel{flex-basis:210px;width:210px;padding:10px}
+.reader-bottom{grid-column:3;grid-row:2;display:flex;flex-direction:column;flex-wrap:nowrap;gap:16px;padding:14px 5px;min-height:0;overflow-y:auto;border:0;border-left:1px solid #37373b;justify-content:center}
+.reader-bottom{overflow-x:hidden}.reader-bottom span{min-width:0;font-size:11px;white-space:nowrap}.reader-bottom input[type=range]{flex:none;min-width:0;width:78px}.reader-jump,.reader-jump label{flex-direction:column;gap:5px}.reader-bottom :deep(.page-metadata){flex:none;min-width:0;width:80px;font-size:10px}
+.reader-error{position:absolute;left:108px;right:100px;top:36px;z-index:5;border-radius:6px;font-size:11px;max-height:70px;overflow:auto}
+.idle .reader-tools:not(:focus-within):not(:hover),.idle .reader-bottom:not(:focus-within):not(:hover){opacity:1}
+.image-reader.minimized{inset:auto 24px 20px auto!important;width:300px!important;height:34px!important;min-height:0;min-width:0;resize:none;display:block}.minimized>:not(.reader-title){display:none}.minimized .reader-title{height:32px}.minimized .reader-title>svg{display:none}
+@media(max-height:650px){.reader-tools{gap:3px;padding-block:5px}.reader-bottom{gap:10px}}
 </style>

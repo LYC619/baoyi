@@ -4,12 +4,15 @@ import TitleBar from '@/components/TitleBar.vue'
 import ToastHost from '@/components/ui/ToastHost.vue'
 import VideoImportPanel from '@/components/video/VideoImportPanel.vue'
 import AgentOrganizePanel from '@/components/video/AgentOrganizePanel.vue'
+import ImageReader from '@/components/image/ImageReader.vue'
+import { useImageReader } from '@/composables/useImageReader'
 import { useVideoAgentOrganize } from '@/composables/useVideoAgentOrganize'
 import { useVideoImport } from '@/composables/useVideoImport'
 import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
 import { watch } from 'vue'
 const videoImport = useVideoImport(), workflow = useVideoWorkflow()
 const videoAgent = useVideoAgentOrganize()
+const imageReader = useImageReader()
 watch(workflow.hideHentai, hidden => { videoImport.setPrivacy(hidden); if (hidden) videoAgent.hide() })
 </script>
 
@@ -24,6 +27,7 @@ watch(workflow.hideHentai, hidden => { videoImport.setPrivacy(hidden); if (hidde
     <ToastHost />
     <VideoImportPanel v-if="videoImport.open.value" />
     <AgentOrganizePanel v-if="videoAgent.open.value" />
+    <ImageReader v-if="imageReader.session.value" :key="imageReader.session.value.item.id + ':' + imageReader.session.value.startId" v-bind="imageReader.session.value" @close="imageReader.close" />
   </div>
 </template>
 

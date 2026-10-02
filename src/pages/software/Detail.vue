@@ -42,6 +42,7 @@ const route = useRoute()
 const detailTabs = [{"id":"overview","label":"简介"},{"id":"notes","label":"使用心得"},{"id":"files","label":"文件与启动"}]
 const activeTab = ref(detailTabs.some(tab=>tab.id===route.query.tab) ? String(route.query.tab) : 'overview')
 watch(activeTab, tab=>{ void router.replace({query:{...route.query,tab}}) })
+watch(()=>route.query.tab,tab=>{activeTab.value=detailTabs.some(t=>t.id===tab)?String(tab):'overview'})
 watch(()=>props.id,()=>{activeTab.value='overview'})
 const store = useSoftwareStore()
 const categories = useCategoriesStore()

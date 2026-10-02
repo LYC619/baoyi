@@ -8033,7 +8033,7 @@ async function videoUserEditedSection(): Promise<void> {
     //   9 = video_meta 多了 hanime_id 列（rollback-v9 撤这个）
     // 一个数字标两件事的话，两个回滚脚本的界限就说不清了。
     // 0.9 抬到 10：拆扫描目录（scan_dirs -> software/game/video_scan_dirs）+ identify_logs.resource_kind 列
-    assert.equal(SCHEMA_VERSION, 12, '图片阅读设置与书签的库形状是 12')
+    assert.equal(SCHEMA_VERSION, 13, '漫画合集的库形状是 13')
   })
 }
 

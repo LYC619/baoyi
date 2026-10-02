@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
+import { withImageCollections } from './collections.ts'
 import type { SqlDb } from '../../services/schema.ts'
 import type { ImageBulkPatch, ImageChapter, ImageGroup, ImageItem, ImagePage, ImagePatch, ImageQuery, ScannedImage } from '../../../src/types/image.ts'
 
@@ -60,7 +61,7 @@ export class ImageLibrary {
       const list = chapters.get(c.resource_id) || []
       list.push({ id: c.id, title: c.title, ordinal: c.ordinal, pageCount: c.page_count, sourceId: c.source_id }); chapters.set(c.resource_id, list)
     }
-    return rows.map(r => imageItem(r, chapters.get(r.id) || [], r.page_count, r.progress_page_id ? { page_id: r.progress_page_id, chapter_id: r.progress_chapter_id, ordinal: r.progress_ordinal, scroll_offset: r.scroll_offset, updated_at: r.progress_updated_at } : undefined, r.selected_cover || ''))
+    return withImageCollections(this.db, rows.map(r => imageItem(r, chapters.get(r.id) || [], r.page_count, r.progress_page_id ? { page_id: r.progress_page_id, chapter_id: r.progress_chapter_id, ordinal: r.progress_ordinal, scroll_offset: r.scroll_offset, updated_at: r.progress_updated_at } : undefined, r.selected_cover || '')))
   }
   get(id: string): ImageItem | null {
     const r = this.db.prepare(`SELECT r.*,m.*,s.is_read FROM resource r JOIN image_meta m ON m.resource_id=r.id LEFT JOIN image_reader_state s ON s.resource_id=r.id WHERE r.id=? AND ${visible}`).get(id) as Row | undefined
@@ -70,7 +71,7 @@ export class ImageLibrary {
     const count = (this.db.prepare('SELECT COUNT(*) n FROM image_pages WHERE resource_id=? AND missing=0').get(id) as Row).n
     const p = this.db.prepare('SELECT v.*,p.chapter_id,p.ordinal FROM image_progress v JOIN image_pages p ON p.id=v.page_id WHERE v.resource_id=? AND p.missing=0').get(id) as Row | undefined
     const cover = this.db.prepare('SELECT id FROM image_pages WHERE resource_id=? AND missing=0 ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END,ordinal LIMIT 1').get(id, r.cover_page_id) as Row | undefined
-    return imageItem(r, chapters, count, p, cover?.id || '')
+    return withImageCollections(this.db,[imageItem(r, chapters, count, p, cover?.id || '')])[0]
   }
   bulkUpdate(ids: string[], patch: ImageBulkPatch): number {
     if (!Array.isArray(ids) || !ids.length || ids.length > 5000 || ids.some(id => typeof id !== 'string' || !id || id.length > 128)) throw new Error('请选择 1 到 5000 项资源')
@@ -122,7 +123,7 @@ export class ImageLibrary {
     this.db.exec('SAVEPOINT image_register')
     try {
       this.db.prepare(`INSERT INTO resource(id,kind,path,created_at,updated_at,file_name,source_dir,name_zh,description,tags,category,ai_status) VALUES(?,'image',?,?,?,?,?,?,?,?,?,'done')
-        ON CONFLICT(id) DO UPDATE SET path=excluded.path,updated_at=excluded.updated_at`).run(id, scan.path, Date.now(), Date.now(), path.basename(scan.path), scan.sourceDir, scan.name, scan.description || '', JSON.stringify(scan.tags || []), scan.type === 'comic' ? '漫画' : '照片')
+        ON CONFLICT(id) DO UPDATE SET path=excluded.path,source_dir=excluded.source_dir,file_name=excluded.file_name,updated_at=excluded.updated_at`).run(id, scan.path, Date.now(), Date.now(), path.basename(scan.path), scan.sourceDir, scan.name, scan.description || '', JSON.stringify(scan.tags || []), scan.type === 'comic' ? '漫画' : '照片')
       this.db.prepare(`INSERT INTO image_meta(resource_id,item_type,source,source_id,publication) VALUES(?,?,?,?,?) ON CONFLICT(resource_id) DO NOTHING`).run(id, scan.type, scan.source || '', scan.sourceId || '', scan.publication || 'unknown')
       this.db.prepare('UPDATE image_pages SET missing=1 WHERE resource_id=?').run(id)
       const priorChapters = this.db.prepare('SELECT id,ordinal,customized FROM image_chapters WHERE resource_id=?').all(id) as Row[]

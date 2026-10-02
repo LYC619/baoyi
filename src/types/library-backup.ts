@@ -29,6 +29,8 @@ export const LIBRARY_BACKUP_COLUMNS = {
     use_count: 'integer?', is_archived: 'integer?', external_active_at: 'integer?'
   },
   image_groups: { id: 'text', name: 'text', sort_order: 'integer', hidden: 'integer' },
+  image_collections: {id:'text',name:'text',created_at:'integer'},
+  image_collection_members: {collection_id:'text',resource_id:'text',position:'integer'},
   image_meta: { resource_id: 'text', item_type: 'text', group_id: 'text?', favorite: 'integer', publication: 'text', cover_page_id: 'text', source: 'text', source_id: 'text' },
   image_chapters: { id: 'text', resource_id: 'text', chapter_key: 'text', title: 'text', ordinal: 'integer', source_id: 'text', customized: 'integer' },
   image_pages: { id: 'text', resource_id: 'text', chapter_id: 'text?', file: 'text', entry: 'text', ordinal: 'integer', size: 'integer', missing: 'integer' },

@@ -21,9 +21,16 @@ const phaseLabel = (job: ImageDownloadJob) => job.status === 'running' ? phases[
 async function changeConcurrency(event: Event) {
   const input = event.target as HTMLInputElement
   error.value = ''; optionsBusy.value = true
-  try { await downloads.setOptions({ concurrency: Number(input.value) }) }
+  try { await downloads.setOptions({ ...downloads.options.value, concurrency: Number(input.value) }) }
   catch (cause) { error.value = (cause as Error).message }
   finally { optionsBusy.value = false; input.value = String(downloads.options.value.concurrency) }
+}
+async function changeJobConcurrency(event: Event) {
+  const input = event.target as HTMLInputElement
+  optionsBusy.value = true
+  try { await downloads.setOptions({ ...downloads.options.value, jobConcurrency: Number(input.value) }) }
+  catch(cause) {error.value=(cause as Error).message}
+  finally {optionsBusy.value=false;input.value=String(downloads.options.value.jobConcurrency || 3)}
 }
 async function action(job: ImageDownloadJob, type: 'retry' | 'cancel' | 'dismiss' | 'pause' | 'resume' | 'up' | 'down') {
   if (busy.value.has(job.id)) return
@@ -44,7 +51,7 @@ async function action(job: ImageDownloadJob, type: 'retry' | 'cancel' | 'dismiss
 
 <template>
   <section v-if="shownJobs.length" class="image-download-list">
-    <div class="download-controls"><h3>漫画下载</h3><label>并发 <input type="number" min="1" max="3" step="1" aria-label="图片下载并发" :disabled="optionsBusy" :value="downloads.options.value.concurrency" @change="changeConcurrency" /></label></div>
+    <div class="download-controls"><h3>漫画下载</h3><label>同时下载作品 <input type="number" min="1" max="4" step="1" aria-label="同时下载漫画数" :disabled="optionsBusy" :value="downloads.options.value.jobConcurrency || 3" @change="changeJobConcurrency" /></label><label>每部图片并发 <input type="number" min="1" max="3" step="1" aria-label="图片下载并发" :disabled="optionsBusy" :value="downloads.options.value.concurrency" @change="changeConcurrency" /></label></div>
     <p v-if="error" role="alert" class="download-error">{{ error }}</p>
     <article v-for="job in shownJobs" :key="job.id" :data-job-id="job.id">
       <header class="download-heading">

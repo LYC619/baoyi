@@ -380,7 +380,8 @@ function validateInput(input: unknown): LibraryBackup {
   if (header.exported_at < 0) invalid('exported_at must not be negative')
   const legacyImages = header.schema_version < 11 ? { image_groups: [], image_meta: [], image_chapters: [], image_pages: [], image_progress: [], image_download_jobs: [] } : {}
   const legacyReader = header.schema_version < 12 ? { image_reader_state: [], image_bookmarks: [] } : {}
-  const source = keys({ video_scan_state: [], video_scan_ignores: [], video_detached_owners: [], video_discovery_sources: [], video_discovery_marks: [], ...legacyImages, ...legacyReader, ...object(header.tables, 'tables') }, LIBRARY_BACKUP_TABLE_NAMES, 'tables')
+  const legacyCollections = header.schema_version < 13 ? {image_collections:[],image_collection_members:[]} : {}
+  const source = keys({ video_scan_state: [], video_scan_ignores: [], video_detached_owners: [], video_discovery_sources: [], video_discovery_marks: [], ...legacyImages, ...legacyReader, ...legacyCollections, ...object(header.tables, 'tables') }, LIBRARY_BACKUP_TABLE_NAMES, 'tables')
   let totalRows = 0
   // Bound every table before traversing any rows or issuing metadata writes.
   for (const table of LIBRARY_BACKUP_TABLE_NAMES) {

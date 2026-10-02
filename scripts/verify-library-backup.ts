@@ -19,6 +19,7 @@ import { LIBRARY_BACKUP_LIMITS, type LibraryBackup } from '../src/types/library-
 import { buildLibraryBackup, previewLibraryBackup, restoreLibraryBackup } from '../electron/services/library-backup.ts'
 
 const expectedTables = [
+  'image_collections','image_collection_members',
   'image_groups', 'image_meta', 'image_chapters', 'image_pages', 'image_progress', 'image_reader_state', 'image_bookmarks', 'image_download_jobs',
   'resource', 'software_meta', 'game_meta', 'video_meta', 'episode', 'video_sources',
   'video_directories', 'video_assets', 'video_episode_assets', 'video_download_jobs',

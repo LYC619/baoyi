@@ -4,7 +4,6 @@ import type { SqlDb } from '../../services/schema.ts'
 import { IMAGE_EXTENSIONS } from './scanner.ts'
 import { MAX_IMAGE_BYTES, readArchiveEntry } from './archive.ts'
 
-const MIME: Record<string,string> = { '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.webp':'image/webp', '.gif':'image/gif', '.bmp':'image/bmp', '.avif':'image/avif' }
 export function imageMime(data: Uint8Array): string {
   const b = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
   if (b.length < 12) throw new Error('图片数据不完整')
@@ -32,6 +31,6 @@ export async function readImagePage(db: SqlDb, id: string, includeMissing = fals
   if (!row.entry && (await fs.stat(file)).size > MAX_IMAGE_BYTES) throw new Error('图片超过 64 MB')
   const data = row.entry ? await readArchiveEntry(file, row.entry) : await fs.readFile(file)
   const mime = imageMime(data)
-  if (mime !== MIME[ext]) throw new Error('图片格式与扩展名不符')
+  // Some providers save WebP payloads under JPG names; serve the verified raster MIME.
   return { data, mime }
 }

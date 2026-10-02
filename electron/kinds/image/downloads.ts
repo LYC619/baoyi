@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { assertImageFilesIdle } from './management.ts'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type { SqlDb } from '../../services/schema.ts'
@@ -32,7 +33,12 @@ export function createImageDownloads(deps: Dependencies) {
   const jobs = new Map<string, ImageDownloadJob>(), controllers = new Map<string, AbortController>()
   const settling = new Map<string, Promise<void>>(), gates = new Map<string, ImageRequestGate>()
   const jobsChanged = deps.jobsChanged || deps.changed
-  let pumping: Promise<void> | null = null, nextOrder = 0, configuredConcurrency = 2
+  let pumping = false, nextOrder = 0, configuredConcurrency = 2, configuredJobConcurrency = 3
+  try {
+    const row = db.prepare("SELECT value FROM settings WHERE key='image_download_job_concurrency'").get() as {value:string} | undefined
+    const saved = row && JSON.parse(row.value)
+    if (Number.isInteger(saved) && saved >= 1 && saved <= 4) configuredJobConcurrency = saved
+  } catch { /* bounded default */ }
   try {
     const row = db.prepare("SELECT value FROM settings WHERE key='image_download_concurrency'").get() as { value: string } | undefined
     const saved = row ? JSON.parse(row.value) : 2
@@ -64,12 +70,17 @@ export function createImageDownloads(deps: Dependencies) {
   function options(value?: ImageDownloadOptions): ImageDownloadOptions {
     if (value !== undefined) {
       if (!value || !Number.isInteger(value.concurrency) || value.concurrency < 1 || value.concurrency > 3) throw new Error('下载并发必须是 1 到 3 的整数')
+      const jobConcurrency = value.jobConcurrency ?? configuredJobConcurrency
+      if (!Number.isInteger(jobConcurrency) || jobConcurrency < 1 || jobConcurrency > 4) throw new Error('同时下载作品数必须是 1 到 4 的整数')
       db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('image_download_concurrency',?)").run(JSON.stringify(value.concurrency))
       configuredConcurrency = value.concurrency
+      configuredJobConcurrency = jobConcurrency
+      db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('image_download_job_concurrency',?)").run(JSON.stringify(jobConcurrency))
       for (const gate of gates.values()) gate.refresh()
       jobsChanged()
+      pump()
     }
-    return { concurrency: configuredConcurrency }
+    return { concurrency: configuredConcurrency, jobConcurrency: configuredJobConcurrency }
   }
   async function run(job: ImageDownloadJob) {
     const controller = new AbortController()
@@ -118,6 +129,7 @@ export function createImageDownloads(deps: Dependencies) {
       save(job)
       const root = await fs.realpath(job.root)
       const existing = library.list().find(i => i.source === 'pica' && i.sourceId === job.work.id)
+      if(existing)assertImageFilesIdle(existing.id)
       if (job.resourceId && existing?.id !== job.resourceId) throw new Error('目标作品已移除或隐藏，未写入下载文件')
       if (existing && path.dirname(existing.path).toLowerCase() !== root.toLowerCase()) throw new Error('作品已在另一目录中，请使用原下载根目录补齐章节')
       const directory = await realDirectory(existing?.path || path.join(root, safeName(job.work.title) + ' [' + hash(job.work.id).slice(0, 8) + ']'), root)
@@ -214,18 +226,21 @@ export function createImageDownloads(deps: Dependencies) {
   }
   function pump() {
     if (pumping) return
-    pumping = (async () => {
+    pumping = true
+    try {
       let next: ImageDownloadJob | undefined
-      while ((next = queued()[0])) {
+      while (settling.size < configuredJobConcurrency && (next = queued().find(job=>!settling.has(job.id)))) {
         const job = next, pending = Promise.resolve().then(() => job.status === 'queued' ? run(job) : undefined)
         settling.set(job.id, pending)
-        try { await pending } finally { settling.delete(job.id) }
+        void pending.catch(error => { job.status = 'failed'; job.error = String(error); save(job) }).finally(() => { settling.delete(job.id); pump() })
       }
-    })().finally(() => { pumping = null; if (queued().length) pump() })
+    } finally { pumping = false }
   }
   async function enqueue(work: ImageSourceWork, chapters: ImageSourceChapter[], root: string, groupId: string | null, request?: { repairPages?: Record<string, string[]>; resourceId?: string }) {
     if (!chapters.length) throw new Error('请先选择章节')
     const actualRoot = await fs.realpath(root)
+    const existing=library.list().find(item=>item.source==='pica'&&item.sourceId===work.id)
+    if(existing)assertImageFilesIdle(existing.id)
     if (duplicate(work.id)) throw new Error('这部作品已有下载任务')
     if (groupId && !library.groups().some(g => g.id === groupId && !g.hidden)) throw new Error('下载类型不可用')
     if (request?.resourceId) {
@@ -300,5 +315,15 @@ export function createImageDownloads(deps: Dependencies) {
     return [...jobs.values()].filter(visible).sort((a, b) => priority(a) - priority(b) || (a.status === 'queued' && b.status === 'queued' ? a.queueOrder! - b.queueOrder! : b.updatedAt - a.updatedAt))
       .map(job => ({ ...structuredClone(job), queuePosition: job.status === 'queued' ? queue.indexOf(job) + 1 : undefined }))
   }
-  return { enqueue, repair, retry, pause, resume, cancel, move, options, dismiss, list, idle: async () => { while (pumping) await pumping } }
+  async function enqueueBatch(ids: string[], root: string, groupId: string | null) {
+    if (!Array.isArray(ids) || ids.length > 200 || !ids.length || ids.some(id=>typeof id!=='string'||!id.trim())) throw new Error('一次请选择 1 到 200 部漫画')
+    const result = {enqueued:0,skipped:0,errors:[] as string[]}
+    for (const id of new Set(ids)) {
+      if (duplicate(id) || db.prepare("SELECT 1 FROM image_meta WHERE source='pica' AND source_id=?").get(id)) {result.skipped++;continue}
+      try { const {work,chapters} = await source.detail(id); await enqueue(work,chapters,root,groupId); result.enqueued++ }
+      catch(error) {result.errors.push(`${id}：${(error as Error).message}`)}
+    }
+    return result
+  }
+  return { enqueue, enqueueBatch, repair, retry, pause, resume, cancel, move, options, dismiss, list, idle: async () => { while (settling.size) {await Promise.allSettled([...settling.values()]); await Promise.resolve()} } }
 }

@@ -49,6 +49,10 @@ function plain<T>(value: T): T {
 
 const api: BaoyiApi = {
   image: {
+    collections: () => ipcRenderer.invoke('image:collections'),
+    saveCollection: (name,members,id) => ipcRenderer.invoke('image:save-collection',name,plain(members),id),
+    removeCollection: id => ipcRenderer.invoke('image:remove-collection',id),
+    move: (ids,byCategory) => ipcRenderer.invoke('image:move',plain(ids),byCategory),
     readerPreferences: (id, value) => ipcRenderer.invoke('image:reader-preferences', id, value === undefined ? undefined : plain(value)),
     bookmarks: id => ipcRenderer.invoke('image:bookmarks', id), saveBookmark: (id, pageId, offset, label) => ipcRenderer.invoke('image:save-bookmark', id, pageId, offset, label),
     removeBookmark: (id, bookmarkId) => ipcRenderer.invoke('image:remove-bookmark', id, bookmarkId),
@@ -58,7 +62,7 @@ const api: BaoyiApi = {
     list: query => ipcRenderer.invoke('image:list', plain(query)), get: id => ipcRenderer.invoke('image:get', id),
     pages: (id, chapter) => ipcRenderer.invoke('image:pages', id, chapter), update: (id, patch) => ipcRenderer.invoke('image:update', id, plain(patch)),
     bulkUpdate: (ids, patch) => ipcRenderer.invoke('image:bulk-update', plain(ids), plain(patch)),
-    remove: id => ipcRenderer.invoke('image:remove', id), groups: () => ipcRenderer.invoke('image:groups'),
+    remove: (id,deleteFiles) => ipcRenderer.invoke('image:remove', id,deleteFiles), groups: () => ipcRenderer.invoke('image:groups'),
     saveGroup: group => ipcRenderer.invoke('image:save-group', plain(group)), removeGroup: id => ipcRenderer.invoke('image:remove-group', id),
     prepareImport: (type, multiple, archive) => ipcRenderer.invoke('image:prepare-import', type, multiple, archive),
     confirmImport: (token, selected) => ipcRenderer.invoke('image:confirm-import', token, plain(selected)),
@@ -69,6 +73,7 @@ const api: BaoyiApi = {
     sourceFavorites: (page,sort) => ipcRenderer.invoke('image:source-favorites',page,sort),
     sourceRanking: period => ipcRenderer.invoke('image:source-ranking',period), sourceCover: url => ipcRenderer.invoke('image:source-cover',url),
     sourceDetail: id => ipcRenderer.invoke('image:source-detail', id), download: (work,chapters,group) => ipcRenderer.invoke('image:download', work,plain(chapters),group),
+    downloadBatch: (ids,group) => ipcRenderer.invoke('image:download-batch',plain(ids),group),
     jobs: () => ipcRenderer.invoke('image:jobs'), retryJob: id => ipcRenderer.invoke('image:retry-job',id), cancelJob: id => ipcRenderer.invoke('image:cancel-job',id),
     dismissJob: id => ipcRenderer.invoke('image:dismiss-job',id), onChanged: callback => subscribe('image:changed',callback),
     onJobsChanged: callback => subscribe('image:jobs-changed',callback),

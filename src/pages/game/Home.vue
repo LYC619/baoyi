@@ -58,8 +58,11 @@ const SORTS: Array<{ value: NonNullable<GameQuery['sort']>; label: string }> = [
 ]
 
 let offSession: (() => void) | null = null
+let focusedAt=0
+function refreshOnFocus(){if(Date.now()-focusedAt>2000){focusedAt=Date.now();void store.load()}}
 
 onMounted(async () => {
+  window.addEventListener('focus',refreshOnFocus)
   // 在封面墙上也订阅：用户可能从详情页启动完就退回来，等游戏关掉时人在这一屏。
   // 不订阅的话卡片上的时长要等到下一次开库才更新
   offSession = window.baoyi.game.onSession(() => void store.reload())
@@ -70,6 +73,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('focus',refreshOnFocus)
   if (content.value) rememberScroll('game', content.value.scrollTop)
   pageDisposed = true
   offSession?.()

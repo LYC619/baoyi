@@ -41,6 +41,13 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
     if(result.canceled||!result.filePaths[0])return null
     return queue.enqueue(work,chosen,result.filePaths[0],groupId)
   })
+  handle('download-batch',async(workIds:string[],groupId:string|null)=>{
+    if(!token)throw new Error('请先登录哔咔')
+    if(!Array.isArray(workIds)||workIds.length<1||workIds.length>200)throw new Error('一次请选择 1 到 200 部漫画')
+    const result=await dialog.showOpenDialog(getWindow()!,{title:`选择 ${workIds.length} 部漫画的下载根目录`,properties:['openDirectory','createDirectory']})
+    if(result.canceled||!result.filePaths[0])return null
+    return queue.enqueueBatch(workIds,result.filePaths[0],groupId)
+  })
   handle('jobs',()=>queue.list());handle('retry-job',(id:string)=>{if(!token)throw new Error('请先登录哔咔');return queue.retry(id)});handle('cancel-job',(id:string)=>queue.cancel(id));handle('dismiss-job',(id:string)=>queue.dismiss(id))
   handle('pause-job',(id:string)=>queue.pause(id))
   handle('resume-job',(id:string)=>{if(!token)throw new Error('请先登录哔咔');return queue.resume(id)})

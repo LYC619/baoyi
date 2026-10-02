@@ -55,7 +55,7 @@ try {
   assert.equal(queue.options().concurrency, 2)
   assert.throws(() => queue.options({ concurrency: 0 }))
   assert.throws(() => queue.options({ concurrency: 4 }))
-  queue.options({ concurrency: 1 })
+  queue.options({ concurrency: 1, jobConcurrency: 1 })
   const paused = await queue.enqueue(work('paused'), chapters, root, null)
   await until(() => calls.includes('paused/2') && queue.list().find(j => j.id === paused.id)!.processed === 1)
   await queue.retry(paused.id)

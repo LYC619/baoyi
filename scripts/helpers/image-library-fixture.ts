@@ -6,6 +6,7 @@ import { pngImage } from './test-images.ts'
 import { zipFixture } from './test-zip.ts'
 
 export function seedImageLibrary(db: SqlDb, root: string, count: number, media = false) {
+  for(let i=0;i<4;i++)db.prepare('INSERT OR IGNORE INTO image_groups(id,name,sort_order) VALUES(?,?,?)').run('image-group-'+i,'合成分类 '+i,i)
   const png = pngImage(480, 720, [75, 125, 110])
   const archive = media ? zipFixture(Array.from({ length: 24 }, (_, n) => ({ name: n + '.png', data: png }))) : null
   const resource = db.prepare("INSERT INTO resource(id,kind,path,created_at,updated_at,file_name,source_dir,name_zh,tags,description) VALUES(?,'image',?,1,?,?,'synthetic',?,?,?)")
