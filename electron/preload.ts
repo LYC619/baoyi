@@ -126,6 +126,7 @@ const api: BaoyiApi = {
     refreshIcons: () => ipcRenderer.invoke('software:refresh-icons')
   },
   game: {
+    relocate: (id: string, mode: 'directory' | 'file' = 'directory') => ipcRenderer.invoke('game:relocate', id, mode),
     addManual: () => ipcRenderer.invoke('game:add-manual'),
     list: (query: GameQuery = {}) => ipcRenderer.invoke('game:list', plain(query)),
     get: (id: string) => ipcRenderer.invoke('game:get', id),

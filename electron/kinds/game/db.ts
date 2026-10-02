@@ -221,7 +221,8 @@ export function listGames(d: SqlDb, query: GameQuery = {}): GameItem[] {
   const where: string[] = [query.group === 'archived' ? 'is_archived = 1' : 'is_archived = 0']
   const params: unknown[] = []
 
-  if (query.category) {
+  if (query.uncategorized) where.push("TRIM(COALESCE(category, '')) IN ('', '其他', '未分类')")
+  else if (query.category) {
     where.push('category = ?')
     params.push(query.category)
   }
@@ -292,6 +293,7 @@ export function gameCounts(d: SqlDb): GameCounts {
 
   return {
     all: one('SELECT COUNT(*) AS n FROM game WHERE is_archived = 0'),
+    uncategorized: one("SELECT COUNT(*) AS n FROM game WHERE is_archived = 0 AND TRIM(COALESCE(category,'')) IN ('', '其他', '未分类')"),
     archived: one('SELECT COUNT(*) AS n FROM game WHERE is_archived = 1'),
     status,
     save,

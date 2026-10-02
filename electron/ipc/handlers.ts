@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { relocateGame } from '../kinds/game/files'
 import type {
   AIConfig,
   AppSettings,
@@ -250,6 +251,26 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   })
 
   /* ------------------------------ 游戏 ------------------------------ */
+  ipcMain.handle('game:relocate', async (event, id: string, mode: 'directory' | 'file' = 'directory') => {
+    const win = getWindow()
+    if (!win || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('只允许主窗口修改游戏路径')
+    const game = getGameItem(id)
+    if (!game) throw new Error('游戏已不存在')
+    const selected = await dialog.showOpenDialog(win, { title: mode === 'directory' ? '选择重命名或移动后的游戏文件夹' : '选择游戏主程序', properties: [mode === 'directory' ? 'openDirectory' : 'openFile'] })
+    if (selected.canceled || !selected.filePaths[0]) return null
+    let file = selected.filePaths[0], directory: string | undefined
+    if (mode === 'directory') {
+      directory = file
+      const relative = path.relative(game.source_dir || path.dirname(game.path), game.path)
+      file = path.join(directory, relative)
+      if (relative.startsWith('..') || !(await fs.stat(file).catch(() => null))?.isFile()) {
+        const picked = await dialog.showOpenDialog(win, { title: '目录内未找到原入口，请选择主程序', defaultPath: directory, properties: ['openFile'], filters: [{ name: '游戏入口', extensions: ['exe','lnk','bat','cmd'] }] })
+        if (picked.canceled || !picked.filePaths[0]) return null
+        file = picked.filePaths[0]
+      }
+    }
+    return relocateGame(getDb(), id, file, directory)
+  })
   ipcMain.handle('game:list', (_e, query: GameQuery = {}) => listGameItems(query))
   ipcMain.handle('game:get', (_e, id: string) => getGameItem(id))
   ipcMain.handle('game:update', (_e, id: string, patch: Partial<GameItem>) =>

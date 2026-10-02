@@ -41,6 +41,9 @@ export interface AgentRunOptions {
   toolChoice?: 'auto' | 'required'
   /** 指定提交工具成功后即可结束，无须再请求一轮自然语言总结。 */
   stopAfterToolSuccess?: string
+  /** Reserve the last rounds for explicit completion, so optional exploration cannot exhaust the run. */
+  finalTools?: string[]
+  finalTurns?: number
   signal?: AbortSignal
   onEvent?: (e: AgentEvent) => void
 }
@@ -234,8 +237,11 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
     onEvent?.({ type: 'turn', index: turns })
 
     let turn: ChatTurn
+    const finalizing = !!opts.finalTools?.length && turns > maxTurns - Math.max(1, opts.finalTurns ?? 2)
+    const availableTools = finalizing ? tools.filter(tool => opts.finalTools!.includes(tool.name)) : tools
+    if (finalizing && turns === maxTurns - Math.max(1, opts.finalTurns ?? 2) + 1) messages.push({role:'user',content:'探索阶段已结束。根据已经获得的证据立即登记结果或明确跳过。不确定的可选字段留空；不要再浏览目录或猜测路径。'})
     try {
-      turn = await timeAsync(`LLM 第 ${turns} 轮`, () => requestTurn(config, messages, tools, signal, opts.toolChoice))
+      turn = await timeAsync(`LLM 第 ${turns} 轮`, () => requestTurn(config, messages, availableTools, signal, finalizing ? 'required' : opts.toolChoice))
     } catch (err) {
       if (signal?.aborted || (err as Error)?.name === 'AbortError') {
         return { stopReason: 'aborted', error: '', turns, tokens, text }
@@ -295,7 +301,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
       }
 
       const tool = byName.get(name)
-      if (!tool) {
+      if (!tool || !availableTools.includes(tool)) {
         const stop = fail(`错误：不存在名为 ${name} 的工具。可用工具：${[...byName.keys()].join('、')}`)
         if (stop) return stop
         continue
@@ -332,7 +338,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         // 成功一次就把错误链断开，只有「连续」同错才算死路
         lastError = ''
         sameError = 0
-        if (opts.stopAfterToolSuccess === name) {
+        if (opts.stopAfterToolSuccess === name || (finalizing && opts.finalTools!.includes(name))) {
           return { stopReason: signal?.aborted ? 'aborted' : 'done', error: '', turns, tokens, text }
         }
       } catch (err) {

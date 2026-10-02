@@ -68,10 +68,11 @@ const isActive = (kind: string, value: string) => store.activeKey === `${kind}:$
         <span class="row__count">{{ store.counts.save[s] }}</span>
       </button>
 
-      <template v-if="store.counts.categories.length > 0">
+      <template v-if="store.counts">
         <p class="sidebar__title">分类</p>
+        <button class="row" :class="{'row--active':isActive('uncategorized','uncategorized')}" @click="store.select({kind:'uncategorized',value:'uncategorized'})"><Box :size="15"/><span class="row__label">未分类</span><span class="row__count">{{store.counts.uncategorized || 0}}</span></button>
         <button
-          v-for="c in store.counts.categories"
+          v-for="c in store.counts.categories.filter(c=>c.name && c.name!=='其他' && c.name!=='未分类')"
           :key="c.name"
           class="row"
           :class="{ 'row--active': isActive('category', c.name) }"

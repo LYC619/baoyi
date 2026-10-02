@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
+import DetailTabs from '@/components/ui/DetailTabs.vue'
 import {
   Archive,
   ArchiveRestore,
@@ -37,6 +38,11 @@ import {
 const props = defineProps<{ id: string }>()
 
 const router = useRouter()
+const route = useRoute()
+const detailTabs = [{"id":"overview","label":"简介"},{"id":"notes","label":"使用心得"},{"id":"files","label":"文件与启动"}]
+const activeTab = ref(detailTabs.some(tab=>tab.id===route.query.tab) ? String(route.query.tab) : 'overview')
+watch(activeTab, tab=>{ void router.replace({query:{...route.query,tab}}) })
+watch(()=>props.id,()=>{activeTab.value='overview'})
 const store = useSoftwareStore()
 const categories = useCategoriesStore()
 const { success, error, toast } = useToast()
@@ -350,10 +356,8 @@ async function dropLink(): Promise<void> {
         </div>
       </header>
 
-      <div class="body">
-        <!-- ------------------------------ 主列 ------------------------------ -->
-        <div class="col col--main">
-          <section class="hero panel">
+      <div class="body detail-body">
+<section class="hero panel">
             <!--
               图标本身就是换图标的入口，藏在别处等于没有。悬停才显形，
               不占静态视觉重量。只有 64px，放不下游戏那边的文字按钮，所以只留图标
@@ -434,8 +438,9 @@ async function dropLink(): Promise<void> {
               </div>
             </div>
           </section>
-
-          <section class="panel">
+<DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="software" label="软件详情"/>
+<div id="software-panel-overview" v-show="activeTab === 'overview'" role="tabpanel" aria-labelledby="software-tab-overview" tabindex="0" class="detail-panel detail-panel--overview">
+<section class="panel">
             <h2 class="sec-title">功能说明</h2>
             <EditableField
               :model-value="item.description"
@@ -444,41 +449,7 @@ async function dropLink(): Promise<void> {
               @commit="save({ description: $event })"
             />
           </section>
-
-          <section class="panel">
-            <h2 class="sec-title">为什么选它</h2>
-            <EditableField
-              :model-value="item.why_choose"
-              multiline
-              placeholder="同类里为什么留下这一个"
-              @commit="save({ why_choose: $event })"
-            />
-          </section>
-
-          <section class="panel">
-            <h2 class="sec-title">使用场景</h2>
-            <EditableField
-              :model-value="item.use_cases"
-              multiline
-              placeholder="什么时候会打开它"
-              @commit="save({ use_cases: $event })"
-            />
-          </section>
-
-          <section class="panel">
-            <h2 class="sec-title">个人笔记</h2>
-            <EditableField
-              :model-value="item.notes"
-              multiline
-              placeholder="快捷键、配置位置、踩过的坑…"
-              @commit="save({ notes: $event })"
-            />
-          </section>
-        </div>
-
-        <!-- ------------------------------ 侧列 ------------------------------ -->
-        <div class="col col--side">
-          <section class="panel">
+<section class="panel">
             <h2 class="sec-title">标签</h2>
             <div v-if="item.tags.length" class="tag-row">
               <TagBadge v-for="t in item.tags" :key="t" :label="t" />
@@ -489,20 +460,7 @@ async function dropLink(): Promise<void> {
               @commit="commitList('tags', $event)"
             />
           </section>
-
-          <section class="panel">
-            <h2 class="sec-title">淘汰的同类</h2>
-            <div v-if="item.alternatives.length" class="tag-row">
-              <TagBadge v-for="a in item.alternatives" :key="a" :label="a" tone="muted" />
-            </div>
-            <EditableField
-              :model-value="item.alternatives.join('、')"
-              placeholder="被它替代掉的软件"
-              @commit="commitList('alternatives', $event)"
-            />
-          </section>
-
-          <section class="panel">
+<section class="panel">
             <h2 class="sec-title">使用统计</h2>
             <dl class="kv">
               <dt>上次使用</dt>
@@ -529,8 +487,55 @@ async function dropLink(): Promise<void> {
               是个近似值，只用来区分「装了没碰过」和「最近还在用」。
             </p>
           </section>
-
-          <section class="panel">
+<section v-if="item.official_url" class="panel">
+            <h2 class="sec-title">官网</h2>
+            <a :href="item.official_url" target="_blank" class="mono truncate link">
+              {{ item.official_url }}
+            </a>
+          </section>
+</div>
+<div id="software-panel-notes" v-show="activeTab === 'notes'" role="tabpanel" aria-labelledby="software-tab-notes" tabindex="0" class="detail-panel detail-panel--notes">
+<section class="panel">
+            <h2 class="sec-title">为什么选它</h2>
+            <EditableField
+              :model-value="item.why_choose"
+              multiline
+              placeholder="同类里为什么留下这一个"
+              @commit="save({ why_choose: $event })"
+            />
+          </section>
+<section class="panel">
+            <h2 class="sec-title">使用场景</h2>
+            <EditableField
+              :model-value="item.use_cases"
+              multiline
+              placeholder="什么时候会打开它"
+              @commit="save({ use_cases: $event })"
+            />
+          </section>
+<section class="panel">
+            <h2 class="sec-title">个人笔记</h2>
+            <EditableField
+              :model-value="item.notes"
+              multiline
+              placeholder="快捷键、配置位置、踩过的坑…"
+              @commit="save({ notes: $event })"
+            />
+          </section>
+<section class="panel">
+            <h2 class="sec-title">淘汰的同类</h2>
+            <div v-if="item.alternatives.length" class="tag-row">
+              <TagBadge v-for="a in item.alternatives" :key="a" :label="a" tone="muted" />
+            </div>
+            <EditableField
+              :model-value="item.alternatives.join('、')"
+              placeholder="被它替代掉的软件"
+              @commit="commitList('alternatives', $event)"
+            />
+          </section>
+</div>
+<div id="software-panel-files" v-show="activeTab === 'files'" role="tabpanel" aria-labelledby="software-tab-files" tabindex="0" class="detail-panel detail-panel--files">
+<section class="panel">
             <h2 class="sec-title">
               启动端
               <span v-if="item.launchers.length > 1" class="sec-title__count">
@@ -571,8 +576,7 @@ async function dropLink(): Promise<void> {
               </li>
             </ul>
           </section>
-
-          <section class="panel">
+<section class="panel">
             <h2 class="sec-title">位置信息</h2>
             <dl class="kv">
               <dt>当前位置</dt>
@@ -634,8 +638,7 @@ async function dropLink(): Promise<void> {
               </button>
             </div>
           </section>
-
-          <section class="panel">
+<section class="panel">
             <h2 class="sec-title">文件信息</h2>
             <dl class="kv">
               <dt>文件名</dt>
@@ -648,15 +651,8 @@ async function dropLink(): Promise<void> {
               <dd>{{ formatBytes(item.file_size) }}</dd>
             </dl>
           </section>
-
-          <section v-if="item.official_url" class="panel">
-            <h2 class="sec-title">官网</h2>
-            <a :href="item.official_url" target="_blank" class="mono truncate link">
-              {{ item.official_url }}
-            </a>
-          </section>
-        </div>
-      </div>
+</div>
+</div>
     </template>
   </div>
 </template>
@@ -1079,4 +1075,8 @@ async function dropLink(): Promise<void> {
     grid-template-columns: 1fr;
   }
 }
+</style>
+
+<style scoped>
+.detail-body{display:flex;flex-direction:column;gap:18px;max-width:1280px;width:100%;margin:0 auto}.detail-body>.hero{width:100%}.detail-body>.detail-tabs{width:100%}.detail-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;width:100%;align-items:start}.detail-panel--overview>.panel:first-child{grid-column:1/-1}.detail-panel--saves,.detail-panel--files{grid-template-columns:minmax(0,1fr)}@media(max-width:800px){.detail-panel{grid-template-columns:minmax(0,1fr)}}
 </style>

@@ -19,6 +19,8 @@ import { useTaskCenter } from '@/composables/useTaskCenter'
 import { useSettingsStore } from '@/stores/settings'
 import { useGameStore } from '@/stores/game'
 import { debounce, errorMessage, shortenPath } from '@/utils'
+import { useLibraryView } from '@/composables/useLibraryView'
+import { libraryBlocks } from '@/utils/library-grouping'
 
 const router = useRouter()
 const store = useGameStore()
@@ -26,6 +28,9 @@ const settings = useSettingsStore()
 const { toast, success, error } = useToast()
 
 const content = ref<HTMLElement | null>(null)
+const { grouping, cardSize } = useLibraryView('game')
+const blocks = computed(() => libraryBlocks(store.items, grouping.value, item => ['其他','未分类'].includes(item.category) ? '' : item.category, item => item.source_dir, settings.settings.game_scan_dirs))
+const unavailable = computed(() => store.items.filter(item=>item.path_state && item.path_state !== 'present'))
 
 const operation = useMediaScan('game')
 const tasks = useTaskCenter()
@@ -252,6 +257,8 @@ const emptyHint = computed(() => {
         </div>
 
         <div class="toolbar__actions">
+          <select v-model="grouping" class="select" aria-label="游戏分组"><option value="none">不分组</option><option value="category">按分类分组</option><option value="directory">按一级文件夹分组</option></select>
+          <label class="card-size">卡片大小<input v-model.number="cardSize" type="range" min="110" max="260" step="10" aria-label="游戏卡片大小"/></label>
           <select v-model="store.sort" class="select" @change="store.load()">
             <option v-for="o in SORTS" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
@@ -291,11 +298,12 @@ const emptyHint = computed(() => {
       </Transition>
 
       <p v-if="coverSummary" class="cover-summary" role="status">{{ coverSummary }}</p>
+      <p v-if="unavailable.length" class="cover-summary" role="status">{{unavailable.length}} 个游戏的程序路径不可用，进入详情可重新定位文件夹。<button class="btn btn--subtle" @click="store.reload()">重新检查</button></p>
 
       <section ref="content" class="home__content">
-        <div v-if="store.items.length > 0" class="wall">
-          <GameCard v-for="g in store.items" :key="g.id" :item="g" :selectable="selecting" :selected="selectedIds.has(g.id)" @open="open" @select="toggleSelected" />
-        </div>
+        <template v-if="store.items.length > 0"><section v-for="block in blocks" :key="block.key" class="game-group"><h2 v-if="block.name">{{block.name}} <small>{{block.items.length}}</small></h2><div class="wall" :style="{gridTemplateColumns:`repeat(auto-fill, minmax(${cardSize}px, 1fr))`}">
+          <GameCard v-for="g in block.items" :key="g.id" :item="g" :selectable="selecting" :selected="selectedIds.has(g.id)" @open="open" @select="toggleSelected" />
+        </div></section></template>
         <div v-else-if="!store.loading" class="empty">
           <h2>{{ emptyHint.title }}</h2>
           <p>{{ emptyHint.desc }}</p>
@@ -306,6 +314,7 @@ const emptyHint = computed(() => {
 </template>
 
 <style scoped>
+.card-size{display:flex;align-items:center;gap:7px;color:var(--text-sub);font-size:12px}.card-size input{width:90px;accent-color:var(--accent)}.game-group{margin-bottom:26px}.game-group h2{font-size:17px;font-weight:500;margin-bottom:14px}.game-group small{font-size:12px;color:var(--text-faint);margin-left:7px}
 .home {
   display: flex;
   height: 100%;

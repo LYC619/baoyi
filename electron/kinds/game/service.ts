@@ -95,6 +95,7 @@ import { loadSaveDb, type SaveDbHandle } from './savedb'
 import { elapsedSeconds, endSession, type SessionOutcome } from './session'
 import { inspectDir, probeSave, scanGameRoot, type GameCandidate } from './scanner'
 import { buildGameTools, type GameToolContext } from './tools'
+import { gamePathState } from './files'
 
 /**
  * 单个游戏目录的轮数上限。
@@ -130,10 +131,10 @@ function gameSaveDb(): SaveDbHandle | null {
 
 /* ------------------------------ 读写转发 ------------------------------ */
 
-export const listGameItems = (query: GameQuery = {}): GameItem[] => listGames(getDb(), query)
+export const listGameItems = (query: GameQuery = {}): GameItem[] => listGames(getDb(), query).map(gamePathState)
 export const getGameItem = (id: string): GameItem | null => {
   const game = getGame(getDb(), id)
-  return game ? refreshKnownIdentity(game).game : null
+  return game ? gamePathState(refreshKnownIdentity(game).game) : null
 }
 export const gameCountsOf = (): GameCounts => gameCounts(getDb())
 
@@ -1250,12 +1251,16 @@ export async function scanGames(
     }
 
     const trail: AgentEvent[] = []
+    const registeredBefore = result.registered, skippedBefore = result.skipped
+    const identifyStarted = Date.now()
     const run = await runAgent({
       config: settings.ai,
       system,
       user: candidatePrompt(c, gamesUnder(db, c.dir)),
       tools: buildGameTools(ctx, categoryNames, withSearch),
       maxTurns: MAX_TURNS,
+      finalTools: ['register_game', 'skip_directory'],
+      finalTurns: 2,
       signal,
       onEvent: (e) => {
         trail.push(e)
@@ -1266,10 +1271,11 @@ export async function scanGames(
 
     // 落识别日志
     if (run.stopReason !== 'aborted') {
-      const status = run.stopReason === 'error' ? 'failed' : result.registered > 0 ? 'success' : 'skipped'
-      const note = run.stopReason === 'error' ? '识别过程出错' :
-                   run.stopReason === 'max_turns' ? '达到轮数上限' :
-                   result.registered > 0 ? '已注册' : '未注册任何条目'
+      const registered = result.registered - registeredBefore
+      const failed = !registered && result.skipped === skippedBefore
+      const status = registered ? 'success' : failed ? 'failed' : 'skipped'
+      const note = registered ? '已注册' : run.stopReason === 'error' ? `识别失败：${run.error}` :
+                   run.stopReason === 'max_turns' ? '达到识别预算，未登记；可手动选择主程序后补充资料' : failed ? '未完成登记，可手动添加主程序' : '已明确跳过'
 
       try {
         saveIdentifyLog({
@@ -1279,9 +1285,9 @@ export async function scanGames(
           resource_kind: 'game',
           status,
           summary: note,
-          registered: result.registered > 0 ? 1 : 0,
+          registered,
           rounds: run.turns,
-          duration_ms: 0, // 游戏识别不记单条时长，只有总耗时
+          duration_ms: Date.now() - identifyStarted,
           tokens: run.tokens,
           stop_reason: run.stopReason,
           events: trail
@@ -1291,7 +1297,7 @@ export async function scanGames(
       }
     }
 
-    if (run.stopReason === 'error') result.failed++
+    if (run.stopReason !== 'aborted' && result.registered === registeredBefore && result.skipped === skippedBefore) result.failed++
   }
 
   report({ phase: 'done', processed: candidates.length })

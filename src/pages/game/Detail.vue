@@ -8,7 +8,8 @@
  * 识别时模型漏了或者认错了，用户得有地方纠正，而不是等备份备了个空目录。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
+import DetailTabs from '@/components/ui/DetailTabs.vue'
 import {
   Archive,
   ArchiveRestore,
@@ -62,6 +63,11 @@ import {
 const props = defineProps<{ id: string }>()
 
 const router = useRouter()
+const route = useRoute()
+const detailTabs = [{"id":"overview","label":"简介"},{"id":"saves","label":"存档与备份"},{"id":"files","label":"文件与封面"},{"id":"notes","label":"笔记"}]
+const activeTab = ref(detailTabs.some(tab=>tab.id===route.query.tab) ? String(route.query.tab) : 'overview')
+watch(activeTab, tab=>{ void router.replace({query:{...route.query,tab}}) })
+watch(()=>props.id,()=>{activeTab.value='overview'})
 const store = useGameStore()
 const settings = useSettingsStore()
 const { success, error, toast } = useToast()
@@ -69,6 +75,13 @@ const tasks = useTaskCenter()
 
 const item = ref<GameItem | null>(null)
 const loading = ref(true)
+const relocating = ref(false)
+async function relocate(mode: 'directory' | 'file' = 'directory') {
+  relocating.value = true
+  try { const updated = await window.baoyi.game.relocate(props.id, mode); if (updated) {item.value = updated; await store.reload(); success('路径已更新，游玩记录与存档信息已保留')} }
+  catch (cause) {error(errorMessage(cause))}
+  finally {relocating.value = false}
+}
 let loadSequence = 0
 let coverSearchSequence = 0
 let coverChoiceSequence = 0
@@ -185,6 +198,7 @@ const COVER_STAGE_LABEL = { identity: '身份', lookup: '查找', network: '网�
 const coverMiss = ref('')
 
 async function searchCovers(): Promise<void> {
+  activeTab.value = 'files'
   if (!item.value || coverSearching.value) return
   const selectedId = item.value.id
   const sequence = ++coverSearchSequence
@@ -720,10 +734,10 @@ function copyPath(path: string): void {
         </div>
       </header>
 
-      <div class="body">
-        <!-- ------------------------------ 主列 ------------------------------ -->
-        <div class="col col--main">
-          <section class="hero panel">
+      <div v-if="item.path_state && item.path_state !== 'present'" class="path-warning" role="alert">{{item.path_state==='offline'?'游戏所在磁盘离线，请先连接磁盘。':'主程序已找不到，可能是文件夹改名或移动。'}}<button class="btn btn--primary" :disabled="relocating" @click="relocate()">重新定位文件夹</button></div>
+
+      <div class="body detail-body">
+<section class="hero panel">
             <!--
               封面本身就是那几个按钮的入口，藏在别处等于没有。
               悬停才显形，不占静态视觉重量。「搜封面」排在最前 —— 它是不用离开
@@ -823,13 +837,145 @@ function copyPath(path: string): void {
               </div>
             </div>
           </section>
+<DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="game" label="游戏详情"/>
+<div id="game-panel-overview" v-show="activeTab === 'overview'" role="tabpanel" aria-labelledby="game-tab-overview" tabindex="0" class="detail-panel detail-panel--overview">
+<section class="panel">
+            <h2 class="sec-title">简介</h2>
+            <EditableField
+              :model-value="item.description"
+              multiline
+              placeholder="讲的是什么、玩法是什么样的"
+              @commit="save({ description: $event })"
+            />
+          </section>
+<section class="panel">
+            <h2 class="sec-title">分类</h2>
+            <input
+              class="input"
+              :value="item.category"
+              placeholder="RPG / 动作 / 策略…"
+              @change="save({ category: ($event.target as HTMLInputElement).value.trim() })"
+            />
+          </section>
+<section class="panel">
+            <h2 class="sec-title">标签</h2>
+            <div v-if="item.tags.length > 0" class="tags">
+              <TagBadge v-for="t in item.tags" :key="t" :label="t" />
+            </div>
+            <EditableField
+              :model-value="item.tags.join('、')"
+              placeholder="用「、」隔开，最多 8 个"
+              @commit="commitTags"
+            />
+          </section>
+<section class="panel">
+            <h2 class="sec-title">游玩</h2>
+            <dl class="facts">
+              <dt>时长</dt>
+              <dd>{{ formatPlaytime(item.total_playtime_sec) }}</dd>
+              <dt>上次游玩</dt>
+              <dd>{{ item.last_played_at ? formatRelative(item.last_played_at) : '未玩过' }}</dd>
+              <dt>加入</dt>
+              <dd>{{ formatDate(item.created_at) }}</dd>
+            </dl>
+          </section>
+</div>
+<div id="game-panel-saves" v-show="activeTab === 'saves'" role="tabpanel" aria-labelledby="game-tab-saves" tabindex="0" class="detail-panel detail-panel--saves">
+<section class="panel">
+            <h2 class="sec-title">
+              <HardDriveDownload :size="14" />
+              存档位置
+              <button class="sec-title__act" @click="addSavePath">
+                <FolderPlus :size="13" />
+                添加
+              </button>
+            </h2>
 
-          <!--
-            搜到的候选封面。只在搜过之后出现，不是常驻区块 ——
-            平时它是空的，占着一块地方只会让详情页更长。
-            搜不到时这里显示原因和下一步，而不是一句「没有结果」就没了
-          -->
-          <section v-if="coverHits.length > 0 || coverMiss || coverDiagnostics.length" class="panel">
+            <ul v-if="item.save_paths.length > 0" class="paths">
+              <li v-for="s in item.save_paths" :key="s.path" class="path">
+                <button class="path__text mono truncate" :title="`${s.path}（点击复制）`" @click="copyPath(s.path)">
+                  {{ s.path }}
+                </button>
+                <!-- 失效盖过验证时间：那个时间戳说的是过去某一刻它在，
+                     而这条说的是现在它不在，后者是用户此刻要知道的那句 -->
+                <span v-if="isStale(s.path)" class="path__note path__note--stale" title="开库时检查发现这个位置不存在了。可能是移动或卸载了游戏，也可能是所在的盘没接上">
+                  <Unlink :size="11" />
+                  路径失效
+                </span>
+                <span v-else class="path__note">
+                  {{ s.verified_at ? `${formatDate(s.verified_at)} 验证过` : '未验证' }}
+                </span>
+                <button
+                  class="path__act"
+                  title="重新看一眼它还在不在"
+                  :disabled="verifying === s.path"
+                  @click="verifySavePath(s.path)"
+                >
+                  <component :is="verifying === s.path ? Loader2 : BadgeCheck" :size="13" :class="{ spin: verifying === s.path }" />
+                </button>
+                <!-- 一条存档路径可能是目录也可能是单个 .sav，文案不能替它认定形状 -->
+                <button
+                  class="path__act"
+                  title="现在备份这份存档"
+                  :disabled="backingUp === s.path"
+                  @click="backupSave(s.path)"
+                >
+                  <component :is="backingUp === s.path ? Loader2 : Save" :size="13" :class="{ spin: backingUp === s.path }" />
+                </button>
+                <button class="path__del" title="这条不对，删掉" @click="removeSavePath(s.path)">
+                  <Trash2 :size="13" />
+                </button>
+              </li>
+            </ul>
+            <p v-else class="hint">
+              识别时没能找到存档目录。点「添加」指一个 —— 选完会当场看一眼里面有什么，
+              确认是存档再记下来。有了它才谈得上备份。
+            </p>
+            <p v-if="item.save_paths.length > 0" class="hint">
+              备份放在设置 › 数据管理里指定的目录，一次备一份，不会覆盖上一份。
+              超过那里设的保留上限时会问一句要不要清掉最早的几份。
+            </p>
+          </section>
+<section v-if="backups.length > 0" class="panel">
+            <h2 class="sec-title">
+              <History :size="14" />
+              存档备份
+              <span class="sec-title__count">{{ backups.length }}</span>
+            </h2>
+            <ul class="backups">
+              <li v-for="b in backups" :key="b.id" class="backup">
+                <div class="backup__main">
+                  <button
+                    class="backup__when"
+                    :title="`${b.backup_dir}（点击在资源管理器里打开）`"
+                    @click="openBackup(b)"
+                  >
+                    {{ formatDateTime(b.created_at) }}
+                  </button>
+                  <span class="backup__meta">
+                    {{ b.file_count }} 个文件　{{ formatBytes(b.size_bytes) }}
+                  </span>
+                  <span class="backup__from mono truncate" :title="b.save_path">{{ b.save_path }}</span>
+                </div>
+                <div class="backup__acts">
+                  <button
+                    class="btn btn--ghost btn--tiny"
+                    :disabled="restoring === b.id"
+                    @click="restore(b)"
+                  >
+                    <component :is="restoring === b.id ? Loader2 : RotateCcw" :size="13" :class="{ spin: restoring === b.id }" />
+                    还原
+                  </button>
+                  <button class="path__del" title="删掉这份备份" @click="dropBackup(b)">
+                    <Trash2 :size="13" />
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </section>
+</div>
+<div id="game-panel-files" v-show="activeTab === 'files'" role="tabpanel" aria-labelledby="game-tab-files" tabindex="0" class="detail-panel detail-panel--files">
+<section v-if="coverHits.length > 0 || coverMiss || coverDiagnostics.length" class="panel">
             <h2 class="sec-title">
               <Image :size="14" />
               候选封面
@@ -886,128 +1032,7 @@ function copyPath(path: string): void {
               </ul>
             </details>
           </section>
-
-          <section class="panel">
-            <h2 class="sec-title">简介</h2>
-            <EditableField
-              :model-value="item.description"
-              multiline
-              placeholder="讲的是什么、玩法是什么样的"
-              @commit="save({ description: $event })"
-            />
-          </section>
-
-          <!--
-            存档路径。识别时进来的那些都经过 detect_save_path 验证（见
-            kinds/game/tools.ts 的 acceptSavePaths），手工加的那些经过对话框 +
-            当场探测。两条路都不接受「没验证过的路径」—— 备份一个不存在的目录，
-            后果是用户以为自己有备份。
-          -->
-          <section class="panel">
-            <h2 class="sec-title">
-              <HardDriveDownload :size="14" />
-              存档位置
-              <button class="sec-title__act" @click="addSavePath">
-                <FolderPlus :size="13" />
-                添加
-              </button>
-            </h2>
-
-            <ul v-if="item.save_paths.length > 0" class="paths">
-              <li v-for="s in item.save_paths" :key="s.path" class="path">
-                <button class="path__text mono truncate" :title="`${s.path}（点击复制）`" @click="copyPath(s.path)">
-                  {{ s.path }}
-                </button>
-                <!-- 失效盖过验证时间：那个时间戳说的是过去某一刻它在，
-                     而这条说的是现在它不在，后者是用户此刻要知道的那句 -->
-                <span v-if="isStale(s.path)" class="path__note path__note--stale" title="开库时检查发现这个位置不存在了。可能是移动或卸载了游戏，也可能是所在的盘没接上">
-                  <Unlink :size="11" />
-                  路径失效
-                </span>
-                <span v-else class="path__note">
-                  {{ s.verified_at ? `${formatDate(s.verified_at)} 验证过` : '未验证' }}
-                </span>
-                <button
-                  class="path__act"
-                  title="重新看一眼它还在不在"
-                  :disabled="verifying === s.path"
-                  @click="verifySavePath(s.path)"
-                >
-                  <component :is="verifying === s.path ? Loader2 : BadgeCheck" :size="13" :class="{ spin: verifying === s.path }" />
-                </button>
-                <!-- 一条存档路径可能是目录也可能是单个 .sav，文案不能替它认定形状 -->
-                <button
-                  class="path__act"
-                  title="现在备份这份存档"
-                  :disabled="backingUp === s.path"
-                  @click="backupSave(s.path)"
-                >
-                  <component :is="backingUp === s.path ? Loader2 : Save" :size="13" :class="{ spin: backingUp === s.path }" />
-                </button>
-                <button class="path__del" title="这条不对，删掉" @click="removeSavePath(s.path)">
-                  <Trash2 :size="13" />
-                </button>
-              </li>
-            </ul>
-            <p v-else class="hint">
-              识别时没能找到存档目录。点「添加」指一个 —— 选完会当场看一眼里面有什么，
-              确认是存档再记下来。有了它才谈得上备份。
-            </p>
-            <p v-if="item.save_paths.length > 0" class="hint">
-              备份放在设置 › 数据管理里指定的目录，一次备一份，不会覆盖上一份。
-              超过那里设的保留上限时会问一句要不要清掉最早的几份。
-            </p>
-          </section>
-
-          <!--
-            备份列表。刻意不做自动备份：备份是用户「我要留住这一刻」的动作，
-            替他决定什么时候值得留住，等于把这个动作的意思抽掉。
-            保留上限只**提示**、不自动删，理由同上 —— 见 pruneOver。
-          -->
-          <section v-if="backups.length > 0" class="panel">
-            <h2 class="sec-title">
-              <History :size="14" />
-              存档备份
-              <span class="sec-title__count">{{ backups.length }}</span>
-            </h2>
-            <ul class="backups">
-              <li v-for="b in backups" :key="b.id" class="backup">
-                <div class="backup__main">
-                  <button
-                    class="backup__when"
-                    :title="`${b.backup_dir}（点击在资源管理器里打开）`"
-                    @click="openBackup(b)"
-                  >
-                    {{ formatDateTime(b.created_at) }}
-                  </button>
-                  <span class="backup__meta">
-                    {{ b.file_count }} 个文件　{{ formatBytes(b.size_bytes) }}
-                  </span>
-                  <span class="backup__from mono truncate" :title="b.save_path">{{ b.save_path }}</span>
-                </div>
-                <div class="backup__acts">
-                  <button
-                    class="btn btn--ghost btn--tiny"
-                    :disabled="restoring === b.id"
-                    @click="restore(b)"
-                  >
-                    <component :is="restoring === b.id ? Loader2 : RotateCcw" :size="13" :class="{ spin: restoring === b.id }" />
-                    还原
-                  </button>
-                  <button class="path__del" title="删掉这份备份" @click="dropBackup(b)">
-                    <Trash2 :size="13" />
-                  </button>
-                </div>
-              </li>
-            </ul>
-          </section>
-
-          <!--
-            关联文件。列的是「标签 + 类型 + 路径」，标签在最前 ——
-            用户找的是「那份攻略」，不是「D:\资料\某游戏\攻略\图文.pdf」。
-            路径小一号排在后面，需要核对时才看。
-          -->
-          <section class="panel">
+<section class="panel">
             <h2 class="sec-title">
               <Link2 :size="14" />
               关联文件
@@ -1068,56 +1093,9 @@ function copyPath(path: string): void {
               解除关联只是把这条记录去掉，不会删你的文件。
             </p>
           </section>
-
-          <section class="panel">
-            <h2 class="sec-title">个人笔记</h2>
-            <EditableField
-              :model-value="item.notes"
-              multiline
-              placeholder="进度、卡在哪、装了哪些 MOD…"
-              @commit="save({ notes: $event })"
-            />
-          </section>
-        </div>
-
-        <!-- ------------------------------ 侧列 ------------------------------ -->
-        <div class="col col--side">
-          <section class="panel">
-            <h2 class="sec-title">分类</h2>
-            <input
-              class="input"
-              :value="item.category"
-              placeholder="RPG / 动作 / 策略…"
-              @change="save({ category: ($event.target as HTMLInputElement).value.trim() })"
-            />
-          </section>
-
-          <section class="panel">
-            <h2 class="sec-title">标签</h2>
-            <div v-if="item.tags.length > 0" class="tags">
-              <TagBadge v-for="t in item.tags" :key="t" :label="t" />
-            </div>
-            <EditableField
-              :model-value="item.tags.join('、')"
-              placeholder="用「、」隔开，最多 8 个"
-              @commit="commitTags"
-            />
-          </section>
-
-          <section class="panel">
-            <h2 class="sec-title">游玩</h2>
-            <dl class="facts">
-              <dt>时长</dt>
-              <dd>{{ formatPlaytime(item.total_playtime_sec) }}</dd>
-              <dt>上次游玩</dt>
-              <dd>{{ item.last_played_at ? formatRelative(item.last_played_at) : '未玩过' }}</dd>
-              <dt>加入</dt>
-              <dd>{{ formatDate(item.created_at) }}</dd>
-            </dl>
-          </section>
-
-          <section class="panel">
+<section class="panel">
             <h2 class="sec-title">文件</h2>
+            <div class="row"><button class="btn btn--ghost" :disabled="relocating" @click="relocate()">重新定位文件夹</button><button class="btn btn--subtle" :disabled="relocating" @click="relocate('file')">更换主程序</button></div>
             <dl class="facts">
               <dt>主程序</dt>
               <dd>
@@ -1135,13 +1113,25 @@ function copyPath(path: string): void {
               </dd>
             </dl>
           </section>
-        </div>
-      </div>
+</div>
+<div id="game-panel-notes" v-show="activeTab === 'notes'" role="tabpanel" aria-labelledby="game-tab-notes" tabindex="0" class="detail-panel detail-panel--notes">
+<section class="panel">
+            <h2 class="sec-title">个人笔记</h2>
+            <EditableField
+              :model-value="item.notes"
+              multiline
+              placeholder="进度、卡在哪、装了哪些 MOD…"
+              @commit="save({ notes: $event })"
+            />
+          </section>
+</div>
+</div>
     </template>
   </div>
 </template>
 
 <style scoped>
+.path-warning{display:flex;align-items:center;gap:12px;padding:14px 24px;color:var(--warning,#d8a35d);background:var(--bg-card)}
 .detail {
   display: flex;
   flex-direction: column;
@@ -1737,4 +1727,8 @@ function copyPath(path: string): void {
 .link:hover {
   color: var(--accent);
 }
+</style>
+
+<style scoped>
+.detail-body{display:flex;flex-direction:column;gap:18px;max-width:1280px;width:100%;margin:0 auto}.detail-body>.hero{width:100%}.detail-body>.detail-tabs{width:100%}.detail-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;width:100%;align-items:start}.detail-panel--overview>.panel:first-child{grid-column:1/-1}.detail-panel--saves,.detail-panel--files{grid-template-columns:minmax(0,1fr)}@media(max-width:800px){.detail-panel{grid-template-columns:minmax(0,1fr)}}
 </style>

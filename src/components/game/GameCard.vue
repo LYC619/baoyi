@@ -70,6 +70,7 @@ watch(cover, () => { brokenCover.value = false })
     </div>
 
     <p class="card__name truncate">{{ title }}</p>
+    <p v-if="item.path_state && item.path_state !== 'present'" class="card__missing"><Unlink :size="11"/>{{item.path_state === 'offline' ? '磁盘离线' : '程序路径失效'}} · 点击修复</p>
     <p class="card__meta truncate">
       <Clock :size="11" />
       <span v-if="item.total_playtime_sec > 0">{{ formatPlaytime(item.total_playtime_sec) }}</span>
@@ -80,6 +81,7 @@ watch(cover, () => { brokenCover.value = false })
 </template>
 
 <style scoped>
+.card__missing{display:flex;align-items:center;gap:5px;color:var(--warning,#d8a35d);font-size:11px}
 .gameCard { position: relative; min-width: 0; }
 .gameCard__select { position: absolute; z-index: 2; top: 9px; left: 9px; width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 .gameCard--selected .card__cover { outline: 2px solid var(--accent); outline-offset: 2px; }

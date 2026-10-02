@@ -31,8 +31,8 @@ const SKIP_DIRS = new Set([
   '__pycache__', 'cache', 'temp', 'tmp', 'logs', 'crashes'
 ])
 
-/** 找主程序时最多下钻几层。Unreal 的主程序在 <Game>\Binaries\Win64\ 下，三层够 */
-const MAX_EXE_DEPTH = 3
+/** 用户常在安装目录外再套一层命名文件夹，包含该层后最多下钻五层。 */
+const MAX_EXE_DEPTH = 5
 /** 一个候选目录最多列几个 exe。列表是给模型看的，太长只会挤掉别的信息 */
 const MAX_EXES = 40
 /** 收纳目录最多往下钻几层再放弃，同 scanPlan 的 MAX_UNIT_DEPTH */
@@ -206,9 +206,10 @@ function nestedEvidence(dir: string, l: Listing): string[] {
 /** 递归收集 exe，按体积从大到小 */
 function collectExes(root: string): GameExe[] {
   const out: GameExe[] = []
+  let visited = 0
   const stack: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }]
 
-  while (stack.length > 0 && out.length < MAX_EXES) {
+  while (stack.length > 0 && out.length < MAX_EXES && visited++ < 600) {
     const { dir, depth } = stack.pop()!
     let entries: fs.Dirent[]
     try {
@@ -220,7 +221,7 @@ function collectExes(root: string): GameExe[] {
       if (out.length >= MAX_EXES) break
       const full = path.join(dir, e.name)
       if (e.isDirectory()) {
-        if (depth < MAX_EXE_DEPTH && !SKIP_DIRS.has(e.name.toLowerCase())) {
+        if (depth < MAX_EXE_DEPTH && !SKIP_DIRS.has(e.name.toLowerCase()) && !/^(?:Engine|Content|Paks|_CommonRedist|DirectX|redist)$/i.test(e.name)) {
           stack.push({ dir: full, depth: depth + 1 })
         }
       } else if (e.isFile() && path.extname(e.name).toLowerCase() === '.exe') {
@@ -258,6 +259,15 @@ export function guessMain(dir: string, l: Listing, exes: GameExe[]): string {
   const base = path.basename(dir).toLowerCase()
   const sameName = byName.get(`${base}.exe`)
   if (sameName) return sameName
+
+  const shipping = exes.filter(exe => /[\\/]Binaries[\\/]Win64[\\/][^\\/]+-Win64-Shipping\.exe$/i.test(exe.path))
+  if (shipping.length === 1) {
+    const binary = shipping[0].path
+    const installation = path.dirname(path.dirname(path.dirname(path.dirname(binary))))
+    const launcher = path.join(installation, path.basename(binary).replace(/-Win64-Shipping\.exe$/i, '.exe'))
+    const found = exes.find(exe=>exe.path.toLowerCase()===launcher.toLowerCase())
+    if (found) return found.path
+  }
 
   // 目录名常带着平台或版本的尾巴：「洛克王国：世界(2002304)」「某游戏 v1.2」「某游戏 [汉化版]」。
   // 去掉尾巴再对一次，命中的仍然是精确同名，不是模糊匹配 —— 「某游戏卸载.exe」不会中

@@ -337,6 +337,7 @@ export interface SavePathCheck {
  * 合成一个「资源」类型的代价是每处都要判「这是哪一类」再决定字段有没有意义。
  */
 export interface GameItem extends GameMeta {
+  path_state?: 'present' | 'missing' | 'offline'
   id: string
   created_at: number
   updated_at: number
@@ -384,6 +385,7 @@ export interface SavePathAlert {
 }
 
 export interface GameQuery {
+  uncategorized?: boolean
   keyword?: string
   category?: string
   tag?: string
@@ -395,6 +397,7 @@ export interface GameQuery {
 }
 
 export interface GameCounts {
+  uncategorized?: number
   all: number
   archived: number
   /** 四个游玩状态各有几个。闭集，缺的那个是 0 不是不存在 */
@@ -1426,6 +1429,7 @@ export interface BaoyiApi {
     refreshIcons(): Promise<{ total: number; changed: number; manual: number; failed: number }>
   }
   game: {
+    relocate(id: string, mode?: 'directory' | 'file'): Promise<GameItem | null>
     addManual(): Promise<{ ok: boolean; message: string; item?: GameItem } | null>
     list(query?: GameQuery): Promise<GameItem[]>
     get(id: string): Promise<GameItem | null>

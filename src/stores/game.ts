@@ -6,6 +6,7 @@ import { createLatestGuard, errorMessage, plain } from '@/utils'
 
 /** 侧边栏一次只选一样东西：一个虚拟分组、一个分类、或一个标签 */
 export type GameSelection =
+  | { kind: 'uncategorized'; value: 'uncategorized' }
   | { kind: 'group'; value: 'all' | 'archived' }
   | { kind: 'status'; value: PlayStatus }
   | { kind: 'save'; value: SaveStatus }
@@ -55,6 +56,7 @@ export const useGameStore = defineStore('game', () => {
   const activeKey = computed(() => `${selection.kind}:${selection.value}`)
 
   const heading = computed(() => {
+    if (selection.kind === 'uncategorized') return '未分类'
     if (selection.kind === 'category') return selection.value
     if (selection.kind === 'tag') return `# ${selection.value}`
     if (selection.kind === 'status') return PLAY_STATUS_LABEL[selection.value]
@@ -64,6 +66,7 @@ export const useGameStore = defineStore('game', () => {
 
   function buildQuery(): GameQuery {
     const q: GameQuery = { keyword: keyword.value.trim() || undefined, sort: sort.value }
+    if (selection.kind === 'uncategorized') q.uncategorized = true
     if (selection.kind === 'group') q.group = selection.value
     if (selection.kind === 'status') q.status = selection.value
     if (selection.kind === 'save') q.save = selection.value
