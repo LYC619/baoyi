@@ -1,4 +1,4 @@
-import { BrowserWindow, app, net, protocol, shell } from 'electron'
+import { BrowserWindow, app, dialog, net, protocol, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -17,6 +17,9 @@ import { imageResponse } from './kinds/image/protocol.ts'
 // getSettings() 顺手开库 —— 晚一步，这两样就先落在旧位置了，表现是「绿色版旁边
 // 有个空 data/，真数据还在 %APPDATA%」
 initPortable()
+const primaryInstance = app.requestSingleInstanceLock()
+let startupError: unknown = null
+let startupReady = false
 
 // 必须在 app ready 前设置：Chromium 只会在网络栈初始化时读取这项，之后追加不认
 // （scripts 里做过实验）。这让 Hanime 直连请求也能绕开受污染的系统 DNS；代理模式
@@ -25,10 +28,11 @@ initPortable()
 // 启动地址用上次运行时回退通了的那个（记在设置里），没有就是地址池第一个：
 // 第一个地址死了的话，验证窗口和下载都跟着死，只有换启动地址才救得回来。
 const hanimeStartup = (() => {
+  if (!primaryInstance) return { enabled: false, ip: pickStartupIp() }
   try {
     const s = getSettings()
     return { enabled: s.hanime_builtin_hosts !== false, ip: pickStartupIp(s.hanime_hosts_active_ip) }
-  } catch { return { enabled: true, ip: pickStartupIp() } }
+  } catch (cause) { startupError = cause; return { enabled: false, ip: pickStartupIp() } }
 })()
 if (hanimeStartup.enabled) app.commandLine.appendSwitch('host-resolver-rules', buildHanimeHostResolverRules(HANIME_HOSTS, hanimeStartup.ip))
 setHanimeHostsEnabled(hanimeStartup.enabled, {
@@ -139,7 +143,7 @@ function createWindow(): void {
   }
 }
 
-if (!app.requestSingleInstanceLock()) {
+if (!primaryInstance) {
   app.quit()
 } else {
   app.on('second-instance', () => {
@@ -149,6 +153,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
+    if (startupError) throw startupError
     // 默认是空操作，只有带 BAOYI_TIMING=1 起才真的跑
     startHeartbeat()
 
@@ -159,10 +164,17 @@ if (!app.requestSingleInstanceLock()) {
     // 填错一个代理地址不该变成「应用打不开」
     void initProxy(() => getSettings().proxy)
     createWindow()
+    startupReady = true
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
+  }).catch(cause => {
+    console.error('[抱一] 启动已停止：', cause)
+    dialog.showErrorBox('抱一未能安全启动',
+      `未继续载入资料库。请保留数据与已有快照，检查磁盘空间和目录权限后重试。\n\n数据目录：${app.getPath('userData')}\n\n${cause instanceof Error ? cause.message : String(cause)}`)
+    closeDb()
+    app.exit(1)
   })
 
   app.on('window-all-closed', () => {
@@ -172,7 +184,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     // 顺序是硬要求：结算要写库，得赶在库关掉之前。所以这两件事放在同一个处理器里
     // 按顺序写，而不是分成两个 app.on —— 那样就依赖注册顺序了。
-    finalizeGameSessions()
+    if (startupReady) finalizeGameSessions()
     closeDb()
   })
 }

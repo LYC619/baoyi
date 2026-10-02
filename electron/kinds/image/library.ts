@@ -1,13 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { SqlDb } from '../../services/schema.ts'
-import type { ImageChapter, ImageGroup, ImageItem, ImagePage, ImagePatch, ImageQuery, ScannedImage } from '../../../src/types/image.ts'
+import type { ImageBulkPatch, ImageChapter, ImageGroup, ImageItem, ImagePage, ImagePatch, ImageQuery, ScannedImage } from '../../../src/types/image.ts'
 
 type Row = Record<string, any>
 type IndexedImagePage = ImagePage & { file: string; entry: string }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 32)
 const keyPath = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
 const visible = "(m.group_id IS NULL OR NOT EXISTS(SELECT 1 FROM image_groups g WHERE g.id=m.group_id AND g.hidden=1))"
+function imageItem(r: Row, chapters: ImageChapter[], count: number, p: Row | undefined, cover: string): ImageItem {
+  return { id: r.id, type: r.item_type, path: r.path, sourceDir: r.source_dir || '', name: r.name_zh || r.file_name, description: r.description || '', tags: JSON.parse(r.tags || '[]'),
+    groupId: r.group_id, favorite: !!r.favorite, read: !!r.is_read, publication: r.publication, coverPageId: cover, source: r.source, sourceId: r.source_id,
+    pageCount: count, chapterCount: chapters.filter(c => c.pageCount).length, chapters, updatedAt: r.updated_at,
+    progress: p ? { pageId: p.page_id, chapterId: p.chapter_id, ordinal: p.ordinal, offset: p.scroll_offset, updatedAt: p.updated_at } : null }
+}
 export class ImageLibrary {
   private db: SqlDb
   constructor(db: SqlDb) { this.db = db }
@@ -30,25 +36,74 @@ export class ImageLibrary {
     if (query.type) { where.push('m.item_type=?'); args.push(query.type) }
     if (query.groupId) { where.push('m.group_id=?'); args.push(query.groupId) }
     if (query.favorite) where.push('m.favorite=1')
+    if (query.read !== undefined) { where.push('COALESCE(s.is_read,0)=?'); args.push(Number(query.read)) }
     if (query.publication) { where.push('m.publication=?'); args.push(query.publication) }
     if (query.sourceDir) { where.push('r.source_dir=?'); args.push(query.sourceDir) }
     if (query.search?.trim()) { where.push("(instr(lower(r.name_zh || ' ' || r.description || ' ' || r.tags),lower(?))>0)"); args.push(query.search.trim()) }
     if (query.tag) { where.push('EXISTS(SELECT 1 FROM json_each(r.tags) WHERE value=?)'); args.push(query.tag) }
     const order = query.sort === 'name' ? 'r.name_zh COLLATE NOCASE' : query.sort === 'read' ? 'COALESCE(p.updated_at,0) DESC' : 'r.updated_at DESC'
-    return (this.db.prepare(`SELECT r.id FROM resource r JOIN image_meta m ON m.resource_id=r.id LEFT JOIN image_progress p ON p.resource_id=r.id WHERE ${where.join(' AND ')} ORDER BY ${order}, r.id`).all(...args) as Row[]).map(r => this.get(r.id)!).filter(Boolean)
+    const joins = `FROM resource r JOIN image_meta m ON m.resource_id=r.id LEFT JOIN image_progress p ON p.resource_id=r.id LEFT JOIN image_reader_state s ON s.resource_id=r.id`
+    const filter = where.join(' AND ')
+    const rows = this.db.prepare(`SELECT r.*,m.*,s.is_read,
+      (SELECT COUNT(*) FROM image_pages ip WHERE ip.resource_id=r.id AND ip.missing=0) AS page_count,
+      COALESCE((SELECT ip.id FROM image_pages ip WHERE ip.id=m.cover_page_id AND ip.resource_id=r.id AND ip.missing=0),
+        (SELECT ip.id FROM image_pages ip WHERE ip.resource_id=r.id AND ip.missing=0 ORDER BY ip.ordinal LIMIT 1)) AS selected_cover,
+      rp.id AS progress_page_id,rp.chapter_id AS progress_chapter_id,rp.ordinal AS progress_ordinal,p.scroll_offset,p.updated_at AS progress_updated_at
+      ${joins} LEFT JOIN image_pages rp ON rp.id=p.page_id AND rp.missing=0 WHERE ${filter} ORDER BY ${order},r.id`).all(...args) as Row[]
+    if (!rows.length) return []
+    const chapters = new Map<string, ImageChapter[]>()
+    // Include resource_id in the page join to use the existing resource-first page index.
+    const chapterRows = this.db.prepare(`SELECT c.*,COUNT(cp.id) AS page_count ${joins}
+      JOIN image_chapters c ON c.resource_id=r.id LEFT JOIN image_pages cp ON cp.resource_id=c.resource_id AND cp.chapter_id=c.id AND cp.missing=0
+      WHERE ${filter} GROUP BY c.id ORDER BY c.ordinal`).all(...args) as Row[]
+    for (const c of chapterRows) {
+      const list = chapters.get(c.resource_id) || []
+      list.push({ id: c.id, title: c.title, ordinal: c.ordinal, pageCount: c.page_count, sourceId: c.source_id }); chapters.set(c.resource_id, list)
+    }
+    return rows.map(r => imageItem(r, chapters.get(r.id) || [], r.page_count, r.progress_page_id ? { page_id: r.progress_page_id, chapter_id: r.progress_chapter_id, ordinal: r.progress_ordinal, scroll_offset: r.scroll_offset, updated_at: r.progress_updated_at } : undefined, r.selected_cover || ''))
   }
   get(id: string): ImageItem | null {
-    const r = this.db.prepare(`SELECT r.*,m.* FROM resource r JOIN image_meta m ON m.resource_id=r.id WHERE r.id=? AND ${visible}`).get(id) as Row | undefined
+    const r = this.db.prepare(`SELECT r.*,m.*,s.is_read FROM resource r JOIN image_meta m ON m.resource_id=r.id LEFT JOIN image_reader_state s ON s.resource_id=r.id WHERE r.id=? AND ${visible}`).get(id) as Row | undefined
     if (!r) return null
-    const chapters = (this.db.prepare(`SELECT c.*,COUNT(p.id) AS page_count FROM image_chapters c LEFT JOIN image_pages p ON p.chapter_id=c.id AND p.missing=0 WHERE c.resource_id=? GROUP BY c.id ORDER BY c.ordinal`).all(id) as Row[])
+    const chapters = (this.db.prepare(`SELECT c.*,COUNT(p.id) AS page_count FROM image_chapters c LEFT JOIN image_pages p ON p.resource_id=c.resource_id AND p.chapter_id=c.id AND p.missing=0 WHERE c.resource_id=? GROUP BY c.id ORDER BY c.ordinal`).all(id) as Row[])
       .map((c): ImageChapter => ({ id: c.id, title: c.title, ordinal: c.ordinal, pageCount: c.page_count, sourceId: c.source_id }))
     const count = (this.db.prepare('SELECT COUNT(*) n FROM image_pages WHERE resource_id=? AND missing=0').get(id) as Row).n
     const p = this.db.prepare('SELECT v.*,p.chapter_id,p.ordinal FROM image_progress v JOIN image_pages p ON p.id=v.page_id WHERE v.resource_id=? AND p.missing=0').get(id) as Row | undefined
     const cover = this.db.prepare('SELECT id FROM image_pages WHERE resource_id=? AND missing=0 ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END,ordinal LIMIT 1').get(id, r.cover_page_id) as Row | undefined
-    return { id, type: r.item_type, path: r.path, sourceDir: r.source_dir || '', name: r.name_zh || r.file_name, description: r.description || '', tags: JSON.parse(r.tags || '[]'),
-      groupId: r.group_id, favorite: !!r.favorite, publication: r.publication, coverPageId: cover?.id || '', source: r.source, sourceId: r.source_id,
-      pageCount: count, chapterCount: chapters.filter(c => c.pageCount).length, chapters, updatedAt: r.updated_at,
-      progress: p ? { pageId: p.page_id, chapterId: p.chapter_id, ordinal: p.ordinal, offset: p.scroll_offset, updatedAt: p.updated_at } : null }
+    return imageItem(r, chapters, count, p, cover?.id || '')
+  }
+  bulkUpdate(ids: string[], patch: ImageBulkPatch): number {
+    if (!Array.isArray(ids) || !ids.length || ids.length > 5000 || ids.some(id => typeof id !== 'string' || !id || id.length > 128)) throw new Error('请选择 1 到 5000 项资源')
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch) || !Object.keys(patch).length || Object.keys(patch).some(key => !['groupId', 'read', 'tags'].includes(key))) throw new Error('批量修改内容无效')
+    if (patch.read !== undefined && typeof patch.read !== 'boolean') throw new Error('已读状态无效')
+    if (patch.groupId !== undefined && patch.groupId !== null && (typeof patch.groupId !== 'string' || !patch.groupId)) throw new Error('分类无效')
+    if (patch.tags !== undefined && (!patch.tags || typeof patch.tags !== 'object' || !['add', 'remove', 'replace'].includes(patch.tags.mode) || !Array.isArray(patch.tags.values) || patch.tags.values.length > 50 || patch.tags.values.some(t => typeof t !== 'string'))) throw new Error('标签修改无效')
+    if (patch.read === undefined && patch.groupId === undefined && patch.tags === undefined) throw new Error('没有需要修改的内容')
+    const values = [...new Set((patch.tags?.values || []).map(t => t.trim().slice(0, 80)).filter(Boolean))], unique = [...new Set(ids)]
+    this.db.exec('SAVEPOINT image_bulk')
+    try {
+      if (patch.groupId && !this.db.prepare('SELECT 1 FROM image_groups WHERE id=? AND hidden=0').get(patch.groupId)) throw new Error('目标分类不可用或已隐藏')
+      const lookup = this.db.prepare(`SELECT r.tags,m.item_type FROM resource r JOIN image_meta m ON m.resource_id=r.id WHERE r.id=? AND r.kind='image' AND ${visible}`)
+      const changes = unique.map(id => {
+        const item = lookup.get(id) as Row | undefined
+        if (!item) throw new Error('所选资源不可用或已隐藏，请刷新后重试')
+        if (patch.groupId !== undefined && item.item_type !== 'comic') throw new Error('相册不支持漫画分类')
+        const old = JSON.parse(item.tags || '[]') as string[]
+        const tags = patch.tags?.mode === 'replace' ? values : patch.tags?.mode === 'add' ? [...new Set([...old, ...values])] : old.filter(t => !values.includes(t))
+        if (patch.tags && tags.length > 50) throw new Error('每项资源最多保留 50 个标签')
+        return { id, tags }
+      })
+      const now = Date.now(), tagWrite = this.db.prepare('UPDATE resource SET tags=? WHERE id=?'), pool = this.db.prepare("INSERT OR IGNORE INTO tags(kind,name,source,created_at) VALUES('image',?,'user',?)")
+      const groupWrite = this.db.prepare('UPDATE image_meta SET group_id=? WHERE resource_id=?'), readWrite = this.db.prepare('INSERT INTO image_reader_state(resource_id,is_read) VALUES(?,?) ON CONFLICT(resource_id) DO UPDATE SET is_read=excluded.is_read')
+      const touch = this.db.prepare('UPDATE resource SET updated_at=? WHERE id=?')
+      for (const change of changes) {
+        if (patch.tags) { tagWrite.run(JSON.stringify(change.tags), change.id); for (const tag of change.tags) pool.run(tag, now) }
+        if (patch.groupId !== undefined) groupWrite.run(patch.groupId, change.id)
+        if (patch.read !== undefined) readWrite.run(change.id, Number(patch.read))
+        touch.run(now, change.id)
+      }
+      this.db.exec('RELEASE image_bulk'); return unique.length
+    } catch (cause) { this.db.exec('ROLLBACK TO image_bulk; RELEASE image_bulk'); throw cause }
   }
   pages(id: string, chapterId?: string): IndexedImagePage[] {
     if (!this.get(id)) return []
@@ -70,10 +125,16 @@ export class ImageLibrary {
         ON CONFLICT(id) DO UPDATE SET path=excluded.path,updated_at=excluded.updated_at`).run(id, scan.path, Date.now(), Date.now(), path.basename(scan.path), scan.sourceDir, scan.name, scan.description || '', JSON.stringify(scan.tags || []), scan.type === 'comic' ? '漫画' : '照片')
       this.db.prepare(`INSERT INTO image_meta(resource_id,item_type,source,source_id,publication) VALUES(?,?,?,?,?) ON CONFLICT(resource_id) DO NOTHING`).run(id, scan.type, scan.source || '', scan.sourceId || '', scan.publication || 'unknown')
       this.db.prepare('UPDATE image_pages SET missing=1 WHERE resource_id=?').run(id)
+      const priorChapters = this.db.prepare('SELECT id,ordinal,customized FROM image_chapters WHERE resource_id=?').all(id) as Row[]
+      const customOrder = priorChapters.some(c => c.customized === 1), priorOrder = new Map(priorChapters.map(c => [c.id, c.ordinal as number]))
+      let nextChapter = Math.max(-1, ...priorChapters.map(c => c.ordinal as number)) + 1
       let ordinal = 0
       for (const [ci, chapter] of scan.chapters.entries()) {
         const cid = scan.type === 'comic' ? hash(id + ':chapter:' + chapter.key) : null
-        if (cid) this.db.prepare(`INSERT INTO image_chapters(id,resource_id,chapter_key,title,ordinal,source_id) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET ordinal=CASE WHEN image_chapters.customized=1 THEN image_chapters.ordinal ELSE excluded.ordinal END`).run(cid, id, chapter.key, chapter.title, ci, chapter.sourceId || '')
+        if (cid) {
+          const chapterOrdinal = customOrder ? priorOrder.get(cid) ?? nextChapter++ : ci
+          this.db.prepare(`INSERT INTO image_chapters(id,resource_id,chapter_key,title,ordinal,source_id,customized) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET ordinal=CASE WHEN image_chapters.customized=1 THEN image_chapters.ordinal ELSE excluded.ordinal END,customized=MAX(image_chapters.customized,excluded.customized)`).run(cid, id, chapter.key, chapter.title, chapterOrdinal, chapter.sourceId || '', Number(customOrder))
+        }
         for (const page of chapter.pages) {
           const relative = keyPath(page.file) === keyPath(scan.path) ? '.' : path.relative(scan.path, page.file).replaceAll('\\', '/')
           const pid = hash(id + ':page:' + relative + ':' + page.entry)
@@ -90,6 +151,7 @@ export class ImageLibrary {
   update(id: string, patch: ImagePatch): ImageItem {
     const item = this.get(id)
     if (!item) throw new Error('资源不可用')
+    if (patch.read !== undefined && typeof patch.read !== 'boolean') throw new Error('已读状态无效')
     if (patch.name !== undefined) {
       const name = patch.name.trim().slice(0, 300)
       if (!name) throw new Error('名称不能为空')
@@ -106,6 +168,9 @@ export class ImageLibrary {
       this.db.prepare('UPDATE image_meta SET group_id=? WHERE resource_id=?').run(patch.groupId, id)
     }
     if (patch.favorite !== undefined) this.db.prepare('UPDATE image_meta SET favorite=? WHERE resource_id=?').run(Number(!!patch.favorite), id)
+    if (patch.read !== undefined) {
+      this.db.prepare('INSERT INTO image_reader_state(resource_id,is_read) VALUES(?,?) ON CONFLICT(resource_id) DO UPDATE SET is_read=excluded.is_read').run(id, Number(patch.read))
+    }
     if (patch.publication && ['unknown','ongoing','completed'].includes(patch.publication)) this.db.prepare('UPDATE image_meta SET publication=? WHERE resource_id=?').run(patch.publication, id)
     if (patch.coverPageId !== undefined) {
       if (patch.coverPageId && !this.pages(id).some(p => p.id === patch.coverPageId)) throw new Error('封面必须是作品中的页面')

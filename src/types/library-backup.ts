@@ -33,6 +33,8 @@ export const LIBRARY_BACKUP_COLUMNS = {
   image_chapters: { id: 'text', resource_id: 'text', chapter_key: 'text', title: 'text', ordinal: 'integer', source_id: 'text', customized: 'integer' },
   image_pages: { id: 'text', resource_id: 'text', chapter_id: 'text?', file: 'text', entry: 'text', ordinal: 'integer', size: 'integer', missing: 'integer' },
   image_progress: { resource_id: 'text', page_id: 'text', scroll_offset: 'real', updated_at: 'integer' },
+  image_reader_state: { resource_id: 'text', is_read: 'integer', preferences: 'text' },
+  image_bookmarks: { id: 'text', resource_id: 'text', page_id: 'text', scroll_offset: 'real', label: 'text', created_at: 'integer' },
   image_download_jobs: { id: 'text', status: 'text', updated_at: 'integer', payload: 'text' },
   software_meta: {
     resource_id: 'text', file_description: 'text?', company: 'text?', version: 'text?',
@@ -78,6 +80,8 @@ export const LIBRARY_BACKUP_COLUMNS = {
   },
   video_episode_assets: { episode_id: 'text', asset_id: 'text' },
   video_download_jobs: { id: 'text', status: 'text', updated_at: 'integer', payload: 'text' },
+  video_discovery_sources: { id: 'text', updated_at: 'integer', payload: 'text' },
+  video_discovery_marks: { source_id: 'text', entry_id: 'text', payload: 'text' },
   task_records: {
     id: 'text', kind: 'text', title: 'text', status: 'text', started_at: 'integer', finished_at: 'integer',
     processed: 'integer', total: 'integer', percent: 'integer', current: 'text', message: 'text', error: 'text', events: 'text'

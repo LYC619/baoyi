@@ -140,6 +140,7 @@ import { registerVideoOrganizeIpc } from './video-organize.ts'
 import { registerVideoImportIpc } from './video-import.ts'
 import { registerVideoAgentOrganizeIpc } from './video-agent-organize.ts'
 import { assertLibraryIdle, registerLibraryBackupIpc } from './library-backup.ts'
+import { registerLibrarySnapshotIpc } from './library-snapshots.ts'
 import { createHanimeBrowser } from '../services/hanime-browser.ts'
 import { registerImageIpc } from './image.ts'
 import { registerImageSourceIpc } from './image-source.ts'
@@ -157,6 +158,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   registerVideoImportIpc(getWindow, ipcMain)
   registerVideoAgentOrganizeIpc(getWindow, ipcMain)
   registerLibraryBackupIpc(getWindow, ipcMain)
+  registerLibrarySnapshotIpc(getWindow, ipcMain)
   registerImageIpc(getWindow, ipcMain)
   registerImageSourceIpc(getWindow, ipcMain)
   const send = (channel: string, payload: unknown) => {

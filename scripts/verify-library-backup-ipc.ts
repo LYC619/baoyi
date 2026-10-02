@@ -11,6 +11,7 @@ import * as backup from '../electron/services/library-backup.ts'
 import { atomicWrite } from '../electron/kinds/video/bundle.ts'
 import { registerVideoContent } from '../electron/kinds/video/registration.ts'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
+import { librarySafetyInfo } from '../electron/services/library-snapshots.ts'
 
 assert.ok(fs.existsSync('electron/ipc/library-backup.ts'), 'Full metadata backups need a reviewed restore entry point')
 let passed = 0, failed = 0
@@ -74,6 +75,10 @@ await test('export includes every metadata table and excludes app settings', asy
   assert.equal(Object.keys(result.tables).length, LIBRARY_BACKUP_TABLE_NAMES.length)
   assert.equal(result.tables.resource[0].name_zh, 'Current title')
   assert.ok(!raw.includes('local setting sentinel'))
+  const info = librarySafetyInfo(f.db, f.root, '0.10.0')
+  assert.equal(info.lastExport?.file, target); assert.equal(info.lastExport?.state, 'available')
+  assert.equal(info.lastExport?.size, Buffer.byteLength(raw))
+  assert.ok(!JSON.stringify(info).includes('local setting sentinel'))
 })
 await test('canceling selection or confirmation makes no changes', async f => {
   f.controls.cancelOpen = true

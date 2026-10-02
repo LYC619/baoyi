@@ -11,6 +11,8 @@
  */
 import { Buffer } from 'node:buffer'
 import { SCHEMA_KEY, SCHEMA_VERSION, type SqlDb } from './schema.ts'
+import { normalizeImagePreferences } from '../../src/utils/image-preferences.ts'
+import { parseCatalogue } from '../kinds/video/discovery/catalogue.ts'
 import {
   LIBRARY_BACKUP_COLUMNS, LIBRARY_BACKUP_FORMAT, LIBRARY_BACKUP_LIMITS, LIBRARY_BACKUP_TABLE_NAMES, LIBRARY_BACKUP_VERSION,
   type LibraryBackup, type LibraryBackupSummary, type LibraryBackupTableName, type LibraryBackupTables,
@@ -37,7 +39,7 @@ const watchStates = ['unwatched', 'watching', 'watched', 'dropped'] as const
 const enumColumns: Partial<Record<LibraryBackupTableName, Record<string, readonly string[]>>> = {
   resource: { kind: kinds }, categories: { kind: kinds }, tags: { kind: kinds },
   image_meta: { item_type: ['photo','comic'], publication: ['unknown','ongoing','completed'] },
-  image_download_jobs: { status: ['queued','running','success','failed','cancelled','interrupted'] },
+  image_download_jobs: { status: ['queued','running','paused','success','failed','cancelled','interrupted'] },
   game_meta: { play_status: ['unplayed', 'playing', 'completed', 'shelved'] },
   video_meta: { video_type: ['movie', 'series'], watch_status: watchStates },
   episode: { watch_status: watchStates }, video_sources: { scope: ['work', 'episode'] },
@@ -131,6 +133,7 @@ function json(text: LibraryBackupValue, container: 'array' | 'object', at: strin
 }
 
 function primaryKey(table: LibraryBackupTableName): readonly string[] {
+  if (table === 'video_discovery_marks') return ['source_id', 'entry_id']
   if (table === 'video_episode_assets') return ['episode_id', 'asset_id']
   if (table === 'video_scan_state' || table === 'video_scan_ignores') return ['path']
   if (table === 'scan_units') return ['dir']
@@ -152,6 +155,12 @@ function validateRow(table: LibraryBackupTableName, input: unknown, at: string, 
     result[column] = value
     const allowed = enumColumns[table]?.[column]
     if (allowed) oneOf(value, allowed, label)
+    if (table === 'image_reader_state' && column === 'is_read' && value !== 0 && value !== 1) invalid(`${label} must be 0 or 1`)
+    if (table === 'image_reader_state' && column === 'preferences' && value !== '') {
+      const preferences = keys(json(value, 'object', label, budget), ['mode', 'direction', 'fit'], label, ['coverSingle', 'zoom'])
+      try { normalizeImagePreferences(preferences) } catch { invalid(`${label} contains invalid reader preferences`) }
+    }
+    if (table === 'image_bookmarks' && column === 'scroll_offset' && ((value as number) < 0 || (value as number) > 1)) invalid(`${label} must be between 0 and 1`)
     if (value !== null && arrayColumns[table]?.includes(column)) {
       const parsed = json(value, 'array', label, budget)
       if (['tags', 'new_tags', 'hanime_tags', 'user_edited'].includes(column)) strings(parsed, label)
@@ -165,6 +174,16 @@ function validateRow(table: LibraryBackupTableName, input: unknown, at: string, 
   if (!partial) {
     if (table === 'identify_logs' || table === 'identification_reports') {
       if (result.resource_kind !== null) oneOf(result.resource_kind, kinds, `${at}.resource_kind`)
+    }
+    if (table === 'video_discovery_sources') {
+      const source = parseCatalogue(json(result.payload, 'object', at + '.payload', budget))
+      if (source.id !== result.id) invalid(at + ' source id disagrees with its payload')
+    }
+    if (table === 'video_discovery_marks') {
+      const mark = keys(json(result.payload, 'object', at + '.payload', budget), ['favorite', 'watched', 'notes', 'userRating'], at + '.payload')
+      boolean(mark.favorite, at + '.favorite'); boolean(mark.watched, at + '.watched'); string(mark.notes, at + '.notes')
+      finiteNumber(mark.userRating, at + '.userRating')
+      if ((mark.userRating as number) < 0 || (mark.userRating as number) > 5 || (mark.notes as string).length > 4000) invalid(at + ' invalid personal rating or notes')
     }
     if (table === 'video_download_jobs') validateJob(result, budget, at)
     if (table === 'video_organize_journal') validateJournal(result, budget, at)
@@ -183,7 +202,12 @@ function validateJob(row: Row, budget: Budget, at: string): void {
   const textFields = ['id', 'resourceId', 'bundleId', 'title', 'category', 'videoCode', 'root', 'directory',
     'sourceLabel', 'status', 'message', 'description', 'posterUrl', 'posterPath']
   const job = keys(json(row.payload, 'object', `${at}.payload`, budget),
-    [...textFields, 'strictQuality', 'register', 'createdAt', 'updatedAt', 'sources', 'items', 'warnings'], `${at}.payload`, ['retryStage', 'directoryChange', 'episodeMetadata'])
+    [...textFields, 'strictQuality', 'register', 'createdAt', 'updatedAt', 'sources', 'items', 'warnings'], `${at}.payload`, ['retryStage', 'directoryChange', 'episodeMetadata', 'discovery'])
+  if (Object.hasOwn(job, 'discovery')) {
+    const discovery = keys(job.discovery, ['sourceId', 'entry'], at + '.discovery')
+    const source = parseCatalogue({ schemaVersion: 1, id: discovery.sourceId, name: 'snapshot', entries: [discovery.entry] })
+    if (!array(job.sources, at + '.sources').some(value => { const ref = object(value, at + '.source'); return ref.provider === 'catalogue:' + source.id && ref.externalId === source.entries[0].id })) invalid(at + ' discovery source does not match the job')
+  }
   for (const field of textFields) string(job[field], `${at}.payload.${field}`)
   for (const field of ['createdAt', 'updatedAt']) integer(job[field], `${at}.payload.${field}`)
   for (const field of ['strictQuality', 'register']) boolean(job[field], `${at}.payload.${field}`)
@@ -355,7 +379,8 @@ function validateInput(input: unknown): LibraryBackup {
   integer(header.exported_at, 'exported_at')
   if (header.exported_at < 0) invalid('exported_at must not be negative')
   const legacyImages = header.schema_version < 11 ? { image_groups: [], image_meta: [], image_chapters: [], image_pages: [], image_progress: [], image_download_jobs: [] } : {}
-  const source = keys({ video_scan_state: [], video_scan_ignores: [], video_detached_owners: [], ...legacyImages, ...object(header.tables, 'tables') }, LIBRARY_BACKUP_TABLE_NAMES, 'tables')
+  const legacyReader = header.schema_version < 12 ? { image_reader_state: [], image_bookmarks: [] } : {}
+  const source = keys({ video_scan_state: [], video_scan_ignores: [], video_detached_owners: [], video_discovery_sources: [], video_discovery_marks: [], ...legacyImages, ...legacyReader, ...object(header.tables, 'tables') }, LIBRARY_BACKUP_TABLE_NAMES, 'tables')
   let totalRows = 0
   // Bound every table before traversing any rows or issuing metadata writes.
   for (const table of LIBRARY_BACKUP_TABLE_NAMES) {
@@ -407,7 +432,7 @@ function checkIntegrity(db: SqlDb): void {
   for (const [table, kind] of [
     ['software_meta', 'software'], ['game_meta', 'game'], ['video_meta', 'video'], ['episode', 'video'],
     ['video_sources', 'video'], ['video_directories', 'video'], ['video_assets', 'video'],
-    ['image_meta', 'image'], ['image_chapters', 'image'], ['image_pages', 'image'], ['image_progress', 'image']
+    ['image_meta', 'image'], ['image_chapters', 'image'], ['image_pages', 'image'], ['image_progress', 'image'], ['image_reader_state', 'image'], ['image_bookmarks', 'image']
   ] as const) {
     if (db.prepare(`SELECT 1 FROM ${tableSql(table)} m JOIN main.resource r ON r.id = m.resource_id WHERE r.kind <> ? LIMIT 1`).get(kind)) invalid(`${table} has an incompatible resource kind`)
   }
@@ -420,6 +445,7 @@ function checkIntegrity(db: SqlDb): void {
   if (db.prepare(`SELECT 1 FROM main.video_sources GROUP BY provider, external_id, scope, resource_id, episode_id HAVING COUNT(*) > 1 LIMIT 1`).get()) invalid('video_sources contains duplicate source identities')
   if (db.prepare('SELECT 1 FROM image_pages p JOIN image_chapters c ON c.id=p.chapter_id WHERE c.resource_id<>p.resource_id LIMIT 1').get()) invalid('image_pages has inconsistent chapter ownership')
   if (db.prepare('SELECT 1 FROM image_progress v JOIN image_pages p ON p.id=v.page_id WHERE v.resource_id<>p.resource_id LIMIT 1').get()) invalid('image_progress has inconsistent page ownership')
+  if (db.prepare('SELECT 1 FROM image_bookmarks b JOIN image_pages p ON p.id=b.page_id WHERE b.resource_id<>p.resource_id LIMIT 1').get()) invalid('image_bookmarks has inconsistent page ownership')
 }
 
 function checkWriteScope(db: SqlDb): void {

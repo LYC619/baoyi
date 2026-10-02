@@ -74,6 +74,13 @@ select {
   user-select: text;
 }
 
+/* Native popup menus need an opaque theme surface on Windows. */
+select option,
+select optgroup {
+  color: var(--text-main);
+  background: var(--bg-card);
+}
+
 ::selection {
   background: color-mix(in srgb, var(--accent) 35%, transparent);
 }

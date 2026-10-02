@@ -29,7 +29,7 @@ interface Dependencies {
   resolveWork: (code: string, options?: { signal?: AbortSignal }) => Promise<VideoWorkSource>
   resolveSources: (code: string, options?: { signal?: AbortSignal }) => Promise<VideoSources>
   transfer: (options: Omit<TransferOptions, 'fetch'>) => Promise<TransferResult>
-  savePoster?: (url: string, directory: string, signal?: AbortSignal) => Promise<string>
+  savePoster?: (url: string, directory: string, signal?: AbortSignal, referer?: string) => Promise<string>
   artworkSize?: (file: string) => { width: number; height: number }
   onChange?: (job: VideoDownloadJob) => void
   onLibraryChange?: (resourceId: string) => void
@@ -39,7 +39,7 @@ const sourceRef = (code: string): VideoSourceRef => ({ provider: 'hanime', exter
 function filePresent(file: string): boolean { try { return !!file && fs.statSync(file).isFile() && fs.statSync(file).size > 0 } catch { return false } }
 
 export function createVideoWorkflow(deps: Dependencies) {
-  const store = createVideoJobStore(deps.db)
+  const store = createVideoJobStore(deps.db, job => !job.discovery)
   store.interrupt()
   const jobs = new Map(store.list().map(job => [job.id, job]))
   const refreshIdleJobs = () => {

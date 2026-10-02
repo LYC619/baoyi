@@ -32,6 +32,16 @@ export const imageSchema: KindSchema = {
       scroll_offset REAL NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS image_download_jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at INTEGER NOT NULL, payload TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS image_reader_state (
+      resource_id TEXT PRIMARY KEY REFERENCES resource(id) ON DELETE CASCADE,
+      is_read INTEGER NOT NULL DEFAULT 0 CHECK(is_read IN (0,1)), preferences TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS image_bookmarks (
+      id TEXT PRIMARY KEY, resource_id TEXT NOT NULL REFERENCES resource(id) ON DELETE CASCADE,
+      page_id TEXT NOT NULL REFERENCES image_pages(id) ON DELETE CASCADE,
+      scroll_offset REAL NOT NULL DEFAULT 0 CHECK(scroll_offset >= 0 AND scroll_offset <= 1),
+      label TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, UNIQUE(resource_id,page_id)
+    );
   `,
   migrate(db) {
     const seeded = db.prepare("SELECT 1 FROM settings WHERE key = '_image_groups_seeded'").get()

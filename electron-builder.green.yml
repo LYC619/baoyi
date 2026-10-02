@@ -1,4 +1,4 @@
-# 绿色版（免安装）打包配置 —— 在基础配置上只改两处：目标换成 zip、多带一个标记文件。
+# 绿色 ZIP 配置：复用便携数据标记，输出到独立的版本目录。
 #
 # **为什么必须是单独一份配置，而不是往 win.target 里再加一个 zip。**
 # 标记文件（`绿色版.txt`）决定运行时把数据写到哪。`extraFiles` 是全局的，
@@ -9,7 +9,13 @@
 # 后者不算崩，但它是装机版不该有的行为：卸载不会带走数据，而且和「装了的程序
 # 数据在 AppData」这个预期不一致。一个开关管两种分发方式，迟早会在某台机器上
 # 选错边 —— 所以从源头分开。
-extends: ./electron-builder.yml
+extends: ./electron-builder.portable.yml
+
+# 保留历史绿色 ZIP 的应用标识。
+appId: com.baoyi.app
+
+directories:
+  output: release/${version}-green
 
 win:
   icon: resources/icon.ico
@@ -17,7 +23,4 @@ win:
     - target: zip
       arch: [x64]
 
-# 落到 exe 同级。`initPortable()` 认的就是这个位置
-extraFiles:
-  - from: resources/绿色版.txt
-    to: 绿色版.txt
+# 标记文件沿用 portable 配置，中文和 ASCII 标记一并保留。

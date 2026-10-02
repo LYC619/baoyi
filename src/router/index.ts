@@ -57,6 +57,7 @@ const router = createRouter({
       component: () => import('@/pages/video/Home.vue'),
       meta: { module: 'video' }
     },
+    { path: '/video/discover', name: 'video-discover', component: () => import('@/pages/video/Discover.vue'), meta: { module: 'video' } },
     {
       path: '/video/:id',
       name: 'video-detail',

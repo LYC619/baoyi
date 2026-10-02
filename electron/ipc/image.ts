@@ -4,10 +4,13 @@ import { getDb } from '../services/database.ts'
 import { ImageLibrary } from '../kinds/image/library.ts'
 import { isArchive, scanImageImport } from '../kinds/image/scanner.ts'
 import { imageOperation } from '../kinds/image/activity.ts'
+import { auditImage, imagePageInfo } from '../kinds/image/integrity.ts'
+import { ImageReaderState } from '../kinds/image/reader-state.ts'
 import type { ImageImportPreview, ImagePreferences, ImageType, ScannedImage } from '../../src/types/image.ts'
 
 export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pick<IpcMain,'handle'>): void {
   const library = () => new ImageLibrary(getDb())
+  const reader = () => new ImageReaderState(getDb())
   let preview: { token: string; at: number; items: ScannedImage[] } | null = null
   const changed = () => { const win = getWindow(); if (win && !win.isDestroyed()) win.webContents.send('image:changed') }
   const main = (event: IpcMainInvokeEvent) => {
@@ -17,23 +20,22 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
   const handle = (name: string, action: (...args: any[]) => unknown) => ipc.handle('image:' + name, (event, ...args) => { main(event); return action(...args) })
   handle('list', query => library().list(query))
   handle('get', id => library().get(id))
+  handle('page-info', id => imageOperation(() => imagePageInfo(getDb(), id)))
+  handle('audit', id => imageOperation(() => auditImage(getDb(), id)))
   handle('pages', (id, chapter) => library().pages(id, chapter).map(({ id, resourceId, chapterId, ordinal, size, missing }) => ({ id, resourceId, chapterId, ordinal, size, missing })))
   handle('save-chapter', (id, chapterId, title, move) => { library().saveChapter(id, chapterId, title, move); changed() })
   handle('groups', () => library().groups())
   handle('update', (id, patch) => { const item = library().update(id, patch); changed(); return item })
+  handle('bulk-update', (ids, patch) => { const count = library().bulkUpdate(ids, patch); changed(); return count })
   handle('remove', id => { library().remove(id); changed() })
   handle('save-group', group => { const result = library().saveGroup(group); changed(); return result })
   handle('remove-group', id => { library().removeGroup(id); changed() })
   handle('progress', (id, pageId, offset) => library().saveProgress(id, pageId, offset))
-  handle('preferences', (value?: ImagePreferences) => {
-    const db = getDb()
-    if (value) {
-      if (!['single','double','scroll'].includes(value.mode) || !['ltr','rtl'].includes(value.direction) || !['screen','width','original'].includes(value.fit)) throw new Error('阅读设置无效')
-      db.prepare("INSERT INTO settings(key,value) VALUES('_image_reader',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(value))
-    }
-    const row = db.prepare("SELECT value FROM settings WHERE key='_image_reader'").get() as { value: string } | undefined
-    try { return row ? JSON.parse(row.value) : { mode: 'single', direction: 'ltr', fit: 'screen' } } catch { return { mode: 'single', direction: 'ltr', fit: 'screen' } }
-  })
+  handle('preferences', (value?: ImagePreferences) => reader().preferences(value))
+  handle('reader-preferences', (id: string, value?: ImagePreferences | null) => reader().forWork(id, value))
+  handle('bookmarks', (id: string) => reader().bookmarks(id))
+  handle('save-bookmark', (id: string, pageId: string, offset: number, label?: string) => reader().saveBookmark(id, pageId, offset, label))
+  handle('remove-bookmark', (id: string, bookmarkId: string) => reader().removeBookmark(id, bookmarkId))
   handle('prepare-import', async (type: ImageType, multiple: boolean, archive: boolean): Promise<ImageImportPreview | null> => {
     const result = await dialog.showOpenDialog(getWindow()!, { title: archive ? '选择 ZIP／CBZ' : multiple ? '选择包含多个相册／作品的父目录' : '选择一个相册／漫画目录',
       properties: archive ? ['openFile'] : ['openDirectory'], ...(archive ? { filters: [{ name: '漫画归档', extensions: ['zip','cbz'] }] } : {}) })

@@ -35,6 +35,7 @@
  */
 
 import { VIDEO_SCAN_STATE_SQL } from './scan-state.ts'
+import { VIDEO_DISCOVERY_SQL } from './discovery/catalogue.ts'
 import type { KindSchema } from '../types.ts'
 import { columnsOf, objectType, type SqlDb } from '../../services/schema.ts'
 import { HENTAI_CATEGORY_ID, VIDEO_CATEGORIES } from './taxonomy.ts'
@@ -484,7 +485,7 @@ export function migrateVideo(d: SqlDb, from: number): void {
 }
 
 export const videoSchema: KindSchema = {
-  tables: VIDEO_SCAN_STATE_SQL + VIDEO_META_SQL + EPISODE_SQL + VIDEO_LIBRARY_SQL + VIDEO_ORGANIZE_SQL,
+  tables: VIDEO_SCAN_STATE_SQL + VIDEO_META_SQL + EPISODE_SQL + VIDEO_LIBRARY_SQL + VIDEO_ORGANIZE_SQL + VIDEO_DISCOVERY_SQL,
   view: VIDEO_VIEW_SQL,
   indexes: VIDEO_INDEXES_SQL,
   migrate: migrateVideo

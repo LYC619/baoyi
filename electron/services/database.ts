@@ -6,7 +6,8 @@ import { randomUUID } from 'node:crypto'
 import { readExternalActiveAt } from './activity'
 import { rebase } from '../kinds/software/organize/plan'
 import { KINDS } from '../kinds'
-import { initSchema, insertCategories, insertTag, schemaVersion, seedDefaults, SCHEMA_VERSION } from './schema'
+import { initSchema, insertCategories, insertTag, seedDefaults, SCHEMA_VERSION } from './schema'
+import { openUpgradedDatabase } from './library-snapshots.ts'
 import { FALLBACK_CATEGORY } from './taxonomy'
 import { buildLibraryBackup } from './library-backup.ts'
 import { VIDEO_JOBS_SQL } from '../kinds/video/download/jobs.ts'
@@ -165,64 +166,21 @@ export function saveBackupRoot(): string {
   return dir
 }
 
-/**
- * 迁移前留一份原样的副本。
- *
- * 迁移是全项目唯一会改写用户几个月真实数据的一段。自检和 verify-migration 都跑过了，
- * 但它们跑的是合成数据和副本 —— 真库上出的那一次意外，代价是数据没了。
- *
- * 命名沿用 0.1 / 0.3 / 0.4 那几份手工备份的形状：baoyi.db.v{旧版本}.bak。
- * 同一个旧版本只备一次：升级失败、用户重开应用再试一次时，第二次备份的会是
- * 一个已经被改坏的库，正好把唯一那份好的盖掉。
- *
- * 备份失败不拦启动，但要在主进程日志里喊一声 —— 一次静默失败的备份
- * 和没有备份是一回事，而用户会以为自己有。
- */
-function backupBeforeMigrate(file: string): void {
-  let from = 0
-  try {
-    const probe = new Database(file, { readonly: true, fileMustExist: true })
-    try {
-      from = schemaVersion(probe)
-    } finally {
-      probe.close()
-    }
-  } catch {
-    // 库还不存在（首次启动），或者连版本号都读不出来。前者没什么可备份的，
-    // 后者交给 initSchema 去报错，这里不越权
-    return
-  }
-  if (from <= 0 || from >= SCHEMA_VERSION) return
-
-  const target = `${file}.v0.${from}.0.bak`
-  if (fs.existsSync(target)) return
-  try {
-    // WAL 里可能还压着没落盘的事务，直接 copyFile 会拿到一个缺尾巴的库。
-    // better-sqlite3 的 backup 走的是 SQLite 自己的备份 API，拿到的是完整快照
-    const src = new Database(file, { readonly: true, fileMustExist: true })
-    try {
-      src.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`)
-    } finally {
-      src.close()
-    }
-    console.log(`[抱一] 迁移前备份：${target}`)
-  } catch (err) {
-    console.error(`[抱一] 迁移前备份失败（${from} -> ${SCHEMA_VERSION}）：`, err)
-  }
-}
 
 export function getDb(): Database.Database {
   if (db) return db
   const file = path.join(app.getPath('userData'), 'baoyi.db')
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  backupBeforeMigrate(file)
-  db = new Database(file)
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
-  // 品类模块从注册表来：公共层不认识 software_meta，也不认识「开发工具」
-  // 这些分类名，它只负责把每个品类交上来的那几段 SQL 按顺序执行一遍
-  initSchema(db, KINDS)
-  db.exec(VIDEO_JOBS_SQL)
+  db = openUpgradedDatabase({
+    file, version: app.getVersion(), targetSchema: SCHEMA_VERSION,
+    open: (filename, readonly) => new Database(filename, { readonly, fileMustExist: readonly }),
+    migrate: connection => {
+      connection.pragma('journal_mode = WAL')
+      connection.pragma('foreign_keys = ON')
+      initSchema(connection, KINDS)
+      connection.exec(VIDEO_JOBS_SQL)
+    }
+  })
   try {
     const pruned = pruneStrayPlaceholders(db)
     if (pruned) console.log(`[抱一] 已清理 ${pruned} 条不属于同系列的占位集（播放列表带来的、本地没有文件的集）`)

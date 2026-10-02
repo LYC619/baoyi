@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import type { ModuleKey } from './useModules'
 import type {
   TaskEvent,
   TaskEventLevel,
@@ -24,6 +25,11 @@ let hydrationStarted = false
 const clearedIds = new Set<string>()
 const videoHidden = ref(false)
 const videoKinds = new Set<TaskKind>(['video-scan', 'video-download', 'video-series-download', 'hanime-verify'])
+const taskModules: Record<TaskKind, ModuleKey> = {
+  'software-scan': 'software', 'ai-identify': 'software', organize: 'software',
+  'game-scan': 'game', 'video-scan': 'video', 'video-download': 'video',
+  'video-series-download': 'video', 'hanime-verify': 'video'
+}
 
 async function hydrate(): Promise<void> {
   if (hydrated || hydrationStarted || typeof window === 'undefined' || !window.baoyi?.tasks) return
@@ -89,9 +95,10 @@ function replaceTask(id: string, change: (task: TaskWithResults) => TaskWithResu
   tasks.value = tasks.value.with(index, change(current))
 }
 
-export function useTaskCenter() {
+export function useTaskCenter(module?: () => ModuleKey) {
   void hydrate()
-  const visibleTasks = computed(() => tasks.value.filter(task => !videoHidden.value || !videoKinds.has(task.kind)))
+  const visibleTasks = computed(() => tasks.value.filter(task =>
+    (!module || taskModules[task.kind] === module()) && (!videoHidden.value || !videoKinds.has(task.kind))))
   const runningTasks = computed(() => visibleTasks.value.filter((task) => task.status === 'running'))
   const history = computed(() => visibleTasks.value.filter((task) => task.status !== 'running'))
   const runningCount = computed(() => runningTasks.value.length)

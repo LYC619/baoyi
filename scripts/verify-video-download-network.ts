@@ -42,6 +42,13 @@ await test('Electron redirect EVENT becomes a 3xx Response, no automatic follow'
   assert.equal(r.status, 302); assert.equal(r.headers.get('location'), 'https://cdn2.example.test/main.mp4')
   assert.ok(h.aborted() > 0)
 })
+await test('image requests explicitly omit session credentials', async () => {
+  const h = harness(req => response(req, 'image'))
+  const r = await h.fetch(url, { redirect: 'manual', credentials: 'omit' })
+  assert.equal(await r.text(), 'image')
+  assert.equal(h.options[0].credentials, 'omit')
+  assert.equal(h.options[0].useSessionCookies, false)
+})
 await test('redirect body is never requested even for a non-HTTP redirect', async () => {
   const h = harness(req => req.emit('redirect', 302, 'GET', 'file:///C:/private.mp4', {}))
   const r = await h.fetch(url, { redirect: 'manual' })

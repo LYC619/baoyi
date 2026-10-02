@@ -29,3 +29,9 @@ reference/
 
 # 手动打的源码压缩包，本地留存，不进版本库
 /抱一.7z
+
+# 本地历史产物归档（可能含数据库快照，不进入版本库）
+/archive/
+
+# 本机视频示例每次启动生成的临时端口目录
+/examples/video-discovery/localhost-catalogue.json

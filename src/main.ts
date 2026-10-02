@@ -7,6 +7,7 @@ import { useCategoriesStore } from './stores/categories'
 import { useSettingsStore } from './stores/settings'
 import { useVideoStore } from './stores/video'
 import { useVideoWorkflow } from './composables/useVideoWorkflow'
+import { pendingDiscoveryDownload, pendingWebAddress } from './composables/useVideoDiscovery'
 import { useToast } from './composables/useToast'
 import './styles/global.scss'
 
@@ -23,6 +24,14 @@ async function boot(): Promise<void> {
     app.use(router)
     await router.isReady()
     app.mount('#app')
+    window.baoyi.video.discovery?.onDownload(selection => {
+      pendingDiscoveryDownload.value = selection
+      void router.push({ name: 'video-discover' }).catch(cause => useToast().error(errorMessage(cause)))
+    })
+    window.baoyi.video.discovery?.web?.onEdit(url => {
+      pendingWebAddress.value = url
+      void router.push({ name: 'video-discover' }).catch(cause => useToast().error(errorMessage(cause)))
+    })
     window.baoyi.hanimeBrowser?.onDownload(url => {
       if (settings.settings.hide_hentai) return
       void (async () => {

@@ -188,7 +188,8 @@ export function registerVideoContent(d: SqlDb, input: VideoRegistration): VideoR
   const resolvedId = rawId ? resolveVideoOrganizeOwner(d, rawId) : ''
   let existing = resolvedId ? getVideo(d, resolvedId) : null
   if (input.resourceId && !existing) throw new Error('所选作品已不存在')
-  const resourcePath = existing?.path || directory || files[0]
+  if (input.videoType && !['movie', 'series'].includes(input.videoType)) throw new Error('视频类型无效')
+  const resourcePath = (input.videoType === 'movie' ? files[0] : '') || existing?.path || directory || files[0]
   if (!resourcePath) throw new Error('缺少作品目录或视频文件')
   if (directory) {
     const occupied = d.prepare('SELECT id FROM resource WHERE path = ? COLLATE NOCASE').get(directory) as { id: string } | undefined
@@ -200,7 +201,7 @@ export function registerVideoContent(d: SqlDb, input: VideoRegistration): VideoR
     const created = !existing
     if (!existing) {
       const payload: VideoPayload = {
-        path: resourcePath, video_type: directory || input.items.length > 1 ? 'series' : 'movie', collection_name: '',
+        path: resourcePath, video_type: input.videoType || (directory || input.items.length > 1 ? 'series' : 'movie'), collection_name: '',
         name_zh: input.title.trim(), name_en: input.nameEn || '', summary: input.description || '', description: input.originalDescription || input.description || '',
         category: input.category || '其他', tags: input.tags || [], official_url: sources[0]?.pageUrl || '', source_dir: directory || path.dirname(resourcePath), file_size: 0,
         year: 0, end_year: 0, rating: 0, duration_sec: 0, resolution: '', video_codec: '', source: '', release_group: '', audio_tracks: [], subtitle_tracks: [], parts: [], linked_files: [],
@@ -224,8 +225,9 @@ export function registerVideoContent(d: SqlDb, input: VideoRegistration): VideoR
       && resolveVideoOrganizePathOwner(d, directory) === resourceId
     if (directory && !historicalDirectory) {
       upsertVideoDirectory(d, { resourceId, directory, root: input.root || oldDirectory?.root, bundleId, metadataState: input.metadataState, missing: input.missing })
-      d.prepare('UPDATE resource SET path = ?, source_dir = ?, file_name = ?, updated_at = ? WHERE id = ?').run(directory, directory, path.basename(directory), Date.now(), resourceId)
-      d.prepare("UPDATE video_meta SET video_type = 'series' WHERE resource_id = ?").run(resourceId)
+      const storedPath = input.videoType === 'movie' ? resourcePath : directory
+      d.prepare('UPDATE resource SET path = ?, source_dir = ?, file_name = ?, updated_at = ? WHERE id = ?').run(storedPath, directory, path.basename(storedPath), Date.now(), resourceId)
+      d.prepare('UPDATE video_meta SET video_type = ? WHERE resource_id = ?').run(input.videoType || 'series', resourceId)
     }
     let itemsAdded = 0; let filesAdded = 0
     const numbering = new Map<string, { number: number; season: number }>()
@@ -342,7 +344,7 @@ export function registerVideoBundleData(d: SqlDb, root: string, bundle: import('
     }
     const duplicatesMerged = owner ? absorbDuplicateVideoCards(d, owner.resource_id, items) : 0
     const result = registerVideoContent(d, {
-    restoreRemoved,
+    restoreRemoved, videoType: bundle.work.video_type,
     resourceId, bundleId: bundle.bundle_id, directory: root, root: path.dirname(root), title: bundle.work.title,
     nameEn: bundle.work.name_en, description: bundle.work.description, originalDescription: bundle.work.original_description,
     category: bundle.work.category, tags: bundle.work.tags, posterPath: bundle.work.poster ? resolveBundlePath(root, bundle.work.poster) : '', posterSource: bundle.work.poster_source, thumbnailPath: bundle.work.thumbnail ? resolveBundlePath(root, bundle.work.thumbnail) : '', thumbnailSource: bundle.work.thumbnail_source,

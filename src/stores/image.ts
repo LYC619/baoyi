@@ -1,10 +1,12 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type { ImageGroup, ImageItem, ImageQuery } from '@/types/image'
 
 export const useImageStore = defineStore('image', () => {
   const items = ref<ImageItem[]>([]), groups = ref<ImageGroup[]>([]), loading = ref(false), error = ref('')
   const query = ref<ImageQuery>({ type: 'comic', sort: 'updated' })
+  const shelfPage = ref(1)
+  watch(query, () => { shelfPage.value = 1 }, { deep: true })
   let subscribed = false, revision = 0
   const count = computed(() => items.value.length)
   async function refresh(): Promise<void> {
@@ -22,9 +24,9 @@ export const useImageStore = defineStore('image', () => {
   const shown = computed(() => {
     const q = query.value, needle = q.search?.trim().toLocaleLowerCase()
     return items.value.filter(i => (!q.type || i.type === q.type) && (!q.groupId || i.groupId === q.groupId) && (!q.favorite || i.favorite)
-      && (!q.publication || i.publication === q.publication) && (!q.tag || i.tags.includes(q.tag)) && (!q.sourceDir || i.sourceDir===q.sourceDir)
+      && (q.read === undefined || i.read === q.read) && (!q.publication || i.publication === q.publication) && (!q.tag || i.tags.includes(q.tag)) && (!q.sourceDir || i.sourceDir===q.sourceDir)
       && (!needle || `${i.name} ${i.description} ${i.tags.join(' ')}`.toLocaleLowerCase().includes(needle)))
       .sort((a,b) => q.sort === 'name' ? a.name.localeCompare(b.name,'zh-CN',{ numeric:true }) : q.sort === 'read' ? (b.progress?.updatedAt || 0) - (a.progress?.updatedAt || 0) : b.updatedAt-a.updatedAt)
   })
-  return { items, groups, loading, error, count, query, shown, refresh }
+  return { items, groups, loading, error, count, query, shelfPage, shown, refresh }
 })

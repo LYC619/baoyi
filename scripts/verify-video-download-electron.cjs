@@ -51,6 +51,10 @@ app.whenReady().then(async () => {
     assert.match(await (await fetch(next, init({}))).text(), /ftyp/)
     assert.match(seen.at(-1).cookie || '', /fixture=redirect/)
   })
+  await test('image requests omit existing session cookies', async () => {
+    assert.match(await (await fetch(base + '/video', { ...init({}), credentials: 'omit' })).text(), /ftyp/)
+    assert.equal(seen.at(-1).cookie, undefined)
+  })
   await test('session configured proxy carries download request', async () => {
     await ses.setProxy({ mode: 'fixed_servers', proxyRules: base, proxyBypassRules: '<-loopback>' })
     assert.match(await ses.resolveProxy('http://download.fixture.invalid/video'), /PROXY/)

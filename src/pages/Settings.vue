@@ -36,6 +36,7 @@ import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
 import IdentifyLog from '@/components/identify/IdentifyLog.vue'
 import ReportDialog from '@/components/identify/ReportDialog.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
+import LibrarySafetyPanel from '@/components/settings/LibrarySafetyPanel.vue'
 import { useAI } from '@/composables/useAI'
 import { useScan } from '@/composables/useScan'
 import { useMediaScan } from '@/composables/useMediaScan'
@@ -1098,6 +1099,7 @@ async function clearSkipped(): Promise<void> {
 const dataDir = ref('')
 const stats = ref<DataStats | null>(null)
 const resetting = ref(false)
+const backupRefresh = ref(0)
 
 /**
  * 备份根的**实际生效值**，从主进程取而不是读 settings.save_backup_root ——
@@ -1171,7 +1173,7 @@ function openDataDir(): void {
 async function exportJson(): Promise<void> {
   try {
     const file = await window.baoyi.data.exportJson()
-    if (file) success(`已备份到 ${file}`)
+    if (file) { success(`已备份到 ${file}`); backupRefresh.value++ }
   } catch (cause) { error(`备份失败：${cause instanceof Error ? cause.message : String(cause)}`) }
 }
 
@@ -2214,6 +2216,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </p>
           </section>
 
+          <LibrarySafetyPanel :refresh-key="backupRefresh" />
           <!--
             存档备份目录。放在「数据管理」而不是新开一个游戏 Tab：这一项回答的是
             「东西存在磁盘哪儿」，和上面的数据位置是同一类问题。游戏详情页里

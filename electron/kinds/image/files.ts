@@ -20,9 +20,9 @@ export function imageMime(data: Uint8Array): string {
   throw new Error('不是受支持的图片数据')
 }
 /** Identity-based protocol: the renderer never supplies filesystem paths. */
-export async function readImagePage(db: SqlDb, id: string): Promise<{ data: Buffer; mime: string }> {
+export async function readImagePage(db: SqlDb, id: string, includeMissing = false): Promise<{ data: Buffer; mime: string }> {
   const row = db.prepare(`SELECT p.file,p.entry,r.path FROM image_pages p JOIN resource r ON r.id=p.resource_id JOIN image_meta m ON m.resource_id=r.id
-    WHERE p.id=? AND p.missing=0 AND (m.group_id IS NULL OR NOT EXISTS(SELECT 1 FROM image_groups g WHERE g.id=m.group_id AND g.hidden=1))`).get(id) as { file: string; entry: string; path: string } | undefined
+    WHERE p.id=? AND ${includeMissing ? '1=1' : 'p.missing=0'} AND (m.group_id IS NULL OR NOT EXISTS(SELECT 1 FROM image_groups g WHERE g.id=m.group_id AND g.hidden=1))`).get(id) as { file: string; entry: string; path: string } | undefined
   if (!row) throw new Error('页面不可用')
   const file = await fs.realpath(row.file), root = await fs.realpath(row.path)
   const relative = path.relative(root, file)

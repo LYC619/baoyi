@@ -9,6 +9,7 @@ import { videoOrganizationBusy } from './video-organize.ts'
 import { videoAgentOrganizationBusy } from './video-agent-organize.ts'
 import { videoImportBusy } from './video-import.ts'
 import { imageLibraryBusy } from '../kinds/image/activity.ts'
+import { recordMetadataExport } from '../services/library-snapshots.ts'
 
 const MAX_BACKUP_BYTES = 256 * 1024 * 1024
 
@@ -38,6 +39,7 @@ export function registerLibraryBackupIpc(getWindow: () => BrowserWindow | null, 
     const contents = JSON.stringify(exportAll(), null, 2)
     if (Buffer.byteLength(contents, 'utf8') > MAX_BACKUP_BYTES) throw new Error('备份超过 256 MB，请先通过数据目录保存完整数据库副本')
     atomicWrite(result.filePath, contents)
+    recordMetadataExport(getDb(), result.filePath)
     return result.filePath
   })
   ipcMain.handle('data:restore-json', async event => {

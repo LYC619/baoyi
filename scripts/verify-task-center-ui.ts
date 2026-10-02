@@ -50,6 +50,8 @@ const load = createRendererLoader({
   vue: { ...Vue, Transition: { props: ['name'], setup: (_: unknown, ctx: any) => () => ctx.slots.default?.() } }
 }, { document: doc, console: { info: () => {}, warn: () => {}, error: () => {} } }, true)
 const center = load('src/composables/useTaskCenter.ts').useTaskCenter()
+const activeModule = load('src/composables/useModules.ts').activeModule
+activeModule.value = 'video'
 const app = renderer.createApp(load('src/components/tasks/TaskCenter.vue').default)
 app.config.warnHandler = message => { throw new Error('Unexpected Vue warning: ' + message) }
 app.mount(root)
@@ -63,7 +65,7 @@ assert.equal(classed('task-panel__clear').props.disabled, true)
 assert.equal(find(n => n.props.role === 'dialog').props['aria-labelledby'], 'task-center-title')
 assert.ok(events.get('pointerdown')?.size)
 const running = center.start('video-scan', '影视扫描', { message: '正在遍历目录' })
-const failed = center.start('ai-identify', '软件识别')
+const failed = center.start('video-scan', '影视识别')
 center.finish(failed, 'failed', '识别失败', '<script>敏感字符作为文本</script>')
 await Vue.nextTick()
 assert.match(String(trigger.props['aria-label']), /1.*运行.*1.*失败/)

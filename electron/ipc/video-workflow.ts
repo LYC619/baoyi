@@ -16,6 +16,23 @@ import { previewVideoCollectionName, renameVideoCollection } from '../kinds/vide
 import { getVideoItem, getVideoLibrary, updateVideoEpisode, updateVideoItem } from '../kinds/video/service.ts'
 import { getEpisode } from '../kinds/video/db.ts'
 import type { VideoDownloadJob, VideoEnqueueRequest, VideoJobRetry } from '../../src/types/video-workflow.ts'
+import { createDiscoveryCatalogue } from '../kinds/video/discovery/catalogue.ts'
+import { createDiscoveryWorkflow } from '../kinds/video/discovery/workflow.ts'
+import { resolveMissav } from '../kinds/video/discovery/missav.ts'
+import { downloadHls } from '../kinds/video/download/hls.ts'
+import { locateFfmpeg } from '../kinds/video/download/ffmpeg.ts'
+import { registerDiscoveryIpc } from './video-discovery.ts'
+import { DISCOVERY_PARTITION } from '../services/discovery-browser.ts'
+
+/** 装成一个普通 Chrome。图床常带 Cloudflare 防盗链：缺 UA / Referer 直接 403。 */
+const POSTER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+/** JAVDB 的图床只认 javdb 系 Referer；其他图床按调用方给的来源页 origin 兜。 */
+function posterRequestHeaders(target: URL, referer?: string): Record<string, string> {
+  const headers: Record<string, string> = { 'User-Agent': POSTER_UA }
+  if (/(^|\.)jdbstatic\.com$/i.test(target.hostname)) headers.Referer = 'https://javdb.com/'
+  else if (referer) { try { headers.Referer = new URL(referer).origin + '/' } catch { /* 来源地址无效就不带 Referer */ } }
+  return headers
+}
 
 export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, ipcMain: Pick<Electron.IpcMain, 'handle'>): { resetHistory: () => void } {
   const assertMain = (event: IpcMainInvokeEvent) => {
@@ -24,7 +41,7 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   }
   const send = (channel: string, value: unknown) => { const win = getWindow(); if (win && !win.isDestroyed()) win.webContents.send(channel, value) }
   const visible = (job: VideoDownloadJob) => !getSettings().hide_hentai || job.category !== '里番'
-  const workflow = createVideoWorkflow({
+  const workflowOptions: Parameters<typeof createVideoWorkflow>[0] = {
     artworkSize: file => nativeImage.createFromPath(file).getSize(),
     db: getDb(), downloadsDirectory: () => getSettings().video_scan_dirs[0] || app.getPath('videos'),
     libraryRoots: () => getSettings().video_scan_dirs,
@@ -32,12 +49,12 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     transfer: options => transferVideo({ ...options, fetch: createChromiumDownloadFetch(opts => net.request(opts), session.fromPartition('persist:hanime-network')) }),
     // 下载时作品目录已经定下来了，封面直接写进 <目录>/.baoyi/artwork（和清单同一套约定）；
     // 只有还没目录的极少情况才暂放缓存目录（A2）
-    savePoster: async (url, directory, signal) => {
+    savePoster: async (url, directory, signal, referer) => {
       const target = new URL(url)
       if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) throw new Error('封面地址无效')
       const timeout = AbortSignal.timeout(20000)
       const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
-      const response = isHanimeHost(target.hostname) ? await fetchHanimeResource(url, { signal: requestSignal }) : await net.fetch(url, { signal: requestSignal })
+      const response = isHanimeHost(target.hostname) ? await fetchHanimeResource(url, { signal: requestSignal }) : await net.fetch(url, { signal: requestSignal, headers: posterRequestHeaders(target, referer) })
       if (!response.ok || !response.body) throw new Error('封面请求失败：HTTP ' + response.status)
       const chunks: Uint8Array[] = []; let size = 0
       const reader = response.body.getReader()
@@ -55,20 +72,34 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     },
     onChange: job => { if (visible(job)) send('video-workflow:changed', job) },
     onLibraryChange: id => send('video:library-changed', id)
-  })
-  ipcMain.handle('video-workflow:prepare', (event, input) => { assertMain(event); return workflow.prepare(input || {}) })
+  }
+  const workflow = createVideoWorkflow(workflowOptions)
+  const catalogue = createDiscoveryCatalogue(getDb())
+  const discoveryFetch: typeof globalThis.fetch = (url, init) => session.fromPartition(DISCOVERY_PARTITION).fetch(url instanceof URL ? url.href : url, init)
+  const discovery = createDiscoveryWorkflow({ ...workflowOptions, catalogue,
+    transfer: options => transferVideo({ ...options, fetch: discoveryFetch }),
+    resolvePlayback: (code, signal) => resolveMissav(code, discoveryFetch, signal),
+    hlsTransfer: ({ url, destination, headers, signal, onProgress }) => {
+      const ffmpeg = locateFfmpeg()
+      if (!ffmpeg) throw new Error('没有找到 FFmpeg，无法把 HLS 片源合成 MP4；请先安装 FFmpeg 并确保在 PATH 中')
+      return downloadHls({ url, destination, headers, signal, fetch: discoveryFetch, ffmpeg, onProgress })
+    } })
+  registerDiscoveryIpc(getWindow, ipcMain, catalogue, getDb(), workflowOptions.savePoster!)
+  const workerFor = (id: string) => typeof id === 'string' && id.startsWith('discovery-') ? discovery : workflow
+  const allJobs = () => [...workflow.list(), ...discovery.list()].sort((a, b) => b.updatedAt - a.updatedAt)
+  ipcMain.handle('video-workflow:prepare', (event, input) => { assertMain(event); return input?.discovery ? discovery.prepare(input.discovery) : workflow.prepare(input || {}) })
   ipcMain.handle('video-workflow:pick-root', async (event, id: string) => {
     assertMain(event)
     const result = await dialog.showOpenDialog(getWindow()!, { title: '选择影视库根目录', properties: ['openDirectory', 'createDirectory'] })
-    return result.canceled || !result.filePaths[0] ? null : workflow.setRoot(id, result.filePaths[0])
+    return result.canceled || !result.filePaths[0] ? null : workerFor(id).setRoot(id, result.filePaths[0])
   })
-  ipcMain.handle('video-workflow:enqueue', (event, request: VideoEnqueueRequest) => { assertMain(event); return workflow.enqueue(request) })
-  ipcMain.handle('video-workflow:list', event => { assertMain(event); return workflow.list().filter(visible) })
-  ipcMain.handle('video-workflow:retry', (event, id: string, stage: VideoJobRetry) => { assertMain(event); return workflow.retry(id, stage) })
-  ipcMain.handle('video-workflow:cancel', (event, id: string) => { assertMain(event); return workflow.cancel(id) })
-  ipcMain.handle('video-workflow:dismiss', (event, id: string) => { assertMain(event); return workflow.dismiss(id) })
+  ipcMain.handle('video-workflow:enqueue', (event, request: VideoEnqueueRequest) => { assertMain(event); return workerFor(request?.draftId).enqueue(request) })
+  ipcMain.handle('video-workflow:list', event => { assertMain(event); return allJobs().filter(visible) })
+  ipcMain.handle('video-workflow:retry', (event, id: string, stage: VideoJobRetry) => { assertMain(event); return workerFor(id).retry(id, stage) })
+  ipcMain.handle('video-workflow:cancel', (event, id: string) => { assertMain(event); return workerFor(id).cancel(id) })
+  ipcMain.handle('video-workflow:dismiss', (event, id: string) => { assertMain(event); return workerFor(id).dismiss(id) })
   ipcMain.handle('video-workflow:reveal', async (event, id: string) => {
-    assertMain(event); const job = workflow.list().find(job => job.id === id)
+    assertMain(event); const job = allJobs().find(job => job.id === id)
     if (!job || !job.directory || !fs.existsSync(job.directory)) return false
     return !(await shell.openPath(job.directory))
   })
@@ -117,5 +148,5 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     send('video:library-changed', asset.resource_id)
     return { ok: true, message: '', item: getVideoItem(asset.resource_id), episode: link ? getEpisode(getDb(), link.episode_id) : null }
   })
-  return { resetHistory: workflow.clearHistory }
+  return { resetHistory: () => { workflow.clearHistory(); discovery.clearHistory() } }
 }

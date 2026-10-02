@@ -27,12 +27,12 @@ export function rebaseStoredVideoJobs(db: SqlDb, resourceId: string, from: strin
   }
 }
 
-export function createVideoJobStore(db: SqlDb) {
+export function createVideoJobStore(db: SqlDb, accepts: (job: VideoDownloadJob) => boolean = () => true) {
   db.exec(VIDEO_JOBS_SQL)
   function list(): VideoDownloadJob[] {
     const rows = db.prepare('SELECT payload FROM video_download_jobs ORDER BY updated_at DESC').all() as Array<{ payload: string }>
     return rows.flatMap(row => {
-      try { const job = JSON.parse(row.payload); return job?.id && Array.isArray(job.items) ? [job as VideoDownloadJob] : [] } catch { return [] }
+        try { const job = JSON.parse(row.payload); return job?.id && Array.isArray(job.items) && accepts(job) ? [job as VideoDownloadJob] : [] } catch { return [] }
     })
   }
   function save(job: VideoDownloadJob): void {

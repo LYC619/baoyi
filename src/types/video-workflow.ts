@@ -6,6 +6,9 @@ export interface VideoWorkLibrary { resourceId: string; directory: VideoDirector
 export interface VideoLibrarySyncResult { library: VideoWorkLibrary; itemsAdded: number; filesAdded: number; pathsRepaired: number; duplicatesMerged: number; warnings: string[]; message: string }
 
 export interface VideoDownloadDraft {
+  discovery?: import('./video-discovery').DiscoverySelection
+  sourceName?: string
+  qualities?: string[]
   id: string
   resourceId: string
   videoCode: string
@@ -59,6 +62,7 @@ export interface VideoJobItem {
   missing?: string[]
 }
 export interface VideoDownloadJob {
+  discovery?: { sourceId: string; entry: import('./video-discovery').DiscoveryEntry }
   id: string
   resourceId: string
   bundleId: string

@@ -2,7 +2,7 @@
 /**
  * 顶栏的「日志」面板（实测第四轮之前叫「任务」）。
  *
- * 四个页签：任务（扫描 / 识别 / 整理这类进程内任务）、下载记录、整理记录、识别与调用。
+ * 跟随当前模块显示任务、下载、整理和识别记录；角标与清除范围保持一致。
  * 以前下载队列和任务挤在同一块里，整理记录藏在影视墙副菜单栏，搜索调用记录躲在设置页 ——
  * 用户看见顶栏一个红色的 7，翻遍面板也不知道是哪 7 个。现在角标只数两样：下载待处理 + 任务失败，
  * 悬停能看拆分；下载记录默认只看待处理，看完能一条条「移除记录」。
@@ -32,7 +32,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'tasks', label: '任务' }, { key: 'downloads', label: '下载记录' }, { key: 'organize', label: '整理记录' }, { key: 'identify', label: '识别与调用' }
 ]
 
-const center = useTaskCenter()
+const center = useTaskCenter(() => activeModule.value)
 const { runningTasks, history } = center
 const workflow = useVideoWorkflow()
 const imageDownloads = useImageDownloads()
@@ -47,20 +47,28 @@ const privateHidden = computed(() => !workflow.privacyReady.value || workflow.hi
 watch(() => settings?.loaded ? settings.settings : null, value => {
   if (value) workflow.applyPreferences(value)
 }, { immediate: true, deep: true, flush: 'sync' })
-const downloadJobs = workflow.jobs
+const downloadJobs = computed(() => activeModule.value === 'video' ? workflow.jobs.value : [])
+const imageJobs = computed(() => activeModule.value === 'image' ? imageDownloads.jobs.value : [])
+const activeImageJobs = computed(() => activeModule.value === 'image' ? imageDownloads.active.value : [])
+const imageAttention = computed(() => activeModule.value === 'image' ? imageDownloads.attention.value.length : 0)
 const activeJob = (job: VideoDownloadJob) => job.status === 'running' || job.status === 'queued'
 const needsAttention = (job: VideoDownloadJob) => !activeJob(job) && (videoJobRetryStages(job).length > 0 || job.status === 'failed')
-const runningCount = computed(() => center.runningCount.value + downloadJobs.value.filter(job => job.status === 'running').length + imageDownloads.active.value.filter(j=>j.status==='running').length)
-const queuedCount = computed(() => downloadJobs.value.filter(job => job.status === 'queued').length + imageDownloads.active.value.filter(j=>j.status==='queued').length)
-const downloadAttention = computed(() => downloadJobs.value.filter(needsAttention).length + imageDownloads.attention.value.length)
+const runningDownloads = computed(() => downloadJobs.value.filter(job => job.status === 'running').length + activeImageJobs.value.filter(j=>j.status==='running').length)
+const runningCount = computed(() => center.runningCount.value + runningDownloads.value)
+const queuedCount = computed(() => downloadJobs.value.filter(job => job.status === 'queued').length + activeImageJobs.value.filter(j=>j.status==='queued').length)
+const downloadAttention = computed(() => downloadJobs.value.filter(needsAttention).length + imageAttention.value)
 const failedCount = computed(() => center.attentionCount.value + downloadAttention.value)
 const attentionHint = computed(() => [
   downloadAttention.value ? `${downloadAttention.value} 个下载待处理（失败或有剩余项，可重试或移除记录）` : '',
   center.attentionCount.value ? `${center.attentionCount.value} 个任务失败、中断或有待确认项` : ''
 ].filter(Boolean).join('；'))
 const tab = ref<Tab>('tasks')
+const availableTabs = computed(() => TABS.filter(t => activeModule.value === 'image' ? t.key === 'downloads'
+  : activeModule.value === 'video' || t.key === 'tasks' || t.key === 'identify'))
 const downloadFilter = ref<'attention' | 'all'>('attention')
 const shownJobs = computed(() => downloadFilter.value === 'all' ? downloadJobs.value : downloadJobs.value.filter(job => activeJob(job) || needsAttention(job)))
+const shownImageCount = computed(() => downloadFilter.value === 'all' ? imageJobs.value.length : activeImageJobs.value.length + imageAttention.value)
+const hasDownloadHistory = computed(() => downloadJobs.value.length + imageJobs.value.length > 0)
 const jobSections = computed(() => [
   { key: 'active', label: '下载队列', jobs: shownJobs.value.filter(activeJob).sort((a, b) => a.createdAt - b.createdAt) },
   { key: 'finished', label: downloadFilter.value === 'all' ? '下载结果' : '待处理的下载', jobs: shownJobs.value.filter(job => !activeJob(job)) }
@@ -71,7 +79,7 @@ const journalBusy = ref(false)
 const journalError = ref('')
 const pendingJournals = computed(() => journals.value.filter(journal => journal.status === 'partial' || journal.status === 'running' || journal.status === 'rollback-partial').length)
 const tabCounts = computed<Record<Tab, number>>(() => ({
-  tasks: runningTasks.value.length, downloads: downloadAttention.value + queuedCount.value + downloadJobs.value.filter(job => job.status === 'running').length,
+  tasks: runningTasks.value.length, downloads: downloadAttention.value + queuedCount.value + runningDownloads.value,
   organize: journalsLoaded.value ? pendingJournals.value : 0, identify: 0
 }))
 const retryingEntry = ref('')
@@ -95,7 +103,7 @@ const sections = computed(() => [
   { key: 'running', label: '运行中', items: runningTasks.value },
   { key: 'history', label: '最近结束', items: history.value }
 ])
-const entryLabel = computed(() => `日志：${runningCount.value} 个运行中，${queuedCount.value} 个排队，${failedCount.value} 个失败或待处理`)
+const entryLabel = computed(() => `${identifyKindLabel.value}日志：${runningCount.value} 个运行中，${queuedCount.value} 个排队，${failedCount.value} 个失败或待处理`)
 const kindLabels: Record<TaskKind, string> = {
   'software-scan': '软件扫描', 'game-scan': '游戏扫描', 'video-scan': '影视扫描',
   'ai-identify': 'AI 识别', organize: '目录整理', 'hanime-verify': '网络验证', 'video-download': '视频下载',
@@ -108,6 +116,13 @@ const stageLabels: Record<VideoJobStage, string> = { pending: '待执行', runni
 const retryLabels: Record<VideoJobRetry, string> = { remaining: '仅重试剩余视频', metadata: '补齐资料', registration: '仅重试入库' }
 const scanStatusLabels = { new: '新增', updated: '更新', skipped: '跳过', review: '待确认', failed: '失败' }
 const identifyKindLabel = computed(() => ({ software: '软件', game: '游戏', video: '影视', image: '图片' })[activeModule.value])
+const scopeNote = computed(() => activeModule.value === 'image' ? '仅显示图片下载、修复与连载更新记录。暂停后可继续下载。'
+  : `仅显示${identifyKindLabel.value}模块的记录；切换顶部模块可查看对应日志。`)
+watch(activeModule, () => {
+  privacyRevision++
+  tab.value = activeModule.value === 'image' ? 'downloads' : 'tasks'
+  actionError.value = ''; expanded.value.clear(); identifyLogs.value.clear()
+}, { immediate: true })
 
 function jobStatus(job: VideoDownloadJob): string {
   return job.status === 'success' && videoJobRetryStages(job).length ? '部分完成' : jobStatusLabels[job.status]
@@ -146,7 +161,7 @@ async function retryUnit(dir: string): Promise<void> {
 
 /* ------------------------------ 整理记录 ------------------------------ */
 async function loadJournals(): Promise<void> {
-  if (journalBusy.value || !workflow.privacyReady.value || typeof window === 'undefined' || !window.baoyi?.videoOrganize) return
+  if (activeModule.value !== 'video' || journalBusy.value || !workflow.privacyReady.value || typeof window === 'undefined' || !window.baoyi?.videoOrganize) return
   const revision = privacyRevision
   journalBusy.value = true
   journalError.value = ''
@@ -172,6 +187,7 @@ async function recoverJournal(id: string, action: 'retry' | 'rollback'): Promise
   finally { journalBusy.value = false }
 }
 function showTab(next: Tab): void {
+  if (!availableTabs.value.some(t => t.key === next)) return
   tab.value = next
   if (next === 'organize' && !journalsLoaded.value) void loadJournals()
 }
@@ -188,7 +204,8 @@ function taskProgress(task: { kind: TaskKind; processed: number; total: number }
 async function togglePanel(): Promise<void> {
   if (opened.value) { closePanel(); return }
   opened.value = true
-  void workflow.refresh()
+  if (activeModule.value === 'video') void workflow.refresh()
+  if (activeModule.value === 'image') void imageDownloads.refresh()
   if (tab.value === 'organize') void loadJournals()
   await nextTick()
   if (opened.value) closeButton.value?.focus()
@@ -281,8 +298,8 @@ onBeforeUnmount(() => {
         >
           <header class="task-panel__header">
             <div>
-              <h2 id="task-center-title">日志</h2>
-              <p id="task-center-note">{{ attentionHint || '任务、下载、整理和识别的记录都在这里；下载依次执行，重启后可恢复未完成的部分。' }}</p>
+              <h2 id="task-center-title">{{ identifyKindLabel }}日志</h2>
+              <p id="task-center-note">{{ attentionHint || scopeNote }}</p>
             </div>
             <button v-if="tab === 'tasks'" type="button" class="task-panel__clear" :disabled="clearing || history.length === 0" title="清除当前可见的扫描、识别等历史；运行中任务与下载记录继续保留" @click="clearHistory">
               <Trash2 :size="13" />清除历史
@@ -292,18 +309,18 @@ onBeforeUnmount(() => {
             </button>
           </header>
           <nav class="task-tabs no-select" aria-label="日志类别">
-            <button v-for="item in TABS" :key="item.key" type="button" :aria-current="tab === item.key ? 'page' : undefined" @click="showTab(item.key)">
+            <button v-for="item in availableTabs" :key="item.key" type="button" :aria-current="tab === item.key ? 'page' : undefined" @click="showTab(item.key)">
               {{ item.label }}<span v-if="tabCounts[item.key]" class="task-tabs__count" :class="{ 'task-tabs__count--warn': item.key === 'downloads' && downloadAttention > 0 || item.key === 'organize' }">{{ tabCounts[item.key] }}</span>
             </button>
           </nav>
 
           <div class="task-panel__body">
-            <p v-if="actionError || workflow.jobsError.value" class="task-card__error" role="alert">{{ actionError || workflow.jobsError.value }}</p>
+            <p v-if="actionError || activeModule === 'video' && workflow.jobsError.value" class="task-card__error" role="alert">{{ actionError || workflow.jobsError.value }}</p>
             <template v-if="tab === 'tasks'">
               <div v-if="runningTasks.length === 0 && history.length === 0" class="task-panel__empty">
                 <ScrollText :size="30" :stroke-width="1.3" />
                 <h3>暂无任务</h3>
-                <p>扫描、识别、整理和验证的进度会显示在这里。下载在「下载记录」页签。</p>
+                <p>{{ identifyKindLabel }}模块的任务进度和历史会显示在这里。<template v-if="activeModule === 'video'">下载在「下载记录」页签。</template></p>
               </div>
               <template v-for="section in sections" :key="section.key">
                 <section v-if="section.items.length" class="task-group" :aria-label="section.label">
@@ -377,16 +394,16 @@ onBeforeUnmount(() => {
             </template>
 
             <div v-else-if="tab === 'downloads'" class="task-panel__downloads" aria-label="下载记录">
-              <ImageDownloadList />
               <div class="task-filter">
                 <label>显示<select v-model="downloadFilter" class="select" aria-label="下载记录范围"><option value="attention">待处理</option><option value="all">全部</option></select></label>
-                <span>{{ downloadFilter === 'all' ? `共 ${downloadJobs.length + imageDownloads.jobs.value.length} 条` : `${downloadAttention} 条待处理` }}</span>
+                <span>{{ downloadFilter === 'all' ? `共 ${downloadJobs.length + imageJobs.length} 条` : `${downloadAttention} 条待处理` }}</span>
               </div>
-              <div v-if="!shownJobs.length && !imageDownloads.jobs.value.length" class="task-panel__empty">
-                <Check v-if="downloadJobs.length" :size="30" :stroke-width="1.3" />
+              <ImageDownloadList v-if="activeModule === 'image'" :filter="downloadFilter" />
+              <div v-if="!shownJobs.length && !shownImageCount" class="task-panel__empty">
+                <Check v-if="hasDownloadHistory" :size="30" :stroke-width="1.3" />
                 <ScrollText v-else :size="30" :stroke-width="1.3" />
-                <h3>{{ downloadJobs.length ? '没有待处理的下载' : '暂无下载记录' }}</h3>
-                <p>{{ downloadJobs.length ? '切到「全部」能看到已完成的记录。' : '从 Hanime 或哔咔添加作品后，进度和结果会显示在这里。' }}</p>
+                <h3>{{ hasDownloadHistory ? '没有待处理的下载' : '暂无下载记录' }}</h3>
+                <p>{{ hasDownloadHistory ? '切到「全部」能看到已完成的记录。' : activeModule === 'image' ? '从哔咔添加作品后，进度和结果会显示在这里。' : '从 Hanime 添加作品后，进度和结果会显示在这里。' }}</p>
               </div>
               <template v-for="section in jobSections" :key="section.key">
                 <section v-if="section.jobs.length" class="task-group" :aria-label="section.label">
@@ -433,11 +450,11 @@ onBeforeUnmount(() => {
 
             <div v-else class="task-panel__identify">
               <p class="task-panel__hint">当前看的是「{{ identifyKindLabel }}」模块的识别日志；切换顶栏模块就换一份。设置页「识别日志」页签里也有同一份。</p>
-              <IdentifyLog :resource-kind="activeModule" @retry="retryUnit" />
-              <SearchCallLog />
+              <IdentifyLog :key="activeModule" :resource-kind="activeModule" @retry="retryUnit" />
+              <SearchCallLog :key="activeModule" :resource-kind="activeModule" />
             </div>
           </div>
-          <footer class="task-panel__footer">任务记录保留最近 30 项、每项 100 条事件。下载记录独立保留，补资料和重试入库不重新传输视频；「移除记录」只删记录不删文件。</footer>
+          <footer class="task-panel__footer">{{ activeModule === 'image' || activeModule === 'video' ? '下载记录独立保留；移除记录只删记录，不删文件。' : '任务记录共保留最近 30 项，每项 100 条事件。清除历史只影响当前模块。' }}</footer>
         </section>
       </Transition>
     </Teleport>

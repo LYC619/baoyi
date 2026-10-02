@@ -161,6 +161,7 @@ export function reserveWorkDirectory(root: string, title: string, identity: stri
 }
 
 export function writeBundleFiles(input: {
+  videoType?: 'movie' | 'series';
   directory: string; bundleId?: string; title: string; description?: string; originalDescription?: string; category?: string; tags?: string[]; source?: string; sources?: VideoSourceRef[]
   files: Array<{ publishedAt?: number; airDate?: number; durationSec?: number; studio?: string; id?: string; path: string; title: string; order: number; label?: string; season?: number | null; number?: number | null; quality?: string; size?: number; sourceId?: string; sources?: VideoSourceRef[]; originalTitle?: string; description?: string; originalDescription?: string; tags?: string[]; thumbnailPath?: string; thumbnailSource?: string; posterSource?: string; attachments?: VideoBundle['items'][number]['attachments']; posterPath?: string; sourceUrl?: string; notes?: string; watch?: VideoBundle['items'][number]['watch'] }>
   thumbnail?: { path: string; source?: string };
@@ -240,7 +241,7 @@ export function writeBundleFiles(input: {
   const bundle: VideoBundle = {
     excluded_files: input.excludedFiles || previous?.excluded_files || [], excluded_sources: input.excludedSources || previous?.excluded_sources || [],
     schema_version: 1, bundle_id: previous?.bundle_id || ensureBundleId(input.bundleId), revision: (previous?.revision || 0) + 1, updated_at: Date.now(),
-    work: { title: (promoted || input.replaceWorkTitle ? '' : previous?.work.title) || input.title, name_en: (promoted ? '' : previous?.work.name_en) || '', description, original_description: (promoted ? '' : previous?.work.original_description) || input.originalDescription || '',
+    work: { ...(input.videoType || previous?.work.video_type ? { video_type: input.videoType || previous?.work.video_type } : {}), title: (promoted || input.replaceWorkTitle ? '' : previous?.work.title) || input.title, name_en: (promoted ? '' : previous?.work.name_en) || '', description, original_description: (promoted ? '' : previous?.work.original_description) || input.originalDescription || '',
       category: previous?.work.category || input.category || '其他', tags: previous?.work.tags || input.tags || [], sources: [...sourceMap.values()], poster: posterRelative,
       thumbnail: thumbnailRelative, thumbnail_source: input.thumbnail?.source || previous?.work.thumbnail_source || '',
       poster_source: previous?.work.poster_source || input.poster?.source || '', provenance: { ...(previous?.work.provenance || {}), title: 'source', description: description ? 'source' : 'missing' } },

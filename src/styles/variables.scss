@@ -4,6 +4,7 @@
    ============================================================ */
 
 :root {
+  color-scheme: dark;
   /* ---------------- 配色（深色主题） ---------------- */
   --bg-main: #1e1e2e;
   --bg-side: #181825;
@@ -78,6 +79,7 @@
 }
 
 :root[data-theme='light'] {
+  color-scheme: light;
   --bg-main: #f8f9fc;
   --bg-side: #ffffff;
   --bg-card: #ffffff;

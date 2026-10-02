@@ -91,9 +91,9 @@ function initialize(): void {
   if (!initialLoad) initialLoad = refresh()
 }
 
-export function useVideoWorkflow(resourceId = '') {
+export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/video-discovery').DiscoverySelection) {
   initialize()
-  const key = resourceId || 'url-entry'
+  const key = discovery ? 'discovery:' + JSON.stringify(discovery) : resourceId || 'url-entry'
   let state = drafts.get(key)
   if (!state) {
     state = reactive<DraftState>({
@@ -121,7 +121,7 @@ export function useVideoWorkflow(resourceId = '') {
 
   async function prepare(): Promise<VideoDownloadDraft | null> {
     if (current.preparing || current.picking || current.enqueuing) return current.draft
-    if (!resourceId && !current.url.trim()) { current.error = '先粘贴来源页面链接'; return null }
+    if (!discovery && !resourceId && !current.url.trim()) { current.error = '先粘贴来源页面链接'; return null }
     const revision = ++current.revision
     current.preparing = true
     current.open = true
@@ -130,7 +130,7 @@ export function useVideoWorkflow(resourceId = '') {
     const inputUrl = current.url.trim()
     try {
       const [draft] = await Promise.all([
-        window.baoyi.video.prepareDownload({ ...(resourceId ? { resourceId } : {}), ...(inputUrl ? { url: inputUrl } : {}) }),
+        window.baoyi.video.prepareDownload({ ...(discovery ? { discovery: { sourceId: discovery.sourceId, entryId: discovery.entryId } } : {}), ...(resourceId ? { resourceId } : {}), ...(inputUrl ? { url: inputUrl } : {}) }),
         refresh()
       ])
       if (revision !== current.revision) return null
@@ -138,7 +138,7 @@ export function useVideoWorkflow(resourceId = '') {
       current.preparedUrl = inputUrl
       current.title = draft.title
       current.selectedVideoCodes = episodes.value.filter(episode => episode.state === 'missing' || episode.state === 'available').map(episode => episode.videoCode)
-      current.sourceLabel = preferences.quality
+      current.sourceLabel = draft.qualities && !draft.qualities.includes(preferences.quality) ? '' : preferences.quality
       current.strictQuality = preferences.strictQuality
       current.register = preferences.register
       return draft

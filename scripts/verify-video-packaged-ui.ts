@@ -7,17 +7,17 @@ import { DatabaseSync } from 'node:sqlite'
 import { initSchema } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { insertVideo, type VideoPayload } from '../electron/kinds/video/db.ts'
+import { pngImage } from './helpers/test-images.ts'
 
 const require = createRequire(import.meta.url)
 const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
 const executable = path.resolve(process.argv[2] || 'release/0.8.0-field-test-20260908/win-unpacked/抱一.exe')
 assert.ok(fs.existsSync(executable), 'Test build executable is missing')
-const output = path.resolve('.recover/field-test-fixes/packaged-ui')
+const output = path.resolve(process.env.BAOYI_VIDEO_UI_OUTPUT || 'output/video-packaged-verification')
 fs.mkdirSync(output, { recursive: true })
 const profile = fs.mkdtempSync(path.join(output, 'profile-'))
 const mediaDir = path.join(profile, 'media'); const posters = path.join(profile, 'posters')
 fs.mkdirSync(mediaDir); fs.mkdirSync(posters)
-const picture = fs.readFileSync('resources/icon.png')
 const db = new DatabaseSync(path.join(profile, 'baoyi.db'))
 initSchema(db, KINDS)
 for (const [key, value] of Object.entries({ onboarded: true, theme: 'light' })) {
@@ -37,6 +37,7 @@ for (const [key, title, category, collection] of [
     poster_path: '', fanart_path: '', episodes: []
   }
   const id = insertVideo(db, payload).id; ids[key] = id
+  const picture = pngImage(400, 600, [50 + Object.keys(ids).length * 40, 90, 130])
   const cached = path.join(posters, id + '.png'); fs.writeFileSync(cached, picture)
   fs.writeFileSync(path.join(mediaDir, key + '-poster.png'), picture)
   db.prepare('UPDATE video_meta SET poster_path = ? WHERE resource_id = ?').run(cached, id)
@@ -51,7 +52,8 @@ try {
   evidence.push('isolated-profile')
   const page = await application.firstWindow(); page.on('pageerror', (error: Error) => errors.push(error.message))
   await page.waitForFunction(() => !!(window as any).baoyi)
-  await page.evaluate(() => { location.hash = '/video' })
+  // Use the mounted navigation; preload availability precedes router startup.
+  await page.getByRole('button', { name: /^影视\s/ }).click()
   await page.waitForFunction(() => document.querySelectorAll('.wall .card').length === 2)
   const info = await page.evaluate(() => (window as any).baoyi.app.info())
   assert.equal(info.version, JSON.parse(fs.readFileSync('package.json', 'utf8')).version)
@@ -59,6 +61,7 @@ try {
   assert.equal(counts.all, 2); assert.equal(counts.hentai, 1)
   evidence.push('native-db-preload-query')
   await page.getByRole('button', { name: /培训录屏示例/ }).click()
+  await page.getByRole('tab', { name: '文件与资料', exact: true }).click()
   await page.getByLabel('视频分组', { exact: true }).fill('课程笔记')
   await page.getByLabel('视频分组', { exact: true }).press('Tab')
   await page.waitForFunction(async (id: string) => (await (window as any).baoyi.video.get(id)).collection_name === '课程笔记', ids.recording)
@@ -76,6 +79,7 @@ try {
   await page.locator('.sidebar .row').filter({ hasText: '站方标签' }).click()
   assert.equal(await page.locator('.wall .card').count(), 1)
   await page.getByRole('button', { name: /站方样本/ }).click()
+  await page.getByRole('button', { name: '编辑资料', exact: true }).click()
   assert.equal(await page.getByRole('combobox', { name: '视频类型', exact: true }).inputValue(), 'hentai')
   assert.equal(await page.getByLabel('视频分类', { exact: true }).count(), 0)
   await page.getByRole('combobox', { name: '视频类型', exact: true }).selectOption('movie')
@@ -101,7 +105,10 @@ try {
     assert.equal(await page.locator('.sidebar .row').filter({ hasText: '站方系列' }).count(), 0)
   }
   evidence.push('1280-and-960-layouts')
-  fs.unlinkSync(path.join(posters, ids.recording + '.png'))
+  const currentPoster = await page.evaluate(async (id: string) => (await (window as any).baoyi.video.get(id)).poster_path, ids.recording)
+  const relativePoster = path.relative(profile, currentPoster)
+  assert.ok(relativePoster && !relativePoster.startsWith('..') && !path.isAbsolute(relativePoster), 'Only remove disposable fixture artwork')
+  fs.unlinkSync(currentPoster)
   await page.reload()
   await page.getByRole('button', { name: /补海报 1/ }).waitFor()
   await page.getByRole('button', { name: /补海报 1/ }).click()

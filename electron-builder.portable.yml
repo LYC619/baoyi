@@ -1,16 +1,18 @@
 # 绿色版专用配置（合并到 electron-builder.yml 之上）
 #
-#   npx electron-builder --config.extends=electron-builder.yml --config.extends=./electron-builder.portable.yml
+#   npm run dist:portable
 #
 # 只改三件事：
 #  1. 往产物里塞标记文件（判据认它 → 进绿色版模式 → 数据在 exe 旁边）
 #  2. target 换成 dir（免安装包；不走 NSIS）
 #  3. 输出目录加后缀，避免和 NSIS 产物争抢同一个 win-unpacked
 
+extends: ./electron-builder.yml
+
 appId: com.baoyi.app.portable
 
 directories:
-  output: release/0.8.0-portable
+  output: release/${version}-portable
 
 extraFiles:
   # 两个标记文件，存在即标志绿色版。portable-rules.ts 里 PORTABLE_MARKERS 列的

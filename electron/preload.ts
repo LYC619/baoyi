@@ -49,9 +49,15 @@ function plain<T>(value: T): T {
 
 const api: BaoyiApi = {
   image: {
+    readerPreferences: (id, value) => ipcRenderer.invoke('image:reader-preferences', id, value === undefined ? undefined : plain(value)),
+    bookmarks: id => ipcRenderer.invoke('image:bookmarks', id), saveBookmark: (id, pageId, offset, label) => ipcRenderer.invoke('image:save-bookmark', id, pageId, offset, label),
+    removeBookmark: (id, bookmarkId) => ipcRenderer.invoke('image:remove-bookmark', id, bookmarkId),
+    pageInfo: id => ipcRenderer.invoke('image:page-info', id), audit: id => ipcRenderer.invoke('image:audit', id), repair: id => ipcRenderer.invoke('image:repair', id),
+    checkUpdates: id => ipcRenderer.invoke('image:check-updates', id), downloadUpdates: (id, chapters) => ipcRenderer.invoke('image:download-updates', id, plain(chapters)),
     saveChapter: (id, chapterId, title, move) => ipcRenderer.invoke('image:save-chapter', id, chapterId, title, move),
     list: query => ipcRenderer.invoke('image:list', plain(query)), get: id => ipcRenderer.invoke('image:get', id),
     pages: (id, chapter) => ipcRenderer.invoke('image:pages', id, chapter), update: (id, patch) => ipcRenderer.invoke('image:update', id, plain(patch)),
+    bulkUpdate: (ids, patch) => ipcRenderer.invoke('image:bulk-update', plain(ids), plain(patch)),
     remove: id => ipcRenderer.invoke('image:remove', id), groups: () => ipcRenderer.invoke('image:groups'),
     saveGroup: group => ipcRenderer.invoke('image:save-group', plain(group)), removeGroup: id => ipcRenderer.invoke('image:remove-group', id),
     prepareImport: (type, multiple, archive) => ipcRenderer.invoke('image:prepare-import', type, multiple, archive),
@@ -60,9 +66,15 @@ const api: BaoyiApi = {
     saveProgress: (id, page, offset) => ipcRenderer.invoke('image:progress', id, page, offset), preferences: value => ipcRenderer.invoke('image:preferences', plain(value)),
     sourceStatus: () => ipcRenderer.invoke('image:source-status'), sourceLogin: (email, password) => ipcRenderer.invoke('image:source-login', email, password),
     sourceLogout: () => ipcRenderer.invoke('image:source-logout'), sourceSearch: (query,page) => ipcRenderer.invoke('image:source-search', query,page),
+    sourceFavorites: (page,sort) => ipcRenderer.invoke('image:source-favorites',page,sort),
+    sourceRanking: period => ipcRenderer.invoke('image:source-ranking',period), sourceCover: url => ipcRenderer.invoke('image:source-cover',url),
     sourceDetail: id => ipcRenderer.invoke('image:source-detail', id), download: (work,chapters,group) => ipcRenderer.invoke('image:download', work,plain(chapters),group),
     jobs: () => ipcRenderer.invoke('image:jobs'), retryJob: id => ipcRenderer.invoke('image:retry-job',id), cancelJob: id => ipcRenderer.invoke('image:cancel-job',id),
-    dismissJob: id => ipcRenderer.invoke('image:dismiss-job',id), onChanged: callback => subscribe('image:changed',callback)
+    dismissJob: id => ipcRenderer.invoke('image:dismiss-job',id), onChanged: callback => subscribe('image:changed',callback),
+    onJobsChanged: callback => subscribe('image:jobs-changed',callback),
+    pauseJob: id => ipcRenderer.invoke('image:pause-job',id), resumeJob: id => ipcRenderer.invoke('image:resume-job',id),
+    moveJob: (id,direction) => ipcRenderer.invoke('image:move-job',id,direction),
+    downloadOptions: value => ipcRenderer.invoke('image:download-options',plain(value))
   },
   videoAgentOrganize: {
     prepare: (ids, actions) => ipcRenderer.invoke('video-agent:prepare', plain(ids), plain(actions)),
@@ -187,6 +199,31 @@ const api: BaoyiApi = {
     revealAsset: (id: string) => ipcRenderer.invoke('video:reveal-asset', id),
     relocateAsset: (id: string) => ipcRenderer.invoke('video:relocate-asset', id),
     setDefaultAsset: (episodeId: string, assetId: string) => ipcRenderer.invoke('video:default-asset', episodeId, assetId),
+    discovery: {
+      online: {
+        connect: url => ipcRenderer.invoke('video-discovery:online-connect', url),
+        refresh: id => ipcRenderer.invoke('video-discovery:online-refresh', id),
+        next: id => ipcRenderer.invoke('video-discovery:online-next', id),
+        detail: selection => ipcRenderer.invoke('video-discovery:online-detail', plain(selection))
+      },
+      web: {
+        list: () => ipcRenderer.invoke('web-browser:list'),
+        save: input => ipcRenderer.invoke('web-browser:save', plain(input)),
+        remove: id => ipcRenderer.invoke('web-browser:remove', id),
+        open: url => ipcRenderer.invoke('web-browser:open', url),
+        onEdit: cb => subscribe('web-browser:edit-address', cb)
+      },
+      sources: () => ipcRenderer.invoke('video-discovery:sources'),
+      entries: id => ipcRenderer.invoke('video-discovery:entries', id),
+      artwork: selection => ipcRenderer.invoke('video-discovery:artwork', plain(selection)),
+      importSource: () => ipcRenderer.invoke('video-discovery:import'),
+      exportSource: id => ipcRenderer.invoke('video-discovery:export', id),
+      removeSource: id => ipcRenderer.invoke('video-discovery:remove', id),
+      mark: (selection, patch) => ipcRenderer.invoke('video-discovery:mark', plain(selection), plain(patch)),
+      open: (sourceId, entryId, mode) => ipcRenderer.invoke('video-discovery:open', sourceId, entryId, mode),
+      playExternal: (selection, siteId) => ipcRenderer.invoke('video-discovery:external-play', plain(selection), siteId),
+      onDownload: cb => subscribe('video-discovery:download', cb)
+    },
     prepareDownload: (input) => ipcRenderer.invoke('video-workflow:prepare', plain(input)),
     pickDownloadRoot: (draftId: string) => ipcRenderer.invoke('video-workflow:pick-root', draftId),
     enqueueDownload: (request) => ipcRenderer.invoke('video-workflow:enqueue', plain(request)),
@@ -278,6 +315,9 @@ const api: BaoyiApi = {
     onProgress: (cb) => subscribe('ai:progress', cb)
   },
   data: {
+    snapshotInfo: () => ipcRenderer.invoke('data:snapshot-info'),
+    createSnapshot: () => ipcRenderer.invoke('data:create-snapshot'),
+    openSnapshotDir: () => ipcRenderer.invoke('data:open-snapshot-dir'),
     restoreJson: () => ipcRenderer.invoke('data:restore-json'),
     exportJson: () => ipcRenderer.invoke('data:export-json'),
     exportMarkdown: () => ipcRenderer.invoke('data:export-markdown'),

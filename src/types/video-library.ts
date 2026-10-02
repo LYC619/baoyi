@@ -62,6 +62,7 @@ export interface VideoContentInput {
   files: Array<{ path: string; quality?: string; size?: number }>
 }
 export interface VideoRegistration {
+  videoType?: 'movie' | 'series'
   restoreRemoved?: boolean
   resourceId?: string
   bundleId?: string
@@ -101,6 +102,7 @@ export interface VideoBundle {
   revision: number
   updated_at: number
   work: {
+    video_type?: 'movie' | 'series'
     title: string
     name_en: string
     description: string

@@ -5,10 +5,10 @@ import { Download, ExternalLink, FolderOpen, Globe, Link, Loader2, RefreshCw, Se
 import { errorMessage } from '@/utils'
 import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
 
-const props = withDefaults(defineProps<{ id?: string }>(), { id: '' })
+const props = withDefaults(defineProps<{ id?: string; discovery?: import('@/types/video-discovery').DiscoverySelection }>(), { id: '' })
 const emit = defineEmits<{ close: []; queued: [id: string] }>()
 const router = useRouter()
-const flow = useVideoWorkflow(props.id)
+const flow = useVideoWorkflow(props.id, props.discovery)
 const { url, draft, title, selectedVideoCodes, sourceLabel, strictQuality, register,
   preparing, picking, enqueuing, error, currentJob, draftHidden, needsPrepare, episodes } = flow
 const panel = ref<HTMLElement | null>(null)
@@ -61,6 +61,7 @@ onMounted(async () => {
   document.addEventListener('keydown', keydown)
   await nextTick()
   panel.value?.querySelector<HTMLElement>('input, button')?.focus()
+  if (props.discovery) await flow.prepare()
 })
 onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (previousFocus?.isConnected) previousFocus.focus() })
 </script>
@@ -70,11 +71,11 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
     <div class="download-overlay" @click.self="close">
       <section ref="panel" class="download-panel" role="dialog" aria-modal="true" aria-labelledby="download-title">
         <header class="download-panel__head">
-          <div><h2 id="download-title">{{ id ? '补齐作品内容' : '从 Hanime 添加作品' }}</h2><p>先确认内容和保存位置，再加入下载队列。</p></div>
+          <div><h2 id="download-title">{{ discovery ? '保存到本地' : id ? '补齐作品内容' : '从 Hanime 添加作品' }}</h2><p>{{ draft?.sourceName ? draft.sourceName + ' · ' : '' }}先确认内容和保存位置，再加入下载队列。</p></div>
           <button class="btn btn--subtle" type="button" aria-label="关闭下载面板" :disabled="enqueuing" @click="close"><X :size="18" /></button>
         </header>
         <div class="download-panel__body">
-          <form v-if="(!id || !draft) && !draftHidden" class="download-url" @submit.prevent="flow.prepare">
+          <form v-if="!discovery && (!id || !draft) && !draftHidden" class="download-url" @submit.prevent="flow.prepare">
             <label for="video-source-url"><Link :size="14" />来源页面链接</label>
             <div class="download-url__input">
               <input id="video-source-url" v-model="url" type="url" class="input" placeholder="https://hanime1.me/watch?v=…" :disabled="busy" required />
@@ -103,12 +104,12 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
             </div>
             <ul class="download-contents" aria-label="来源内容与本地状态">
               <li v-for="episode in episodes" :key="episode.videoCode">
-                <label><input v-model="selectedVideoCodes" type="checkbox" :value="episode.videoCode" :disabled="busy || episode.state === 'queued' || episode.state === 'other-work'" /><span><small class="download-episode-number">{{ episode.numbered === false ? '集数待确认' : `第 ${episode.order} 集` }}</small>{{ episode.originalTitle || episode.title || episode.videoCode }}<small v-if="episode.qualities.length">{{ episode.qualities.join(' · ') }}</small></span></label>
+                <label><input v-model="selectedVideoCodes" type="checkbox" :value="episode.videoCode" :disabled="busy || episode.state === 'queued' || episode.state === 'other-work'" /><span><small v-if="!discovery" class="download-episode-number">{{ episode.numbered === false ? '集数待确认' : `第 ${episode.order} 集` }}</small>{{ episode.originalTitle || episode.title || episode.videoCode }}<small v-if="episode.qualities.length">{{ episode.qualities.join(' · ') }}</small></span></label>
                 <span :class="['download-state', `download-state--${episode.state}`]">{{ stateLabels[episode.state] }}</span>
               </li>
             </ul>
             <div class="download-options">
-              <label class="download-field"><span>目标清晰度</span><select v-model="sourceLabel" class="select" :disabled="busy"><option value="">最高可用</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option><option value="360p">360p</option></select></label>
+              <label class="download-field"><span>目标清晰度</span><select v-model="sourceLabel" class="select" :disabled="busy"><option value="">最高可用</option><option v-for="quality in draft?.qualities || ['1080p', '720p', '480p', '360p']" :key="quality" :value="quality">{{ quality }}</option></select></label>
               <label class="download-check"><input v-model="strictQuality" type="checkbox" :disabled="busy || !sourceLabel" /><span>严格匹配清晰度<small>{{ strictQuality && sourceLabel ? '没有目标清晰度时保留为待处理' : '没有目标清晰度时回退到可用清晰度' }}</small></span></label>
             </div>
             <fieldset class="download-mode" :disabled="busy"><legend>下载完成后</legend><label><input v-model="register" type="radio" :value="true" />登记到影视库</label><label><input v-model="register" type="radio" :value="false" />仅保存文件</label></fieldset>
@@ -123,7 +124,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
         </div>
         <footer class="download-panel__footer">
           <button type="button" class="btn btn--ghost" @click="openSettings"><Settings :size="14" />下载与存储设置</button>
-          <button v-if="id && !draft" type="button" class="btn btn--ghost" :disabled="busy" @click="flow.prepare"><RefreshCw :size="14" />重新解析</button>
+          <button v-if="(id || discovery) && !draft" type="button" class="btn btn--ghost" :disabled="busy" @click="flow.prepare"><RefreshCw :size="14" />重新解析</button>
           <button type="button" class="btn btn--primary" :disabled="busy || !draft || draftHidden || needsPrepare || !title.trim() || !selectedVideoCodes.length" @click="enqueue"><Loader2 v-if="enqueuing" :size="14" class="spin" /><Download v-else :size="14" />{{ enqueuing ? '正在加入队列' : `下载所选${selectedVideoCodes.length ? ` ${selectedVideoCodes.length} 项` : ''}` }}</button>
         </footer>
       </section>

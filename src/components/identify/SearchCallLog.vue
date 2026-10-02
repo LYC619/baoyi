@@ -5,12 +5,13 @@
  * 代价是时间只精确到「所属那次识别」这一级。原先长在设置页「搜索服务」里，
  * 实测第四轮挪进顶部「日志」面板，和识别日志放一起。
  */
-import { onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import type { SearchCallRecord } from '@/types'
 import { errorMessage, searchCalls } from '@/utils'
 
-const props = withDefaults(defineProps<{ limit?: number }>(), { limit: 20 })
+const props = withDefaults(defineProps<{ limit?: number; resourceKind?: string }>(), { limit: 20 })
+let revision = 0
 const calls = ref<SearchCallRecord[]>([])
 const loading = ref(false)
 const loadError = ref('')
@@ -29,14 +30,20 @@ function callTime(ts: number): string {
 }
 
 async function load(): Promise<void> {
+  const request = ++revision
   loading.value = true
   loadError.value = ''
-  try { calls.value = searchCalls(await window.baoyi.logs.list({ limit: 100 }), props.limit) }
-  catch (cause) { calls.value = []; loadError.value = errorMessage(cause) }
-  finally { loading.value = false }
+  calls.value = []
+  try {
+    const logs = await window.baoyi.logs.list({ limit: 100, resource_kind: props.resourceKind })
+    if (request === revision) calls.value = searchCalls(logs, props.limit)
+  }
+  catch (cause) { if (request === revision) { calls.value = []; loadError.value = errorMessage(cause) } }
+  finally { if (request === revision) loading.value = false }
 }
 onMounted(load)
-watch(() => props.limit, load)
+watch(() => [props.limit, props.resourceKind], load)
+onBeforeUnmount(() => { revision++ })
 defineExpose({ reload: load })
 </script>
 

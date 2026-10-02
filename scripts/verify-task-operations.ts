@@ -22,7 +22,7 @@ function harness() {
   const unmount: Array<() => void> = []
   const implementations: Record<string, (...args: any[]) => any> = {
     readiness: async () => ({ ok: true, message: '' }),
-    scan: async () => scanResult, ai: async () => aiResult, import: async () => null,
+    scan: async () => scanResult, ai: async () => aiResult, import: async () => null, preview: async () => null,
     game: async () => mediaResult, video: async () => mediaResult,
     organize: async () => organizeResult,
     reidentify: async () => ({ id: 'v1', name_zh: '测试影片', name_en: '', file_name: 'video.mp4', path: 'D:/video.mp4' })
@@ -44,6 +44,14 @@ function harness() {
     reidentify: (...args: any[]) => { calls.push('reidentify'); return implementations.reidentify(...args) }
   })
   const baoyi = Object.fromEntries(['scan', 'ai', 'game', 'video', 'organize'].map(kind => [kind, api(kind)]))
+  Object.assign(baoyi, {
+    settings: { getAll: async () => ({ video_import_agent: false }) },
+    videoImport: {
+      list: async () => [],
+      prepare: (...args: any[]) => { calls.push('preview'); return implementations.preview(...args) },
+      onChanged: (cb: (p: any) => void) => { listeners.set('preview', new Set([cb])); return () => listeners.delete('preview') }
+    }
+  })
   const store = { reload: async () => {}, merge: () => {}, load: async () => {}, counts: { all: 0 }, items: [], selection: {} }
   const load = createRendererLoader({
     vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: (cb: () => void) => unmount.push(cb) },
@@ -55,7 +63,8 @@ function harness() {
     '@/stores/settings': { useSettingsStore: () => ({ settings: { ai: { enabled: true, api_key: 'test' } } }) },
     '@/utils': utils
   }, {
-    window: { baoyi, confirm: () => true }, console: { info: () => {}, warn: () => {}, error: () => {} }
+    window: { baoyi, confirm: () => true }, console: { info: () => {}, warn: () => {}, error: () => {} },
+    document: { hidden: false, addEventListener: () => {}, removeEventListener: () => {} }, setTimeout, clearTimeout
   })
   const center = load('src/composables/useTaskCenter.ts').useTaskCenter()
   return {
@@ -179,18 +188,16 @@ await test('reidentify: shares video mutex, records progress and rejects stale i
   assert.equal(h.latest().status, 'failed')
   assert.equal(h.count('video'), 0)
 })
-for (const kind of ['game', 'video'] as const) {
+for (const kind of ['game'] as const) {
   await test(kind + ' Home: real setup calls shared runner, survives route disposal and reports cancellation', async () => {
     const h = harness()
     const job = deferred<any>()
     h.implementations[kind] = () => job.promise
-    if (kind === 'video') h.implementations.readiness = async () => ({ ok: true, message: '首页降级提醒' })
     const setup = h.load('src/pages/' + kind + '/Home.vue').default.setup
     const page = setup({}, { expose: () => {} })
-    const run = kind === 'video' ? page.addVideos() : page.addGames()
+    const run = page.addGames()
     for (let i = 0; i < 6; i++) await Promise.resolve()
     assert.equal(h.latest()?.kind, kind + '-scan')
-    if (kind === 'video') assert.ok(h.latest().events.some(e => e.level === 'warn' && e.message === '首页降级提醒'))
     h.dispose()
     const newPage = setup({}, { expose: () => {} })
     assert.equal(newPage.scanning.value, true)
@@ -201,11 +208,40 @@ for (const kind of ['game', 'video'] as const) {
     h.dispose()
   })
 }
-await test('video import: retains progress and results in the task center after route disposal', async () => {
+await test('video Home: preview import stays shared after route disposal and awaits confirmation', async () => {
+  const h = harness(), job = deferred<any>()
+  h.implementations.preview = () => job.promise
+  const setup = h.load('src/pages/video/Home.vue').default.setup
+  const page = setup({}, { expose: () => {} }), run = page.addVideos()
+  assert.equal(h.latest()?.kind, 'video-scan')
+  assert.match(h.latest().title, /识别预览/)
+  h.dispose()
+  const remounted = setup({}, { expose: () => {} })
+  assert.equal(remounted.videoImport.busy.value, 'scan')
+  await remounted.addVideos()
+  assert.deepEqual(h.calls, ['preview'], 'remount cannot start a duplicate import')
+  const batch = { id: 'preview-1', roots: ['D:/library'], revision: 1, createdAt: 1, updatedAt: 1, status: 'ready', entries: [], progress: { current: 'a.mp4', processed: 1, total: 2, log: 'preview progress' } }
+  h.emit('preview', batch)
+  assert.equal(h.latest().processed, 1)
+  assert.equal(h.latest().message, 'preview progress')
+  job.resolve(batch); await run
+  assert.equal(h.latest().status, 'success')
+  assert.match(h.latest().message, /等待确认入库/)
+  assert.equal(remounted.videoImport.batch.value.id, batch.id)
+  h.dispose()
+})
+await test('video preview import: cancelling directory selection is not a failure', async () => {
+  const h = harness()
+  const page = h.load('src/pages/video/Home.vue').default.setup({}, { expose: () => {} })
+  await page.importBundle()
+  assert.equal(h.latest()?.status, 'cancelled')
+  assert.match(h.latest().message, /未选择|取消/)
+  h.dispose()
+})
+await test('legacy video import: retains progress and results in the task center after route disposal', async () => {
   const h = harness(), job = deferred<any>()
   h.implementations.import = () => job.promise
-  const page = h.load('src/pages/video/Home.vue').default.setup({}, { expose: () => {} })
-  const run = page.importBundle()
+  const run = h.load('src/composables/useMediaScan.ts').importVideoDirectory()
   try {
     assert.equal(h.latest()?.kind, 'video-scan', 'directory imports create a persistent scan task')
     assert.match(h.latest().title, /导入/)
@@ -221,10 +257,9 @@ await test('video import: retains progress and results in the task center after 
   assert.equal((h.latest() as any).scanEntries.length, 1)
   assert.equal(h.count('video'), 0)
 })
-await test('video import: cancelling directory selection ends the task without a failure', async () => {
+await test('legacy video import: cancelling directory selection ends the task without a failure', async () => {
   const h = harness()
-  const page = h.load('src/pages/video/Home.vue').default.setup({}, { expose: () => {} })
-  await page.importBundle()
+  await h.load('src/composables/useMediaScan.ts').importVideoDirectory()
   assert.equal(h.latest()?.status, 'cancelled')
   assert.match(h.latest().message, /未选择|取消/)
   assert.equal(h.count('video'), 0)

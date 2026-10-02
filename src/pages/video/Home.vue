@@ -356,7 +356,8 @@ const emptyHint = computed(() => {
             {{ filling ? '补海报…' : `补海报 ${missingPosterIds.length}` }}
           </button>
 
-          <button class="btn btn--primary" title="粘贴 Hanime 视频页链接，或到站内挑好再下载" @click="addFromLink"><Link :size="15" />从 Hanime 添加</button>
+          <button class="btn btn--primary" title="切换来源，浏览海报墙并选择观看或保存" @click="router.push({ name: 'video-discover' })"><Link :size="15" />找视频</button>
+          <button class="btn btn--ghost" title="粘贴 Hanime 视频页链接，或到站内挑好再下载" @click="addFromLink">从 Hanime 添加</button>
           <button class="btn btn--ghost" :disabled="scanning" @click="addVideos">
             <FolderPlus :size="15" />
             扫描本地

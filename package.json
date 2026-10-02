@@ -1,7 +1,7 @@
 {
   "name": "baoyi",
   "productName": "抱一",
-  "version": "0.8.0",
+  "version": "0.11.0",
   "description": "抱一 — 本地资源掌控工具。知止而后得。",
   "author": "BaoYi",
   "license": "MIT",
@@ -25,6 +25,8 @@
     "verify-task-operations": "node --experimental-strip-types --no-warnings scripts/verify-task-operations.ts",
     "verify-task-center-ui": "node --experimental-strip-types --no-warnings scripts/verify-task-center-ui.ts",
     "verify-hanime-verification": "node --experimental-strip-types --no-warnings scripts/verify-hanime-verification.ts",
+    "verify-javdb-parse": "node --experimental-strip-types --no-warnings scripts/verify-javdb-parse.ts",
+    "verify-missav-parse": "node --experimental-strip-types --no-warnings scripts/verify-missav-parse.ts",
     "verify-video-download": "node --experimental-strip-types --no-warnings scripts/verify-video-download.ts",
     "verify-video-download-service": "node --experimental-strip-types --no-warnings scripts/verify-video-download-service.ts",
     "verify-video-download-network": "node --experimental-strip-types --no-warnings scripts/verify-video-download-network.ts",
@@ -59,13 +61,17 @@
     "preview": "vite preview",
     "rebuild": "electron-builder install-app-deps",
     "postinstall": "electron-builder install-app-deps",
-    "dist": "npm run build && electron-builder",
-    "dist:dir": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder --config.electronDist=node_modules/electron/dist",
+    "dist:dir": "npm run build && electron-builder --dir --config.electronDist=node_modules/electron/dist",
     "build-save-manifest": "node --experimental-strip-types --no-warnings scripts/build-save-manifest.ts",
-    "dist:portable": "npm run build && electron-builder --dir --config.extends=electron-builder.yml --config.extends=./electron-builder.portable.yml --config.directories.output=release/0.8.0-portable"
+    "dist:portable": "npm run build && electron-builder --dir --config electron-builder.portable.yml --config.electronDist=node_modules/electron/dist",
+    "dist:green": "npm run build && electron-builder --config electron-builder.green.yml --config.electronDist=node_modules/electron/dist",
+    "verify-release-config": "node --test scripts/verify-release-config.cjs"
   },
   "dependencies": {
+    "@panzoom/panzoom": "4.6.2",
     "better-sqlite3": "^12.2.0",
+    "image-size": "2.0.4",
     "resedit": "^2.0.3"
   },
   "devDependencies": {

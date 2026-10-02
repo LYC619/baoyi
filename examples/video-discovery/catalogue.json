@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "local-demo",
+  "name": "海报墙示例",
+  "entries": [
+    { "id": "forest", "code": "DEMO-001", "title": "森林纪行", "description": "本机示例作品，展示来源目录与个人收藏。完整播放演示请先运行同目录中的 serve.cjs。", "tags": ["纪录片", "自然"], "year": 2026, "rating": { "value": 8.8, "scale": 10, "votes": 100 }, "rankings": [{ "name": "本周精选", "source": "演示编辑", "period": "示例", "position": 1 }] },
+    { "id": "light", "code": "DEMO-002", "title": "光的形状", "description": "所有作品共用同一段本机生成的短测试视频。", "tags": ["短片", "城市"], "year": 2025, "rating": { "value": 8.5, "scale": 10, "votes": 90 }, "rankings": [{ "name": "本周精选", "source": "演示编辑", "period": "示例", "position": 2 }] },
+    { "id": "city", "code": "DEMO-003", "title": "城市之间", "tags": ["短片", "城市"], "year": 2024 },
+    { "id": "coast", "code": "DEMO-004", "title": "海岸线", "tags": ["纪录片", "自然"], "year": 2026 },
+    { "id": "mountain", "code": "DEMO-005", "title": "山野来信", "tags": ["纪录片", "自然"], "year": 2025 },
+    { "id": "day", "code": "DEMO-006", "title": "一日之光", "tags": ["短片", "城市"], "year": 2024 }
+  ]
+}

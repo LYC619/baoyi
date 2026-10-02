@@ -1593,7 +1593,8 @@ export interface BaoyiApi {
     revealAsset(id: string): Promise<boolean>
     relocateAsset(id: string): Promise<boolean>
     setDefaultAsset(episodeId: string, assetId: string): Promise<boolean>
-    prepareDownload(input: { url?: string; resourceId?: string }): Promise<import('./video-workflow').VideoDownloadDraft>
+    discovery: import('./video-discovery').DiscoveryApi
+    prepareDownload(input: { url?: string; resourceId?: string; discovery?: import('./video-discovery').DiscoverySelection }): Promise<import('./video-workflow').VideoDownloadDraft>
     pickDownloadRoot(draftId: string): Promise<import('./video-workflow').VideoDownloadDraft | null>
     enqueueDownload(request: import('./video-workflow').VideoEnqueueRequest): Promise<import('./video-workflow').VideoDownloadJob>
     downloadJobs(): Promise<import('./video-workflow').VideoDownloadJob[]>
@@ -1719,6 +1720,9 @@ export interface BaoyiApi {
     onProgress(cb: (p: AIProgress) => void): Unsubscribe
   }
   data: {
+    snapshotInfo(): Promise<import('./library-snapshot').LibrarySafetyInfo>
+    createSnapshot(): Promise<import('./library-snapshot').LibrarySnapshotEntry>
+    openSnapshotDir(): Promise<void>
     exportJson(): Promise<string | null>
     /** Validate and preview a full metadata backup, confirm, snapshot and restart. */
     restoreJson(): Promise<{ backupPath: string } | null>

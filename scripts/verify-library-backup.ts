@@ -19,9 +19,10 @@ import { LIBRARY_BACKUP_LIMITS, type LibraryBackup } from '../src/types/library-
 import { buildLibraryBackup, previewLibraryBackup, restoreLibraryBackup } from '../electron/services/library-backup.ts'
 
 const expectedTables = [
-  'image_groups', 'image_meta', 'image_chapters', 'image_pages', 'image_progress', 'image_download_jobs',
+  'image_groups', 'image_meta', 'image_chapters', 'image_pages', 'image_progress', 'image_reader_state', 'image_bookmarks', 'image_download_jobs',
   'resource', 'software_meta', 'game_meta', 'video_meta', 'episode', 'video_sources',
   'video_directories', 'video_assets', 'video_episode_assets', 'video_download_jobs',
+  'video_discovery_sources', 'video_discovery_marks',
   'task_records', 'video_organize_journal', 'video_scan_state', 'video_scan_ignores', 'video_detached_owners', 'categories', 'tags', 'organize_plans',
   'save_backups', 'scan_units', 'pending_software', 'skip_list', 'identify_logs', 'identification_reports'
 ] as const
@@ -288,10 +289,10 @@ for (const [name, corrupt] of invalidPayloads) await test(`rejects ${name} befor
   assert.ok(!observed.statements.some(sql => /^\s*(DELETE|INSERT|UPDATE)\b/i.test(sql)), 'structurally invalid input must fail before any metadata write')
 })
 
-await test('every original table is required even when empty; additive scan tables default separately', (source, target) => {
+await test('every original table is required even when empty; additive tables default separately', (source, target) => {
   const backup = buildLibraryBackup(source)
   for (const table of expectedTables) {
-    if (['video_scan_state','video_scan_ignores','video_detached_owners'].includes(table)) continue
+    if (['video_scan_state','video_scan_ignores','video_detached_owners','video_discovery_sources','video_discovery_marks'].includes(table)) continue
     const incomplete = structuredClone(backup)
     delete (incomplete.tables as Partial<LibraryBackup['tables']>)[table]
     const observed = traced(target)

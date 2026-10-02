@@ -1,0 +1,98 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { createRequire } from 'node:module'
+import { DatabaseSync } from 'node:sqlite'
+import { initSchema } from '../electron/services/schema.ts'
+import { KINDS } from '../electron/kinds/index.ts'
+import { seedImageLibrary } from './helpers/image-library-fixture.ts'
+const require = createRequire(import.meta.url)
+const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const packedExecutable = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : undefined
+const executable = path.resolve(packedExecutable || 'node_modules/electron/dist/electron.exe')
+const output = path.resolve('output/image-optimization/bulk-ui' + (packedExecutable ? '-packaged' : '')); fs.mkdirSync(output, { recursive: true })
+const profile = fs.mkdtempSync(path.join(output, 'profile-')), db = new DatabaseSync(path.join(profile, 'baoyi.db'))
+db.exec('PRAGMA foreign_keys=ON'); initSchema(db, KINDS)
+for (const [key, value] of Object.entries({ onboarded: true, theme: 'dark', hanime_builtin_hosts: false })) db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, JSON.stringify(value))
+seedImageLibrary(db, profile, 500, true); db.close()
+const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL
+const app = await _electron.launch({ executablePath: executable, args: [...(packedExecutable ? [] : [path.resolve('.')]), '--user-data-dir=' + profile, '--disable-gpu'], env, timeout: 90000 })
+const baseline = process.argv.includes('--baseline'), errors: string[] = []
+try {
+  const page = await app.firstWindow(); page.setDefaultTimeout(90000); page.on('pageerror', (e: Error) => errors.push(e.message))
+  await page.waitForFunction(() => !!window.baoyi?.image)
+  await app.evaluate(({ BrowserWindow }: any) => BrowserWindow.getAllWindows()[0].setSize(1440, 900))
+  const start = performance.now()
+  await page.evaluate(() => { location.hash = '/image' })
+  await page.waitForSelector('.image-card')
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('.image-card img')).some(i => (i as HTMLImageElement).naturalWidth > 0))
+  const metrics = await page.evaluate(() => ({ cards: document.querySelectorAll('.image-card').length, images: document.querySelectorAll('.image-card img').length, decoded: Array.from(document.querySelectorAll('.image-card img')).filter(i => (i as HTMLImageElement).naturalWidth > 0).length, nodes: document.querySelectorAll('*').length }))
+  const report = { ...metrics, loadMs: Math.round(performance.now() - start), count: 500, profile }
+  console.log(report)
+  fs.writeFileSync(path.join(output, baseline ? 'baseline.json' : 'optimized.json'), JSON.stringify(report, null, 2))
+  if (!baseline) {
+    assert.ok(metrics.cards <= 60, 'large shelf must mount a bounded page of cards')
+    await page.getByLabel('批量整理', { exact: true }).click()
+    await page.getByLabel('选择当前页', { exact: true }).check()
+    await page.getByLabel('下一页书架', { exact: true }).click()
+    assert.match(await page.getByLabel('所选数量', { exact: true }).innerText(), /60 \/ 500/)
+    await page.getByLabel('上一页书架', { exact: true }).click()
+    assert.equal(await page.getByLabel('选择当前页', { exact: true }).isChecked(), true)
+    await page.evaluate(() => { (window as any).bulkChangeCount = 0; window.baoyi.image.onChanged(() => { (window as any).bulkChangeCount++ }) })
+    await page.getByLabel('批量已读状态', { exact: true }).selectOption('read')
+    await page.getByLabel('批量分类', { exact: true }).selectOption('image-group-1')
+    await page.getByLabel('批量标签', { exact: true }).fill('reviewed')
+    await page.getByRole('button', { name: '应用到所选', exact: true }).click()
+    await page.waitForFunction(async () => (await window.baoyi.image.list({ tag: 'reviewed' })).length === 60)
+    const changed = await page.evaluate(async () => window.baoyi.image.list({ tag: 'reviewed' }))
+    assert.ok(changed.every((i: any) => i.read && i.groupId === 'image-group-1'))
+    assert.equal(await page.evaluate(() => (window as any).bulkChangeCount), 1, 'one change event after the whole transaction')
+    await page.getByLabel('下一页书架', { exact: true }).click()
+    assert.equal(await page.locator('.image-card').count(), 60)
+    await page.getByLabel('搜索图片库').fill('no-matches-in-fixture')
+    await page.waitForFunction(() => document.querySelectorAll('.image-card').length === 0)
+    await page.getByLabel('搜索图片库').fill('')
+    await page.waitForFunction(() => document.querySelectorAll('.image-card').length === 60)
+    assert.equal((await page.getByLabel('书架页码', { exact: true }).innerText()).trim(), '1 / 9', 'empty filters must reset the remembered page')
+    await page.getByLabel('批量整理', { exact: true }).click()
+    await page.getByLabel('搜索图片库').fill('作品 00499')
+    await page.waitForFunction(() => document.querySelectorAll('.image-card').length === 1)
+    assert.equal(await page.getByRole('button', { name: '应用到所选', exact: true }).isDisabled(), true, 'filter change must clear prior selection')
+    await page.getByLabel('选择当前页', { exact: true }).check()
+    await page.screenshot({ path: path.join(output, 'bulk-1440.png') })
+    await app.evaluate(({ BrowserWindow }: any) => BrowserWindow.getAllWindows()[0].setSize(960, 640))
+    await page.screenshot({ path: path.join(output, 'bulk-960.png') })
+    assert.equal(await page.locator('.image-content').evaluate((el: HTMLElement) => el.scrollWidth > el.clientWidth), false)
+    await page.getByLabel('搜索图片库').fill('')
+    await page.getByLabel('全选筛选结果', { exact: true }).click()
+    await page.getByLabel('批量标签', { exact: true }).fill('all-reviewed')
+    await page.getByLabel('批量已读状态', { exact: true }).selectOption('read')
+    await page.getByRole('button', { name: '应用到所选', exact: true }).click()
+    await page.waitForFunction(async () => (await window.baoyi.image.list({ tag: 'all-reviewed' })).length === 500)
+    await page.getByLabel('筛选已读状态', { exact: true }).selectOption({ label: '未读' })
+    await page.waitForFunction(() => document.querySelectorAll('.image-card').length === 0)
+    await page.getByLabel('筛选已读状态', { exact: true }).selectOption({ label: '已读' })
+    await page.waitForFunction(() => document.querySelectorAll('.image-card').length === 60)
+    await page.getByLabel('批量整理', { exact: true }).click()
+    await page.getByLabel('搜索图片库').fill('作品 00499')
+    await page.waitForFunction(() => document.querySelectorAll('.image-card').length === 1)
+    await page.getByLabel('选择当前页', { exact: true }).check()
+    const staleGroup = await page.evaluate(async () => window.baoyi.image.saveGroup({ name: 'stale-destination' }))
+    await page.getByLabel('批量分类', { exact: true }).selectOption(staleGroup.id)
+    await page.evaluate(async (g: any) => window.baoyi.image.saveGroup({ ...g, hidden: true }), staleGroup)
+    const original = await page.evaluate(async () => window.baoyi.image.get('fixture-499'))
+    await page.getByRole('button', { name: '应用到所选', exact: true }).click()
+    await page.getByRole('alert').filter({ hasText: '目标分类不可用或已隐藏' }).waitFor()
+    assert.deepEqual(await page.evaluate(async () => window.baoyi.image.get('fixture-499')), original)
+    await page.getByLabel('批量分类', { exact: true }).selectOption('unchanged')
+    await page.getByLabel('批量标签操作', { exact: true }).selectOption('replace')
+    await page.getByLabel('批量标签', { exact: true }).fill('replaced')
+    page.once('dialog', (dialog: any) => dialog.accept())
+    await page.getByRole('button', { name: '应用到所选', exact: true }).click()
+    await page.waitForFunction(async () => JSON.stringify((await window.baoyi.image.get('fixture-499'))?.tags) === '["replaced"]')
+    assert.deepEqual(errors, [])
+    console.log('PASS bounded shelf, bulk transaction, pagination, filter selection reset and responsive layouts')
+  }
+} catch (cause) {
+  const page = await app.firstWindow(); await page.screenshot({ path: path.join(output, 'failure.png') }); console.error(errors); throw cause
+} finally { await app.close() }
