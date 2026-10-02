@@ -532,6 +532,7 @@ export interface GameCoverSearchResult {
 export type TitleLang = 'zh' | 'en'
 
 export interface AppSettings {
+  ffmpeg_path?: string
   /** 当前生效的那份配置。切换配置就是把某个 profile 铺到这里 */
   ai: AIConfig
   ai_profiles: AIProfile[]
@@ -1676,6 +1677,8 @@ export interface BaoyiApi {
     clearSkipped(): Promise<number>
   }
   settings: {
+    detectFfmpeg(): Promise<string | null>
+    pickFfmpeg(): Promise<string | null>
     getAll(): Promise<AppSettings>
     patch(patch: Partial<AppSettings>): Promise<AppSettings>
     /** 问 Chromium 某个地址实际会走哪条代理。诊断「配了没生效」用 */

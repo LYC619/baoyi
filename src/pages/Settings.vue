@@ -37,6 +37,7 @@ import IdentifyLog from '@/components/identify/IdentifyLog.vue'
 import ReportDialog from '@/components/identify/ReportDialog.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import LibrarySafetyPanel from '@/components/settings/LibrarySafetyPanel.vue'
+import FfmpegPanel from '@/components/settings/FfmpegPanel.vue'
 import { useAI } from '@/composables/useAI'
 import { useScan } from '@/composables/useScan'
 import { useMediaScan } from '@/composables/useMediaScan'
@@ -1688,6 +1689,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 
         <!-- -------------------------- 搜索服务 -------------------------- -->
         <template v-else-if="tab === 'search'">
+          <FfmpegPanel />
           <section class="panel">
             <div class="sec-head">
               <h2>联网搜索</h2>

@@ -291,6 +291,8 @@ const api: BaoyiApi = {
     clearSkipped: () => ipcRenderer.invoke('pending:clear-skipped')
   },
   settings: {
+    detectFfmpeg: () => ipcRenderer.invoke('settings:ffmpeg-detect'),
+    pickFfmpeg: () => ipcRenderer.invoke('settings:ffmpeg-pick'),
     getAll: () => ipcRenderer.invoke('settings:get'),
     patch: (patch: Partial<AppSettings>) => ipcRenderer.invoke('settings:patch', plain(patch)),
     proxyStatus: (url?: string) => ipcRenderer.invoke('settings:proxy-status', url),

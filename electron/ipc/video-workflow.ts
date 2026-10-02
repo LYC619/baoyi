@@ -2,7 +2,7 @@ import { app, dialog, nativeImage, net, shell, session, type BrowserWindow, type
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { getDb, getSettings, postersDir } from '../services/database.ts'
+import { getDb, getSettings, patchSettings, postersDir } from '../services/database.ts'
 import { createVideoWorkflow } from '../kinds/video/download/workflow.ts'
 import { loadVideoSources, loadVideoWork } from '../kinds/video/download/sources.ts'
 import { createChromiumDownloadFetch } from '../kinds/video/download/chromium-fetch.ts'
@@ -20,7 +20,7 @@ import { createDiscoveryCatalogue } from '../kinds/video/discovery/catalogue.ts'
 import { createDiscoveryWorkflow } from '../kinds/video/discovery/workflow.ts'
 import { resolveMissav } from '../kinds/video/discovery/missav.ts'
 import { downloadHls } from '../kinds/video/download/hls.ts'
-import { locateFfmpeg } from '../kinds/video/download/ffmpeg.ts'
+import { locateFfmpeg, validateFfmpeg } from '../kinds/video/download/ffmpeg.ts'
 import { registerDiscoveryIpc } from './video-discovery.ts'
 import { DISCOVERY_PARTITION } from '../services/discovery-browser.ts'
 
@@ -40,6 +40,20 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('只允许主窗口操作影视库')
   }
   const send = (channel: string, value: unknown) => { const win = getWindow(); if (win && !win.isDestroyed()) win.webContents.send(channel, value) }
+  ipcMain.handle('settings:ffmpeg-detect', event => {
+    assertMain(event)
+    const settings = getSettings()
+    return locateFfmpeg('', settings.software_scan_dirs)
+  })
+  ipcMain.handle('settings:ffmpeg-pick', async event => {
+    assertMain(event)
+    const result = await dialog.showOpenDialog(getWindow()!, { title: '选择 ffmpeg.exe', properties: ['openFile'], filters: [{ name: 'FFmpeg', extensions: ['exe'] }] })
+    if (result.canceled || !result.filePaths[0]) return null
+    const file = result.filePaths[0]
+    if (!validateFfmpeg(file)) throw new Error('该程序不是可运行的 FFmpeg，请选择 ffmpeg.exe')
+    patchSettings({ ffmpeg_path: file })
+    return file
+  })
   const visible = (job: VideoDownloadJob) => !getSettings().hide_hentai || job.category !== '里番'
   const workflowOptions: Parameters<typeof createVideoWorkflow>[0] = {
     artworkSize: file => nativeImage.createFromPath(file).getSize(),
@@ -80,8 +94,8 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     transfer: options => transferVideo({ ...options, fetch: discoveryFetch }),
     resolvePlayback: (code, signal) => resolveMissav(code, discoveryFetch, signal),
     hlsTransfer: ({ url, destination, headers, signal, onProgress }) => {
-      const ffmpeg = locateFfmpeg()
-      if (!ffmpeg) throw new Error('没有找到 FFmpeg，无法把 HLS 片源合成 MP4；请先安装 FFmpeg 并确保在 PATH 中')
+      const ffmpeg = locateFfmpeg(getSettings().ffmpeg_path, getSettings().software_scan_dirs)
+      if (!ffmpeg) throw new Error('没有找到 FFmpeg。请到设置的「HLS 下载工具」重新检测或选择 ffmpeg.exe。PotPlayer 可播放 m3u8，但下载为 MP4 仍需要 FFmpeg。')
       return downloadHls({ url, destination, headers, signal, fetch: discoveryFetch, ffmpeg, onProgress })
     } })
   registerDiscoveryIpc(getWindow, ipcMain, catalogue, getDb(), workflowOptions.savePoster!)

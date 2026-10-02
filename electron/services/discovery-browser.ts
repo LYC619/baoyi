@@ -50,7 +50,7 @@ export function createDiscoveryBrowser(getMainWindow: () => BrowserWindow | null
     const guard = (event: Electron.Event, url: string) => { if (!allowed(url)) { event.preventDefault(); win.setTitle('此跳转不在来源目录中 · 抱一') } }
     win.webContents.on('will-navigate', guard)
     win.webContents.on('will-redirect', (event, url, _inPlace, mainFrame) => { if (mainFrame) guard(event, url) })
-    win.webContents.setWindowOpenHandler(({ url }) => { navigate(url); return { action: 'deny' } })
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     win.webContents.on('did-navigate', updateMenu); win.webContents.on('did-navigate-in-page', updateMenu)
     const blockDownload = (event: Electron.Event, _item: Electron.DownloadItem, sender: Electron.WebContents) => { if (sender === win.webContents) event.preventDefault() }
     browserSession.on('will-download', blockDownload)

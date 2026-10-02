@@ -414,7 +414,7 @@ const emptyHint = computed(() => {
         <div v-if="shownItems.length > 0" :class="compact ? 'list' : 'wall'">
           <div v-for="v in shownItems" :key="v.id" class="work-group">
             <div class="work-card">
-              <VideoCard :item="v" :status="itemStatus(v)" :recent="recentContent(v)" :selectable="selecting" :selected="selectedIds.includes(v.id)" @select="selectWork" @open="open" @poster-error="store.markPosterMissing" />
+              <VideoCard :item="v" :show-published="store.sort === 'published' || store.sort === 'published-asc'" :status="itemStatus(v)" :recent="recentContent(v)" :selectable="selecting" :selected="selectedIds.includes(v.id)" @select="selectWork" @open="open" @poster-error="store.markPosterMissing" />
               <button v-if="v.episode_total > 1 && !selecting" class="collection-expand" :aria-expanded="!!expanded[v.id]" :aria-controls="'collection-' + v.id" @click="toggleCollection(v.id)">{{ expanded[v.id] ? '收起单集' : '展开 ' + v.episode_total + ' 集' }}</button>
             </div>
             <div v-if="expanded[v.id] && !selecting" :id="'collection-' + v.id" class="collection-episodes" role="group" :aria-label="(v.name_zh || v.file_name) + '的单集'">

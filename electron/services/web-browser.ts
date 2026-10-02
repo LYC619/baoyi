@@ -24,6 +24,7 @@ export function createWebBrowser(getMainWindow: () => BrowserWindow | null) {
       webPreferences: { session: browserSession, contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } })
     window = win
     const contents = win.webContents
+    let popupUrl = '', popupCount = 0
     const currentAddress = () => isWebNavigation(contents.getURL()) ? contents.getURL() : target
     const returnToApp = (edit: boolean) => {
       const host = getMainWindow()
@@ -41,6 +42,10 @@ export function createWebBrowser(getMainWindow: () => BrowserWindow | null) {
         { label: '刷新', accelerator: 'CmdOrCtrl+R', click: () => failed ? navigate(target) : contents.reload() },
         { label: '更换网址', accelerator: 'CmdOrCtrl+L', click: () => returnToApp(true) },
         { label: '复制网址', enabled: !!address, click: () => { const value = currentAddress(); if (isWebNavigation(value)) clipboard.writeText(value) } },
+        { label: popupCount ? `已拦截弹窗 (${popupCount})` : '弹窗拦截已开启', enabled: !!popupUrl, submenu: [
+          { label: '在独立窗口打开最近弹窗', click: () => { if (popupUrl) createWebBrowser(getMainWindow).open(popupUrl) } },
+          { label: '复制弹窗网址', click: () => { if (popupUrl) clipboard.writeText(popupUrl) } }
+        ] },
         { label: '返回抱一', click: () => returnToApp(false) }
       ]))
     }
@@ -55,7 +60,10 @@ export function createWebBrowser(getMainWindow: () => BrowserWindow | null) {
     }
     contents.on('will-navigate', guard)
     contents.on('will-redirect', (event, value, _inPlace, mainFrame) => { if (mainFrame) guard(event, value) })
-    contents.setWindowOpenHandler(({ url: value }) => { if (isWebNavigation(value)) navigate(value); return { action: 'deny' } })
+    contents.setWindowOpenHandler(({ url: value }) => {
+      if (isWebNavigation(value)) { popupUrl = value; popupCount++; updateMenu() }
+      return { action: 'deny' }
+    })
     contents.on('did-start-navigation', (_event, value, _inPlace, mainFrame) => {
       if (mainFrame && isWebNavigation(value)) { target = value; failed = false }
     })

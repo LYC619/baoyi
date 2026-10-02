@@ -14,7 +14,7 @@ import { formatDuration, posterUrl, videoTitle } from '@/utils'
 import { videoDateLabel, videoEpisodeLabel } from '@/utils/video-content'
 import { WATCH_STATUS_LABEL } from '@/stores/video'
 
-const props = withDefaults(defineProps<{ item: VideoItem; episode?: VideoWorkContent; status?: string; recent?: string; selectable?: boolean; selected?: boolean }>(), { status: '', recent: '', selectable: false, selected: false })
+const props = withDefaults(defineProps<{ item: VideoItem; episode?: VideoWorkContent; status?: string; recent?: string; selectable?: boolean; selected?: boolean; showPublished?: boolean }>(), { status: '', recent: '', selectable: false, selected: false, showPublished: false })
 defineEmits<{ (e: 'open', id: string): void; (e: 'poster-error', id: string): void; (e: 'select', id: string, event: MouseEvent): void }>()
 
 const title = computed(() => props.episode ? props.episode.title || props.episode.original_title || videoEpisodeLabel(props.episode, props.item.category === '里番') : videoTitle(props.item))
@@ -85,6 +85,7 @@ const videoCount = computed(() => typeof props.item.available_files === 'number'
       <template v-else>
       <p class="card__meta"><span v-if="item.year > 0" class="card__year">{{ item.year }}</span><span>{{ videoCount }}</span></p>
       <p v-if="isSeries" class="card__detail">{{ episodeLine }}</p>
+      <p v-if="showPublished" class="card__detail">{{item.published_end ? '发布 ' + videoDateLabel(item.published_end) : '发布日期未知'}}</p>
       <p v-if="status" class="card__pending">{{ status }}</p>
       <p v-if="item.matched_content" class="card__match">命中内容：{{ item.matched_content }}</p>
       <p v-else-if="recent" class="card__detail">最近新增：{{ recent }}</p>

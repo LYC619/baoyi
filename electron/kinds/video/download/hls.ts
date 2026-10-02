@@ -8,7 +8,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { createDecipheriv } from 'node:crypto'
+import { createDecipheriv, createHash } from 'node:crypto'
 import { remuxToMp4 } from './ffmpeg.ts'
 
 export interface HlsProgress {
@@ -100,6 +100,9 @@ export function parsePlaylist(text: string, base: string): Playlist {
 }
 
 export async function downloadHls(options: HlsDownloadOptions): Promise<{ destination: string; warnings: string[] }> {
+  options.signal.throwIfAborted()
+  const stopped = new AbortController()
+  const signal = AbortSignal.any([options.signal, stopped.signal])
   const warnings: string[] = []
   const workers = Math.min(Math.max(options.workers ?? 8, 1), 16)
   const retries = options.retries ?? 4
@@ -117,7 +120,8 @@ export async function downloadHls(options: HlsDownloadOptions): Promise<{ destin
     let lastError: unknown
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const response = await options.fetch(url, { headers, signal: options.signal, redirect: 'follow' })
+        signal.throwIfAborted()
+        const response = await options.fetch(url, { headers, signal, redirect: 'follow' })
         if (range ? response.status !== 206 : !response.ok) throw new Error('HLS 请求失败：HTTP ' + response.status)
         const data = Buffer.from(await response.arrayBuffer())
         if (!data.length) throw new Error('HLS 资源为空')
@@ -125,8 +129,8 @@ export async function downloadHls(options: HlsDownloadOptions): Promise<{ destin
         return data
       } catch (error) {
         lastError = error
-        if (options.signal.aborted) throw options.signal.reason
-        await new Promise(resolve => setTimeout(resolve, Math.min(attempt + 1, 5) * 500))
+        if (signal.aborted) throw signal.reason
+        if (attempt < retries) await new Promise(resolve => setTimeout(resolve, Math.min(attempt + 1, 5) * 500))
       }
     }
     throw lastError instanceof Error ? lastError : new Error('HLS 资源多次重试仍失败')
@@ -143,10 +147,28 @@ export async function downloadHls(options: HlsDownloadOptions): Promise<{ destin
   const segments = playlist.segments
 
   const tempDir = path.join(path.dirname(options.destination), '.' + path.basename(options.destination) + '.baoyi-hls')
+  const identity = createHash('sha256').update(JSON.stringify(segments)).digest('hex')
+  const manifestFile = path.join(tempDir, 'manifest.json')
+  let manifest: { identity: string; files: Record<string, { size: number; hash: string }> } = { identity, files: {} }
+  try {
+    const savedManifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'))
+    if (savedManifest.identity === identity && savedManifest.files) manifest = savedManifest
+    else fs.rmSync(tempDir, { recursive: true, force: true })
+  } catch { /* Only verified files from this playlist may be reused. */ }
   fs.mkdirSync(tempDir, { recursive: true })
+  const saveManifest = () => {
+    fs.writeFileSync(manifestFile + '.tmp', JSON.stringify(manifest))
+    fs.renameSync(manifestFile + '.tmp', manifestFile)
+  }
+  saveManifest()
   const segmentFile = (index: number) => path.join(tempDir, String(index).padStart(6, '0') + '.segment')
   const saved = new Set<number>()
-  for (let index = 0; index < segments.length; index++) { try { if (fs.statSync(segmentFile(index)).size > 0) { saved.add(index); receivedBytes += fs.statSync(segmentFile(index)).size } } catch { /* 未下 */ } }
+  for (let index = 0; index < segments.length; index++) {
+    try {
+      const expected = manifest.files[index], data = fs.readFileSync(segmentFile(index))
+      if (expected && data.length === expected.size && createHash('sha256').update(data).digest('hex') === expected.hash) { saved.add(index); receivedBytes += data.length }
+    } catch { /* 未下或损坏，重新下载 */ }
+  }
   emit('downloading', `已下载 ${saved.size}/${segments.length} 个分片`, true)
 
   const keyCache = new Map<string, Buffer>()
@@ -161,7 +183,8 @@ export async function downloadHls(options: HlsDownloadOptions): Promise<{ destin
     const key = await fetchKey(segment.key.url)
     const iv = segment.key.iv
       ? Buffer.from(segment.key.iv.replace(/^0x/i, '').padStart(32, '0'), 'hex')
-      : (() => { const buf = Buffer.alloc(16); buf.writeBigUInt64BE(BigInt(segment.sequence)); return buf })()
+      : (() => { const buf = Buffer.alloc(16); buf.writeBigUInt64BE(BigInt(segment.sequence), 8); return buf })()
+    if (iv.length !== 16) throw new Error('AES-128 IV 必须为 16 字节')
     if (data.length % 16) throw new Error('加密分片长度不是 AES block 的整数倍')
     const decipher = createDecipheriv('aes-128-cbc', key, iv)
     return Buffer.concat([decipher.update(data), decipher.final()])
@@ -172,22 +195,24 @@ export async function downloadHls(options: HlsDownloadOptions): Promise<{ destin
     for (;;) {
       const index = cursor++; if (index >= segments.length) return
       if (saved.has(index)) continue
-      options.signal.throwIfAborted()
+      signal.throwIfAborted()
       const segment = segments[index]
       const data = await decrypt(segment, await request(segment.url, segment.range))
+      signal.throwIfAborted()
       fs.writeFileSync(segmentFile(index) + '.tmp', data)
       fs.renameSync(segmentFile(index) + '.tmp', segmentFile(index))
+      manifest.files[index] = { size: data.length, hash: createHash('sha256').update(data).digest('hex') }
+      saveManifest()
       saved.add(index); receivedBytes += data.length
       emit('downloading', `已下载 ${saved.size}/${segments.length} 个分片`)
     }
   }
-  try {
-    await Promise.all(Array.from({ length: workers }, worker))
-  } catch (error) {
-    if (options.signal.aborted) throw error
-    fs.rmSync(tempDir, { recursive: true, force: true })
-    throw error
-  }
+  let failure: unknown
+  await Promise.allSettled(Array.from({ length: workers }, async () => {
+    try { await worker() } catch (error) { if (!stopped.signal.aborted) { failure = error; stopped.abort(error) } }
+  }))
+  if (failure) throw failure
+  signal.throwIfAborted()
   if (saved.size !== segments.length) throw new Error(`HLS 下载不完整：${saved.size}/${segments.length}`)
 
   emit('finalizing', '正在合并分片并生成 MP4', true)
@@ -196,6 +221,7 @@ export async function downloadHls(options: HlsDownloadOptions): Promise<{ destin
   try {
     let lastInit: Segment['init']
     for (let index = 0; index < segments.length; index++) {
+      signal.throwIfAborted()
       const segment = segments[index]
       if (segment.init && segment.init !== lastInit) { fs.writeSync(output, await request(segment.init.url, segment.init.range)); lastInit = segment.init }
       fs.writeSync(output, fs.readFileSync(segmentFile(index)))
