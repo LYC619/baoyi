@@ -52,11 +52,12 @@ if (!$VerifyOnly) {
   $baseline = (& git -C $root rev-parse HEAD).Trim()
   if ($LASTEXITCODE -ne 0) { throw 'Cannot record Git baseline' }
   $branch = (& git -C $root branch --show-current).Trim()
+  $dirty = [bool](& git -C $root status --porcelain --untracked-files=normal)
   $manifest = [ordered]@{
     version = $pkg.version; createdAt = [DateTimeOffset]::Now.ToString('o'); platform = 'win32-x64'
     electronVersion = $pkg.devDependencies.electron; dataMode = 'appdata'
     executable = 'win-unpacked/' + $pkg.productName + '.exe'; codeSigned = $false
-    gitBaseline = $baseline; gitBranch = $branch; uncommittedChangesIncluded = $true
+    gitBaseline = $baseline; gitBranch = $branch; uncommittedChangesIncluded = $dirty
     provenance = 'local-worktree-build'; sourceArchive = [System.IO.Path]::GetFileName($sourceZip)
     sourceArchiveSha256 = (Hash $sourceZip); sourceFileManifest = 'source-files.json'; sourceFileCount = $sources.Count
     verification = $verification; compiledContent = $content; files = $files

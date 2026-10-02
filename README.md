@@ -6,10 +6,10 @@
 
 ## 当前版本
 
-**0.11.0，2026-10-02。** 整合视频海报墙、标准网页接入、内置播放与下载入库，保留轻量可选解析接口，供整体实际测试。
+**0.12.0，2026-10-03。** 统一软件/游戏详情子页与分组，增强漫画并发下载、合集、文件整理及浮动阅读，修复 JAV 弹窗、HLS 下载和游戏路径问题。
 
-- 当前程序：[release/0.11.0/win-unpacked/抱一.exe](release/0.11.0/win-unpacked/抱一.exe)
-- [版本说明与运行方式](docs/releases/0.11.0.md)
+- 当前程序：[release/0.12.0/win-unpacked/抱一.exe](release/0.12.0/win-unpacked/抱一.exe)
+- [版本说明与运行方式](docs/releases/0.12.0.md)
 - [发布与打包约定](docs/releases/README.md)
 - [历史文件整理记录](docs/maintenance/2026-09-29-release-cleanup.md)
 - [文档导航](docs/README.md)
@@ -83,6 +83,8 @@ npm run dist:dir
 | 0.8.0 | Hanime 接入、影视整理与多轮实测修复；历史包沿用此版本号 |
 | 0.9.0 | 图片 / 漫画库与阅读器、哔咔收藏榜单和图片下载网络修复 |
 | **0.10.0** | 图片工作流七项优化与资料库升级保护 |
+| 0.11.0 | 网页视频来源接入与整体实测 |
+| **0.12.0** | 四库功能统一、漫画管理与浮动阅读、JAV/HLS 和游戏识别修复 |
 
 早期计划不等于已交付功能；保留在 [docs/history](docs/history/README.md) 中供追溯。
 当前模块约定以 `electron/kinds/types.ts`、模块实现和近期交付报告为准。

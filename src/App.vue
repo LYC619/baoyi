@@ -6,6 +6,7 @@ import VideoImportPanel from '@/components/video/VideoImportPanel.vue'
 import AgentOrganizePanel from '@/components/video/AgentOrganizePanel.vue'
 import ImageReader from '@/components/image/ImageReader.vue'
 import { useImageReader } from '@/composables/useImageReader'
+import { useImageStore } from '@/stores/image'
 import { useVideoAgentOrganize } from '@/composables/useVideoAgentOrganize'
 import { useVideoImport } from '@/composables/useVideoImport'
 import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
@@ -13,6 +14,8 @@ import { watch } from 'vue'
 const videoImport = useVideoImport(), workflow = useVideoWorkflow()
 const videoAgent = useVideoAgentOrganize()
 const imageReader = useImageReader()
+const images = useImageStore()
+watch(()=>images.items,items=>{const current=imageReader.session.value;if(current&&!items.some(item=>item.id===current.item.id))void imageReader.close()})
 watch(workflow.hideHentai, hidden => { videoImport.setPrivacy(hidden); if (hidden) videoAgent.hide() })
 </script>
 

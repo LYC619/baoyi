@@ -60,5 +60,7 @@ try{
  checks.push('comic-classification-size-collection-create-reorder-uncategorized')
  await app.evaluate(({BrowserWindow}:any)=>BrowserWindow.getAllWindows()[0].setSize(960,640));await page.screenshot({path:path.join(output,'comic-shelf-960.png')})
  assert.equal(await page.locator('.image-content').evaluate((el:HTMLElement)=>el.scrollWidth>el.clientWidth+1),false)
+ await go('/image/'+imageIds[2]);await page.getByRole('button',{name:'开始阅读',exact:true}).click();await page.getByLabel('关闭阅读器',{exact:true}).waitFor()
+ await page.evaluate((id:string)=>window.baoyi.image.remove(id),imageIds[2]);await page.locator('.image-reader').waitFor({state:'hidden'});checks.push('reader-closes-when-resource-removed')
  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'report.json'),JSON.stringify({checks,errors,profile},null,2));console.log('PASS '+checks.join(', '))
 }catch(cause){await(await app.firstWindow()).screenshot({path:path.join(output,'failure.png')});throw cause}finally{await app.close()}

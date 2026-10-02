@@ -2,7 +2,7 @@ import { app, dialog, shell, type BrowserWindow, type IpcMain, type IpcMainInvok
 import { randomUUID } from 'node:crypto'
 import { getDb, getSettings } from '../services/database.ts'
 import { imageCollections,saveImageCollection,removeImageCollection } from '../kinds/image/collections.ts'
-import { imageFileTarget,planImageMove,moveImageItems,removeImageFiles } from '../kinds/image/management.ts'
+import { assertImageFilesIdle,imageFileTarget,planImageMove,moveImageItems,removeImageFiles } from '../kinds/image/management.ts'
 import { ImageLibrary } from '../kinds/image/library.ts'
 import { isArchive, scanImageImport } from '../kinds/image/scanner.ts'
 import { imageOperation } from '../kinds/image/activity.ts'
@@ -45,6 +45,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
     })
   })
   handle('remove', async(id:string,deleteFiles=false) => {
+    assertImageFilesIdle(id)
     if(deleteFiles){
       const target=await imageFileTarget(getDb(),id,protectedPaths())
       const confirmed=await dialog.showMessageBox(getWindow()!,{type:'warning',title:'删除原文件及全部内容',message:'将此作品的原文件夹及全部内容送入回收站？',detail:target+'\n\n包含图片、附带文件和子文件夹；同时移除库中记录。',buttons:['取消','删除原文件'],defaultId:0,cancelId:0})
@@ -86,13 +87,17 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
     return { imported, errors }
   })
   handle('rescan', (id: string) => imageOperation(async () => {
+    assertImageFilesIdle(id)
     const item = library().get(id)
     if (!item) throw new Error('资源不可用')
     const scanned = (await scanImageImport(item.path, item.type, false))[0]
+    assertImageFilesIdle(id)
+    if(library().get(id)?.path!==item.path)throw new Error('作品位置已改变，请重新扫描')
     if (!scanned.chapters.some(c => c.pages.length)) throw new Error(scanned.warnings.join('；') || '没有找到图片')
     const result = library().register(scanned); changed(); return result
   }))
   handle('relocate', async (id: string) => {
+    assertImageFilesIdle(id)
     const item = library().get(id)
     if (!item) throw new Error('资源不可用')
     const result = await dialog.showOpenDialog(getWindow()!, { title: '重新定位相册／漫画', properties: isArchive(item.path) ? ['openFile'] : ['openDirectory'],
@@ -100,6 +105,8 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
     if (result.canceled || !result.filePaths[0]) return null
     return imageOperation(async () => {
       const scanned = (await scanImageImport(result.filePaths[0], item.type, false))[0]
+      assertImageFilesIdle(id)
+      if(library().get(id)?.path!==item.path)throw new Error('作品位置已改变，请重新定位')
       if (!scanned.chapters.some(c => c.pages.length)) throw new Error('新位置没有可读图片')
       const updated = library().register(scanned, id); changed(); return updated
     })
