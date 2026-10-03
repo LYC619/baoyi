@@ -18,7 +18,10 @@ export async function imageResponse(url: URL): Promise<Response> {
     let image = thumbnails.get(key)
     if (!image) {
       const decoded = nativeImage.createFromBuffer(data)
-      if (decoded.isEmpty()) throw new Error('无法解码图片')
+      // NativeImage cannot decode every format that Chromium <img> supports
+      // (notably WebP). Let the renderer decode the authorized original instead.
+      // Do not cache originals in the JPEG thumbnail cache: they may be large.
+      if (decoded.isEmpty()) return new Response(new Uint8Array(data), { headers: { 'Content-Type': mime, 'Cache-Control':'no-store' } })
       const size = decoded.getSize()
       const ratio = Math.min(1, 440 / Math.max(size.width, size.height))
       image = decoded.resize({ width: Math.max(1, Math.round(size.width*ratio)), height: Math.max(1, Math.round(size.height*ratio)), quality: 'good' }).toJPEG(82)
