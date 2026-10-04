@@ -39,6 +39,8 @@ export type ImageSourceSort = 'dd' | 'da'
 export interface ImageSourceWork { id: string; title: string; author: string; description: string; tags: string[]; chapters: number; pages: number; finished: boolean; coverUrl?: string }
 export interface ImageSourceChapter { id: string; title: string; order: number }
 export interface ImageSourcePage { id: string; url: string }
+/** 哔咔浏览界面的本地标注：哪些作品已入库、哪些正在下载、已入库作品本地已有哪些章。 */
+export interface ImageSourceOwned { owned: string[]; queued: string[]; chapters: Record<string, string[]> }
 export interface ImageChapterUpdate extends ImageSourceChapter {
   status: 'new' | 'downloaded' | 'incomplete' | 'unverified' | 'unavailable';
   localTitle: string; localPages: number; expectedPages: number | null;
@@ -81,7 +83,7 @@ export interface ImageApi {
   groups(): Promise<ImageGroup[]>; saveGroup(group: Partial<ImageGroup> & { name: string }): Promise<ImageGroup>; removeGroup(id: string): Promise<void>;
   prepareImport(type: ImageType, multiple: boolean, archive: boolean): Promise<ImageImportPreview | null>;
   confirmImport(token: string, selected: Array<{ index: number; name: string }>): Promise<{ imported: number; errors: string[] }>;
-  rescan(id: string): Promise<ImageItem>; relocate(id: string): Promise<ImageItem | null>;
+  rescan(id: string): Promise<ImageItem>; relocate(id: string): Promise<ImageItem | null>; reveal(id: string): Promise<boolean>;
   saveProgress(id: string, pageId: string, offset: number): Promise<void>;
   preferences(value?: ImagePreferences): Promise<ImagePreferences>;
   readerPreferences(id: string, value?: ImagePreferences | null): Promise<ImageReaderPreferences>;
@@ -94,6 +96,7 @@ export interface ImageApi {
   sourceRanking(period: ImageSourceRank): Promise<{ items: ImageSourceWork[]; pages: number }>;
   sourceCover(url: string): Promise<string>;
   sourceDetail(id: string): Promise<{ work: ImageSourceWork; chapters: ImageSourceChapter[] }>;
+  sourceOwned(workIds: string[]): Promise<ImageSourceOwned>;
   download(workId: string, chapters: string[], groupId: string | null): Promise<ImageDownloadJob | null>;
   downloadBatch(workIds: string[], groupId: string | null): Promise<ImageBatchDownloadResult | null>;
   jobs(): Promise<ImageDownloadJob[]>; retryJob(id: string): Promise<void>; cancelJob(id: string): Promise<void>; dismissJob(id: string): Promise<void>;

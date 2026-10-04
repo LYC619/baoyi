@@ -7,6 +7,7 @@ import { createImageSourceFetch } from '../kinds/image/network.ts'
 import { createImageDownloads } from '../kinds/image/downloads.ts'
 import { imageOperation } from '../kinds/image/activity.ts'
 import { createImageUpdates } from '../kinds/image/updates.ts'
+import { restoreWindowFocus } from '../services/window-focus.ts'
 
 export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<IpcMain,'handle'>):void{
   const credentialFile=path.join(app.getPath('userData'),'pica-auth.bin')
@@ -19,6 +20,16 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
   const updates=createImageUpdates({db:getDb(),source,queue})
   function handle(name:string,fn:(...args:any[])=>unknown){ipc.handle('image:'+name,(event:IpcMainInvokeEvent,...args)=>{const win=getWindow();if(!win||win.isDestroyed()||event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw new Error('只允许主窗口操作图片来源');return fn(...args)})}
   handle('source-status',()=>!!token)
+  handle('source-owned',(workIds:string[])=>{
+    if(!Array.isArray(workIds)||!workIds.length||workIds.length>200||workIds.some(id=>typeof id!=='string'||!id||id.length>100))throw new Error('来源作品标识无效')
+    const ids=[...new Set(workIds)],marks=ids.map(()=>'?').join(',')
+    const owned=(getDb().prepare("SELECT source_id FROM image_meta WHERE source='pica' AND source_id IN ("+marks+")").all(...ids) as Array<{source_id:string}>).map(row=>row.source_id)
+    const chapters:Record<string,string[]>=Object.create(null)
+    const rows=getDb().prepare("SELECT m.source_id AS work_id,c.source_id AS chapter_id FROM image_chapters c JOIN image_meta m ON m.resource_id=c.resource_id WHERE m.source='pica' AND c.source_id!='' AND m.source_id IN ("+marks+")").all(...ids) as Array<{work_id:string;chapter_id:string}>
+    for(const row of rows)(chapters[row.work_id]||=[]).push(row.chapter_id)
+    const queued=[...new Set(queue.list().filter(job=>['queued','running','paused'].includes(job.status)&&ids.includes(job.work.id)).map(job=>job.work.id))]
+    return {owned,queued,chapters}
+  })
   handle('repair',(id:string)=>{if(!token)throw new Error('请先登录哔咔');return imageOperation(()=>queue.repair(id))})
   handle('check-updates',(id:string)=>{if(!token)throw new Error('请先登录哔咔');return imageOperation(()=>updates.check(id))})
   handle('download-updates',(id:string,chapters:string[])=>{if(!token)throw new Error('请先登录哔咔');return imageOperation(()=>updates.download(id,chapters))})
@@ -38,6 +49,7 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
     const {work,chapters}=await source.detail(workId),chosen=chapters.filter(c=>selected.includes(c.id))
     if(!chosen.length)throw new Error('请选择有效章节')
     const result=await dialog.showOpenDialog(getWindow()!,{title:'选择漫画下载根目录（补章请选择原根目录）',properties:['openDirectory','createDirectory']})
+    restoreWindowFocus(getWindow())
     if(result.canceled||!result.filePaths[0])return null
     return queue.enqueue(work,chosen,result.filePaths[0],groupId)
   })
@@ -45,6 +57,7 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
     if(!token)throw new Error('请先登录哔咔')
     if(!Array.isArray(workIds)||workIds.length<1||workIds.length>200)throw new Error('一次请选择 1 到 200 部漫画')
     const result=await dialog.showOpenDialog(getWindow()!,{title:`选择 ${workIds.length} 部漫画的下载根目录`,properties:['openDirectory','createDirectory']})
+    restoreWindowFocus(getWindow())
     if(result.canceled||!result.filePaths[0])return null
     return queue.enqueueBatch(workIds,result.filePaths[0],groupId)
   })

@@ -295,7 +295,7 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('keydown', k
 
 <style scoped>
 .image-reader{inset:70px 24px auto auto;width:min(78vw,1120px);height:min(82vh,900px);min-width:min(640px,96vw);min-height:380px;max-width:100vw;max-height:calc(100vh - 40px);resize:both;overflow:hidden;display:grid;grid-template:34px minmax(0,1fr) / 100px minmax(0,1fr) 92px;border:1px solid #55555c;border-radius:10px;box-shadow:0 16px 60px #0008;z-index:180}
-.image-reader.maximized{inset:var(--titlebar-h) 0 0!important;width:100%!important;height:calc(100vh - var(--titlebar-h))!important;max-height:none;border-radius:0;resize:none}
+.image-reader.maximized{inset:0!important;width:100%!important;height:100vh!important;max-height:none;border-radius:0;resize:none}
 .image-reader:fullscreen{inset:0!important;width:100%!important;height:100%!important;max-height:none;border-radius:0;resize:none}
 .reader-title{grid-column:1 / -1;display:flex;gap:8px;align-items:center;padding:0 5px 0 12px;background:#29292e;cursor:move;touch-action:none;min-width:0;user-select:none}
 .reader-title strong{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500}.reader-title span{font-size:10px;color:#a1a1ac}.reader-title button{height:28px;width:30px}

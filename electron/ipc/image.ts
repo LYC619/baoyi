@@ -1,5 +1,6 @@
 import { app, dialog, shell, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'node:crypto'
+import { existsSync, statSync } from 'node:fs'
 import { getDb, getSettings } from '../services/database.ts'
 import { imageCollections,saveImageCollection,removeImageCollection } from '../kinds/image/collections.ts'
 import { assertImageFilesIdle,imageFileTarget,planImageMove,moveImageItems,removeImageFiles } from '../kinds/image/management.ts'
@@ -8,6 +9,7 @@ import { isArchive, scanImageImport } from '../kinds/image/scanner.ts'
 import { imageOperation } from '../kinds/image/activity.ts'
 import { auditImage, imagePageInfo } from '../kinds/image/integrity.ts'
 import { ImageReaderState } from '../kinds/image/reader-state.ts'
+import { restoreWindowFocus } from '../services/window-focus.ts'
 import type { ImageImportPreview, ImagePreferences, ImageType, ScannedImage } from '../../src/types/image.ts'
 
 export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pick<IpcMain,'handle'>): void {
@@ -15,6 +17,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
   const reader = () => new ImageReaderState(getDb())
   let preview: { token: string; at: number; items: ScannedImage[] } | null = null
   const changed = () => { const win = getWindow(); if (win && !win.isDestroyed()) win.webContents.send('image:changed') }
+  const focusBack = () => restoreWindowFocus(getWindow())
   const main = (event: IpcMainInvokeEvent) => {
     const win = getWindow()
     if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw new Error('只允许主窗口操作图片库')
@@ -22,6 +25,14 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
   const handle = (name: string, action: (...args: any[]) => unknown) => ipc.handle('image:' + name, (event, ...args) => { main(event); return action(...args) })
   handle('list', query => library().list(query))
   handle('get', id => library().get(id))
+  handle('reveal', (id: string) => {
+    const item = library().get(id)
+    if (!item?.path || !existsSync(item.path)) return false
+    try { if (!isArchive(item.path) && statSync(item.path).isDirectory()) void shell.openPath(item.path); else shell.showItemInFolder(item.path) }
+    catch { return false }
+    focusBack()
+    return true
+  })
   handle('page-info', id => imageOperation(() => imagePageInfo(getDb(), id)))
   handle('audit', id => imageOperation(() => auditImage(getDb(), id)))
   handle('pages', (id, chapter) => library().pages(id, chapter).map(({ id, resourceId, chapterId, ordinal, size, missing }) => ({ id, resourceId, chapterId, ordinal, size, missing })))
@@ -35,11 +46,13 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
   handle('remove-collection',id=>{removeImageCollection(getDb(),id);changed()})
   handle('move',async(ids:string[],byCategory=false)=>{
     const selected=await dialog.showOpenDialog(getWindow()!,{title:'选择整理目标目录',properties:['openDirectory','createDirectory']})
+    focusBack()
     if(selected.canceled||!selected.filePaths[0])return null
     return imageOperation(async()=>{
       const plan=await planImageMove(getDb(),ids,selected.filePaths[0],byCategory,protectedPaths())
       if(!plan.length)return {moved:0,paths:[],warnings:[]}
       const confirmed=await dialog.showMessageBox(getWindow()!,{type:'question',title:'确认整理和移动',message:`移动 ${plan.length} 个作品目录${byCategory?'，按分类存放':''}`,detail:plan.slice(0,30).map(row=>row.source+'\n→ '+row.destination).join('\n\n')+(plan.length>30?`\n另有 ${plan.length-30} 项`:'')+'\n\n保留全部内容、分类、合集及阅读进度；同名目录不会覆盖。',buttons:['取消','确认移动'],defaultId:0,cancelId:0})
+      focusBack()
       if(confirmed.response!==1)return null
       const result=await moveImageItems(getDb(),plan,file=>shell.trashItem(file),protectedPaths());changed();return result
     })
@@ -49,6 +62,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
     if(deleteFiles){
       const target=await imageFileTarget(getDb(),id,protectedPaths())
       const confirmed=await dialog.showMessageBox(getWindow()!,{type:'warning',title:'删除原文件及全部内容',message:'将此作品的原文件夹及全部内容送入回收站？',detail:target+'\n\n包含图片、附带文件和子文件夹；同时移除库中记录。',buttons:['取消','删除原文件'],defaultId:0,cancelId:0})
+      focusBack()
       if(confirmed.response!==1)return false
       await imageOperation(()=>removeImageFiles(getDb(),id,file=>shell.trashItem(file),protectedPaths()))
     }else library().remove(id)
@@ -65,6 +79,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
   handle('prepare-import', async (type: ImageType, multiple: boolean, archive: boolean): Promise<ImageImportPreview | null> => {
     const result = await dialog.showOpenDialog(getWindow()!, { title: archive ? '选择 ZIP／CBZ' : multiple ? '选择包含多个相册／作品的父目录' : '选择一个相册／漫画目录',
       properties: archive ? ['openFile'] : ['openDirectory'], ...(archive ? { filters: [{ name: '漫画归档', extensions: ['zip','cbz'] }] } : {}) })
+    focusBack()
     if (result.canceled || !result.filePaths[0]) return null
     return imageOperation(async () => {
       const items = await scanImageImport(result.filePaths[0], type, multiple && !archive)
@@ -102,6 +117,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
     if (!item) throw new Error('资源不可用')
     const result = await dialog.showOpenDialog(getWindow()!, { title: '重新定位相册／漫画', properties: isArchive(item.path) ? ['openFile'] : ['openDirectory'],
       ...(isArchive(item.path) ? { filters: [{ name: '漫画归档', extensions: ['zip','cbz'] }] } : {}) })
+    focusBack()
     if (result.canceled || !result.filePaths[0]) return null
     return imageOperation(async () => {
       const scanned = (await scanImageImport(result.filePaths[0], item.type, false))[0]
