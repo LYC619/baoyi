@@ -71,7 +71,7 @@ function snapshotWork(d: SqlDb, resourceId: string, directory: string): VideoBun
   return { excluded_files: (d.prepare('SELECT path FROM video_scan_ignores WHERE resource_id = ?').all(resourceId) as Array<{ path: string }>).map(r => relative(r.path)).filter(Boolean),
     excluded_sources: (d.prepare("SELECT source_key FROM video_scan_ignores WHERE resource_id = ? AND source_key != '' AND source_key NOT LIKE 'detached:%'").all(resourceId) as Array<{ source_key: string }>).map(r => r.source_key),
     schema_version: 1, bundle_id: library.directory?.bundleId || randomUUID(), revision: 0, updated_at: Date.now(),
-    work: { title: item.name_zh || item.name_en || item.file_name, name_en: item.name_en, description: item.description || item.summary,
+    work: { media_kind:item.media_kind,video_type:item.video_type,title: item.name_zh || item.name_en || item.file_name, name_en: item.name_en, description: item.description || item.summary,
       original_description: item.original_description, category: item.category, tags: item.hanime_tags.length ? item.hanime_tags : item.tags,
       sources, thumbnail: relative(item.thumbnail_path), thumbnail_source: item.thumbnail_source, poster: relative(item.poster_path), poster_source: item.poster_source || '', provenance: {} },
     items: library.contents.map(episode => ({ id: episode.id, title: episode.title, label: episode.display_label || '', order: episode.episode,
@@ -100,7 +100,7 @@ export function persistVideoWorkBundle(d: SqlDb, resourceId: string, directory?:
       attachments: snapshot.items.find(item => item.id === ep.id)?.attachments,
       originalDescription: ep.original_description, posterPath: ep.poster_path, sourceUrl: ep.source_url, notes: ep.notes,
       watch: { status: ep.watch_status, position: ep.position_sec, watchedAt: ep.watched_at } })))
-  const result = writeBundleFiles({ directory, bundleId: snapshot.bundle_id, title: snapshot.work.title, replaceWorkTitle: true,
+  const result = writeBundleFiles({ mediaKind:item.media_kind,videoType:item.video_type,directory, bundleId: snapshot.bundle_id, title: snapshot.work.title, replaceWorkTitle: true,
     description: snapshot.work.description, originalDescription: snapshot.work.original_description, descriptionOptional: true,
     category: item.category, tags: snapshot.work.tags, sources: snapshot.work.sources, poster: { path: item.poster_path, source: item.poster_source },
     thumbnail: { path: item.thumbnail_path || '', source: item.thumbnail_source }, replaceContents: true,

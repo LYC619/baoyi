@@ -2846,7 +2846,7 @@ async function videoDataSection(): Promise<void> {
     ).map((r) => r.name)
     // 0.6 的库里视频分类一条都没有，走的是 seedCategories 那条路，一次装齐八条 ——
     // 「里番」是 0.8 加的，兜底装的就该是新版的完整一套
-    assert.deepEqual(cats, ['华语', '欧美', '日韩', '动画', '纪录片', '综艺', '里番', '其他'])
+    assert.deepEqual(cats, ['华语', '欧美', '日韩', '动画', '纪录片', '综艺', '里番', '其他', '音频'])
     const tags = (
       d.prepare(`SELECT name, source FROM tags WHERE kind = 'video'`).all() as any[]
     )
@@ -8033,7 +8033,7 @@ async function videoUserEditedSection(): Promise<void> {
     //   9 = video_meta 多了 hanime_id 列（rollback-v9 撤这个）
     // 一个数字标两件事的话，两个回滚脚本的界限就说不清了。
     // 0.9 抬到 10：拆扫描目录（scan_dirs -> software/game/video_scan_dirs）+ identify_logs.resource_kind 列
-    assert.equal(SCHEMA_VERSION, 13, '漫画合集的库形状是 13')
+    assert.equal(SCHEMA_VERSION, 15, '项目对话与媒体类型的库形状是 15')
   })
 }
 

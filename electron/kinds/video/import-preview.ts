@@ -110,7 +110,7 @@ export function createVideoImportManager(options: Options) {
       } }
     save(draft)
     try {
-      const result = await options.scan(draft.batch.roots, progress => { draft.batch.progress = progress; save(draft) }, false, runtime)
+      const result = await options.scan(draft.batch.roots, progress => { draft.batch.progress = progress; save(draft) }, true, runtime)
       const entries: VideoImportEntry[] = oldEntries.filter(entry => entry.status === 'confirmed')
       const rows: Record<string, DraftRow> = Object.fromEntries(entries.map(entry => [entry.id, oldRows[entry.id]]))
       const results = new Map((result.entries || []).map(entry => [key(entry.path), entry]))

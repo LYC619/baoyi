@@ -49,6 +49,7 @@ export const imageSchema: KindSchema = {
     );
   `,
   migrate(db) {
+    db.exec("UPDATE image_meta SET group_id=NULL WHERE item_type='photo' AND group_id IS NOT NULL")
     const seeded = db.prepare("SELECT 1 FROM settings WHERE key = '_image_groups_seeded'").get()
     if (!seeded) {
       for (const [i, name] of ['待整理', '喜欢的作品'].entries()) {

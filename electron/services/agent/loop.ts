@@ -31,6 +31,8 @@ export interface AgentRunResult {
 }
 
 export interface AgentRunOptions {
+  /** Prior conversation turns supplied by persistent workspaces. */
+  history?: Array<{role:'user'|'assistant';content:string}>
   config: AIConfig
   system: string
   user: string
@@ -220,6 +222,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 
   const messages: ChatMessage[] = [
     { role: 'system', content: opts.system },
+    ...(opts.history || []),
     { role: 'user', content: opts.user }
   ]
 

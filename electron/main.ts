@@ -11,6 +11,7 @@ import { initProxy, setHanimeHostsEnabled } from './services/proxy'
 import { buildHanimeHostResolverRules, HANIME_HOSTS, pickStartupIp } from './services/hanime-network-rules'
 import { startHeartbeat } from './services/timing.ts'
 import { imageResponse } from './kinds/image/protocol.ts'
+import { audioResponse } from './kinds/video/audio-playback.ts'
 
 // **必须排在最前面，不能挪进 whenReady。** 绿色版要把 userData 指到 exe 旁边，
 // 而下面的 requestSingleInstanceLock 会在 userData 里建锁文件、createWindow 会
@@ -51,7 +52,7 @@ const getWindow = () => mainWindow
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'baoyi',
-    privileges: { standard: true, secure: true, supportFetchAPI: true }
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
   }
 ])
 
@@ -81,6 +82,7 @@ function registerFileProtocol(): void {
   protocol.handle('baoyi', async (request) => {
     const url = new URL(request.url)
     if (url.hostname === 'image') return imageResponse(url)
+    if (url.hostname === 'audio') return audioResponse(getDb(),request)
     // 海报按完整路径取（?p=），放行规则见 poster-protocol.ts；图标和封面仍按文件名在各自目录里找
     if (url.hostname === 'poster') {
       const file = resolvePosterRequest(request.url, { postersDir: postersDir(), isReferenced: posterReferenced })

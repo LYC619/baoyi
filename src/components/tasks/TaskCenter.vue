@@ -115,7 +115,7 @@ const jobStatusLabels: Record<VideoDownloadJob['status'], string> = { queued: '�
 const stageLabels: Record<VideoJobStage, string> = { pending: '待执行', running: '处理中', complete: '完成', failed: '待重试', skipped: '已跳过' }
 const retryLabels: Record<VideoJobRetry, string> = { remaining: '仅重试剩余视频', metadata: '补齐资料', registration: '仅重试入库' }
 const scanStatusLabels = { new: '新增', updated: '更新', skipped: '跳过', review: '待确认', failed: '失败' }
-const identifyKindLabel = computed(() => ({ software: '软件', game: '游戏', video: '影视', image: '图片' })[activeModule.value])
+const identifyKindLabel = computed(() => ({ software: '软件', game: '游戏', video: '影视', image: '图片', project:'项目' })[activeModule.value])
 const scopeNote = computed(() => activeModule.value === 'image' ? '仅显示图片下载、修复与连载更新记录。暂停后可继续下载。'
   : `仅显示${identifyKindLabel.value}模块的记录；切换顶部模块可查看对应日志。`)
 watch(activeModule, () => {
@@ -403,7 +403,7 @@ onBeforeUnmount(() => {
                 <Check v-if="hasDownloadHistory" :size="30" :stroke-width="1.3" />
                 <ScrollText v-else :size="30" :stroke-width="1.3" />
                 <h3>{{ hasDownloadHistory ? '没有待处理的下载' : '暂无下载记录' }}</h3>
-                <p>{{ hasDownloadHistory ? '切到「全部」能看到已完成的记录。' : activeModule === 'image' ? '从哔咔添加作品后，进度和结果会显示在这里。' : '从 Hanime 添加作品后，进度和结果会显示在这里。' }}</p>
+                <p>{{ hasDownloadHistory ? '切到「全部」能看到已完成的记录。' : activeModule === 'image' ? '从哔咔添加作品后，进度和结果会显示在这里。' : '添加下载任务后，进度和结果会显示在这里。' }}</p>
               </div>
               <template v-for="section in jobSections" :key="section.key">
                 <section v-if="section.jobs.length" class="task-group" :aria-label="section.label">

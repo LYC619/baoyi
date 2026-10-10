@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted } from 'vue'
+import { computed, onUnmounted, watch } from 'vue'
 import { Leaf, Play } from 'lucide-vue-next'
 import type { SoftwareItem } from '@/types'
 import AppIcon from '@/components/ui/AppIcon.vue'
@@ -13,6 +13,9 @@ const props = withDefaults(
     item: SoftwareItem
     view?: 'grid' | 'list'
     unusedDays?: number
+    selectable?: boolean
+    selected?: boolean
+    locked?: boolean
   }>(),
   { view: 'grid', unusedDays: 60 }
 )
@@ -20,6 +23,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'open', id: string): void
   (e: 'launch', id: string): void
+  (e: 'select', id: string): void
 }>()
 
 const settings = useSettingsStore()
@@ -34,6 +38,8 @@ const pending = computed(() => props.item.ai_status !== 'done')
 let clickTimer: ReturnType<typeof setTimeout> | null = null
 
 function onClick(): void {
+  if (props.locked) return
+  if (props.selectable) { emit('select', props.item.id); return }
   if (clickTimer) return
   clickTimer = setTimeout(() => {
     clickTimer = null
@@ -42,6 +48,7 @@ function onClick(): void {
 }
 
 function onDblClick(): void {
+  if (props.selectable || props.locked) return
   if (clickTimer) {
     clearTimeout(clickTimer)
     clickTimer = null
@@ -58,17 +65,24 @@ function onLaunchClick(e: MouseEvent): void {
   emit('launch', props.item.id)
 }
 
+watch(() => props.selectable, () => { if (clickTimer) clearTimeout(clickTimer); clickTimer = null })
+
 onUnmounted(() => clickTimer && clearTimeout(clickTimer))
 </script>
 
 <template>
   <article
     class="card"
-    :class="[`card--${view}`, { 'card--archived': item.is_archived }]"
+    :class="[`card--${view}`, { 'card--archived': item.is_archived, 'card--selected': selected, 'card--selectable': selectable }]"
     :title="item.exe_path"
+    tabindex="0"
+    :aria-label="name"
+    @keydown.enter.self.prevent="onClick"
+    @keydown.space.self.prevent="onClick"
     @click="onClick"
     @dblclick="onDblClick"
   >
+    <input v-if="selectable" class="card__select" type="checkbox" :checked="selected" :disabled="locked" :aria-label="`选择 ${name}`" @click.stop @dblclick.stop @change="emit('select', item.id)" />
     <AppIcon :item="item" :size="view === 'grid' ? 44 : 32" />
 
     <div class="card__body">
@@ -105,7 +119,7 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
       </footer>
     </div>
 
-    <button class="card__play" title="启动（或双击卡片）" @click="onLaunchClick">
+    <button v-if="!selectable" class="card__play" title="启动（或双击卡片）" :aria-label="`启动 ${name}`" @click="onLaunchClick">
       <Play :size="13" fill="currentColor" />
     </button>
 
@@ -113,11 +127,12 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
       绿色软件标识。和启动按钮占同一个角 —— 悬浮时让位给它：
       鼠标已经在卡片上了，那一刻用户想的是「打开它」，不是「它是不是绿色的」。
     -->
-    <Leaf v-if="item.is_portable === true" :size="13" class="card__leaf" title="绿色软件" />
+    <Leaf v-if="item.is_portable === true && !selectable" :size="13" class="card__leaf" title="绿色软件" />
   </article>
 </template>
 
 <style scoped>
+.card--selected{outline:2px solid var(--accent);outline-offset:-2px}.card__select{flex:none;width:18px;height:18px;align-self:center;accent-color:var(--accent)}
 .card {
   position: relative;
   display: flex;
@@ -148,6 +163,8 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
   align-items: center;
   padding: 10px 14px;
 }
+
+.card--list:not(.card--selectable) { padding-right: 50px; }
 
 .card__body {
   flex: 1;
@@ -204,6 +221,7 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
 }
 
 .card--list .card__summary {
+  min-width: 0;
   flex: 1;
   -webkit-line-clamp: 1;
   min-height: 0;
@@ -289,7 +307,7 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
   margin-top: -13px;
 }
 
-.card:hover .card__play {
+.card:hover .card__play, .card:focus-within .card__play {
   opacity: 1;
   transform: scale(1);
 }
@@ -308,7 +326,7 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
   margin-top: -6px;
 }
 
-.card:hover .card__leaf {
+.card:hover .card__leaf, .card:focus-within .card__leaf {
   opacity: 0;
 }
 </style>

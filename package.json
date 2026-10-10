@@ -1,7 +1,7 @@
 {
   "name": "baoyi",
   "productName": "抱一",
-  "version": "0.12.1",
+  "version": "0.15.1",
   "description": "抱一 — 本地资源掌控工具。知止而后得。",
   "author": "BaoYi",
   "license": "MIT",
@@ -66,11 +66,15 @@
     "build-save-manifest": "node --experimental-strip-types --no-warnings scripts/build-save-manifest.ts",
     "dist:portable": "npm run build && electron-builder --dir --config electron-builder.portable.yml --config.electronDist=node_modules/electron/dist",
     "dist:green": "npm run build && electron-builder --config electron-builder.green.yml --config.electronDist=node_modules/electron/dist",
-    "verify-release-config": "node --test scripts/verify-release-config.cjs"
+    "verify-release-config": "node --test scripts/verify-release-config.cjs",
+    "verify-unified-ux": "node --experimental-strip-types --no-warnings scripts/verify-unified-ux.ts",
+    "verify-library-selection": "node --experimental-strip-types --no-warnings scripts/verify-library-selection.ts",
+    "verify-library-query": "node --experimental-strip-types --no-warnings scripts/verify-library-query.ts"
   },
   "dependencies": {
     "@panzoom/panzoom": "4.6.2",
     "better-sqlite3": "^12.2.0",
+    "exifr": "^7.1.3",
     "image-size": "2.0.4",
     "resedit": "^2.0.3"
   },

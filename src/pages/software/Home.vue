@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ChevronRight,
@@ -16,6 +16,8 @@ import {
   Timer
 } from 'lucide-vue-next'
 import CardGrid from '@/components/software/CardGrid.vue'
+import LibraryBulkPanel from '@/components/library/LibraryBulkPanel.vue'
+import { useLibrarySelection } from '@/composables/useLibrarySelection'
 import ReportDialog from '@/components/identify/ReportDialog.vue'
 import SearchBar from '@/components/software/SearchBar.vue'
 import Sidebar from '@/components/software/Sidebar.vue'
@@ -47,6 +49,16 @@ const {
 } = useFilter()
 const ai = useAI()
 const scan = useScan()
+const bulkBusy = ref(false)
+const selection = useLibrarySelection(() => store.items, () => bulkBusy.value)
+const { selecting, selectedIds } = selection
+const bulkTrigger = ref<HTMLButtonElement>()
+watch(selecting, async active => { if (!active) { await nextTick(); bulkTrigger.value?.focus() } })
+const bulkItems = computed(() => store.items.map(item => ({ id: item.id, name: item.name_zh || item.name_en || item.file_name })))
+const bulkCategories = computed(() => [...new Set([...categories.list.map(item => item.name), ...store.items.map(item => item.category)])].filter(Boolean))
+const filtered = computed(() => !!store.keyword.trim() || !!store.mastery || store.selection.kind !== 'group' || store.selection.value !== 'all')
+function clearFilters() { store.keyword = ''; store.mastery = ''; store.select({ kind: 'group', value: 'all' }) }
+async function bulkCompleted(failedIds: string[]) { selectedIds.value = new Set(failedIds); await store.reload() }
 
 const addMenuOpen = ref(false)
 
@@ -57,7 +69,7 @@ const content = ref<HTMLElement | null>(null)
 const report = ref<IdentifyReport | null>(null)
 const reportOpen = ref(false)
 
-const busy = computed(() => scan.running.value || ai.running.value)
+const busy = computed(() => scan.running.value || ai.running.value || bulkBusy.value)
 const busyText = computed(() => {
   if (scan.running.value) return scan.phaseLabel.value
   if (ai.running.value) {
@@ -227,7 +239,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: 'Ê
 </script>
 
 <template>
-  <div class="home">
+  <div class="home" @keydown="selection.key">
     <Sidebar />
 
     <main class="home__main">
@@ -257,6 +269,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: 'Ê
             </button>
           </div>
 
+          <button ref="bulkTrigger" v-if="!selecting" class="btn btn--ghost" :disabled="busy || !store.items.length || store.loading" @click="selection.toggleMode">ÊâπÈáèÁÆ°ÁêÜ</button>
           <div class="add" @click.stop>
             <button class="btn btn--primary" :disabled="busy" @click="addMenuOpen = !addMenuOpen">
               <Plus :size="15" />
@@ -331,8 +344,11 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: 'Ê
         </div>
       </div>
 
+
+      <LibraryBulkPanel v-if="selecting" kind="software" :pending="store.queryPending" :items="bulkItems" :ids="[...selectedIds]" :categories="bulkCategories" @all="selection.selectAll" @clear="selection.clear" @close="selection.toggleMode" @busy="bulkBusy = $event" @completed="bulkCompleted" @refresh="store.reload" />
+
       <Transition name="fade">
-        <div v-if="busy" class="progress">
+        <div v-if="scan.running.value || ai.running.value" class="progress">
           <div class="progress__bar"><i :style="{ width: `${busyPercent}%` }" /></div>
           <span class="progress__text truncate">{{ busyText }}</span>
         </div>
@@ -389,6 +405,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: 'Ê
                 :items="block.items"
                 :view="viewMode"
                 :unused-days="settings.settings.unused_days"
+                :selectable="selecting" :selected-ids="selectedIds" :locked="bulkBusy || store.queryPending" @select="selection.toggle"
                 @open="open"
                 @launch="launch"
               />
@@ -400,6 +417,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: 'Ê
             :items="store.items"
             :view="viewMode"
             :unused-days="settings.settings.unused_days"
+            :selectable="selecting" :selected-ids="selectedIds" :locked="bulkBusy || store.queryPending" @select="selection.toggle"
             @open="open"
             @launch="launch"
           />
@@ -407,6 +425,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: 'Ê
         <div v-else-if="!store.loading" class="empty">
           <h2>{{ emptyHint.title }}</h2>
           <p>{{ emptyHint.desc }}</p>
+          <button v-if="filtered" class="btn btn--ghost" @click="clearFilters">Ê∏ÖÁ©∫Á≠õÈÄâ</button>
         </div>
       </section>
     </main>
@@ -416,6 +435,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: 'Ê
 </template>
 
 <style scoped>
+
 .home {
   display: flex;
   height: 100%;
@@ -434,6 +454,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: 'Ê
   flex: none;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
   padding: 14px 20px 10px;
 }

@@ -23,6 +23,8 @@ export const useSoftwareStore = defineStore('software', () => {
   const items = ref<SoftwareItem[]>([])
   const counts = ref<SidebarCounts>({ ...EMPTY_COUNTS })
   const loading = ref(false)
+  const loadedQuery = ref('')
+  const queryPending = computed(() => loading.value || loadedQuery.value !== JSON.stringify(buildQuery()))
 
   /** load 的请求序号：快慢两个查询并发时，晚到的旧响应不许覆盖新结果 */
   const loadRounds = createLatestGuard()
@@ -64,9 +66,10 @@ export const useSoftwareStore = defineStore('software', () => {
   async function load(): Promise<void> {
     const round = loadRounds.begin()
     loading.value = true
+    const query = buildQuery()
     try {
-      const next = await window.baoyi.software.list(buildQuery())
-      if (loadRounds.isCurrent(round)) items.value = next
+      const next = await window.baoyi.software.list(query)
+      if (loadRounds.isCurrent(round)) { items.value = next; loadedQuery.value = JSON.stringify(query) }
     } catch (err) {
       // 失败时保留旧列表，比清成空列表再显示「还没有收录任何软件」诚实
       if (loadRounds.isCurrent(round)) toastError(`读取列表失败：${errorMessage(err)}`)
@@ -134,6 +137,7 @@ export const useSoftwareStore = defineStore('software', () => {
     items,
     counts,
     loading,
+    queryPending,
     keyword,
     mastery,
     sort,

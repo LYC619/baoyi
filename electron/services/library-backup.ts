@@ -12,6 +12,7 @@
 import { Buffer } from 'node:buffer'
 import { SCHEMA_KEY, SCHEMA_VERSION, type SqlDb } from './schema.ts'
 import { normalizeImagePreferences } from '../../src/utils/image-preferences.ts'
+import { validateProjectEntries } from '../kinds/project/library.ts'
 import { parseCatalogue } from '../kinds/video/discovery/catalogue.ts'
 import {
   LIBRARY_BACKUP_COLUMNS, LIBRARY_BACKUP_FORMAT, LIBRARY_BACKUP_LIMITS, LIBRARY_BACKUP_TABLE_NAMES, LIBRARY_BACKUP_VERSION,
@@ -25,10 +26,10 @@ type ColumnRule = 'text' | 'text?' | 'integer' | 'integer?' | 'real'
 type Budget = { textBytes: number; jsonNodes: number }
 const rules: Readonly<Record<LibraryBackupTableName, Readonly<Record<string, ColumnRule>>>> = LIBRARY_BACKUP_COLUMNS
 const limits = LIBRARY_BACKUP_LIMITS
-const kinds = ['software', 'game', 'video', 'image'] as const
+const kinds = ['software', 'game', 'video', 'image', 'project'] as const
 const journalTables = ['resource', 'video_meta', 'episode', 'video_sources', 'video_assets', 'video_episode_assets', 'video_directories'] as const
 const arrayColumns: Partial<Record<LibraryBackupTableName, readonly string[]>> = {
-  resource: ['tags', 'alternatives'], software_meta: ['launchers'], game_meta: ['save_paths', 'linked_files'],
+  resource: ['tags', 'alternatives'], project_meta:['entries'], software_meta: ['launchers'], game_meta: ['save_paths', 'linked_files'],
   video_meta: ['audio_tracks', 'subtitle_tracks', 'parts', 'linked_files', 'hanime_tags', 'user_edited'],
   episode: ['tags'], task_records: ['events'], organize_plans: ['steps'], pending_software: ['tags', 'launchers', 'new_tags'],
   identify_logs: ['events'], identification_reports: ['entries']
@@ -38,10 +39,11 @@ const watchStates = ['unwatched', 'watching', 'watched', 'dropped'] as const
 // disable CHECK enforcement. These also validate historical journal patches.
 const enumColumns: Partial<Record<LibraryBackupTableName, Record<string, readonly string[]>>> = {
   resource: { kind: kinds }, categories: { kind: kinds }, tags: { kind: kinds },
+  project_meta: { origin:['unknown','self','third-party','mixed'], status:['active','maintaining','paused','archived'] },
   image_meta: { item_type: ['photo','comic'], publication: ['unknown','ongoing','completed'] },
   image_download_jobs: { status: ['queued','running','paused','success','failed','cancelled','interrupted'] },
   game_meta: { play_status: ['unplayed', 'playing', 'completed', 'shelved'] },
-  video_meta: { video_type: ['movie', 'series'], watch_status: watchStates },
+  video_meta: { media_kind:['video','audio','other'], video_type: ['movie', 'series'], watch_status: watchStates },
   episode: { watch_status: watchStates }, video_sources: { scope: ['work', 'episode'] },
   video_assets: { role: ['video', 'subtitle', 'poster', 'attachment'], state: ['unchecked', 'present', 'missing', 'offline'] },
   task_records: { status: ['running', 'success', 'failed', 'cancelled', 'interrupted'] },
@@ -144,7 +146,7 @@ function primaryKey(table: LibraryBackupTableName): readonly string[] {
 function validateRow(table: LibraryBackupTableName, input: unknown, at: string, budget: Budget, partial = false, embedded = false): Row {
   const columns = columnNames(table)
   if (table === 'episode' && !partial) input = { published_at: 0, studio: '', tags: '[]', poster_source: '', thumbnail_path: '', thumbnail_source: '', original_title: '', description: '', original_description: '', poster_path: '', source_url: '', notes: '', ...object(input, at) }
-  if (table === 'video_meta' && !partial) input = { thumbnail_path: '', thumbnail_source: '', ...object(input, at) }
+  if (table === 'video_meta' && !partial) input = { media_kind:'video', thumbnail_path: '', thumbnail_source: '', ...object(input, at) }
   if (table === 'video_directories' && !partial) input = { missing: '[]', ...object(input, at) }
   const row = keys(input, partial ? [] : columns, at, partial ? columns : [])
   const result: Row = {}
@@ -185,6 +187,7 @@ function validateRow(table: LibraryBackupTableName, input: unknown, at: string, 
       finiteNumber(mark.userRating, at + '.userRating')
       if ((mark.userRating as number) < 0 || (mark.userRating as number) > 5 || (mark.notes as string).length > 4000) invalid(at + ' invalid personal rating or notes')
     }
+    if (table === 'project_sessions') validateProjectSession(result,budget,at)
     if (table === 'video_download_jobs') validateJob(result, budget, at)
     if (table === 'video_organize_journal') validateJournal(result, budget, at)
   }
@@ -196,6 +199,29 @@ function sourceRef(input: unknown, at: string): void {
   for (const key of ['provider', 'externalId', 'pageUrl']) string(ref[key], `${at}.${key}`)
   oneOf(ref.scope, ['work', 'episode'], `${at}.scope`)
   oneOf(ref.evidence, ['confirmed', 'playlist', 'bundle', 'nfo', 'legacy'], `${at}.evidence`)
+}
+
+function validateProjectSession(row:Row,budget:Budget,at:string):void {
+  const session=keys(json(row.payload,'object',at+'.payload',budget),['id','projectId','title','updatedAt','status','messages','tokens','error'],at)
+  for(const field of ['id','projectId','title','error'])string(session[field],at+'.'+field)
+  if(session.id!==row.id||session.projectId!==row.resource_id||session.title!==row.title||session.updatedAt!==row.updated_at)invalid(at+' row and session disagree')
+  integer(session.updatedAt,at+'.updatedAt');integer(session.tokens,at+'.tokens')
+  oneOf(session.status,['idle','running','interrupted','failed'],at+'.status')
+  const messages=array(session.messages,at+'.messages');if(messages.length>100)invalid(at+' too many messages')
+  const ids=new Set<string>()
+  for(const input of messages){
+    const message=keys(input,['id','role','text','createdAt','events'],at+'.message',['proposal'])
+    string(message.id,at+'.message.id');string(message.text,at+'.message.text');integer(message.createdAt,at+'.createdAt');oneOf(message.role,['user','assistant'],at+'.role')
+    if(ids.has(message.id as string))invalid(at+' repeated message id');ids.add(message.id as string)
+    for(const value of array(message.events,at+'.events')){const event=keys(value,['label','detail'],at+'.event',['error']);string(event.label,at+'.label');string(event.detail,at+'.detail');if(event.error!==undefined)boolean(event.error,at+'.error')}
+    if(message.proposal){
+      const proposal=keys(message.proposal,['patch','before','stamp','applied'],at+'.proposal');string(proposal.stamp,at+'.stamp');boolean(proposal.applied,at+'.applied')
+      for(const field of ['patch','before']){
+        const patch=keys(proposal[field],[],at+'.'+field,['name','summary','category','source','state','group','tags','notes'])
+        for(const [key,value] of Object.entries(patch))if(key==='tags')strings(value,at+'.tags');else string(value,at+'.'+key)
+      }
+    }
+  }
 }
 
 function validateJob(row: Row, budget: Budget, at: string): void {
@@ -381,7 +407,8 @@ function validateInput(input: unknown): LibraryBackup {
   const legacyImages = header.schema_version < 11 ? { image_groups: [], image_meta: [], image_chapters: [], image_pages: [], image_progress: [], image_download_jobs: [] } : {}
   const legacyReader = header.schema_version < 12 ? { image_reader_state: [], image_bookmarks: [] } : {}
   const legacyCollections = header.schema_version < 13 ? {image_collections:[],image_collection_members:[]} : {}
-  const source = keys({ video_scan_state: [], video_scan_ignores: [], video_detached_owners: [], video_discovery_sources: [], video_discovery_marks: [], ...legacyImages, ...legacyReader, ...legacyCollections, ...object(header.tables, 'tables') }, LIBRARY_BACKUP_TABLE_NAMES, 'tables')
+  const legacyProjects = {...(header.schema_version < 14 ? {project_meta:[]} : {}),...(header.schema_version < 15 ? {project_sessions:[]} : {})}
+  const source = keys({ video_scan_state: [], video_scan_ignores: [], video_detached_owners: [], video_discovery_sources: [], video_discovery_marks: [], ...legacyImages, ...legacyReader, ...legacyCollections, ...legacyProjects, ...object(header.tables, 'tables') }, LIBRARY_BACKUP_TABLE_NAMES, 'tables')
   let totalRows = 0
   // Bound every table before traversing any rows or issuing metadata writes.
   for (const table of LIBRARY_BACKUP_TABLE_NAMES) {
@@ -429,9 +456,14 @@ function inspectSchema(db: SqlDb): number {
 }
 
 function checkIntegrity(db: SqlDb): void {
+  for (const row of db.prepare('SELECT entries,default_entry,pinned FROM project_meta').all() as Array<{entries:string;default_entry:string;pinned:number}>) {
+    const entries=validateProjectEntries(JSON.parse(row.entries))
+    if(row.default_entry&&!entries.some(e=>e.id===row.default_entry))invalid('project default entry is missing')
+    if(row.pinned!==0&&row.pinned!==1)invalid('project pinned must be 0 or 1')
+  }
   if (db.prepare('PRAGMA main.foreign_key_check').get()) invalid('foreign key check failed')
   for (const [table, kind] of [
-    ['software_meta', 'software'], ['game_meta', 'game'], ['video_meta', 'video'], ['episode', 'video'],
+    ['software_meta', 'software'], ['project_meta', 'project'], ['project_sessions','project'], ['game_meta', 'game'], ['video_meta', 'video'], ['episode', 'video'],
     ['video_sources', 'video'], ['video_directories', 'video'], ['video_assets', 'video'],
     ['image_meta', 'image'], ['image_chapters', 'image'], ['image_pages', 'image'], ['image_progress', 'image'], ['image_reader_state', 'image'], ['image_bookmarks', 'image']
   ] as const) {
@@ -531,7 +563,7 @@ export function buildLibraryBackup(db: SqlDb): LibraryBackup {
 
 function summarize(backup: LibraryBackup): LibraryBackupSummary {
   const table_counts = {} as LibraryBackupSummary['table_counts']
-  const resources: LibraryBackupSummary['resources'] = { software: 0, game: 0, video: 0, image: 0 }
+  const resources: LibraryBackupSummary['resources'] = { software: 0, game: 0, video: 0, image: 0, project:0 }
   for (const table of LIBRARY_BACKUP_TABLE_NAMES) table_counts[table] = backup.tables[table].length
   for (const row of backup.tables.resource) resources[row.kind as keyof typeof resources]++
   return { format: backup.format, version: backup.version, schema_version: backup.schema_version,
@@ -543,6 +575,10 @@ function summarize(backup: LibraryBackup): LibraryBackupSummary {
 }
 
 function interruptedRow(table: LibraryBackupTableName, row: Row): Row {
+  if(table==='project_sessions') {
+    const session=JSON.parse(row.payload as string)
+    if(session.status==='running')return {...row,payload:JSON.stringify({...session,status:'interrupted',error:'对话从备份恢复，可继续发送消息。'})}
+  }
   if (table === 'image_download_jobs' && (row.status === 'running' || row.status === 'queued')) {
     const job = JSON.parse(row.payload as string)
     return { ...row, status: 'interrupted', payload: JSON.stringify({ ...job, status: 'interrupted' }) }

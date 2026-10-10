@@ -144,6 +144,7 @@ import { assertLibraryIdle, registerLibraryBackupIpc } from './library-backup.ts
 import { registerLibrarySnapshotIpc } from './library-snapshots.ts'
 import { createHanimeBrowser } from '../services/hanime-browser.ts'
 import { registerImageIpc } from './image.ts'
+import { registerProjectIpc } from './project.ts'
 import { registerImageSourceIpc } from './image-source.ts'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
@@ -161,6 +162,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   registerLibraryBackupIpc(getWindow, ipcMain)
   registerLibrarySnapshotIpc(getWindow, ipcMain)
   registerImageIpc(getWindow, ipcMain)
+  registerProjectIpc(getWindow, ipcMain)
   registerImageSourceIpc(getWindow, ipcMain)
   const send = (channel: string, payload: unknown) => {
     const win = getWindow()

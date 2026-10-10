@@ -14,7 +14,7 @@ import { formatDuration, posterUrl, videoTitle } from '@/utils'
 import { videoDateLabel, videoEpisodeLabel } from '@/utils/video-content'
 import { WATCH_STATUS_LABEL } from '@/stores/video'
 
-const props = withDefaults(defineProps<{ item: VideoItem; episode?: VideoWorkContent; status?: string; recent?: string; selectable?: boolean; selected?: boolean; showPublished?: boolean }>(), { status: '', recent: '', selectable: false, selected: false, showPublished: false })
+const props = withDefaults(defineProps<{ item: VideoItem; episode?: VideoWorkContent; status?: string; recent?: string; selectable?: boolean; selected?: boolean; locked?: boolean; showPublished?: boolean }>(), { status: '', recent: '', selectable: false, selected: false, showPublished: false })
 defineEmits<{ (e: 'open', id: string): void; (e: 'poster-error', id: string): void; (e: 'select', id: string, event: MouseEvent): void }>()
 
 const title = computed(() => props.episode ? props.episode.title || props.episode.original_title || videoEpisodeLabel(props.episode, props.item.category === '里番') : videoTitle(props.item))
@@ -58,7 +58,7 @@ const videoCount = computed(() => typeof props.item.available_files === 'number'
 </script>
 
 <template>
-  <button class="card" :class="{ 'card--selected': selectable && selected }" type="button" :title="title" :aria-label="selectable ? '选择作品：' + title : undefined" :aria-pressed="selectable ? selected : undefined" @click="selectable ? $emit('select', item.id, $event) : $emit('open', item.id)">
+  <button :disabled="selectable && locked" class="card" :class="{ 'card--selected': selectable && selected }" type="button" :title="title" :aria-label="selectable ? '选择作品：' + title : undefined" :aria-pressed="selectable ? selected : undefined" @click="selectable ? $emit('select', item.id, $event) : $emit('open', item.id)">
     <div class="card__poster" :style="{ '--hue': hue }">
       <img v-if="poster && !posterFailed" :src="poster" :alt="title" class="card__img"
         @error="posterFailed = true; !episode && $emit('poster-error', item.id)" />

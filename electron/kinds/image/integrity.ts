@@ -5,10 +5,12 @@ import type { ImageAudit, ImageAuditEntry, ImagePageInfo } from '../../../src/ty
 import { ImageLibrary } from './library.ts'
 import { readImagePage } from './files.ts'
 import { inspectImage } from './metadata.ts'
+import { readPhotoMetadata } from './photo-metadata.ts'
 import { manifestPath, readImageManifest, readManifestPage } from './manifest.ts'
 
 export async function imagePageInfo(db: SqlDb, pageId: string): Promise<ImagePageInfo> {
-  return inspectImage((await readImagePage(db, pageId)).data)
+  const { data }=await readImagePage(db,pageId)
+  return {...inspectImage(data),photo:await readPhotoMetadata(data)}
 }
 export async function auditImage(db: SqlDb, id: string): Promise<ImageAudit> {
   const library = new ImageLibrary(db), item = library.get(id)

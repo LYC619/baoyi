@@ -92,6 +92,8 @@ const detailTabs = computed(() => [
   { id: 'notes' as const, label: '个人笔记' },
   { id: 'files' as const, label: '文件与资料' }
 ])
+watch(()=>router.currentRoute.value.query.tab, value=>{activeTab.value=detailTabs.value.find(t=>t.id===value)?.id||'contents'},{immediate:true})
+watch(activeTab, value=>{if(router.currentRoute.value.query.tab!==value)void router.replace({query:{...router.currentRoute.value.query,tab:value}})})
 const visibleTags = computed(() => [...new Set([...(item.value?.tags ?? []), ...(item.value?.hanime_tags ?? [])])].filter(tag => tag.trim() && !/^(add|remove)$/i.test(tag.trim())))
 const tagsElement = ref<HTMLElement | null>(null)
 const tagsExpanded = ref(false)
@@ -264,14 +266,14 @@ async function markWatched(content: VideoWorkContent | null, status: WatchStatus
 onMounted(() => {
   editing.value = router.currentRoute?.value.query.edit === '1'
   void load()
-  unlistenLibrary = window.baoyi.video.onLibraryChanged(id => { if (id === props.id) void refreshLibrary() })
+  unlistenLibrary = window.baoyi.video.onLibraryChanged(id => { if (!id || id === props.id) void refreshLibrary() })
 })
 onBeforeUnmount(() => { loadRound++; unlistenLibrary?.(); tagsObserver?.disconnect() })
 watch(() => router.currentRoute?.value.query.edit, value => { editing.value = value === '1' })
 watch(() => props.id, () => {
   organizeMode.value = ''
   renameOpen.value = false
-  activeTab.value = 'contents'
+  activeTab.value = detailTabs.value.find(t=>t.id===router.currentRoute.value.query.tab)?.id || 'contents'
   selectedEpisodeId.value = ''
   readingScopeInitialized = false
   lastCheck.value = ''
@@ -416,8 +418,9 @@ function filterByTag(tag: string): void {
 /** 走 store 而不是直接调 IPC：海报墙和侧边栏计数要跟着一起更新 */
 async function changeType(value: string): Promise<void> {
   if (!item.value) return
-  if (value === 'hentai') await save({ category: HENTAI_CATEGORY })
-  else if (value === 'movie' || value === 'series') await save({ video_type: value, ...(item.value.category === HENTAI_CATEGORY ? { category: '其他' } : {}) })
+  if (value === 'hentai') await save({ category: HENTAI_CATEGORY,media_kind:'video' })
+  else if(value==='other'||value==='audio')await save({media_kind:value,...(item.value.category===HENTAI_CATEGORY?{category:'其他'}:{})})
+  else if (value === 'movie' || value === 'series') await save({ video_type: value,media_kind:'video', ...(item.value.category === HENTAI_CATEGORY ? { category: '其他' } : {}) })
 }
 
 async function save(patch: Partial<VideoItem>): Promise<void> {
@@ -781,7 +784,7 @@ function copyPath(path: string): void {
               />
               </template>
               <template v-else>
-                <div class="hero__title-line"><h1 class="hero__title">{{ title }}</h1><span class="hero__badge"><Clapperboard :size="12" />{{ item.category === HENTAI_CATEGORY ? '里番' : VIDEO_TYPE_LABEL[item.video_type] }}</span></div>
+                <div class="hero__title-line"><h1 class="hero__title">{{ title }}</h1><span class="hero__badge"><Clapperboard :size="12" />{{ item.media_kind==='audio'?'音频':item.media_kind==='other'?'其他':item.category === HENTAI_CATEGORY ? '里番' : VIDEO_TYPE_LABEL[item.video_type] }}</span></div>
                 <p v-if="item.name_en && item.name_en !== title" class="hero__original">{{ item.name_en }}</p>
               </template>
 
@@ -833,7 +836,7 @@ function copyPath(path: string): void {
             </div>
             <aside class="hero__facts" aria-label="作品信息">
               <span v-if="item.category && item.category !== HENTAI_CATEGORY" class="hero__category">{{ item.category }}</span>
-              <label v-if="editing" class="hero__field">类型<select class="input" aria-label="视频类型" :value="item.category === HENTAI_CATEGORY ? 'hentai' : item.video_type" @change="changeType(($event.target as HTMLSelectElement).value)"><option value="movie">电影</option><option value="series">剧集</option><option value="hentai">里番</option></select></label>
+              <label v-if="editing" class="hero__field">类型<select class="input" aria-label="视频类型" :value="item.media_kind==='audio'||item.media_kind==='other'?item.media_kind:item.category === HENTAI_CATEGORY ? 'hentai' : item.video_type" @change="changeType(($event.target as HTMLSelectElement).value)"><option value="movie">电影</option><option value="series">剧集</option><option value="hentai">里番</option><option value="other">其他</option><option value="audio">音频</option></select></label>
               <label v-if="editing && item.category !== HENTAI_CATEGORY" class="hero__field">分类<input class="input" :value="item.category" list="video-category-options" aria-label="视频分类" @change="save({ category: ($event.target as HTMLInputElement).value.trim() })" /></label>
               <datalist id="video-category-options"><option v-for="name in ['华语', '欧美', '日韩', '动画', '纪录片', '综艺', '其他']" :key="name" :value="name" /></datalist>
               <div class="hero__tag-heading">作品标签<span v-if="(library?.contents.length || 0) > 1"> · 各集标签独立保存</span></div>

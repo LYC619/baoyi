@@ -14,6 +14,7 @@ import { useSoftwareStore } from '@/stores/software'
 import { useGameStore } from '@/stores/game'
 import { useVideoStore } from '@/stores/video'
 import { useImageStore } from '@/stores/image'
+import { useProjectStore } from '@/stores/project'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +22,7 @@ const software = useSoftwareStore()
 const game = useGameStore()
 const video = useVideoStore()
 const images = useImageStore()
+const projects = useProjectStore()
 
 const maximized = ref(false)
 let unsubscribe: (() => void) | null = null
@@ -32,6 +34,7 @@ onMounted(async () => {
   void game.refreshCounts()
   void video.refreshCounts()
   void images.refresh()
+  void projects.refresh()
 })
 
 onUnmounted(() => unsubscribe?.())
@@ -55,12 +58,13 @@ const stats = computed<Record<ModuleKey, { total: number | null; pending: number
   software: { total: software.counts.all, pending: software.counts.pending_confirm },
   game: { total: game.counts.all, pending: 0 },
   video: { total: video.counts.all, pending: 0 },
-  image: { total: images.count, pending: 0 }
+  image: { total: images.count, pending: 0 },
+  project: { total: projects.items.length, pending: 0 }
 }))
 
 function go(key: ModuleKey): void {
-  if (key === activeModule.value) return
-  void router.push(moduleTarget(key))
+  const tab = MODULE_TABS.find(tab => tab.key === key)!
+  void router.push(key === activeModule.value ? { name: tab.home } : moduleTarget(key))
 }
 </script>
 
@@ -77,6 +81,7 @@ function go(key: ModuleKey): void {
         :key="tab.key"
         class="tab"
         :class="{ 'tab--on': activeModule === tab.key }"
+        :title="activeModule === tab.key ? `返回${tab.label}库首页` : `切换到${tab.label}库`"
         @click="go(tab.key)"
       >
         <span>{{ tab.label }}</span>

@@ -231,3 +231,8 @@ select optgroup {
   padding: var(--pad-card);
   box-shadow: var(--shadow-card);
 }
+/* Every library uses the same visible keyboard focus, including custom cards. */
+:where(button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

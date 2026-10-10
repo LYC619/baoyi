@@ -2,12 +2,15 @@
 import { onMounted, ref, watch } from 'vue'
 import type { VideoRemovalPreview } from '@/types/video-management'
 import { errorMessage, formatBytes, plain } from '@/utils'
-const props = defineProps<{ resourceIds: string[]; episodeId?: string }>()
-const emit = defineEmits<{ close: []; changed: [detachedId: string] }>()
+const props = defineProps<{ resourceIds: string[]; episodeId?: string; pending?: boolean }>()
+const emit = defineEmits<{ close: []; changed: [detachedId: string]; busy: [value: boolean] }>()
 const dialog = ref<HTMLDialogElement | null>(null), action = ref<'remove' | 'detach'>('remove'), deleteLocal = ref(false)
 const preview = ref<VideoRemovalPreview | null>(null), busy = ref(false), failure = ref('')
+watch(busy, value => emit('busy', value), { flush: 'sync' })
+watch(() => props.pending, pending => { if (pending) { revision++; preview.value = null } })
 let revision = 0
 async function inspect() {
+  if (props.pending || busy.value) return
   const current = ++revision; preview.value = null; failure.value = ''
   try { const result = await window.baoyi.video.previewRemoval(plain({ resourceIds: props.resourceIds, episodeId: props.episodeId, action: action.value, deleteLocal: action.value === 'remove' && deleteLocal.value })); if (current === revision) preview.value = result }
   catch (e) { if (current === revision) failure.value = errorMessage(e) }
@@ -15,7 +18,7 @@ async function inspect() {
 onMounted(() => { dialog.value?.showModal(); void inspect() })
 watch([action, deleteLocal], inspect)
 async function apply() {
-  if (!preview.value) return
+  if (props.pending || busy.value || !preview.value) return
   busy.value = true; failure.value = ''
   try {
     const result = await window.baoyi.video.applyRemoval(plain(preview.value))
@@ -34,7 +37,7 @@ async function apply() {
     <p>{{ action === 'detach' ? '文件位置和观看进度会保留，首页将显示独立条目。' : deleteLocal ? '共享文件会保留；已缺失的文件无需处理。' : '本地文件保留，后续普通重扫会跳过已移除的内容。' }}</p>
     <template v-if="preview"><p>{{ preview.titles.join('、') }} · {{ preview.episodeCount }} 个内容项</p><ul><li v-for="file in preview.files" :key="file.path"><span>{{ file.path }}</span><small>{{ file.shared ? '共享，保留' : !file.present ? '已缺失' : deleteLocal && action === 'remove' ? '移入回收站' : '保留文件' }} · {{ formatBytes(file.size) }}</small></li></ul></template>
     <p v-if="failure" role="alert">{{ failure }}</p>
-    <footer><button v-if="!preview && !busy" class="btn btn--subtle" @click="inspect">重新检查范围</button><button class="btn btn--primary" :disabled="busy || !preview" @click="apply">{{ busy ? '正在处理…' : action === 'detach' ? '确认移出合集' : deleteLocal ? '删除记录并移入回收站' : '确认移除记录' }}</button></footer>
+    <footer><button v-if="!preview && !busy" class="btn btn--subtle" @click="inspect">重新检查范围</button><button class="btn btn--primary" :disabled="pending || busy || !preview" @click="apply">{{ busy ? '正在处理…' : action === 'detach' ? '确认移出合集' : deleteLocal ? '删除记录并移入回收站' : '确认移除记录' }}</button></footer>
   </dialog>
 </template>
 <style scoped>

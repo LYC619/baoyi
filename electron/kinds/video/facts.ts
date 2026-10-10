@@ -34,6 +34,7 @@
  */
 
 import { readVideoLocalMetadata } from './local-metadata.ts'
+import { isAudioFile } from '../../../src/utils/audio.ts'
 import type { VideoContentInput } from '../../../src/types/video-library.ts'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
@@ -353,6 +354,12 @@ export function mergeFacts(
 
   const rep = repFiles[0]
   const repContainer = rep ? containers.get(rep.path) : undefined
+  if (allFiles.length && allFiles.every(file=>isAudioFile(file.path)) && repContainer?.music) {
+    const music=repContainer.music
+    if (!nfo) f.title_zh=(candidate.video_type==='series'?music.album:music.title)||f.title_zh
+    f.tags=mergeList(f.tags,[music.artist,music.album])
+    f.plot ||= [music.artist && `演奏者：${music.artist}`,music.album && `专辑：${music.album}`].filter(Boolean).join('\n')
+  }
 
   if (rep) {
     // 容器压过文件名：文件名可能写错（改名转发的片子），容器不会
@@ -394,7 +401,7 @@ export function mergeFacts(
       local_metadata: epNfo ? { originalTitle: epNfo.original_title, description: epNfo.plot, tags: mergeList(epNfo.tags, epNfo.genres) } : undefined,
       season: ep.season,
       episode: ep.episode,
-      title: firstNonEmpty(epNfo?.title, ep.title),
+      title: firstNonEmpty(epNfo?.title, container?.music?.title, ep.title),
       path: head.path,
       // 分卷的一集，大小是各卷之和
       file_size: ep.files.reduce((acc, x) => acc + x.size, 0),

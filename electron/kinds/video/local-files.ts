@@ -1,4 +1,5 @@
 import { readVideoLocalMetadata } from './local-metadata.ts'
+import { isAudioFile } from '../../../src/utils/audio.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SqlDb } from '../../services/schema.ts'
@@ -18,7 +19,7 @@ export function localVideoFiles(directory: string, recursive = true): string[] {
       if (entry.isSymbolicLink()) continue
       const file = path.join(folder, entry.name)
       if (recursive && entry.isDirectory() && !entry.name.startsWith('.')) walk(file, depth + 1)
-      else if (entry.isFile() && /\.(mp4|mkv|avi|mov|m4v|webm|wmv|mpg|mpeg|ts|m2ts|flv)$/i.test(entry.name)) files.push(file)
+      else if (entry.isFile() && (/\.(mp4|mkv|avi|mov|m4v|webm|wmv|mpg|mpeg|ts|m2ts|flv)$/i.test(entry.name) || isAudioFile(entry.name))) files.push(file)
     }
   }
   walk(path.resolve(directory), 0)

@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowRight, Loader2, X } from 'lucide-vue-next'
 import type { VideoLayoutPreview, VideoLayoutResult } from '@/types/video-organize'
 import { errorMessage } from '@/utils'
 
-const props = defineProps<{ ids: string[] }>()
-const emit = defineEmits<{ close: []; changed: [] }>()
+const props = defineProps<{ ids: string[]; pending?: boolean }>()
+const emit = defineEmits<{ close: []; changed: []; busy: [value: boolean] }>()
 const dialog = ref<HTMLDialogElement | null>(null)
 const preview = ref<VideoLayoutPreview | null>(null)
 const result = ref<VideoLayoutResult | null>(null)
 const busy = ref(false), loading = ref(true), failure = ref('')
+watch(busy, value => emit('busy', value), { flush: 'sync' })
 const actionLabel = { 'move-directory': '移动整个目录', 'move-files': '搬文件进新目录', 'in-place': '已就位', skip: '这次不动' } as const
 const summary = computed(() => {
   const entries = preview.value?.entries ?? []
@@ -22,7 +23,7 @@ async function load(): Promise<void> {
   finally { loading.value = false }
 }
 async function apply(): Promise<void> {
-  if (busy.value || !preview.value?.movable) return
+  if (props.pending || busy.value || !preview.value?.movable) return
   busy.value = true; failure.value = ''
   try { result.value = await window.baoyi.videoOrganize.layoutApply([...props.ids]); emit('changed') }
   catch (error) { failure.value = errorMessage(error) }
@@ -59,7 +60,7 @@ onBeforeUnmount(() => dialog.value?.close())
       </template>
       <footer>
         <button type="button" class="btn btn--ghost" :disabled="busy" @click="emit('close')">{{ result ? '关闭' : '取消' }}</button>
-        <button v-if="!result" type="button" class="btn btn--primary" :disabled="busy || loading || !preview?.movable" @click="apply"><Loader2 v-if="busy" class="spin" :size="14" />{{ busy ? '正在移动…' : `开始移动 ${summary.move} 部` }}</button>
+        <button v-if="!result" type="button" class="btn btn--primary" :disabled="pending || busy || loading || !preview?.movable" @click="apply"><Loader2 v-if="busy" class="spin" :size="14" />{{ busy ? '正在移动…' : `开始移动 ${summary.move} 部` }}</button>
       </footer>
     </dialog>
   </Teleport>

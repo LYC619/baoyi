@@ -7,7 +7,8 @@ export interface ImageGroup { id: string; name: string; sortOrder: number; hidde
 export interface ImageCollection { id:string; name:string; members:string[] }
 export interface ImageMoveResult { moved:number; paths:string[]; warnings:string[] }
 export interface ImagePage { id: string; resourceId: string; chapterId: string | null; ordinal: number; size: number; missing: boolean }
-export interface ImagePageInfo { width: number; height: number; format: string; size: number }
+export interface PhotoMetadata { takenAt?:string; camera?:string; lens?:string; exposure?:string; aperture?:string; iso?:number; focalLength?:string; orientation?:string }
+export interface ImagePageInfo { width: number; height: number; format: string; size: number; photo?:PhotoMetadata }
 export interface ImageAuditEntry {
   key: string; chapterId: string; sourcePageId: string; pageId: string; title: string; ordinal: number;
   status: 'ok' | 'missing' | 'damaged' | 'unverified'; reason: string; repairable: boolean; info?: ImagePageInfo;

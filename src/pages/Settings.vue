@@ -36,6 +36,8 @@ import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
 import IdentifyLog from '@/components/identify/IdentifyLog.vue'
 import ReportDialog from '@/components/identify/ReportDialog.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
+import ProjectSettings from '@/components/project/ProjectSettings.vue'
+import {useProjectStore} from '@/stores/project'
 import LibrarySafetyPanel from '@/components/settings/LibrarySafetyPanel.vue'
 import FfmpegPanel from '@/components/settings/FfmpegPanel.vue'
 import { useAI } from '@/composables/useAI'
@@ -73,6 +75,7 @@ const store = useSoftwareStore()
 // 「隐藏里番」的开关要在设置页里当场让影视那边重查，所以这儿得拿到它的 store
 const video = useVideoStore()
 const game = useGameStore()
+const project = useProjectStore()
 const catStore = useCategoriesStore()
 const { success, error, toast } = useToast()
 const scan = useScan()
@@ -85,15 +88,16 @@ const ai = useAI()
 /* -------------------------------- 分页 -------------------------------- */
 
 const ALL_TABS = [
+  { id:'project',label:'项目偏好',icon:FolderTree,modules:['project'] },
   { id: 'scan', label: '扫描与识别', icon: Telescope, modules: ['software', 'game', 'video'] },
   { id: 'organize', label: '目录整理', icon: FolderTree, modules: ['software'] },
-  { id: 'ai', label: 'AI 配置', icon: Bot, modules: ['software', 'game', 'video'] },
+  { id: 'ai', label: 'AI 配置', icon: Bot, modules: ['software', 'game', 'video', 'project'] },
   { id: 'search', label: '搜索服务', icon: Globe, modules: ['game', 'video'] },
-  { id: 'appearance', label: '外观', icon: Palette, modules: ['software', 'game', 'video', 'image'] },
-  { id: 'taxonomy', label: '分类与标签', icon: Tags, modules: ['software', 'game', 'video'] },
+  { id: 'appearance', label: '外观', icon: Palette, modules: ['software', 'game', 'video', 'image', 'project'] },
+  { id: 'taxonomy', label: '分类与标签', icon: Tags, modules: ['software', 'game', 'video', 'project'] },
   { id: 'logs', label: '识别日志', icon: ScrollText, modules: ['software', 'game', 'video'] },
-  { id: 'data', label: '数据管理', icon: Database, modules: ['software', 'game', 'video', 'image'] },
-  { id: 'about', label: '关于', icon: Info, modules: ['software', 'game', 'video', 'image'] }
+  { id: 'data', label: '数据管理', icon: Database, modules: ['software', 'game', 'video', 'image', 'project'] },
+  { id: 'about', label: '关于', icon: Info, modules: ['software', 'game', 'video', 'image', 'project'] }
 ] as const
 
 // 根据当前模块过滤标签页
@@ -905,15 +909,21 @@ const newCategory = ref('')
 const newTag = ref('')
 
 async function loadTaxonomy(): Promise<void> {
+  if(activeModule.value==='project')await project.refresh()
   await catStore.load(activeModule.value)
   tags.value = await window.baoyi.tags.list(activeModule.value)
+  await refreshTaxonomy()
 }
 
 onMounted(loadTaxonomy)
+watch(activeModule, () => { mergePick.value=[]; mergeInto.value=null; void loadTaxonomy(); tab.value=tabFromRoute(route.query.tab) })
+
+const taxonomyStore = computed(() => activeModule.value === 'game' ? game : activeModule.value === 'video' ? video : store)
+async function refreshTaxonomy(): Promise<void> { if(activeModule.value==='project')await project.refresh();else await taxonomyStore.value.reload() }
 
 /** 每个分类名下挂着多少软件。侧边栏计数已经算过一遍，直接借用 */
 const categoryCount = computed(
-  () => new Map(store.counts.categories.map((c) => [c.name, c.count]))
+  () => activeModule.value==='project' ? new Map(catStore.list.map(c=>[c.name,project.items.filter(i=>i.category===c.name).length])) : new Map(taxonomyStore.value.counts.categories.map((c) => [c.name, c.count]))
 )
 
 const visibleTags = computed(() => {
@@ -931,7 +941,7 @@ const TAG_SOURCE_META: Record<Tag['source'], { label: string; tone: 'muted' | 'a
 
 async function saveCategory(c: Category, patch: Partial<Category>): Promise<void> {
   await catStore.upsert({ ...c, ...patch }, activeModule.value)
-  await store.refreshCounts()
+  await refreshTaxonomy()
 }
 
 function onCategoryField(c: Category, field: 'name' | 'description' | 'icon', e: Event): void {
@@ -950,7 +960,7 @@ async function addCategory(): Promise<void> {
   const max = catStore.list.reduce((n, c) => Math.max(n, c.sort_order), 0)
   await catStore.upsert({ id: '', name, description: '', icon: 'box', sort_order: max + 1 }, activeModule.value)
   newCategory.value = ''
-  await store.refreshCounts()
+  await refreshTaxonomy()
 }
 
 async function shiftCategory(id: string, delta: number): Promise<void> {
@@ -959,10 +969,10 @@ async function shiftCategory(id: string, delta: number): Promise<void> {
 
 async function dropCategory(c: Category): Promise<void> {
   const n = categoryCount.value.get(c.name) ?? 0
-  const warn = n > 0 ? `\n名下 ${n} 个软件会归入「其他」。` : ''
+  const warn = n > 0 ? `\n名下 ${n} 个条目会归入「其他」。` : ''
   if (!window.confirm(`删除分类「${c.name}」？${warn}\n不会删除任何实际文件。`)) return
   await catStore.remove(c.id)
-  await store.refreshCounts()
+  await refreshTaxonomy()
 }
 
 async function addTag(): Promise<void> {
@@ -977,16 +987,16 @@ function onTagRename(t: Tag, e: Event): void {
   if (!value || value === t.name) return
   void window.baoyi.tags.rename(t.id, value).then(async (list) => {
     tags.value = list
-    await store.refreshCounts()
+    await refreshTaxonomy()
   })
 }
 
 async function dropTag(t: Tag): Promise<void> {
-  const warn = t.usage_count > 0 ? `\n${t.usage_count} 个软件会失去这个标签。` : ''
+  const warn = t.usage_count > 0 ? `\n${t.usage_count} 个条目会失去这个标签。` : ''
   if (!window.confirm(`删除标签「${t.name}」？${warn}`)) return
   tags.value = await window.baoyi.tags.remove(t.id)
   mergePick.value = mergePick.value.filter((id) => id !== t.id)
-  await store.refreshCounts()
+  await refreshTaxonomy()
 }
 
 function toggleMerge(id: number): void {
@@ -1010,7 +1020,7 @@ async function doMerge(): Promise<void> {
   tags.value = await window.baoyi.tags.merge(from, into)
   mergePick.value = []
   mergeInto.value = null
-  await store.refreshCounts()
+  await refreshTaxonomy()
   success(`已并入「${target}」`)
 }
 
@@ -1228,7 +1238,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   // 文案必须把「游戏也会清」写出来。0.6 那版只说「软件条目」而代码只清 software，
   // 两边是对上的；现在改成清全部品类，文案不跟着改就成了一句谎话
   const shared =
-    `会清掉：全部软件、游戏、影视及内容记录，待识别目录、整理记录、任务和下载记录、图标缓存、游戏封面与影视海报。\n` +
+    `会清掉：全部软件、游戏、影视、图片、项目及内容记录，待识别目录、整理记录、任务和下载记录、图标缓存、游戏封面与影视海报。\n` +
     `不会删除资源文件，软件、游戏和视频都还在原处。\n` +
     `存档备份也一份不删，备份记录一并留着，不然你就再也找不到那些文件了。`
   const warning =
@@ -1262,7 +1272,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
       : ''
     success(
       `已清空 ${summary.software} 个软件条目、${summary.games} 个游戏条目、` +
-        `${summary.videos} 个影视条目（${summary.episodes} 集）、` +
+        `${summary.videos} 个影视条目（${summary.episodes} 集）、${summary.projects} 个项目、` +
         `${summary.units} 个目录记录、${summary.icons} 个图标、${summary.covers} 张封面、` +
         `${summary.posters} 张海报${kept}`
     )
@@ -1287,7 +1297,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
         设置
         <span class="head__module">
           {{
-            activeModule === 'software' ? '软件' : activeModule === 'game' ? '游戏' : '影视'
+            {software:'软件',game:'游戏',video:'影视',image:'图片',project:'项目'}[activeModule]
           }}
         </span>
       </h1>
@@ -1309,7 +1319,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 
       <div class="body">
         <!-- ------------------------- 扫描与识别 ------------------------- -->
-        <template v-if="tab === 'scan'">
+        <ProjectSettings v-if="tab==='project'"/><template v-else-if="tab === 'scan'">
           <section class="panel">
             <div class="sec-head">
               <h2>扫描目录</h2>

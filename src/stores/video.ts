@@ -30,7 +30,7 @@ export const WATCH_STATUS_LABEL: Record<WatchStatus, string> = {
 export const VIDEO_TYPE_LABEL: Record<VideoFilterType, string> = {
   movie: '电影',
   series: '剧集',
-  hentai: '里番'
+  hentai: '里番', other: '其他', audio: '音频'
 }
 
 
@@ -48,6 +48,10 @@ export const useVideoStore = defineStore('video', () => {
   const items = ref<VideoItem[]>([])
   const counts = ref<VideoCounts>({ ...EMPTY_COUNTS })
   const loading = ref(false)
+  const loadedQuery = ref<string | null>(null)
+  const loadFailed = ref(false)
+  const querySignature = computed(() => JSON.stringify(buildQuery()))
+  const queryPending = computed(() => loading.value || loadFailed.value || loadedQuery.value !== querySignature.value)
   const brokenPosters = ref(new Set<string>())
 
   // 快慢两个查询并发时，晚到的旧响应不许覆盖新结果。同 game / software store
@@ -109,10 +113,16 @@ export const useVideoStore = defineStore('video', () => {
           loadPending = false
           const round = loadRounds.begin()
           try {
-            const next = await window.baoyi.video.list(buildQuery())
-            if (loadRounds.isCurrent(round)) items.value = next
+            const query = buildQuery()
+            const signature = JSON.stringify(query)
+            const next = await window.baoyi.video.list(query)
+            if (loadRounds.isCurrent(round) && signature === querySignature.value) {
+              items.value = next
+              loadedQuery.value = signature
+              loadFailed.value = false
+            }
           } catch (err) {
-            if (loadRounds.isCurrent(round)) toastError(`读取影视列表失败：${errorMessage(err)}`)
+            if (loadRounds.isCurrent(round)) { loadFailed.value = true; toastError(`读取影视列表失败：${errorMessage(err)}`) }
           }
         }
       } finally { loading.value = false; loadingRequest = null }
@@ -256,6 +266,9 @@ export const useVideoStore = defineStore('video', () => {
     items,
     counts,
     loading,
+    querySignature,
+    queryPending,
+    loadFailed,
     keyword,
     sort,
     filters,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
 /**
  * 游戏库首页：封面墙 + 侧边栏。
  *
@@ -6,10 +7,12 @@
  * 一行文字的列表把唯一的识别线索扔了。规划书 Step 1 里推迟到这一步的
  * 「每个模块各记一份 view_mode」也因此不用做：只有一种视图，没什么可记的。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { FilePlus, FolderPlus, Image, ListChecks, Search, Settings, X } from 'lucide-vue-next'
 import GameCard from '@/components/game/GameCard.vue'
+import LibraryBulkPanel from '@/components/library/LibraryBulkPanel.vue'
+import { useLibrarySelection } from '@/composables/useLibrarySelection'
 import Sidebar from '@/components/game/Sidebar.vue'
 import type { GameQuery } from '@/types'
 import { recallScroll, rememberScroll } from '@/composables/useModules'
@@ -38,14 +41,18 @@ const preparing = ref(false)
 const fillingCovers = ref(false)
 const coverSummary = ref('')
 const registering = ref(false)
-const selecting = ref(false)
-const selectedIds = ref(new Set<string>())
+const bulkBusy = ref(false), savedCategories = ref<string[]>([])
+const selection = useLibrarySelection(() => store.items, () => bulkBusy.value || coversBusy.value)
+const { selecting, selectedIds } = selection
+const bulkTrigger = ref<HTMLButtonElement>()
+watch(selecting, async active => { if (!active) { await nextTick(); bulkTrigger.value?.focus() } })
+const bulkItems = computed(() => store.items.map(item => ({ id: item.id, name: item.name_zh || item.name_en || item.file_name })))
+const bulkCategories = computed(() => [...new Set([...savedCategories.value, ...store.items.map(item => item.category), '其他'])])
+const filtered = computed(() => !!store.keyword.trim() || store.selection.kind !== 'group' || store.selection.value !== 'all')
+function clearFilters() { store.keyword = ''; store.select({ kind: 'group', value: 'all' }) }
+async function bulkCompleted(failedIds: string[]) { selectedIds.value = new Set(failedIds); await store.reload() }
 const coverScope = computed(() => store.items.filter(game => !selecting.value || selectedIds.value.has(game.id)).map(game => game.id))
 const coversBusy = computed(() => fillingCovers.value || tasks.runningTasks.value.some(task => task.kind === 'game-scan' && task.title === '批量补齐游戏封面'))
-watch(() => store.items.map(game => game.id), ids => {
-  const visible = new Set(ids)
-  selectedIds.value = new Set([...selectedIds.value].filter(id => visible.has(id)))
-})
 const scanning = computed(() => preparing.value || operation.running.value)
 const progress = operation.progress
 let pageDisposed = false
@@ -67,6 +74,7 @@ onMounted(async () => {
   // 不订阅的话卡片上的时长要等到下一次开库才更新
   offSession = window.baoyi.game.onSession(() => void store.reload())
   await store.reload()
+  try { savedCategories.value = (await window.baoyi.categories.list('game')).map(category => category.name) } catch (err) { error(errorMessage(err)) }
   await nextTick()
   // 内容还没渲染时容器高度是 0，这时候设 scrollTop 会被浏览器吞掉
   if (content.value) content.value.scrollTop = recallScroll('game')
@@ -112,15 +120,11 @@ function cancelScan(): void {
 }
 
 function toggleSelected(id: string): void {
-  const next = new Set(selectedIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  selectedIds.value = next
+  selection.toggle(id)
 }
 
 function toggleSelection(): void {
-  selecting.value = !selecting.value
-  if (!selecting.value) selectedIds.value = new Set()
+  selection.toggleMode()
 }
 
 async function addManualGame(): Promise<void> {
@@ -236,7 +240,7 @@ const emptyHint = computed(() => {
 </script>
 
 <template>
-  <div class="home">
+  <div class="home" @keydown="selection.key">
     <Sidebar />
 
     <main class="home__main">
@@ -252,6 +256,7 @@ const emptyHint = computed(() => {
             v-model="store.keyword"
             class="search__input"
             type="text"
+            aria-label="搜索游戏"
             placeholder="搜索游戏名、简介、标签"
             @input="onKeyword"
           />
@@ -261,9 +266,9 @@ const emptyHint = computed(() => {
         </div>
 
         <div class="toolbar__actions">
-          <select v-model="grouping" class="select" aria-label="游戏分组"><option value="none">不分组</option><option value="category">按分类分组</option><option value="directory">按一级文件夹分组</option></select>
-          <label class="card-size">卡片大小<input v-model.number="cardSize" type="range" min="110" max="260" step="10" aria-label="游戏卡片大小"/></label>
-          <select v-model="store.sort" class="select" @change="store.load()">
+
+
+          <select v-model="store.sort" class="select" aria-label="游戏排序" @change="store.load()">
             <option v-for="o in SORTS" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
 
@@ -272,26 +277,36 @@ const emptyHint = computed(() => {
             {{ registering ? '登记中' : '加游戏' }}
           </button>
 
+
+
+
+
+          <button ref="bulkTrigger" v-if="!selecting" class="btn btn--ghost" :aria-pressed="selecting" :disabled="store.items.length === 0 || store.loading || coversBusy" @click="toggleSelection">
+            <ListChecks :size="15" />
+            批量管理
+          </button>
+
+          <LibraryToolbarMenu label="视图">
+          <select v-model="grouping" class="select" aria-label="游戏分组"><option value="none">不分组</option><option value="category">按分类分组</option><option value="directory">按一级文件夹分组</option></select>
+          <label class="card-size">卡片大小<input v-model.number="cardSize" type="range" min="110" max="260" step="10" aria-label="游戏卡片大小"/></label>
+          </LibraryToolbarMenu>
+          <LibraryToolbarMenu label="更多">
           <button class="btn btn--ghost" :disabled="scanning" title="扫描目录并由 AI 识别游戏" @click="addGames">
             <FolderPlus :size="15" />
             AI 扫描
           </button>
-
-          <button class="btn btn--ghost" :disabled="coversBusy || coverScope.length === 0" :title="selecting ? '只补齐当前筛选中已选择游戏的缺失封面' : '为当前筛选列表补齐缺失封面'" @click="fillMissingCovers">
+          <button class="btn btn--ghost" :disabled="bulkBusy || coversBusy || coverScope.length === 0" :title="selecting ? '只补齐当前筛选中已选择游戏的缺失封面' : '为当前筛选列表补齐缺失封面'" @click="fillMissingCovers">
             <Image :size="15" />
             {{ coversBusy ? '补图中' : `补齐封面（${coverScope.length}）` }}
           </button>
-
-          <button class="btn btn--ghost" :aria-pressed="selecting" :disabled="store.items.length === 0" @click="toggleSelection">
-            <ListChecks :size="15" />
-            {{ selecting ? '取消选择' : '选择' }}
-          </button>
-
+          </LibraryToolbarMenu>
           <button class="btn btn--subtle" title="设置" @click="router.push({ name: 'settings' })">
             <Settings :size="16" />
           </button>
         </div>
       </header>
+
+      <LibraryBulkPanel v-if="selecting" kind="game" :pending="store.queryPending" :items="bulkItems" :ids="[...selectedIds]" :categories="bulkCategories" @all="selection.selectAll" @clear="selection.clear" @close="selection.toggleMode" @busy="bulkBusy = $event" @completed="bulkCompleted" @refresh="store.reload" />
 
       <Transition name="fade">
         <div v-if="scanning" class="progress">
@@ -306,11 +321,12 @@ const emptyHint = computed(() => {
 
       <section ref="content" class="home__content">
         <template v-if="store.items.length > 0"><section v-for="block in blocks" :key="block.key" class="game-group"><h2 v-if="block.name">{{block.name}} <small>{{block.items.length}}</small></h2><div class="wall" :style="{gridTemplateColumns:`repeat(auto-fill, minmax(${cardSize}px, 1fr))`}">
-          <GameCard v-for="g in block.items" :key="g.id" :item="g" :selectable="selecting" :selected="selectedIds.has(g.id)" @open="open" @select="toggleSelected" />
+          <GameCard v-for="g in block.items" :key="g.id" :item="g" :selectable="selecting" :selected="selectedIds.has(g.id)" :locked="bulkBusy || coversBusy || store.queryPending" @open="open" @select="toggleSelected" />
         </div></section></template>
         <div v-else-if="!store.loading" class="empty">
           <h2>{{ emptyHint.title }}</h2>
           <p>{{ emptyHint.desc }}</p>
+          <button v-if="filtered" class="btn btn--ghost" @click="clearFilters">清空筛选</button>
         </div>
       </section>
     </main>

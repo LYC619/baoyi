@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
 /**
  * 影视库首页：海报墙 + 侧边栏。
  *
@@ -12,6 +13,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRefs, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { CircleAlert, FolderPlus, ImageDown, Link, List, Search, Settings, X } from 'lucide-vue-next'
+import AudioLibrary from '@/components/video/AudioLibrary.vue'
 import Sidebar from '@/components/video/Sidebar.vue'
 import VideoBulkPanel from '@/components/video/VideoBulkPanel.vue'
 import VideoRemovalDialog from '@/components/video/VideoRemovalDialog.vue'
@@ -66,9 +68,11 @@ function pendingReasons(item: VideoItem): string[] {
 const pendingItems = computed(() => visibleItems.value.filter(item => pendingReasons(item).length))
 const shownItems = computed(() => pendingOnly.value ? pendingItems.value.filter(item => issue.value === 'any' || pendingReasons(item).includes(issue.value)) : visibleItems.value)
 const missingPosterIds = computed(() => store.missingPosters.filter(id => visibleItems.value.some(item => item.id === id)))
+const audioScope = computed(() => (store.selection.kind === 'type' && store.selection.value === 'audio') || (store.selection.kind === 'category' && (store.selection.value === '音频' || (shownItems.value.length > 0 && shownItems.value.every(item => item.media_kind === 'audio')))))
 const selecting = ref(false)
 const selectedIds = ref<string[]>([])
 const bulkOpen = ref(false)
+const bulkBusy = ref(false)
 const removing = ref(false)
 const importing = computed(() => !!videoImport.busy.value)
 // 手动展开和搜索自动展开分开记：自动展开只在有搜索 / 标签条件时存在，条件一清就整组收回；
@@ -117,25 +121,56 @@ watch(privateHidden, hidden => {
   if (hidden) organizeWorks.value = organizeWorks.value.filter(item => item.category !== '里番')
 }, { flush: 'sync' })
 const selectionAnchor = ref('')
-function toggleSelecting(): void { bulkOpen.value = false; selecting.value = !selecting.value; selectedIds.value = []; selectionAnchor.value = '' }
+watch(() => [store.querySignature, pendingOnly.value, issue.value, privateHidden.value], () => {
+  selectedIds.value = []
+  selectionAnchor.value = ''
+  if (!bulkBusy.value) { removing.value = false; layoutIds.value = null; organizeMode.value = '' }
+}, { flush: 'sync' })
+function selectAll(): void {
+  if (!store.queryPending && !bulkBusy.value) selectedIds.value = shownItems.value.map(item => item.id)
+}
+function requestRemoval(): void {
+  if (!store.queryPending && !bulkBusy.value && selectedWorks.value.length) removing.value = true
+}
+function requestLayout(): void {
+  if (store.queryPending || bulkBusy.value || scanning.value) return
+  const works = selecting.value ? selectedWorks.value : shownItems.value
+  if (works.length) layoutIds.value = works.map(item => item.id)
+}
+function requestAgent(): void {
+  if (store.queryPending || bulkBusy.value) return
+  const works = selecting.value ? selectedWorks.value : shownItems.value
+  if (works.length) videoAgent.show([...works])
+}
+function selectReview(): void {
+  if (store.queryPending || bulkBusy.value) return
+  toggleSelecting(); bulkOpen.value = true
+  selectedIds.value = shownItems.value.filter(item => item.needs_review).map(item => item.id)
+}
+function toggleSelecting(): void { if (bulkBusy.value) return; bulkOpen.value = false; selecting.value = !selecting.value; selectedIds.value = []; selectionAnchor.value = '' }
 function selectWork(id: string, event?: MouseEvent): void {
-  if (!shownItems.value.some(item => item.id === id)) return
+  if (store.queryPending || bulkBusy.value || !shownItems.value.some(item => item.id === id)) return
   selectedIds.value = rangeSelection(shownItems.value.map(item => item.id), selectedIds.value, id, selectionAnchor.value, event?.shiftKey)
   if (!event?.shiftKey || !selectionAnchor.value) selectionAnchor.value = id
 }
 function organize(mode: 'organize'): void {
-  if (!selectedWorks.value.length) return
+  if (store.queryPending || bulkBusy.value || !selectedWorks.value.length) return
   organizeWorks.value = [...selectedWorks.value]
   organizeReturnFocus.value = organizeTrigger.value
   organizeMode.value = mode
 }
 function selectionKey(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || !selecting.value || organizeMode.value) return
+  if (!selecting.value || bulkBusy.value || organizeMode.value || removing.value || layoutIds.value || event.defaultPrevented) return
+  const target = event.target as HTMLElement
+  if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '') || target?.closest('[role="dialog"]')) return
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') { event.preventDefault(); selectAll(); return }
+  if (event.key !== 'Escape') return
   event.preventDefault()
   selecting.value = false
   selectedIds.value = []
   organizeTrigger.value?.focus()
 }
+function clearLibraryFilters() { store.keyword = ''; pendingOnly.value = false; issue.value = 'any'; store.setFilters({ publishedFrom: '', publishedTo: '', status: '', local: '' }) }
 const checkedVideoCount = computed(() => shownItems.value.every(item => typeof item.available_files === 'number')
   ? shownItems.value.reduce((sum, item) => sum + (item.available_files ?? 0), 0) : null)
 const heading = computed(() => privateHidden.value && store.inHentaiScope ? '影视库' : store.heading)
@@ -168,7 +203,7 @@ function recentContent(item: VideoItem): string {
   const job = workflow.jobs.value.find(job => job.resourceId === item.id && job.items.some(value => value.transfer === 'complete'))
   return job?.items.filter(value => value.transfer === 'complete').at(-1)?.title || ''
 }
-function addFromLink(): void { workflow.open.value = true }
+function addFromLink(): void { if (store.inHentaiScope && !privateHidden.value) workflow.open.value = true }
 function togglePending(): void { pendingOnly.value = !pendingOnly.value }
 
 const SORTS: Array<{ value: NonNullable<VideoQuery['sort']>; label: string }> = [
@@ -182,13 +217,15 @@ const SORTS: Array<{ value: NonNullable<VideoQuery['sort']>; label: string }> = 
 ]
 
 async function reviewSelected(): Promise<void> {
-  if (scanning.value || reviewingSelected.value || !selectedWorks.value.length) return
+  if (store.queryPending || bulkBusy.value || scanning.value || reviewingSelected.value || !selectedWorks.value.length) return
+  const batch = [...selectedWorks.value]
   reviewingSelected.value = true
+  bulkBusy.value = true
   let updated = 0, failed = 0
   try {
     const ready = await window.baoyi.video.readiness(true)
     if (!ready.ok) { toast(ready.message); return }
-    for (const item of [...selectedWorks.value]) {
+    for (const item of batch) {
       if (privateHidden.value && item.category === '里番') break
       try { if (await reidentifyVideo(item, false)) updated++ }
       catch { failed++ }
@@ -197,7 +234,7 @@ async function reviewSelected(): Promise<void> {
     await store.reload()
     toast(`复查${operation.stopping.value ? '已停止' : '完成'}：${updated} 部已更新` + (failed ? `，${failed} 部失败，详见任务日志` : ''))
   } catch (cause) { error(errorMessage(cause)) }
-  finally { reviewingSelected.value = false }
+  finally { reviewingSelected.value = false; bulkBusy.value = false }
 }
 onMounted(async () => {
   unlistenLibrary = window.baoyi.video.onLibraryChanged?.(requestLibraryRefresh)
@@ -252,6 +289,7 @@ function cancelScan(): void {
 }
 
 async function importBundle(): Promise<void> {
+  if (scanning.value || importing.value) return
   await videoImport.begin()
 }
 
@@ -292,9 +330,7 @@ async function fillPosters(): Promise<void> {
  * 可用性判断问主进程要，不在这儿照抄一遍条件 —— 两处各写一份，改了一处
  * 就会出现「界面说能扫，扫下去没识别」。
  */
-async function addVideos(): Promise<void> {
-  if (!scanning.value) await videoImport.begin()
-}
+
 
 const emptyHint = computed(() => {
   if (pendingOnly.value) return { title: '当前范围暂无这类待处理作品', desc: '可切换问题类型或返回全部作品。' }
@@ -305,7 +341,7 @@ const emptyHint = computed(() => {
   if (store.selection.kind === 'type')
     return { title: `还没有${store.heading}`, desc: '换一格看看，或者点右上角加影视' }
   if (store.counts.all === 0)
-    return { title: '影视库还是空的', desc: '从 Hanime 添加作品，或扫描本地目录、导入资源包。' }
+    return { title: '影视库还是空的', desc: '扫描本地目录，或导入视频、课程和音频资源。' }
   return { title: '这里还没有内容', desc: '换个分类看看' }
 })
 </script>
@@ -344,9 +380,27 @@ const emptyHint = computed(() => {
             <option v-for="o in SORTS" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
 
+
+
+          <button v-if="!audioScope" class="btn btn--primary" title="切换来源，浏览海报墙并选择观看或保存" @click="router.push({ name: 'video-discover' })"><Link :size="15" />找视频</button>
+          <button v-if="store.inHentaiScope && !privateHidden" class="btn btn--ghost" title="粘贴 Hanime 视频页链接，或到站内挑好再下载" @click="addFromLink">从 Hanime 添加</button>
+
+          <button class="btn btn--subtle" :title="audioScope ? '导入专辑、播客或有声书目录' : '导入视频目录或抱一资源包'" :disabled="scanning || importing" @click="importBundle">
+            <FolderPlus :size="15" /> {{ importing ? '导入中…' : audioScope ? '导入音频' : '导入目录' }}
+          </button>
+
+
+
+          <LibraryToolbarMenu label="视图">
+          <button v-if="!audioScope || selecting" class="btn btn--subtle" :title="compact ? '海报视图' : '紧凑列表'" :aria-label="compact ? '海报视图' : '紧凑列表'" :aria-pressed="compact" @click="compact = !compact">
+            <List :size="16" />
+          </button>
+<label>卡片大小<input v-if="!compact && (!audioScope || selecting)" v-model.number="cardSize" class="card-size" type="range" min="110" max="320" step="10" title="卡片大小" aria-label="卡片大小" @change="settings.patch({ video_card_size: cardSize })" /></label>
+          </LibraryToolbarMenu>
+          <LibraryToolbarMenu label="更多">
           <!-- 都齐了就不出现：一个按下去只会说「无事可做」的按钮不如不在 -->
           <button
-            v-if="missingPosterIds.length > 0"
+            v-if="!audioScope && missingPosterIds.length > 0"
             class="btn btn--subtle"
             :disabled="filling"
             :title="`补 ${missingPosterIds.length} 张海报`"
@@ -355,21 +409,9 @@ const emptyHint = computed(() => {
             <ImageDown :size="15" />
             {{ filling ? '补海报…' : `补海报 ${missingPosterIds.length}` }}
           </button>
-
-          <button class="btn btn--primary" title="切换来源，浏览海报墙并选择观看或保存" @click="router.push({ name: 'video-discover' })"><Link :size="15" />找视频</button>
-          <button class="btn btn--ghost" title="粘贴 Hanime 视频页链接，或到站内挑好再下载" @click="addFromLink">从 Hanime 添加</button>
-          <button class="btn btn--ghost" :disabled="scanning" @click="addVideos">
-            <FolderPlus :size="15" />
-            扫描本地
-          </button>
-          <button class="btn btn--subtle" title="导入视频目录或抱一资源包" :disabled="scanning || importing" @click="importBundle">
-            <FolderPlus :size="15" /> {{ importing ? '导入中…' : '导入目录' }}
-          </button>
-          <button class="btn btn--subtle" :title="compact ? '海报视图' : '紧凑列表'" :aria-label="compact ? '海报视图' : '紧凑列表'" :aria-pressed="compact" @click="compact = !compact">
-            <List :size="16" />
-          </button>
-          <input v-if="!compact" v-model.number="cardSize" class="card-size" type="range" min="110" max="320" step="10" title="卡片大小" aria-label="卡片大小" @change="settings.patch({ video_card_size: cardSize })" />
-
+          <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || !(selecting ? selectedWorks : shownItems).length" @click="requestAgent">Agent 整理</button>
+          <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || scanning || !(selecting ? selectedWorks : shownItems).length" @click="requestLayout">统一移动</button>
+          </LibraryToolbarMenu>
           <button class="btn btn--subtle" title="设置" aria-label="设置" @click="router.push({ name: 'settings' })">
             <Settings :size="16" />
           </button>
@@ -378,30 +420,30 @@ const emptyHint = computed(() => {
 
       <div class="library-summary">
         <template v-if="selecting">
-          <span role="status">已选 {{ selectedWorks.length }} 部作品</span>
-          <span>Shift 点击可连选</span>
-          <button type="button" class="selection-action" @click="selectedIds = shownItems.map(item => item.id)">全选当前范围</button>
-          <button type="button" class="selection-action" :disabled="!selectedWorks.length" @click="selectedIds = []">清空选择</button>
+          <span role="status" title="Shift 点击可连选，仅操作当前结果">已选 {{ selectedWorks.length }} 部作品</span>
+
+          <button type="button" class="selection-action" :disabled="bulkBusy || store.queryPending" @click="selectAll">全选当前范围</button>
+          <button type="button" class="selection-action" :disabled="bulkBusy || !selectedWorks.length" @click="selectedIds = []">清空选择</button>
         </template>
-        <span v-else>{{ checkedVideoCount === null ? '视频文件数待检查' : `当前范围已有 ${checkedVideoCount} 个视频文件` }}</span>
+        <span v-else>{{ checkedVideoCount === null ? '媒体文件数待检查' : `当前范围已有 ${checkedVideoCount} 个${audioScope ? '音频' : '视频'}文件` }}</span>
         <template v-if="pendingOnly && !selecting">
           <CircleAlert :size="13" /><span>待处理</span>
           <select v-model="issue" class="select" aria-label="待处理问题类型"><option value="any">全部问题</option><option v-for="(label, key) in issueLabels" :key="key" :value="key">{{ label }}</option></select>
           <button type="button" @click="pendingOnly = false">返回全部作品</button>
         </template>
         <div class="library-summary__actions">
-          <button v-if="selecting && bulkOpen" type="button" class="btn btn--ghost" :disabled="scanning || reviewingSelected || !selectedWorks.length" @click="reviewSelected">{{ reviewingSelected ? '正在复查…' : 'Agent 复查所选' }}</button>
-          <button v-if="pendingOnly && !selecting" type="button" @click="toggleSelecting(); bulkOpen = true; selectedIds = shownItems.filter(item => item.needs_review).map(item => item.id)">选择待复查作品</button>
-          <button v-if="selecting && !bulkOpen" type="button" class="btn btn--ghost" :disabled="!selectedWorks.length" @click="organize('organize')">下一步</button>
-          <button type="button" :disabled="!shownItems.length" @click="videoAgent.show(selecting ? selectedWorks : shownItems)">Agent 整理</button>
-          <button ref="organizeTrigger" type="button" :aria-pressed="selecting" @click="toggleSelecting">{{ selecting ? (bulkOpen ? '退出批量管理' : '取消选择') : '创建合集' }}</button>
-          <button v-if="!selecting" type="button" @click="toggleSelecting(); bulkOpen = true">批量管理</button>
+          <button v-if="selecting && bulkOpen && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || scanning || reviewingSelected || !selectedWorks.length" @click="reviewSelected">{{ reviewingSelected ? '正在复查…' : 'Agent 复查所选' }}</button>
+          <button v-if="pendingOnly && !selecting" type="button" :disabled="store.queryPending || bulkBusy" @click="selectReview">选择待复查作品</button>
+          <button v-if="selecting && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || !selectedWorks.length" @click="organize('organize')">创建合集</button>
+
+          <button ref="organizeTrigger" type="button" :disabled="bulkBusy" :aria-pressed="selecting" @click="toggleSelecting(); bulkOpen = selecting">{{ selecting ? '退出批量管理' : '批量管理' }}</button>
           <button v-if="!selecting && videoImport.pendingCount.value" type="button" class="import-pending" @click="videoImport.show()"><CircleAlert :size="13" />导入待确认 {{ videoImport.pendingCount.value }}</button>
-          <button type="button" :disabled="scanning || !(selecting ? selectedWorks : shownItems).length" @click="layoutIds = (selecting ? selectedWorks : shownItems).map(item => item.id)">统一移动</button>
+
         </div>
       </div>
 
-      <VideoBulkPanel v-if="selecting && bulkOpen" :ids="selectedIds" :groups="[...(store.counts.collections || []), ...(store.inHentaiScope ? store.counts.hentai_collections || [] : [])].map(g => g.name)" @changed="store.reload" @remove="removing = true" />
+      <p v-if="store.queryPending" class="query-status" role="status">{{ store.loadFailed ? '读取失败，刷新成功后可继续选择和操作。' : '正在更新查询结果，暂不可批量操作。' }} <button class="btn btn--ghost" :disabled="store.loading" @click="store.load()">刷新结果</button></p>
+      <VideoBulkPanel v-if="selecting && bulkOpen" :ids="selectedWorks.map(item => item.id)" :pending="store.queryPending" :groups="[...(store.counts.collections || []), ...(store.inHentaiScope ? store.counts.hentai_collections || [] : [])].map(g => g.name)" @busy="bulkBusy = $event" @changed="store.reload" @remove="requestRemoval" />
       <Transition name="fade">
         <div v-if="scanning" class="progress">
           <div class="progress__bar"><i :style="{ width: `${busyPercent}%` }" /></div>
@@ -411,10 +453,10 @@ const emptyHint = computed(() => {
       </Transition>
 
       <section ref="content" class="home__content" :aria-busy="store.loading">
-        <div v-if="shownItems.length > 0" :class="compact ? 'list' : 'wall'">
+        <AudioLibrary v-if="audioScope && !selecting" :items="shownItems" @open="open($event.id)"/><div v-else-if="shownItems.length > 0" :class="compact ? 'list' : 'wall'">
           <div v-for="v in shownItems" :key="v.id" class="work-group">
             <div class="work-card">
-              <VideoCard :item="v" :show-published="store.sort === 'published' || store.sort === 'published-asc'" :status="itemStatus(v)" :recent="recentContent(v)" :selectable="selecting" :selected="selectedIds.includes(v.id)" @select="selectWork" @open="open" @poster-error="store.markPosterMissing" />
+              <VideoCard :item="v" :show-published="store.sort === 'published' || store.sort === 'published-asc'" :status="itemStatus(v)" :recent="recentContent(v)" :selectable="selecting" :locked="store.queryPending || bulkBusy" :selected="selectedIds.includes(v.id)" @select="selectWork" @open="open" @poster-error="store.markPosterMissing" />
               <button v-if="v.episode_total > 1 && !selecting" class="collection-expand" :aria-expanded="!!expanded[v.id]" :aria-controls="'collection-' + v.id" @click="toggleCollection(v.id)">{{ expanded[v.id] ? '收起单集' : '展开 ' + v.episode_total + ' 集' }}</button>
             </div>
             <div v-if="expanded[v.id] && !selecting" :id="'collection-' + v.id" class="collection-episodes" role="group" :aria-label="(v.name_zh || v.file_name) + '的单集'">
@@ -426,17 +468,19 @@ const emptyHint = computed(() => {
         <div v-else-if="!store.loading" class="empty">
           <h2>{{ emptyHint.title }}</h2>
           <p>{{ emptyHint.desc }}</p>
+          <button v-if="store.keyword || store.hasFilters || pendingOnly" class="btn btn--ghost" @click="clearLibraryFilters">清空筛选</button>
         </div>
       </section>
     </main>
-    <VideoRemovalDialog v-if="removing" :resource-ids="selectedIds" @close="removing = false" @changed="selectedIds = []; store.reload()" />
+    <VideoRemovalDialog v-if="removing" :pending="store.queryPending" @busy="bulkBusy = $event" :resource-ids="selectedIds" @close="removing = false" @changed="selectedIds = []; store.reload()" />
     <DownloadPanel v-if="workflow.open.value" @close="workflow.open.value = false" />
-    <VideoLayoutDialog v-if="layoutIds" :ids="layoutIds" @close="layoutIds = null" @changed="store.reload" />
+    <VideoLayoutDialog v-if="layoutIds" :pending="store.queryPending" @busy="bulkBusy = $event" :ids="layoutIds" @close="layoutIds = null" @changed="store.reload" />
     <OrganizePanel v-if="organizeMode" :mode="organizeMode" :works="organizeWorks" :return-focus="organizeReturnFocus" @close="organizeMode = ''" @changed="store.reload" />
   </div>
 </template>
 
 <style scoped>
+.query-status{flex:none;margin:0;padding:6px 20px;font-size:12px;color:var(--text-sub)}
 .work-group, .work-card { min-width: 0; }
 .wall .work-group, .wall .collection-episodes { display: contents; }
 .collection-expand { width: 100%; padding: 9px; color: var(--text-sub); font-size: 12px; }

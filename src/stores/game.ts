@@ -43,6 +43,8 @@ export const useGameStore = defineStore('game', () => {
   const items = ref<GameItem[]>([])
   const counts = ref<GameCounts>({ ...EMPTY_COUNTS })
   const loading = ref(false)
+  const loadedQuery = ref('')
+  const queryPending = computed(() => loading.value || loadedQuery.value !== JSON.stringify(buildQuery()))
 
   // 快慢两个查询并发时，晚到的旧响应不许覆盖新结果。同 software store
   const loadRounds = createLatestGuard()
@@ -78,9 +80,10 @@ export const useGameStore = defineStore('game', () => {
   async function load(): Promise<void> {
     const round = loadRounds.begin()
     loading.value = true
+    const query = buildQuery()
     try {
-      const next = await window.baoyi.game.list(buildQuery())
-      if (loadRounds.isCurrent(round)) items.value = next
+      const next = await window.baoyi.game.list(query)
+      if (loadRounds.isCurrent(round)) { items.value = next; loadedQuery.value = JSON.stringify(query) }
     } catch (err) {
       // 失败时保留旧列表，比清空再显示「游戏库是空的」诚实
       if (loadRounds.isCurrent(round)) toastError(`读取游戏列表失败：${errorMessage(err)}`)
@@ -166,6 +169,7 @@ export const useGameStore = defineStore('game', () => {
     items,
     counts,
     loading,
+    queryPending,
     keyword,
     sort,
     selection,

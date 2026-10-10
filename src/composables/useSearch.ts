@@ -1,27 +1,14 @@
-import { ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useSoftwareStore } from '@/stores/software'
-import { debounce } from '@/utils'
 
-/**
- * 搜索框绑定：本地 ref 立即回显，防抖后再打库。
- * 中英文都靠 SQL 的 LIKE 模糊匹配（命中名称 / 说明 / 标签 / 文件名）。
- */
+/** Keep the displayed query and filter state identical; debounce only the lookup. */
 export function useSearch(wait = 220) {
   const store = useSoftwareStore()
-  const text = ref(store.keyword)
-
-  const commit = debounce((value: string) => {
-    store.keyword = value
-    void store.load()
-  }, wait)
-
-  watch(text, (value) => commit(value))
-
-  function clear(): void {
-    text.value = ''
-    store.keyword = ''
-    void store.load()
-  }
-
+  const text = computed({ get: () => store.keyword, set: (value: string) => { store.keyword = value } })
+  watch(text, (_value, _previous, onCleanup) => {
+    const timer = setTimeout(() => void store.load(), wait)
+    onCleanup(() => clearTimeout(timer))
+  })
+  function clear(): void { text.value = ''; void store.load() }
   return { text, clear }
 }

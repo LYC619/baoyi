@@ -72,6 +72,8 @@ const router = createRouter({
     },
     { path: '/image', name: 'image-home', component: () => import('@/pages/image/Home.vue'), meta: { module: 'image' } },
     { path: '/image/:id', name: 'image-detail', component: () => import('@/pages/image/Detail.vue'), props: true, meta: { module: 'image' } },
+    { path: '/project', name: 'project-home', component: () => import('@/pages/project/Home.vue'), meta: { module: 'project' } },
+    { path: '/project/:id', name: 'project-detail', component: () => import('@/pages/project/Detail.vue'), props: true, meta: { module: 'project' } },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ]
 })

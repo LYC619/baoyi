@@ -59,6 +59,7 @@ export interface EpisodePayload {
 }
 
 export interface VideoPayload {
+  media_kind?: 'video' | 'audio' | 'other'
   /** 电影：默认文件路径。剧集：整部剧的目录。同时是 resource.path 这个全局唯一键 */
   path: string
   video_type: VideoType
@@ -175,6 +176,7 @@ export const PROTECTED_RESOURCE_FIELDS = [
   'name_zh', 'name_en', 'summary', 'description', 'category', 'tags', 'official_url'
 ] as const
 export const PROTECTED_META_FIELDS = [
+  'media_kind',
   'video_type', 'collection_name', 'year', 'end_year', 'rating',
   'tmdb_id', 'imdb_id', 'douban_id', 'douban_rating', 'hanime_id'
 ] as const
@@ -267,6 +269,12 @@ export function insertVideo(d: SqlDb, p: VideoPayload, splitFromId = ''): VideoW
   }
 }
 
+function enforceHanimeCategory(d: SqlDb, id: string): void {
+  d.prepare(`UPDATE resource SET category=? WHERE id=? AND kind='video' AND (
+    EXISTS(SELECT 1 FROM video_meta WHERE resource_id=? AND hanime_id!='') OR
+    EXISTS(SELECT 1 FROM video_sources WHERE resource_id=? AND lower(provider)='hanime'))`).run(HENTAI_CATEGORY,id,id,id)
+}
+
 function writeVideo(d: SqlDb, p: VideoPayload, splitFromId: string): VideoWriteOutcome {
   const now = Date.now()
 
@@ -290,6 +298,7 @@ function writeVideo(d: SqlDb, p: VideoPayload, splitFromId: string): VideoWriteO
   ]
 
   const metaFields: Array<[string, string | number]> = [
+    ...(p.media_kind ? [['media_kind',p.media_kind] as [string,string]] : []),
     ['video_type', p.video_type],
     ['year', p.year],
     ['end_year', p.end_year],
@@ -442,6 +451,8 @@ function writeVideo(d: SqlDb, p: VideoPayload, splitFromId: string): VideoWriteO
   // 标记按集列表推翻一次。
   if (episodesAdded > 0 || episodesMoved > 0) syncSeriesStatus(d, id)
 
+  enforceHanimeCategory(d, id)
+
   return { id, created, episodesAdded }
 }
 
@@ -587,6 +598,7 @@ function rowToVideo(row: Row): VideoItem {
     published_end: Number(row.published_end) || 0,
     // 库里有 CHECK 兜着，读到别的值只能是手工改库改坏了，退回默认而不是把它透出去
     video_type: VIDEO_TYPES.includes(row.video_type) ? row.video_type : 'movie',
+    media_kind: ['video','audio','other'].includes(row.media_kind) ? row.media_kind : 'video',
     thumbnail_path: String(row.thumbnail_path ?? ""),
     thumbnail_source: String(row.thumbnail_source ?? ""),
     poster_path: String(row.poster_path ?? ''),
@@ -733,7 +745,11 @@ export function listVideos(
   if (inHentai) { where.push('category = ?'); params.push(HENTAI_CATEGORY) }
   if (query.collection !== undefined) { where.push('collection_name = ?'); params.push(query.collection) }
 
-  if (query.type && query.type !== 'hentai' && VIDEO_TYPES.includes(query.type)) {
+  if (query.type === 'audio' || query.type === 'other') {
+    where.push('media_kind = ?'); params.push(query.type)
+  }
+  if (query.type === 'movie' || query.type === 'series') {
+    where.push("media_kind = 'video'")
     where.push('video_type = ?')
     params.push(query.type)
   }
@@ -877,7 +893,7 @@ export function videoCounts(d: SqlDb, hideHentai = false): VideoCounts {
   const typeRows = d
     .prepare(
       `SELECT video_type AS t, COUNT(*) AS n FROM video
-       WHERE is_archived = 0${hide} GROUP BY video_type`
+       WHERE is_archived = 0 AND media_kind='video'${hide} GROUP BY video_type`
     )
     .all() as Array<{ t: string; n: number }>
   for (const r of typeRows) {
@@ -904,6 +920,8 @@ export function videoCounts(d: SqlDb, hideHentai = false): VideoCounts {
     if (map) map.set(String(row.tag),(map.get(String(row.tag)) || 0) + Number(row.count))
   }
   return {
+    audio: Number((d.prepare("SELECT COUNT(*) n FROM video WHERE is_archived=0 AND media_kind='audio'" + hide).get() as {n:number}).n),
+    other: Number((d.prepare("SELECT COUNT(*) n FROM video WHERE is_archived=0 AND media_kind='other'" + hide).get() as {n:number}).n),
     all: one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 0${hide}`),
     hentai: hideHentai ? 0 : one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 0 AND category = ?`, HENTAI_CATEGORY),
     hentai_visible: !hideHentai,
@@ -940,6 +958,7 @@ export const VIDEO_RESOURCE_COLUMNS = new Set([
   'official_url', 'notes', 'is_archived'
 ])
 export const VIDEO_META_COLUMNS = new Set([
+  'media_kind',
   'thumbnail_path', 'thumbnail_source', 'video_type', 'collection_name', 'poster_path', 'poster_source', 'fanart_path', 'year', 'end_year', 'rating',
   'watch_status', 'position_sec', 'duration_sec', 'last_watched_at',
   'resolution', 'video_codec', 'source', 'release_group',
@@ -1015,6 +1034,7 @@ export function restoreScrapedFields(d: SqlDb, id: string, fields: string[]): Vi
 }
 
 export function updateVideo(d: SqlDb, id: string, patch: Partial<VideoItem>): VideoItem | null {
+  if (patch.media_kind !== undefined && !['video','audio','other'].includes(patch.media_kind)) throw new Error('媒体类型无效')
   const entries = Object.entries(patch).filter(([, v]) => v !== undefined)
 
   for (const [table, cols, key] of [
@@ -1035,6 +1055,7 @@ export function updateVideo(d: SqlDb, id: string, patch: Partial<VideoItem>): Vi
   }
 
   markUserEdited(d, id, entries.map(([k]) => k))
+  enforceHanimeCategory(d, id)
 
   // updated_at 只在总表上，改哪张表都要动它
   d.prepare('UPDATE resource SET updated_at = ? WHERE id = ?').run(Date.now(), id)

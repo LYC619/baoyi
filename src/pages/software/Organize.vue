@@ -26,6 +26,7 @@ const organize = useOrganize()
 const entries = ref<OrganizeEntry[]>([])
 const root = ref('')
 const loading = ref(true)
+const completed = ref<OrganizeResult | null>(null)
 
 const ACTIONS: Array<{ value: OrganizeAction; label: string }> = [
   { value: 'move', label: '剪切移动' },
@@ -95,6 +96,7 @@ function skipWarned(): void {
 }
 
 async function execute(): Promise<void> {
+  if (organize.running.value) return
   if (actionable.value === 0) {
     toast('没有要执行的条目')
     return
@@ -129,6 +131,7 @@ async function execute(): Promise<void> {
   // 让预览和卡片墙停在过期状态比弹一次错更糟。store.reload 自己接错，不会再抛
   await Promise.all([load().catch(() => {}), store.reload()])
   if (!result) return
+  completed.value = result
 
   const parts = [`移动 ${result.moved} 条`, `链接 ${result.linked} 条`]
   if (result.failed > 0) {
@@ -142,15 +145,20 @@ async function execute(): Promise<void> {
 <template>
   <div class="organize">
     <header class="head">
-      <button class="btn btn--subtle" @click="router.back()">
+      <button class="btn btn--subtle" @click="router.push({ name: 'home' })">
         <ArrowLeft :size="16" />
-        返回
+        软件库
       </button>
       <h1>整理预览</h1>
       <span class="head__count">{{ entries.length }}</span>
     </header>
 
     <div class="body">
+      <section v-if="completed" class="panel organize-result" aria-label="本次整理结果">
+        <p role="status">本次整理：移动 {{ completed.moved }} 项，创建链接 {{ completed.linked }} 项，跳过 {{ completed.skipped }} 项，失败 {{ completed.failed }} 项。</p>
+        <details v-if="completed.failed"><summary>查看未完成项目</summary><ul><li v-for="(step, index) in completed.steps.filter(step => !step.ok)" :key="index">{{ step.name }}：{{ step.note }}</li></ul></details>
+        <button class="btn btn--ghost" @click="router.push({ name: 'settings', query: { tab: 'organize' } })">查看整理记录与撤销</button>
+      </section>
       <p v-if="loading" class="state">正在生成方案…（安装版会顺带查一遍注册表引用，稍慢）</p>
 
       <div v-else-if="loadError" class="state">
@@ -249,13 +257,14 @@ async function execute(): Promise<void> {
 
             <select
               class="select"
+              :aria-label="`${e.name}的整理操作`"
               :value="e.action"
               @change="setAction(e, ($event.target as HTMLSelectElement).value)"
             >
               <option v-for="a in ACTIONS" :key="a.value" :value="a.value">{{ a.label }}</option>
             </select>
 
-            <select v-model="e.category" class="select" :disabled="e.action === 'skip'">
+            <select v-model="e.category" class="select" :aria-label="`${e.name}的目标分类`" :disabled="e.action === 'skip'">
               <option v-for="c in categories.list" :key="c.id" :value="c.name">{{ c.name }}</option>
             </select>
 
@@ -289,8 +298,8 @@ async function execute(): Promise<void> {
       </div>
 
       <div class="bar__ops">
-        <button class="btn btn--subtle" :disabled="organize.running.value" @click="router.back()">
-          取消
+        <button class="btn btn--subtle" :disabled="organize.running.value" @click="router.push({ name: 'home' })">
+          {{ completed ? '完成并返回软件库' : '取消' }}
         </button>
         <button
           class="btn btn--primary"
@@ -306,6 +315,7 @@ async function execute(): Promise<void> {
 </template>
 
 <style scoped>
+.organize-result{padding:14px;line-height:1.7}.organize-result details{margin:8px 0;color:var(--warning)}.organize-result ul{padding-left:20px}
 .organize {
   display: flex;
   flex-direction: column;
@@ -345,6 +355,7 @@ async function execute(): Promise<void> {
 }
 
 .body > * {
+  flex-shrink: 0;
   width: 100%;
   max-width: 1120px;
   margin: 0 auto;
@@ -595,6 +606,7 @@ async function execute(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-wrap: wrap;
   padding: 12px 24px;
   background: var(--bg-side);
   border-top: 1px solid var(--divider);

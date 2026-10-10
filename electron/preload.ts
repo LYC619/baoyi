@@ -48,6 +48,21 @@ function plain<T>(value: T): T {
 }
 
 const api: BaoyiApi = {
+  project: {
+    overview:id=>ipcRenderer.invoke('project:overview',id),preferences:value=>ipcRenderer.invoke('project:preferences',plain(value)),
+    sessions:id=>ipcRenderer.invoke('project:sessions',id),createSession:id=>ipcRenderer.invoke('project:create-session',id),session:id=>ipcRenderer.invoke('project:session',id),
+    sendMessage:(id,text)=>ipcRenderer.invoke('project:send-message',id,text),cancelMessage:id=>ipcRenderer.invoke('project:cancel-message',id),
+    applyProposal:(id,message)=>ipcRenderer.invoke('project:apply-proposal',id,message),onSession:callback=>subscribe('project:session',callback),
+    list:()=>ipcRenderer.invoke('project:list'),get:id=>ipcRenderer.invoke('project:get',id),
+    update:(id,patch)=>ipcRenderer.invoke('project:update',id,plain(patch)),remove:id=>ipcRenderer.invoke('project:remove',id),
+    prepareImport:mode=>ipcRenderer.invoke('project:prepare-import',mode),confirmImport:(token,items)=>ipcRenderer.invoke('project:confirm-import',token,plain(items)),
+    rescan:id=>ipcRenderer.invoke('project:rescan',id),pickPath:directory=>ipcRenderer.invoke('project:pick-path',directory),
+    addEntry:(id,directory)=>ipcRenderer.invoke('project:add-entry',id,directory),resources:()=>ipcRenderer.invoke('project:resources'),
+    open:(id,entry)=>ipcRenderer.invoke('project:open',id,entry),reveal:id=>ipcRenderer.invoke('project:reveal',id),relocate:id=>ipcRenderer.invoke('project:relocate',id),
+    prepareMove:id=>ipcRenderer.invoke('project:prepare-move',id),previewMove:(id,destination,keep)=>ipcRenderer.invoke('project:preview-move',id,destination,keep),
+    move:token=>ipcRenderer.invoke('project:move',token),moveRecords:()=>ipcRenderer.invoke('project:move-records'),recoverMove:id=>ipcRenderer.invoke('project:recover-move',id),
+    onChanged:callback=>subscribe('project:changed',callback)
+  },
   image: {
     collections: () => ipcRenderer.invoke('image:collections'),
     saveCollection: (name,members,id) => ipcRenderer.invoke('image:save-collection',name,plain(members),id),

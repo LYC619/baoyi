@@ -9,6 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { ensureResourceCategory } from '../../services/resource-taxonomy.ts'
 import path from 'node:path'
 import type {
   GameCounts,
@@ -331,6 +332,11 @@ function toColumn(key: string, value: unknown): string | number {
 }
 
 export function updateGame(d: SqlDb, id: string, patch: Partial<GameItem>): GameItem | null {
+  if (!getGame(d,id)) return null
+  if (patch.category !== undefined) {
+    patch = { ...patch, category: patch.category.trim() }
+    ensureResourceCategory(d,'game',patch.category!)
+  }
   const entries = Object.entries(patch).filter(([, v]) => v !== undefined)
 
   for (const [table, cols, key] of [

@@ -26,10 +26,12 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { MediaTrack } from '../../../src/types/index.ts'
+import type { AudioMetadata } from '../../../src/utils/audio.ts'
 
 /* ============================== 输出形状 ============================== */
 
 export interface ContainerInfo {
+  music?: AudioMetadata
   /** 时长，秒。0 = 读不出来 */
   duration_sec: number
   /** 容器格式（`Matroska` / `MPEG-4`）。空串 = 读不出来 */
@@ -200,6 +202,12 @@ export function mapMediaInfo(result: unknown): ContainerInfo {
   }
 
   const video = tracks.find((t) => typeOf(t) === 'video')
+  const audio = tracks.find(t=>typeOf(t)==='audio')
+  if (!video && audio) {
+    out.music={title:pick(general||{},'Track','Title'),artist:pick(general||{},'Performer','Album_Performer','Artist'),album:pick(general||{},'Album'),
+      track:toNum(pick(general||{},'Track_Position')),sampleRate:toNum(pick(audio,'SamplingRate')),bitDepth:toNum(pick(audio,'BitDepth')),bitRate:toNum(pick(audio,'BitRate'))}
+    out.duration_sec ||= Math.round(toNum(pick(audio,'Duration')))
+  }
   if (video) {
     out.width = Math.round(toNum(pick(video, 'Width')))
     out.height = Math.round(toNum(pick(video, 'Height')))

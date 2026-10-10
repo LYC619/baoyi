@@ -791,6 +791,7 @@ export interface AIResult {
 
 /** 清空数据后回报清掉了些什么 */
 export interface ResetSummary {
+  projects: number
   software: number
   games: number
   videos: number
@@ -1054,7 +1055,7 @@ export interface SearchCallRecord {
  * 而真正的差别在解析器里，不在数据结构里。
  */
 export type VideoType = 'movie' | 'series'
-export type VideoFilterType = VideoType | 'hentai'
+export type VideoFilterType = VideoType | 'hentai' | 'other' | 'audio'
 
 /**
  * 观看状态。四态闭集，库里有 CHECK 约束兜着（见 kinds/video/schema.ts）。
@@ -1144,6 +1145,7 @@ export interface Episode {
 
 /** video_meta 那张表的形状。resource 的公共字段不在这里，见 VIDEO_VIEW_SQL */
 export interface VideoMeta {
+  media_kind?: 'video' | 'audio' | 'other'
   thumbnail_path?: string
   thumbnail_source?: string
   video_type: VideoType
@@ -1292,6 +1294,8 @@ export interface VideoQuery {
 export type { VideoAsset, VideoAssetState, VideoBundle, VideoContentInput, VideoDirectory, VideoOwnership, VideoRegistration, VideoRegistrationResult, VideoSourceRef } from './video-library'
 
 export interface VideoCounts {
+  audio?: number
+  other?: number
   all: number
   archived: number
   /** 电影 / 剧集各有几部。闭集 */
@@ -1383,6 +1387,7 @@ export type Unsubscribe = () => void
 
 /** preload 暴露给渲染进程的完整 API */
 export interface BaoyiApi {
+  project: import('./project').ProjectApi
   image: import('./image').ImageApi
   hanimeBrowser: {
     open(url?: string): Promise<boolean>

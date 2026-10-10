@@ -8,6 +8,7 @@ import type { VideoPayload } from './db.ts'
 import type { SourceEpisodeDetails } from './episode-details.ts'
 import { registerLocalVideoFacts, registerVideoBundle, registerVideoIdentification } from './registration.ts'
 import { readVideoLocalMetadata } from './local-metadata.ts'
+import { clearVideoScanIgnores } from './scan-ignores.ts'
 
 export type VideoImportCommand =
   | { kind: 'local'; path: string; candidate: VideoCandidate; facts: VideoFacts; splitFromId?: string }
@@ -18,6 +19,7 @@ export function replayVideoImport(d: SqlDb, command: VideoImportCommand) {
   if (command.kind === 'bundle') return registerVideoBundle(d, command.directory, command.restoreRemoved)
   const result = command.kind === 'local' ? registerLocalVideoFacts(d, command.facts, command.splitFromId)
     : registerVideoIdentification(d, command.payload, command.sourceDetails, command.splitFromId)
+  clearVideoScanIgnores(d,result.id,[...command.candidate.files,...command.candidate.episodes.flatMap(ep=>ep.files)].map(file=>file.path))
   return { resourceId: result.id, created: result.created, itemsAdded: result.episodesAdded }
 }
 

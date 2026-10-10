@@ -28,6 +28,8 @@ export const LIBRARY_BACKUP_COLUMNS = {
     notes: 'text?', alternatives: 'text?', mastery_level: 'text?', last_used_at: 'integer?',
     use_count: 'integer?', is_archived: 'integer?', external_active_at: 'integer?'
   },
+  project_meta: { resource_id:'text', origin:'text', status:'text', group_name:'text', pinned:'integer', version:'text', entries:'text', default_entry:'text', evidence:'text' },
+  project_sessions: { id:'text',resource_id:'text',title:'text',created_at:'integer',updated_at:'integer',payload:'text' },
   image_groups: { id: 'text', name: 'text', sort_order: 'integer', hidden: 'integer' },
   image_collections: {id:'text',name:'text',created_at:'integer'},
   image_collection_members: {collection_id:'text',resource_id:'text',position:'integer'},
@@ -49,6 +51,7 @@ export const LIBRARY_BACKUP_COLUMNS = {
     total_playtime_sec: 'integer', last_played_at: 'integer', save_paths: 'text', linked_files: 'text'
   },
   video_meta: {
+    media_kind: 'text',
     thumbnail_path: 'text', thumbnail_source: 'text', resource_id: 'text', video_type: 'text', poster_path: 'text', poster_source: 'text',
     collection_name: 'text', fanart_path: 'text', year: 'integer', end_year: 'integer', rating: 'real',
     watch_status: 'text', position_sec: 'integer', duration_sec: 'integer', last_watched_at: 'integer',
@@ -138,7 +141,7 @@ export type LibraryBackupRow<T extends LibraryBackupTableName> = {
   -readonly [C in keyof (typeof LIBRARY_BACKUP_COLUMNS)[T]]: ColumnValue<(typeof LIBRARY_BACKUP_COLUMNS)[T][C]>
 }
 export type LibraryBackupTables = { [T in LibraryBackupTableName]: LibraryBackupRow<T>[] }
-export type LibraryBackupResourceKind = 'software' | 'game' | 'video' | 'image'
+export type LibraryBackupResourceKind = 'software' | 'game' | 'video' | 'image' | 'project'
 
 export interface LibraryBackup {
   format: typeof LIBRARY_BACKUP_FORMAT

@@ -7,9 +7,9 @@
  * 而软件和游戏没有对应物。
  */
 import { computed, ref } from 'vue'
-import { Archive, Box, ChevronDown, CircleAlert, Clapperboard, Film, Flame, Folder, Hash, Tv } from 'lucide-vue-next'
+import { Archive, Box, ChevronDown, CircleAlert, Clapperboard, Film, Flame, Folder, Hash, Music2, Tv } from 'lucide-vue-next'
 import { VIDEO_TYPE_LABEL, WATCH_STATUS_LABEL, useVideoStore } from '@/stores/video'
-import type { VideoType, WatchStatus } from '@/types'
+import type { VideoFilterType, WatchStatus } from '@/types'
 
 const store = useVideoStore()
 const props = withDefaults(defineProps<{ pendingActive?: boolean; pendingCount?: number; privateHidden?: boolean }>(), { pendingActive: false, pendingCount: 0, privateHidden: false })
@@ -17,7 +17,7 @@ defineEmits<{ pending: [] }>()
 
 /** 在看排第一：这一格是这组里唯一有行动含义的那一格（接着看什么） */
 const STATUSES: WatchStatus[] = ['watching', 'unwatched', 'watched', 'dropped']
-const TYPES: VideoType[] = ['movie', 'series']
+const TYPES: Exclude<VideoFilterType,'hentai'>[] = ['movie', 'series', 'other', 'audio']
 
 const tagsOpen = ref(false)
 const inHentaiScope = computed(() => store.inHentaiScope)
@@ -65,9 +65,9 @@ const isActive = (kind: string, value: string) => !props.pendingActive && store.
         @click="store.select({ kind: 'type', value: t })"
       >
         <Film v-if="t === 'movie'" :size="15" />
-        <Tv v-else :size="15" />
+        <Music2 v-else-if="t === 'audio'" :size="15" /><Folder v-else-if="t === 'other'" :size="15" /><Tv v-else :size="15" />
         <span class="row__label">{{ VIDEO_TYPE_LABEL[t] }}</span>
-        <span class="row__count">{{ store.counts.type[t] }}</span>
+        <span class="row__count">{{ t==='audio'||t==='other' ? store.counts[t]||0 : store.counts.type[t] }}</span>
       </button>
 
       <button v-if="!privateHidden && store.counts.hentai_visible !== false" class="row"
@@ -103,7 +103,7 @@ const isActive = (kind: string, value: string) => !props.pendingActive && store.
           @click="store.select({ kind: 'category', value: c.name })"
         >
           <Box :size="15" />
-          <span class="row__label">{{ c.name === '其他' ? '其他分类' : c.name }}</span>
+          <span class="row__label">{{ c.name === '其他' || c.name === '音频' ? c.name + '分类' : c.name }}</span>
           <span class="row__count">{{ c.count }}</span>
         </button>
       </template>

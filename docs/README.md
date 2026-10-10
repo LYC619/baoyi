@@ -2,6 +2,18 @@
 
 ## 当前入口
 
+- [0.15.1 详情、查询与布局修复](releases/0.15.1.md)
+- [代码与前端整改验收（2026-10-09）](verification/2026-10-09-review-remediation.md)
+
+- [0.15.0 统一体验版](releases/0.15.0.md)
+- [统一体验能力矩阵与验收](verification/2026-10-07-unified-ux.md)
+- [0.14.1 分类与交互修复](releases/0.14.1.md)
+- [10.1–10.7 更新日记](changes/2026-10-01-to-07.md)
+- [五模块使用逻辑审查](verification/2026-10-07-ux-review.md)
+
+- [0.14.0 实测修复与项目助手](releases/0.14.0.md)
+- [0.13.0 项目库与项目移动](releases/0.13.0.md)
+
 - [在线来源适配：新会话实施交接（待实施）](superpowers/reports/2026-10-01-online-source-adapter-handoff.md)
 - [通用网页浏览预览验收](superpowers/reports/2026-10-01-web-browser-entry.md)
 - [在线资料库重规划：网页体验优先](superpowers/plans/2026-10-01-online-library-replan.md)

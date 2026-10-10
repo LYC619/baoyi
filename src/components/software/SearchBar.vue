@@ -30,6 +30,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       v-model="text"
       class="search__input"
       type="text"
+      aria-label="搜索软件"
       placeholder="搜索名称、说明或标签…"
       spellcheck="false"
     />

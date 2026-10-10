@@ -3,6 +3,7 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { reconcileResourceCategories } from './resource-taxonomy.ts'
 import { readExternalActiveAt } from './activity'
 import { rebase } from '../kinds/software/organize/plan'
 import { KINDS } from '../kinds'
@@ -1494,6 +1495,7 @@ export function counts(unusedDays: number): SidebarCounts {
 const DEFAULT_KIND = 'software'
 
 export function listCategories(kind: string = DEFAULT_KIND): Category[] {
+  reconcileResourceCategories(getDb(),kind)
   return getDb()
     .prepare(
       `SELECT id, name, description, icon, sort_order FROM categories
@@ -1932,6 +1934,7 @@ export function dataStats(): DataStats {
 /* ------------------------------- 重置 ------------------------------- */
 
 export interface ResetSummary {
+  projects: number
   software: number
   games: number
   videos: number
@@ -2017,6 +2020,7 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
   const d = getDb()
 
   const count = (sql: string) => (d.prepare(sql).get() as { n: number }).n
+  const projects = count("SELECT COUNT(*) AS n FROM resource WHERE kind='project'")
   const software = count('SELECT COUNT(*) AS n FROM software')
   const games = count('SELECT COUNT(*) AS n FROM game')
   // 影视条目和它下面的集数分开数：一部剧清掉的是一行，但用户感觉上没的是几十集。
@@ -2084,6 +2088,7 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
   }
 
   return {
+    projects,
     software,
     games,
     videos,

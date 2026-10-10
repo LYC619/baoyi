@@ -22,6 +22,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { isAudioFile } from '../../../src/utils/audio.ts'
 import { detectExtra, parseVideoName, splitTitle, titleRegion } from './filename.ts'
 import type { ParsedVideoName } from './filename.ts'
 
@@ -298,7 +299,7 @@ function collect(root: string, maxDepth = 8): RawFile[] {
  */
 export function scanVideoRoot(root: string): VideoCandidate[] {
   const raws = collect(root)
-  const videos = raws.filter((r) => VIDEO_EXTS.has(r.ext))
+  const videos = raws.filter((r) => VIDEO_EXTS.has(r.ext) || isAudioFile(r.path))
   if (videos.length === 0) return []
 
   // 侧车按所在目录索引好，归堆完再按目录发下去
@@ -345,13 +346,39 @@ export function scanVideoRoot(root: string): VideoCandidate[] {
 
   const out: VideoCandidate[] = []
   for (const [dir, items] of groups) {
+    const audio = items.filter(item=>isAudioFile(item.raw.path)).sort((a,b)=>a.raw.name.localeCompare(b.raw.name,'zh-CN',{numeric:true}))
+    if (audio.length) {
+      const files=audio.map(({raw,p})=>({path:raw.path,name:raw.name,size:raw.size,parsed:p,part:null}))
+      const shared=audio.length!==items.length
+      out.push({video_type:audio.length>1?'series':'movie',path:shared?files[0].path:dir,directory:dir,shared_directory:shared,
+        title_zh:audio.length>1?path.basename(dir):audio[0].raw.base,title_en:'',year:0,
+        files:audio.length>1?[]:files,episodes:audio.length>1?files.map((file,i)=>({season:1,episode:i+1,title:audio[i].raw.base,files:[file]})):[],
+        sidecars:mergeSidecars(dir,sidecarsByDir),extras:[],evidence:['音频文件，按目录管理曲目']})
+      items.splice(0,items.length,...items.filter(item=>!isAudioFile(item.raw.path)))
+      if (!items.length) continue
+    }
+    // A named course plus numbered lesson files describes one work even when
+    // every lesson has a different subject. Plain numbered movie folders do not.
+    const lessons = items.map(item => ({ item, match: /^(?:第\s*)?(\d{1,3})(?:\s*[课讲集章节回]|[.、 _-])\s*(.*)/.exec(item.raw.base) }))
+    if (/课程|教程|讲座|主讲|公开课|网课|教学|course|tutorial|lecture/i.test(path.basename(dir)) &&
+        items.length >= 2 && lessons.every(row => row.match && Number(row.match[1]) > 0) &&
+        new Set(lessons.map(row => Number(row.match![1]))).size === items.length) {
+      const title = splitTitle(path.basename(dir))
+      out.push({ video_type:'series',path:audio.length?items[0].raw.path:dir,directory:dir,shared_directory:audio.length>0,
+        title_zh:title.zh || path.basename(dir),title_en:title.en,year:0,files:[],
+        episodes:lessons.sort((a,b)=>Number(a.match![1])-Number(b.match![1])).map(({item,match})=>({
+          season:1,episode:Number(match![1]),title:item.raw.base,
+          files:[{path:item.raw.path,name:item.raw.name,size:item.raw.size,parsed:item.p,part:null}]
+        })),sidecars:mergeSidecars(dir,sidecarsByDir),extras:[],evidence:['课程目录与不重复的课程序号，将各讲保留为合集子视频'] })
+      continue
+    }
     const { series, movies } = partitionWorks(dir, items)
-    const shared = series.size + movies.length > 1
+    const shared = audio.length > 0 || series.size + movies.length > 1
     const candidates: VideoCandidate[] = []
     for (const episodes of series.values()) {
       candidates.push(buildSeries(root, dir, episodes, ['按文件标题与季集标记归并'], extras, sidecarsByDir, shared))
     }
-    candidates.push(...buildMovies(dir, movies, extras, sidecarsByDir, series.size > 0))
+    candidates.push(...buildMovies(dir, movies, extras, sidecarsByDir, audio.length > 0 || series.size > 0))
     const titles = [...new Set(candidates.map(c => c.title_zh || c.title_en).filter(Boolean))]
     for (const candidate of candidates) {
       candidate.sibling_titles = titles

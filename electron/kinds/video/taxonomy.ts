@@ -34,6 +34,7 @@ export const HENTAI_CATEGORY_ID = 'video-hentai'
 export const HENTAI_CATEGORY = '里番'
 
 export const VIDEO_CATEGORIES: Category[] = [
+  { id:'video-audio',name:'音频',description:'音乐、播客、有声书和录音',icon:'music',sort_order:9 },
   {
     id: 'video-cn',
     name: '华语',

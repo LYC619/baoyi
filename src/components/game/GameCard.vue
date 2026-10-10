@@ -12,7 +12,7 @@ import type { GameItem } from '@/types'
 import { coverUrl, formatPlaytime, formatRelative, gameTitle } from '@/utils'
 import { PLAY_STATUS_LABEL, useGameStore } from '@/stores/game'
 
-const props = defineProps<{ item: GameItem; selectable?: boolean; selected?: boolean }>()
+const props = defineProps<{ item: GameItem; selectable?: boolean; selected?: boolean; locked?: boolean }>()
 defineEmits<{ (e: 'open', id: string): void; (e: 'select', id: string): void }>()
 
 const store = useGameStore()
@@ -52,8 +52,8 @@ watch(cover, () => { brokenCover.value = false })
 
 <template>
   <div class="gameCard" :class="{ 'gameCard--selected': selected }">
-    <input v-if="selectable" class="gameCard__select" type="checkbox" :checked="selected" :aria-label="`选择 ${title}`" @change="$emit('select', item.id)" />
-  <button class="card" :title="item.summary || title" :aria-pressed="selectable ? !!selected : undefined" @click="selectable ? $emit('select', item.id) : $emit('open', item.id)">
+    <input v-if="selectable" class="gameCard__select" type="checkbox" :checked="selected" :disabled="locked" :aria-label="`选择 ${title}`" @change="$emit('select', item.id)" />
+  <button class="card" :disabled="locked" :title="item.summary || title" :aria-pressed="selectable ? !!selected : undefined" @click="selectable ? $emit('select', item.id) : $emit('open', item.id)">
     <div class="card__cover" :style="{ '--hue': hue }">
       <img v-if="cover && !brokenCover" :src="cover" :alt="title" class="card__img" @error="brokenCover = true" />
       <span v-else class="card__initial">{{ initial }}</span>

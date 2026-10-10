@@ -178,6 +178,7 @@ export const PROTECTED_FIELD_LABEL: Record<string, string> = {
   tags: '标签',
   official_url: '官网',
   video_type: '类型',
+  media_kind: '媒体类型',
   year: '年份',
   end_year: '完结年份',
   rating: 'TMDB 评分',

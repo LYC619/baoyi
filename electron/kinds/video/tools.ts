@@ -546,6 +546,7 @@ async function register(
   const payload: VideoPayload = {
     path: f.path,
     video_type: f.video_type,
+    ...(f.evidence.some(e=>e.includes('课程目录')) ? {media_kind:'other' as const} : {}),
     collection_name: '',
     name_zh: nameZh,
     name_en: str(args?.name_en, 160) || detail?.original_title || f.original_title || f.title_en,

@@ -25,7 +25,7 @@ function fixture(page: 'Home' | 'Detail') {
   }
   const load = createRendererLoader({
     vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: () => {} },
-    'vue-router': { useRouter: () => ({ push: (route: unknown) => { requests.push(['route', route]) } }) },
+    'vue-router': { useRoute: () => ({ query: {}, params: { id: 'one' } }), useRouter: () => ({ push: async (route: unknown) => { requests.push(['route', route]) }, replace: async () => {} }) },
     '@/stores/game': { useGameStore: () => store, PLAY_STATUS_LABEL: {} },
     '@/stores/settings': { useSettingsStore: () => ({ settings: { ai: { enabled: false, api_key: '' }, title_lang: 'en' } }) },
     '@/composables/useToast': { useToast: () => ({ error: () => {}, success: () => {}, toast: () => {} }) },

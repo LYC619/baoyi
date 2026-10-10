@@ -36,6 +36,7 @@ export class ImageLibrary {
     const where = ["r.kind='image'", visible]
     if (query.type) { where.push('m.item_type=?'); args.push(query.type) }
     if (query.groupId) { where.push('m.group_id=?'); args.push(query.groupId) }
+    if (query.uncategorized) where.push('m.group_id IS NULL')
     if (query.favorite) where.push('m.favorite=1')
     if (query.read !== undefined) { where.push('COALESCE(s.is_read,0)=?'); args.push(Number(query.read)) }
     if (query.publication) { where.push('m.publication=?'); args.push(query.publication) }
@@ -152,6 +153,7 @@ export class ImageLibrary {
   update(id: string, patch: ImagePatch): ImageItem {
     const item = this.get(id)
     if (!item) throw new Error('资源不可用')
+    if (patch.groupId !== undefined && item.type !== 'comic') throw new Error('相册不支持漫画分类，请使用来源目录和标签整理')
     if (patch.read !== undefined && typeof patch.read !== 'boolean') throw new Error('已读状态无效')
     if (patch.name !== undefined) {
       const name = patch.name.trim().slice(0, 300)

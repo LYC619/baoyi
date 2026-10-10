@@ -15,6 +15,7 @@ import { HENTAI_CATEGORY } from './taxonomy.ts'
 import { numberedEpisode } from './episode-identity.ts'
 import { absorbDuplicateVideoCards, localBundleItems, readLocalVideoBundle, rebaseMovedVideoDirectory, videoPathKey } from './local-files.ts'
 import { ignoredVideoFile, clearVideoScanIgnores } from './scan-ignores.ts'
+import { isAudioFile } from '../../../src/utils/audio.ts'
 import { releasePlaceholderClaims } from './placeholders.ts'
 
 export function managedVideoOwner(d: SqlDb, files: string[]): string {
@@ -38,6 +39,7 @@ export function registerVideoPayload(d: SqlDb, payload: VideoPayload, splitFromI
     ? (payload.parts.length ? payload.parts : [{ path: payload.path, file_size: payload.file_size }])
     : payload.episodes.filter(ep => ep.path).map(ep => ({ path: ep.path!, file_size: ep.file_size }))
   const ownerId = resolveVideoOrganizePathOwner(d, payload.path) || managedVideoOwner(d, files.map(file => file.path))
+  if(files.length && files.every(file=>isAudioFile(file.path)))payload.media_kind='audio'
   const owner = ownerId ? getVideo(d, ownerId) : null
   if (owner && ownerId && files.length) {
     const source: VideoSourceRef[] = payload.hanime_id ? [{ provider: 'hanime', externalId: payload.hanime_id, scope: 'episode',
@@ -119,6 +121,8 @@ export function registerLocalVideoFacts(d: SqlDb, facts: VideoFacts, splitFromId
     episodes: f.episodes.map(ep => ({ ...ep, ...(ep.watch ? { watch_status: ep.watch.watch_status, position_sec: ep.watch.position_sec, watched_at: ep.watch.watched_at } : {}) })),
     ...(f.watch ? { watch_status: f.watch.watch_status, position_sec: f.watch.position_sec, last_watched_at: f.watch.watched_at } : {})
   }
+  if (f.files.length && f.files.every(file=>isAudioFile(file.name))) { payload.category=previous?.category||'音频';payload.media_kind='audio' }
+  else if (f.evidence.some(e=>e.includes('课程目录'))) payload.media_kind='other'
   const outcome = registerVideoPayload(d, payload, splitFromId)
   // Viewer exports often contain full metadata without a source ID. Store it on
   // a concrete content row so dates and artwork survive the offline import.
@@ -148,6 +152,7 @@ function validateSource(source: VideoSourceRef): void {
 export function bindVideoSource(d: SqlDb, resourceId: string, source: VideoSourceRef, episodeId?: string): void {
   validateSource(source)
   const provider = source.provider.trim().toLowerCase()
+  if (provider === 'hanime') d.prepare("UPDATE resource SET category=? WHERE id=? AND kind='video'").run(HENTAI_CATEGORY, resourceId)
   const externalId = source.externalId.trim()
   // A later work-level refresh must not recreate an unresolved copy of a source
   // that already belongs to an episode, or weaken its confirmed ownership.
@@ -189,6 +194,8 @@ export function registerVideoContent(d: SqlDb, input: VideoRegistration): VideoR
   let existing = resolvedId ? getVideo(d, resolvedId) : null
   if (input.resourceId && !existing) throw new Error('所选作品已不存在')
   if (input.videoType && !['movie', 'series'].includes(input.videoType)) throw new Error('视频类型无效')
+  if (input.mediaKind && !['video','audio','other'].includes(input.mediaKind)) throw new Error('媒体类型无效')
+  const mediaKind=input.mediaKind || (files.length && files.every(isAudioFile) ? 'audio' : undefined)
   const resourcePath = (input.videoType === 'movie' ? files[0] : '') || existing?.path || directory || files[0]
   if (!resourcePath) throw new Error('缺少作品目录或视频文件')
   if (directory) {
@@ -201,7 +208,7 @@ export function registerVideoContent(d: SqlDb, input: VideoRegistration): VideoR
     const created = !existing
     if (!existing) {
       const payload: VideoPayload = {
-        path: resourcePath, video_type: input.videoType || (directory || input.items.length > 1 ? 'series' : 'movie'), collection_name: '',
+        path: resourcePath, video_type: input.videoType || (directory || input.items.length > 1 ? 'series' : 'movie'), media_kind:mediaKind, collection_name: '',
         name_zh: input.title.trim(), name_en: input.nameEn || '', summary: input.description || '', description: input.originalDescription || input.description || '',
         category: input.category || '其他', tags: input.tags || [], official_url: sources[0]?.pageUrl || '', source_dir: directory || path.dirname(resourcePath), file_size: 0,
         year: 0, end_year: 0, rating: 0, duration_sec: 0, resolution: '', video_codec: '', source: '', release_group: '', audio_tracks: [], subtitle_tracks: [], parts: [], linked_files: [],
@@ -307,6 +314,7 @@ export function registerVideoContent(d: SqlDb, input: VideoRegistration): VideoR
       if (!bound) bindVideoSource(d, resourceId, source)
     }
     const warnings = reconcileEpisodeSlots(d, resourceId, numbering)
+    if(mediaKind)d.prepare("UPDATE video_meta SET media_kind=? WHERE resource_id=? AND NOT EXISTS(SELECT 1 FROM json_each(video_meta.user_edited) WHERE value='media_kind')").run(mediaKind,resourceId)
     d.prepare('UPDATE resource SET updated_at = ? WHERE id = ?').run(Date.now(), resourceId)
     d.exec('RELEASE SAVEPOINT video_registration')
     return { resourceId, bundleId, created, itemsAdded, filesAdded, warnings }
@@ -344,7 +352,7 @@ export function registerVideoBundleData(d: SqlDb, root: string, bundle: import('
     }
     const duplicatesMerged = owner ? absorbDuplicateVideoCards(d, owner.resource_id, items) : 0
     const result = registerVideoContent(d, {
-    restoreRemoved, videoType: bundle.work.video_type,
+    restoreRemoved, videoType: bundle.work.video_type,mediaKind:bundle.work.media_kind,
     resourceId, bundleId: bundle.bundle_id, directory: root, root: path.dirname(root), title: bundle.work.title,
     nameEn: bundle.work.name_en, description: bundle.work.description, originalDescription: bundle.work.original_description,
     category: bundle.work.category, tags: bundle.work.tags, posterPath: bundle.work.poster ? resolveBundlePath(root, bundle.work.poster) : '', posterSource: bundle.work.poster_source, thumbnailPath: bundle.work.thumbnail ? resolveBundlePath(root, bundle.work.thumbnail) : '', thumbnailSource: bundle.work.thumbnail_source,

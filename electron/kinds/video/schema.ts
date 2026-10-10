@@ -68,6 +68,7 @@ export const VIDEO_META_SQL = `
 
     video_type TEXT NOT NULL DEFAULT 'movie'
       CHECK (video_type IN ('movie', 'series')),
+    media_kind TEXT NOT NULL DEFAULT 'video' CHECK(media_kind IN ('video','audio','other')),
 
     -- 竖版 2:3 海报 / 横版背景图的本地路径。空串 = 还没有，界面退回首字占位
     poster_path TEXT NOT NULL DEFAULT '',
@@ -285,6 +286,7 @@ export const VIDEO_VIEW_SQL = `
     r.name_zh, r.name_en, r.summary, r.description, r.category, r.tags,
     r.official_url, r.ai_status, r.notes, r.is_archived,
     COALESCE(m.video_type, 'movie') AS video_type,
+    COALESCE(m.media_kind, 'video') AS media_kind,
     COALESCE(m.thumbnail_path, '') AS thumbnail_path,
     COALESCE(m.thumbnail_source, '') AS thumbnail_source,
     COALESCE(m.poster_path, '') AS poster_path,
@@ -421,6 +423,10 @@ export function migrateVideo(d: SqlDb, from: number): void {
 
   if (objectType(d, 'video_meta') !== 'table') return
   const cols = columnsOf(d, 'video_meta')
+  if (!cols.has('media_kind')) {
+    d.exec("ALTER TABLE video_meta ADD COLUMN media_kind TEXT NOT NULL DEFAULT 'video' CHECK(media_kind IN ('video','audio','other'))")
+    d.exec("UPDATE video_meta SET media_kind='audio' WHERE resource_id IN (SELECT id FROM resource WHERE kind='video' AND category='音频')")
+  }
   for (const column of ['thumbnail_path', 'thumbnail_source']) if (!cols.has(column)) d.exec(`ALTER TABLE video_meta ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`)
   if (!cols.has('collection_name')) {
     d.exec(`ALTER TABLE video_meta ADD COLUMN collection_name TEXT NOT NULL DEFAULT ''`)
@@ -474,7 +480,7 @@ export function migrateVideo(d: SqlDb, from: number): void {
   if (objectType(d, 'video') === 'view') {
     const v = columnsOf(d, 'video')
     if (
-      !v.has('user_edited') ||
+      !v.has('media_kind') || !v.has('user_edited') ||
       !v.has('hanime_id') ||
       !v.has('original_description') ||
       !v.has('hanime_tags') ||
@@ -488,5 +494,10 @@ export const videoSchema: KindSchema = {
   tables: VIDEO_SCAN_STATE_SQL + VIDEO_META_SQL + EPISODE_SQL + VIDEO_LIBRARY_SQL + VIDEO_ORGANIZE_SQL + VIDEO_DISCOVERY_SQL,
   view: VIDEO_VIEW_SQL,
   indexes: VIDEO_INDEXES_SQL,
-  migrate: migrateVideo
+  migrate(d, context) {
+    migrateVideo(d, context)
+    d.exec(`UPDATE resource SET category='里番' WHERE kind='video' AND category!='里番' AND (
+      id IN (SELECT resource_id FROM video_meta WHERE hanime_id!='') OR
+      id IN (SELECT resource_id FROM video_sources WHERE lower(provider)='hanime'))`)
+  }
 }

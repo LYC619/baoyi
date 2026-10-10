@@ -60,6 +60,28 @@ async function test(name: string, run: (f: ReturnType<typeof fixture>) => Promis
   catch (cause) { failed++; console.error('FAIL ' + name + ': ' + (cause instanceof Error ? cause.stack : cause)) }
   finally { f.close() }
 }
+await test('explicit import restores removed files only when confirmed', async f => {
+  const file=path.join(f.root,'Alpha/Alpha.mp4')
+  f.db.prepare('INSERT INTO video_scan_ignores(path,resource_id,source_key,created_at) VALUES(?,?,?,?)').run(file,'removed-owner','',1)
+  const manager=f.make(), batch=await manager.prepare([path.dirname(file)])
+  assert.equal(batch.entries.length,1)
+  assert.notEqual(batch.entries[0].status,'skipped')
+  assert.ok(f.db.prepare('SELECT path FROM video_scan_ignores WHERE path=?').get(file),'preview must preserve removal history')
+  manager.confirm(batch.id,[batch.entries[0].id])
+  assert.equal(f.db.prepare('SELECT path FROM video_scan_ignores WHERE path=?').get(file),undefined)
+  assert.equal(videoDb.listVideos(f.db,{}).length,1)
+})
+await test('Agent review preserves a course collection and its other media type', async f => {
+  const root=path.join(f.root,'大学物理主讲')
+  for(let i=1;i<=14;i++)f.file(`大学物理主讲/${i}.章节${i}.mp4`)
+  const manager=f.make(),batch=await manager.prepare([root])
+  assert.equal(batch.entries.length,1);assert.equal(batch.entries[0].episodeCount,14)
+  f.agent('success')
+  await manager.review(batch.id,[batch.entries[0].id])
+  manager.confirm(batch.id,[batch.entries[0].id])
+  const items=videoDb.listVideos(f.db,{type:'other'})
+  assert.equal(items.length,1);assert.equal(videoDb.listEpisodes(f.db,items[0].id).length,14)
+})
 await test('local preview leaves the library and media untouched, with stable editable rows', async f => {
   const manager = f.make(), before = videoImportLibraryStamp(f.db)
   const batch = await manager.prepare([f.root])

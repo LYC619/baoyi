@@ -7,6 +7,9 @@ withDefaults(
     items: SoftwareItem[]
     view?: 'grid' | 'list'
     unusedDays?: number
+    selectable?: boolean
+    selectedIds?: Set<string>
+    locked?: boolean
   }>(),
   { view: 'grid', unusedDays: 60 }
 )
@@ -14,6 +17,7 @@ withDefaults(
 defineEmits<{
   (e: 'open', id: string): void
   (e: 'launch', id: string): void
+  (e: 'select', id: string): void
 }>()
 </script>
 
@@ -27,8 +31,12 @@ defineEmits<{
       :item="item"
       :view="view"
       :unused-days="unusedDays"
+      :selectable="selectable"
+      :selected="selectedIds?.has(item.id)"
+      :locked="locked"
       @open="$emit('open', $event)"
       @launch="$emit('launch', $event)"
+      @select="$emit('select', $event)"
     />
   </div>
 </template>
