@@ -43,3 +43,29 @@ console.log('PASS software removal failure remains selected for retry')
   scope.stop()
 }
 console.log('PASS bulk category change previews, cancellation writes nothing, confirmation relocates')
+
+{
+  const scope = Vue.effectScope(), writes: any[] = [], notifications: string[] = [], changes: any[] = []
+  const props = Vue.reactive({ id: 'one', modelValue: null as boolean | null, disabled: false })
+  let fail = false
+  const load = createRendererLoader({ vue: Vue, 'vue-router': { onBeforeRouteLeave() {} },
+    '@/stores/software': { useSoftwareStore: () => ({ update: async (id: string, patch: any) => {
+      writes.push({ id, patch }); if (fail) throw new Error('database unavailable')
+      return { id, is_portable: patch.is_portable }
+    } }) },
+    '@/composables/useToast': { useToast: () => ({ success() {}, toast() {}, error: (s: string) => notifications.push(s) }) }
+  })
+  const select = scope.run(() => load('src/components/software/SoftwareTypeSelect.vue').default.setup(props, {
+    expose() {}, emit(name: string, value: any) { if (name === 'updated') { changes.push(value); props.modelValue = value.is_portable } }
+  }))
+  select.draft.value = 'portable'; await select.change(); await Vue.nextTick()
+  assert.equal(props.modelValue, true)
+  assert.deepEqual(Object.keys(writes[0].patch), ['is_portable'], 'setting a type never writes paths, link state or move risk')
+  fail = true; select.draft.value = 'installed'; await select.change()
+  assert.equal(select.draft.value, 'portable'); assert.equal(select.saving.value, false)
+  assert.equal(changes.length, 1); assert.equal(notifications.length, 1)
+  fail = false; select.draft.value = 'unknown'; await select.change(); await Vue.nextTick()
+  assert.equal(props.modelValue, null)
+  scope.stop()
+}
+console.log('PASS manual software type changes only its metadata; failed saves revert and allow retry')

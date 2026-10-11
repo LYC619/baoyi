@@ -4,7 +4,8 @@ import { useRouter } from 'vue-router'
 import { FolderOpen, Leaf, Link2, Loader2 } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/utils'
-import type { OrganizedEntry, RelocatePreview } from '@/types'
+import SoftwareTypeSelect from './SoftwareTypeSelect.vue'
+import type { OrganizedEntry, RelocatePreview, SoftwareItem } from '@/types'
 
 const props = defineProps<{ entries: OrganizedEntry[]; categories: string[]; busy: boolean }>()
 const emit = defineEmits<{ refresh: [id: string]; busy: [value: boolean] }>()
@@ -53,6 +54,10 @@ async function apply(e: OrganizedEntry, action: 'relocate' | 'materialize' | 'un
 async function reveal(id: string) {
   try { await window.baoyi.software.revealInFolder(id) } catch (cause) { error(errorMessage(cause)) }
 }
+function typeUpdated(item: SoftwareItem): void {
+  if (editing.value === item.id) preview.value = null
+  emit('refresh', item.id)
+}
 </script>
 
 <template>
@@ -82,10 +87,11 @@ async function reveal(id: string) {
       <p v-else-if="!e.exe_present" class="warning" role="status">主程序已不存在，可能已卸载或更换安装位置。记录仍保留；重装到原路径后同步即可恢复，路径改变时请重新导入并核对旧记录。</p>
       <p v-if="e.category_mismatch" class="warning">库内分类为“{{ e.category }}”，同步后将跟随文件夹。</p>
       <div class="item-actions">
-        <button class="btn btn--ghost" :disabled="busy || working || !e.present || !e.target_ok" @click="edit(e)">重新归置</button>
-        <button v-if="e.is_link" class="btn btn--ghost" :disabled="busy || working || !e.present || !e.target_ok" @click="apply(e, 'materialize')">转为实体</button>
-        <button v-if="e.is_link" class="btn btn--ghost" :disabled="busy || working || !e.present" @click="apply(e, 'unlink')">移除链接</button>
+        <button class="btn btn--ghost" :disabled="busy || working || !e.present || !e.target_ok" :title="e.is_link ? '更改分类或文件夹位置，只移动链接入口，软件本体不动；操作后仍属于已整理。' : '更改分类或文件夹位置，会移动整个软件文件夹；操作后仍属于已整理。'" @click="edit(e)">更改整理位置</button>
+        <button v-if="e.is_link" class="btn btn--ghost" :disabled="busy || working || !e.present || !e.target_ok" title="把软件本体从原位置搬到当前链接位置，操作后仍属于已整理。" @click="apply(e, 'materialize')">转为实体</button>
+        <button v-if="e.is_link" class="btn btn--ghost" :disabled="busy || working || !e.present" title="只删除链接，记录指回原位置；原位置在整理目录外时回到待整理，真实文件保留。" @click="apply(e, 'unlink')">移除链接</button>
         <button class="btn btn--subtle" :disabled="busy || working || !e.present || !e.target_ok" @click="reveal(e.software_id)"><FolderOpen :size="14" />所在文件夹</button>
+        <SoftwareTypeSelect :id="e.software_id" :model-value="e.is_portable" :disabled="busy || working" @busy="working = $event" @updated="typeUpdated" />
       </div>
       <form v-if="editing === e.software_id" class="relocate-form" @submit.prevent="previewMove(e)">
         <fieldset :disabled="busy || working">
@@ -99,7 +105,7 @@ async function reveal(id: string) {
           <p>目标位置：<span class="mono">{{ preview.to }}</span></p>
           <p v-if="!preview.ok" class="warning">{{ preview.message }}</p>
           <template v-else><p>{{ preview.is_link ? '只移动链接入口，真实文件保留原位。' : '将移动整个文件夹，并更新库内路径和分类。' }}</p><p v-if="preview.warning" class="warning">{{ preview.warning }}</p>
-          <button class="btn btn--primary" type="button" :disabled="busy || working" @click="apply(e, 'relocate')">确认重新归置</button></template>
+          <button class="btn btn--primary" type="button" :disabled="busy || working" @click="apply(e, 'relocate')">确认更改位置</button></template>
         </div>
       </form>
     </article>

@@ -20,6 +20,7 @@ import {
 import AppIcon from '@/components/ui/AppIcon.vue'
 import EditableField from '@/components/ui/EditableField.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
+import SoftwareTypeSelect from '@/components/software/SoftwareTypeSelect.vue'
 import { useAI } from '@/composables/useAI'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
@@ -90,6 +91,10 @@ const categoryOptions = computed(() => {
  * 错误在这里统一接住 —— 保存失败返回 null，调用方靠它决定要不要报成功。
  */
 const categoryBusy = ref(false)
+const typeBusy = ref(false)
+function typeUpdated(updated: SoftwareItem): void {
+  if (item.value?.id === updated.id) item.value = updated
+}
 async function save(patch: Partial<SoftwareItem>): Promise<SoftwareItem | null> {
   if (!item.value) return null
   const id = item.value.id
@@ -636,12 +641,9 @@ async function dropLink(): Promise<void> {
                   </button>
                 </dd>
               </template>
-              <dt>绿色软件</dt>
+              <dt>安装类型</dt>
               <dd>
-                <TagBadge
-                  :label="item.is_portable === null ? '未判断' : item.is_portable ? '是' : '否'"
-                  :tone="item.is_portable === true ? 'success' : 'muted'"
-                />
+                <SoftwareTypeSelect :id="item.id" :model-value="item.is_portable" :disabled="categoryBusy || linkBusy || typeBusy" @busy="typeBusy = $event" @updated="typeUpdated" />
               </dd>
               <dt>移动风险</dt>
               <dd>

@@ -6,10 +6,10 @@
 
 ## 当前版本
 
-**0.16.1，2026-10-11。** 已整理软件操作后局部刷新，区分绿色、链接和安装版；补全卸载及重装后的状态检查。
+**0.16.2，2026-10-11。** 已整理列表与详情页支持手动设置软件类型，为更改整理位置、转为实体和移除链接补充悬浮说明。
 
-- 当前程序：[release/0.16.1/win-unpacked/抱一.exe](release/0.16.1/win-unpacked/抱一.exe)
-- [版本说明与运行方式](docs/releases/0.16.1.md)
+- 当前程序：[release/0.16.2/win-unpacked/抱一.exe](release/0.16.2/win-unpacked/抱一.exe)
+- [版本说明与运行方式](docs/releases/0.16.2.md)
 - [软件整理目录验收](docs/verification/2026-10-11-software-library.md)
 - [整改验收与前后截图](docs/verification/2026-10-09-review-remediation.md)
 - [五模块能力与体验验收](docs/verification/2026-10-07-unified-ux.md)
@@ -97,6 +97,7 @@ npm run dist:dir
 | **0.15.1** | 详情与查询归属保护、本地项目登记、五库紧凑布局 |
 | **0.16.0** | 已整理软件管理、目录分类同步、预览归置与链接清理 |
 | **0.16.1** | 单条操作局部刷新、软件类型筛选、卸载重装状态检查 |
+| **0.16.2** | 手动设置软件类型、整理操作悬浮说明 |
 
 早期计划不等于已交付功能；保留在 [docs/history](docs/history/README.md) 中供追溯。
 当前模块约定以 `electron/kinds/types.ts`、模块实现和近期交付报告为准。
