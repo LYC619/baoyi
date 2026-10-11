@@ -24,6 +24,7 @@ import { useAI } from '@/composables/useAI'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSoftwareStore } from '@/stores/software'
+import { previewSoftwareCategoryChanges, categoryMoveConfirmation } from '@/utils/softwareCategory'
 import type { MasteryLevel, SoftwareItem } from '@/types'
 import {
   MASTERY_META,
@@ -88,15 +89,33 @@ const categoryOptions = computed(() => {
  * 所有保存路径的唯一收口。失焦即存的调用点散在模板各处，逐个包 try/catch 必漏，
  * 错误在这里统一接住 —— 保存失败返回 null，调用方靠它决定要不要报成功。
  */
+const categoryBusy = ref(false)
 async function save(patch: Partial<SoftwareItem>): Promise<SoftwareItem | null> {
   if (!item.value) return null
+  const id = item.value.id
+  let holdsCategoryLock = false
   try {
-    const updated = await store.update(item.value.id, patch)
-    if (updated) item.value = updated
+    if (patch.category !== undefined && patch.category !== item.value.category) {
+      if (categoryBusy.value) return null
+      categoryBusy.value = true
+      holdsCategoryLock = true
+      const moves = await previewSoftwareCategoryChanges([id], patch.category)
+      if (moves.length) {
+        if (!window.confirm(categoryMoveConfirmation(moves))) return null
+        const p = moves[0].preview
+        const result = await window.baoyi.organize.relocate(id, p.category, p.folder, p.from)
+        if (!result.ok) throw new Error(result.message)
+        patch = { ...patch, category: p.category }
+      }
+    }
+    const updated = await store.update(id, patch)
+    if (updated && item.value?.id === id) item.value = updated
     return updated
   } catch (err) {
     error(`保存失败：${errorMessage(err)}`)
     return null
+  } finally {
+    if (holdsCategoryLock) categoryBusy.value = false
   }
 }
 
@@ -159,15 +178,25 @@ async function toggleArchive(): Promise<void> {
 
 async function removeItem(): Promise<void> {
   if (!item.value) return
-  const ok = window.confirm(`确认从抱一移除「${name.value}」？\n只删除记录，不会删除实际文件。`)
+  const linked = item.value.link_target !== ''
+  const ok = window.confirm(
+    `确认从抱一移除「${name.value}」？\n` +
+      (linked
+        ? '这一条是整理目录里的链接：链接会一并删除，真实文件不动。'
+        : '只删除记录，不会删除实际文件。')
+  )
   if (!ok) return
   try {
-    await store.remove(item.value.id)
+    const result = await store.remove(item.value.id)
+    if (!result.ok) {
+      error(result.message)
+      return
+    }
+    success(result.message)
   } catch (err) {
     error(`移除失败：${errorMessage(err)}`)
     return
   }
-  success('已移除记录')
   void router.push({ name: 'home' })
 }
 
@@ -195,8 +224,10 @@ function setMastery(level: MasteryLevel): void {
   void save({ mastery_level: level })
 }
 
-function setCategory(e: Event): void {
-  void save({ category: (e.target as HTMLSelectElement).value })
+async function setCategory(e: Event): Promise<void> {
+  const select = e.target as HTMLSelectElement
+  await save({ category: select.value })
+  select.value = item.value?.category ?? ''
 }
 
 async function copyPath(target: string): Promise<void> {
@@ -421,7 +452,7 @@ async function dropLink(): Promise<void> {
               />
 
               <div class="hero__row">
-                <select class="select" :value="item.category" @change="setCategory">
+                <select class="select" :value="item.category" :disabled="categoryBusy" @change="setCategory">
                   <option v-for="c in categoryOptions" :key="c" :value="c">{{ c }}</option>
                 </select>
 

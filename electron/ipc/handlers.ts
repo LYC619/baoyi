@@ -29,7 +29,6 @@ import {
   counts,
   createTag,
   dataStats,
-  deleteSoftware,
   exportSoftwareList,
   getSettings,
   getSoftware,
@@ -124,12 +123,18 @@ import {
   setHanimeHostsEnabled
 } from '../services/proxy'
 import {
+  deleteSoftwareRecord,
+  listOrganized,
   materialize,
   previewOrganize,
+  previewRelocateOrganized,
+  relocateOrganized,
   runOrganize,
   undoOrganize,
   unlink
 } from '../kinds/software/organize'
+import { removeOrphanLinks, syncOrganizeRoot } from '../kinds/software/organize/sync'
+import { withOrganizeMutation } from '../kinds/software/organize/mutation'
 import { addSingleExe, cancelScan, scanDirectories } from '../kinds/software/scanner'
 import { ICON_EXTS } from '../kinds/software/icons'
 import { clearSoftwareIcon, refreshSoftwareIcons, setSoftwareIcon } from '../kinds/software/service'
@@ -206,7 +211,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('software:update', (_e, id: string, patch: Partial<SoftwareItem>) =>
     updateSoftware(id, patch)
   )
-  ipcMain.handle('software:remove', (_e, id: string) => deleteSoftware(id))
+  // 走整理模块：条目是整理目录里的链接时，链接要一并删掉（见 deleteSoftwareRecord）
+  ipcMain.handle('software:remove', (_e, id: string) => withOrganizeMutation(() => deleteSoftwareRecord(id)))
   ipcMain.handle('software:counts', (_e, unusedDays: number) => counts(unusedDays))
   ipcMain.handle('software:launch', (_e, id: string, launcherPath?: string) =>
     launchSoftware(id, launcherPath)
@@ -623,12 +629,23 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle('organize:preview', (_e, ids?: string[]) => previewOrganize(ids))
   ipcMain.handle('organize:run', (_e, commands: OrganizeCommand[]) =>
-    runOrganize(commands, (p) => send('organize:progress', p))
+    withOrganizeMutation(() => runOrganize(commands, (p) => send('organize:progress', p)))
   )
   ipcMain.handle('organize:plans', () => listOrganizePlans())
-  ipcMain.handle('organize:undo', (_e, planId: string) => undoOrganize(planId))
-  ipcMain.handle('organize:materialize', (_e, id: string) => materialize(id))
-  ipcMain.handle('organize:unlink', (_e, id: string) => unlink(id))
+  ipcMain.handle('organize:undo', (_e, planId: string) => withOrganizeMutation(() => undoOrganize(planId)))
+  ipcMain.handle('organize:materialize', (_e, id: string) => withOrganizeMutation(() => materialize(id)))
+  ipcMain.handle('organize:unlink', (_e, id: string) => withOrganizeMutation(() => unlink(id)))
+  ipcMain.handle('organize:organized', () => listOrganized())
+  ipcMain.handle('organize:sync', () => withOrganizeMutation(() => syncOrganizeRoot()))
+  ipcMain.handle('organize:preview-relocate', (_e, id: string, category: string, folder: string) =>
+    previewRelocateOrganized(id, String(category ?? ''), String(folder ?? ''))
+  )
+  ipcMain.handle('organize:relocate', (_e, id: string, category: string, folder: string, expectedFrom?: string) =>
+    withOrganizeMutation(() => relocateOrganized(id, String(category ?? ''), String(folder ?? ''), expectedFrom))
+  )
+  ipcMain.handle('organize:remove-links', (_e, paths: string[]) =>
+    withOrganizeMutation(() => removeOrphanLinks(Array.isArray(paths) ? paths.map(String) : []))
+  )
 
   /* ------------------------------ 数据 ------------------------------ */
   ipcMain.handle('data:dir', () => app.getPath('userData'))

@@ -1,7 +1,7 @@
 {
   "name": "baoyi",
   "productName": "抱一",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "抱一 — 本地资源掌控工具。知止而后得。",
   "author": "BaoYi",
   "license": "MIT",
@@ -69,7 +69,10 @@
     "verify-release-config": "node --test scripts/verify-release-config.cjs",
     "verify-unified-ux": "node --experimental-strip-types --no-warnings scripts/verify-unified-ux.ts",
     "verify-library-selection": "node --experimental-strip-types --no-warnings scripts/verify-library-selection.ts",
-    "verify-library-query": "node --experimental-strip-types --no-warnings scripts/verify-library-query.ts"
+    "verify-library-query": "node --experimental-strip-types --no-warnings scripts/verify-library-query.ts",
+    "verify-organize-sync": "node --experimental-strip-types --no-warnings --test --test-reporter=dot scripts/verify-organize-sync.ts scripts/verify-organize-service.ts",
+    "verify-organize-renderer": "node --experimental-strip-types --no-warnings scripts/verify-organize-renderer.ts && node --experimental-strip-types --no-warnings scripts/verify-organize-mutation.ts",
+    "verify-organize-ui": "node --experimental-strip-types --no-warnings scripts/verify-organize-ui.ts"
   },
   "dependencies": {
     "@panzoom/panzoom": "4.6.2",

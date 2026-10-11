@@ -8,14 +8,14 @@
 
 import path from 'node:path'
 import type { MoveRisk, OrganizeAction, SoftwareItem } from '../../../../src/types'
-import { nestedInside, sanitizeFolder } from '../../../services/fstree.ts'
+import { nestedInside, samePath, sanitizeFolder } from '../../../services/fstree.ts'
 
 /**
- * 文件夹名规范和路径包含判断都搬到了公共层（services/fstree.ts）——
+ * 文件夹名规范和路径包含 / 相等判断都搬到了公共层（services/fstree.ts）——
  * 游戏存档备份也要用它们，而「一个文件夹名能不能建出来」跟品类无关。
  * 这里原样转出去，整理模块内部和自检的引用都不必知道它们搬过家了。
  */
-export { nestedInside, sanitizeFolder }
+export { nestedInside, samePath, sanitizeFolder }
 
 /**
  * 默认目标文件夹名：软件的英文正式名优先。
@@ -79,4 +79,30 @@ export function sameVolume(a: string, b: string): boolean {
   const va = of(a)
   const vb = of(b)
   return va !== '' && va === vb
+}
+
+/**
+ * 一个条目「要搬的那个目录」。
+ *
+ * 用 source_dir 而不是 path.dirname(exe_path)：agent 识别时记下的 source_dir 是
+ * 软件的整棵子树根，而 exe 可能躺在 bin\ 里。搬 bin\ 会把软件劈成两半。
+ * source_dir 为空（0.1.x 的老条目、手动添加的单个 exe）才退回 exe 所在目录。
+ */
+export function rootDirOf(item: Pick<SoftwareItem, 'source_dir' | 'exe_path'>): string {
+  return item.source_dir || path.dirname(item.exe_path)
+}
+
+/**
+ * 这条目是不是已经整理过了。
+ *
+ * 判据是「它当前的位置已经在整理根下面了」—— 比记一个 organized 标记位可靠：
+ * 用户可能手工把目录挪回去，那时候它就该重新出现在待整理方案里；反过来
+ * 同步（sync.ts）读到的新目录，也不需要谁去打标记就天然算已整理。
+ */
+export function alreadyOrganized(
+  item: Pick<SoftwareItem, 'source_dir' | 'exe_path'>,
+  root: string
+): boolean {
+  if (!root) return false
+  return nestedInside(root, rootDirOf(item))
 }

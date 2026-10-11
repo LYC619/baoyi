@@ -20,24 +20,43 @@ import type {
   OrganizeProgress,
   OrganizeResult,
   OrganizeStep,
+  OrganizedEntry,
+  OrganizedList,
+  RelocatePreview,
+  RelocateResult,
+  RemoveSoftwareResult,
   SoftwareItem,
   UndoResult
 } from '../../../../src/types'
 import {
+  deleteSoftware,
   getOrganizePlan,
   getSettings,
   getSoftware,
+  getSoftwareByPath,
   listSoftware,
   markPlanUndone,
   remapPaths,
   saveOrganizePlan,
   updateSoftware
 } from '../../../services/database'
-import { defaultAction, defaultFolder, nestedInside, rebase, targetDir } from './plan'
+import { samePath } from '../../../services/fstree.ts'
+import {
+  alreadyOrganized,
+  defaultAction,
+  defaultFolder,
+  nestedInside,
+  rebase,
+  rootDirOf,
+  targetDir
+} from './plan'
 import {
   exists,
+  entryExists,
+  checkLibraryPath,
   isLink,
   LINK_MARK,
+  linkTargetOf,
   makeJunction,
   moveDir,
   removeJunction,
@@ -45,27 +64,8 @@ import {
 } from './fsops'
 import { describeRefs, hasRefs, scanRefs } from './refs'
 
-/**
- * 一个条目「要搬的那个目录」。
- *
- * 用 source_dir 而不是 path.dirname(exe_path)：agent 识别时记下的 source_dir 是
- * 软件的整棵子树根，而 exe 可能躺在 bin\ 里。搬 bin\ 会把软件劈成两半。
- * source_dir 为空（0.1.x 的老条目、手动添加的单个 exe）才退回 exe 所在目录。
- */
-function rootDirOf(item: SoftwareItem): string {
-  return item.source_dir || path.dirname(item.exe_path)
-}
-
-/**
- * 已经整理过的条目不再出现在方案里。
- *
- * 判据是「它当前的位置已经在整理根下面了」—— 比记一个 organized 标记位可靠：
- * 用户可能手工把目录挪回去，那时候它就该重新出现在方案里。
- */
-function alreadyOrganized(item: SoftwareItem, root: string): boolean {
-  if (!root) return false
-  return nestedInside(root, rootDirOf(item))
-}
+// rootDirOf / alreadyOrganized 住在 plan.ts：sync.ts 也要用它们，而那边不该反过来
+// 依赖这个编排文件。判据没变 —— 「已整理」仍然看位置，不记标记位。
 
 /**
  * 出整理方案。不动任何文件。
@@ -301,9 +301,18 @@ export async function materialize(id: string): Promise<{ ok: boolean; message: s
   if (!(await isLink(linkPath))) {
     return { ok: false, message: `${linkPath} 已经不是链接了，可能已被手工处理过` }
   }
+  if (!samePath(await linkTargetOf(linkPath), item.link_target)) {
+    return { ok: false, message: '链接目标已变化，请先核对软件记录' }
+  }
+  const invalid = await checkLibraryPath(getSettings().organize_root, linkPath)
+  if (invalid) return { ok: false, message: invalid }
+  const shared = [...listSoftware({}), ...listSoftware({ group: 'archived' })].some(r => r.id !== id && (
+    nestedInside(linkPath, rootDirOf(r)) || nestedInside(item.link_target, rootDirOf(r)) || (r.link_target && samePath(r.link_target, item.link_target))
+  ))
+  if (shared) return { ok: false, message: '其他软件记录仍依赖这个目录，请先处理共用记录' }
 
   const staging = `${linkPath}.baoyi_tmp`
-  if (await exists(staging)) {
+  if (await entryExists(staging)) {
     return { ok: false, message: `临时目录 ${staging} 已存在，请先手工清理` }
   }
 
@@ -338,10 +347,209 @@ export async function unlink(id: string): Promise<{ ok: boolean; message: string
   if (!item.link_target) return { ok: false, message: '这一条不是链接，没有可移除的链接' }
 
   const linkPath = item.source_dir || path.dirname(item.exe_path)
+  const invalid = await checkLibraryPath(getSettings().organize_root, linkPath)
+  if (invalid) return { ok: false, message: invalid }
+  if (!samePath(await linkTargetOf(linkPath), item.link_target)) return { ok: false, message: '链接目标已变化，请先核对软件记录' }
+  const shared = [...listSoftware({}), ...listSoftware({ group: 'archived' })].some(r => r.id !== id && nestedInside(linkPath, rootDirOf(r)))
+  if (shared) return { ok: false, message: '其他软件记录仍共用这个链接，请先处理共用记录' }
   const outcome = await removeJunction(linkPath)
   if (!outcome.ok) return { ok: false, message: outcome.note }
 
   await fsp.rm(path.join(item.link_target, LINK_MARK), { force: true }).catch(() => {})
   remapPaths(id, linkPath, item.link_target, '')
   return { ok: true, message: `已移除链接，条目指回 ${item.link_target}` }
+}
+
+/* ------------------------------ 已整理 ------------------------------ */
+
+/**
+ * 已整理的条目：当前位置已经在整理根下面的那些。
+ *
+ * 和 previewOrganize 正好互补 —— 那边把它们滤掉，这边只要它们。归档的也算：
+ * 归档只是卡片墙不显示，文件还在整理目录里占着位置。
+ */
+export async function listOrganized(): Promise<OrganizedList> {
+  const root = getSettings().organize_root
+  if (!root) return { root: '', entries: [] }
+
+  const items = [...listSoftware({}), ...listSoftware({ group: 'archived' })]
+  const entries: OrganizedEntry[] = []
+
+  for (const item of items) {
+    if (!alreadyOrganized(item, root)) continue
+    const dir = rootDirOf(item)
+    const present = await entryExists(dir)
+    const liveLink = await isLink(dir)
+    const link = item.link_target !== '' || liveLink
+    const target = liveLink ? await linkTargetOf(dir) : item.link_target
+    const rel = path.relative(root, dir).split(/[\\/]/).filter(Boolean)
+    const folderCategory = rel.length > 1 ? rel[0] : ''
+
+    entries.push({
+      software_id: item.id,
+      name: item.name_en || item.name_zh || item.file_name,
+      dir,
+      exe_path: item.exe_path,
+      category: item.category,
+      folder_category: folderCategory,
+      folder: path.basename(dir),
+      is_link: link,
+      link_target: target,
+      target_ok: link ? target !== '' && (await exists(target)) : true,
+      present,
+      category_mismatch: folderCategory !== '' && folderCategory !== item.category,
+      is_portable: item.is_portable,
+      move_risk: item.move_risk,
+      is_archived: item.is_archived
+    })
+  }
+
+  entries.sort(
+    (a, b) =>
+      a.folder_category.localeCompare(b.folder_category, 'zh') ||
+      a.name.localeCompare(b.name, 'zh')
+  )
+  return { root, entries }
+}
+
+/**
+ * 改一条已整理条目的分类 / 文件夹名。
+ *
+ * 实体目录就是再搬一次；链接是「删旧 junction → 在新位置建一个指向同一处的 junction」，
+ * 真实文件自始至终没动。新链接建不起来就把旧的原位补回去 —— 不能让整理目录里
+ * 凭空少一条。
+ */
+export async function previewRelocateOrganized(
+  id: string,
+  category: string,
+  folder: string
+): Promise<RelocatePreview> {
+  const root = getSettings().organize_root
+  const item = getSoftware(id)
+  const from = item ? rootDirOf(item) : ''
+  const to = targetDir(root, category, folder)
+  const preview: RelocatePreview = { ok: false, message: '', from, to, category: path.basename(path.dirname(to)), folder: path.basename(to), is_link: false }
+  const fail = (message: string) => ({ ...preview, message })
+  if (!root) return fail('还没有设置整理目标目录')
+  if (!item) return fail('找不到这个条目')
+  const invalid = await checkLibraryPath(root, from) || await checkLibraryPath(root, to)
+  if (invalid) return fail(invalid)
+  if (!samePath(from, to) && await entryExists(to)) return fail(`目标已存在，没有动：${to}`)
+  if (!await entryExists(from)) return fail('原目录已不存在，请先同步整理目录')
+  const other = [...listSoftware({}), ...listSoftware({ group: 'archived' })].find(r => r.id !== id && nestedInside(from, rootDirOf(r)))
+  if (other) return fail('这个文件夹还有其他软件记录引用，请先合并或移除重复记录')
+  const duplicate = getSoftwareByPath(rebase(item.exe_path, from, to))
+  if (duplicate && duplicate.id !== id) return fail('目标程序路径已被另一条记录占用')
+
+  const liveLink = await isLink(from)
+  if (item.link_target || liveLink) {
+    const target = await linkTargetOf(from)
+    if (!liveLink || !target) return fail('链接状态已变化，请先检查原目录')
+    if (item.link_target && !samePath(item.link_target, target)) return fail('链接目标已变化，请先核对软件记录')
+    if (!await exists(target)) return fail('链接目标已失效，原链接保留，请先修复目标路径')
+    preview.is_link = true
+  }
+  return { ...preview, ok: true }
+}
+
+export async function relocateOrganized(id: string, category: string, folder: string, expectedFrom?: string): Promise<RelocateResult> {
+  const preview = await previewRelocateOrganized(id, category, folder)
+  if (!preview.ok) return preview
+  const { from, to } = preview
+  if (expectedFrom && !samePath(from, expectedFrom)) return { ok: false, message: '位置已变化，请重新预览' }
+  const item = getSoftware(id)!
+  if (samePath(from, to)) {
+    updateSoftware(id, { category: preview.category })
+    return { ok: true, message: '位置没有变化，分类已同步' }
+  }
+
+  if (preview.is_link) {
+    const target = await linkTargetOf(from)
+    // 先建新链接，成功后才删旧的，失败不会丢掉原入口。
+    const made = await makeJunction(to, target)
+    if (!made.ok) return { ok: false, message: made.note }
+
+    const dropped = await removeJunction(from)
+    if (!dropped.ok) {
+      await removeJunction(to)
+      return { ok: false, message: dropped.note }
+    }
+    await writeLinkMark(to, {
+      software: item.name_en || item.name_zh || item.file_name,
+      real_path: target,
+      link_path: to,
+      created_at: new Date().toISOString(),
+      reason: 'relocate'
+    })
+    remapPaths(id, from, to, target)
+    updateSoftware(id, { category: preview.category, source_dir: to })
+    return { ok: true, message: `链接已移到 ${to}` }
+  }
+
+  const outcome = await moveDir(from, to)
+  if (!outcome.ok) return { ok: false, message: outcome.note }
+  remapPaths(id, from, to, '')
+  updateSoftware(id, { category: preview.category, source_dir: to })
+  return { ok: true, message: outcome.note ? `已移动到 ${to}。${outcome.note}` : `已移动到 ${to}` }
+}
+
+/**
+ * 移除一条记录，顺手把整理目录里属于它的链接删掉。
+ *
+ * 只删链接、不删实体：用户要的是「删记录别留一个空壳链接」，不是「删软件」。
+ * 链接删不掉就连记录也不删 —— 留一半的状态（记录没了、链接还在）正是这个
+ * 功能要治的毛病。
+ *
+ * 「属于它的」要守住：link_target 为空、又不在整理根下面的 junction 不碰 ——
+ * 那是用户自己在别处建的链接，抱一没有资格替他删。
+ */
+export async function deleteSoftwareRecord(id: string): Promise<RemoveSoftwareResult> {
+  const item = getSoftware(id)
+  if (!item) return { ok: true, message: '记录已经不在了', link_removed: false }
+
+  const root = getSettings().organize_root
+  const dir = rootDirOf(item)
+  const liveLink = await isLink(dir)
+  const safeLayout = root !== '' && !(await checkLibraryPath(root, dir))
+  const target = liveLink ? await linkTargetOf(dir) : ''
+  // 记录里保存的链接仍归这条记录管理，即使用户后来换过整理根。
+  const ours = item.link_target !== '' || (safeLayout && target !== '' && await exists(path.join(target, LINK_MARK)))
+  const shared = [...listSoftware({}), ...listSoftware({ group: 'archived' })].some(x => x.id !== id && nestedInside(dir, rootDirOf(x)))
+  let real = item.link_target
+  let removed = false
+
+  if (liveLink && ours && !shared) {
+    if (item.link_target && !samePath(item.link_target, target)) {
+      return { ok: false, message: '链接目标已变化，请先核对后再移除记录', link_removed: false }
+    }
+    const read = await linkTargetOf(dir)
+    if (read) real = read
+    const dropped = await removeJunction(dir)
+    if (!dropped.ok) {
+      return {
+        ok: false,
+        message: `链接删除失败：${dropped.note}。为免留下半截状态，记录没有删除`,
+        link_removed: false
+      }
+    }
+    removed = true
+  }
+
+  // 标记文件写在真实目录里。只有确认没有别的条目还指向同一个真实目录时才清掉它，
+  // 否则会把另一条链接的来历一起抹了
+  if (real && removed) {
+    const others = [...listSoftware({}), ...listSoftware({ group: 'archived' })].filter(
+      (x) => x.id !== id && x.link_target !== '' && samePath(x.link_target, real)
+    )
+    if (others.length === 0) {
+      await fsp.rm(path.join(real, LINK_MARK), { force: true }).catch(() => {})
+    }
+  }
+
+  deleteSoftware(id)
+  return {
+    ok: true,
+    message: removed ? '已移除记录，整理目录里的链接一并删掉了' : '已移除记录',
+    link_removed: removed
+  }
 }

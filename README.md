@@ -6,10 +6,11 @@
 
 ## 当前版本
 
-**0.15.1，2026-10-09。** 修复图片详情归属与影视查询期间的批量保护；项目导入改为本地登记后主动分析，收紧五库工具栏和批量布局。
+**0.16.0，2026-10-11。** 软件整理页常驻显示已整理条目，支持目录同步、预览后重新归置，以及链接清理与转为实体。
 
-- 当前程序：[release/0.15.1/win-unpacked/抱一.exe](release/0.15.1/win-unpacked/抱一.exe)
-- [版本说明与运行方式](docs/releases/0.15.1.md)
+- 当前程序：[release/0.16.0/win-unpacked/抱一.exe](release/0.16.0/win-unpacked/抱一.exe)
+- [版本说明与运行方式](docs/releases/0.16.0.md)
+- [软件整理目录验收](docs/verification/2026-10-11-software-library.md)
 - [整改验收与前后截图](docs/verification/2026-10-09-review-remediation.md)
 - [五模块能力与体验验收](docs/verification/2026-10-07-unified-ux.md)
 - [10.1–10.7 更新日记](docs/changes/2026-10-01-to-07.md)
@@ -94,6 +95,7 @@ npm run dist:dir
 | **0.14.0** | 项目助手、课程导入修复、音频界面、照片分类与元数据 |
 | **0.15.0** | 统一体验：批量管理、可靠返回、完整预览、筛选与失败恢复 |
 | **0.15.1** | 详情与查询归属保护、本地项目登记、五库紧凑布局 |
+| **0.16.0** | 已整理软件管理、目录分类同步、预览归置与链接清理 |
 
 早期计划不等于已交付功能；保留在 [docs/history](docs/history/README.md) 中供追溯。
 当前模块约定以 `electron/kinds/types.ts`、模块实现和近期交付报告为准。

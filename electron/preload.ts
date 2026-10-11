@@ -367,7 +367,13 @@ const api: BaoyiApi = {
     plans: () => ipcRenderer.invoke('organize:plans'),
     undo: (planId: string) => ipcRenderer.invoke('organize:undo', planId),
     materialize: (id: string) => ipcRenderer.invoke('organize:materialize', id),
-    unlink: (id: string) => ipcRenderer.invoke('organize:unlink', id)
+    unlink: (id: string) => ipcRenderer.invoke('organize:unlink', id),
+    organized: () => ipcRenderer.invoke('organize:organized'),
+    sync: () => ipcRenderer.invoke('organize:sync'),
+    previewRelocate: (id, category, folder) => ipcRenderer.invoke('organize:preview-relocate', id, category, folder),
+    relocate: (id: string, category: string, folder: string, expectedFrom?: string) =>
+      ipcRenderer.invoke('organize:relocate', id, category, folder, expectedFrom),
+    removeLinks: (paths: string[]) => ipcRenderer.invoke('organize:remove-links', plain(paths))
   }
 }
 

@@ -84,6 +84,27 @@ export function isDriveRoot(p: string): boolean {
   return path.dirname(resolved) === resolved
 }
 
+/**
+ * junction 的 readlink 结果可能带着 `\\?\` 前缀（Windows 的 NT 命名空间写法）。
+ * 库里存的是普通路径，不洗掉就永远比不相等 —— 一条好好的链接会被当成孤立的。
+ */
+export function normalizeLinkTarget(raw: string): string {
+  if (!raw) return ''
+  if (/^\\\\\?\\UNC\\/i.test(raw)) return `\\\\${raw.slice(8)}`
+  return raw.replace(/^\\\\\?\\/, '')
+}
+
+/**
+ * 两个路径指的是不是同一个位置：大小写不敏感、尾部分隔符不算数。
+ * 和 nestedInside 同一套判据 —— Windows 路径不区分大小写，而库里存的和
+ * 文件系统给的未必是同一份大小写。空串永远不等于任何路径。
+ */
+export function samePath(a: string, b: string): boolean {
+  if (!a || !b) return false
+  const norm = (p: string) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase()
+  return norm(a) === norm(b)
+}
+
 /* ============================== 目录树 ============================== */
 
 /** 一棵树的清单：相对路径（小写）-> 字节数。符号链接记 -1，只比存在性 */

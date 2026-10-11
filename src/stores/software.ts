@@ -1,6 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
-import type { MasteryLevel, SidebarCounts, SoftwareItem, SoftwareQuery, VirtualGroup } from '@/types'
+import type {
+  MasteryLevel,
+  RemoveSoftwareResult,
+  SidebarCounts,
+  SoftwareItem,
+  SoftwareQuery,
+  VirtualGroup
+} from '@/types'
 import { useToast } from '@/composables/useToast'
 import { createLatestGuard, errorMessage, plain } from '@/utils'
 import { useSettingsStore } from './settings'
@@ -108,10 +115,12 @@ export const useSoftwareStore = defineStore('software', () => {
     return updated
   }
 
-  async function remove(id: string): Promise<void> {
-    await window.baoyi.software.remove(id)
-    items.value = items.value.filter((x) => x.id !== id)
+  async function remove(id: string): Promise<RemoveSoftwareResult> {
+    const result = await window.baoyi.software.remove(id)
+    // 主进程拒绝删除（链接删不掉）时记录还在，列表不能先把它拿掉
+    if (result.ok) items.value = items.value.filter((x) => x.id !== id)
     void refreshCounts()
+    return result
   }
 
   async function launch(id: string, launcherPath?: string): Promise<boolean> {

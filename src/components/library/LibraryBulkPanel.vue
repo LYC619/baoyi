@@ -3,11 +3,15 @@ import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { useBulkOperation, type BulkItem } from '@/composables/useBulkOperation'
 import { useToast } from '@/composables/useToast'
+import { previewSoftwareCategoryChanges, categoryMoveConfirmation, type SoftwareCategoryMove } from '@/utils/softwareCategory'
+import { errorMessage } from '@/utils'
 
 const props = defineProps<{ kind: 'software' | 'game' | 'project'; items: BulkItem[]; ids: string[]; categories: string[]; pending?: boolean }>()
 const emit = defineEmits<{ all: []; clear: []; close: []; refresh: []; busy: [value: boolean]; completed: [failedIds: string[]] }>()
 const operation = useBulkOperation()
-const { busy, processed, total, succeeded, failures } = operation
+const { processed, total, succeeded, failures } = operation
+const preparing = ref(false)
+const busy = computed(() => preparing.value || operation.busy.value)
 const action = ref('category'), value = ref(''), confirming = ref(false), lastLabel = ref('')
 const { toast } = useToast()
 const actions = computed(() => [
@@ -29,13 +33,33 @@ async function apply() {
   confirming.value = false
   const chosen = new Set(props.ids), batch = props.items.filter(item => chosen.has(item.id))
   const mode = action.value, text = value.value.trim()
+  let moves: SoftwareCategoryMove[] = []
+  if (props.kind === 'software' && mode === 'category') {
+    preparing.value = true
+    try {
+      moves = await previewSoftwareCategoryChanges(batch.map(item => item.id), text)
+      if (moves.length && !window.confirm(categoryMoveConfirmation(moves))) return
+    } catch (cause) { toast(errorMessage(cause)); return }
+    finally { preparing.value = false }
+  }
   lastLabel.value = label.value
   await operation.run(batch, async item => {
     // Read current data before appending tags so a stale card never erases newer tags.
     const api = window.baoyi[props.kind]
-    if (mode === 'remove') { await api.remove(item.id); return }
+    if (mode === 'remove') {
+      const result = await api.remove(item.id)
+      if (result && 'ok' in result && !result.ok) throw new Error(result.message)
+      return
+    }
     const current = await api.get(item.id)
     if (!current) throw new Error('条目已不存在，请刷新资料库')
+    const move = moves.find(m => m.id === item.id)
+    if (move) {
+      const p = move.preview
+      const result = await window.baoyi.organize.relocate(item.id, p.category, p.folder, p.from)
+      if (!result.ok) throw new Error(result.message)
+      return
+    }
     const patch: Record<string, unknown> = {}
     if (mode === 'category') patch.category = text
     if (mode === 'tags') patch.tags = [...new Set([...current.tags, ...text.split(/[,，]/).map(tag => tag.trim()).filter(Boolean)])]
@@ -68,7 +92,7 @@ async function apply() {
         <button v-if="!confirming" class="btn" :class="action === 'remove' ? 'bulk-danger' : 'btn--primary'" type="submit" :disabled="!canRun">{{ busy ? `处理中 ${processed} / ${total}` : `${label}所选 ${ids.length} 项` }}</button>
       </fieldset>
       <div v-if="confirming" class="bulk-confirm" role="alert">
-        <span>将 {{ ids.length }} 项移出资料库。原文件保留，库内资料需要重新导入。确认继续？</span>
+        <span>将 {{ ids.length }} 项移出资料库。原文件保留，库内资料需要重新导入。{{ kind === 'software' ? '整理目录里属于它们的链接会一并删除。' : '' }}确认继续？</span>
         <button class="btn bulk-danger" type="submit" :disabled="busy || pending">确认移出 {{ ids.length }} 项</button>
         <button class="btn btn--subtle" type="button" @click="confirming = false">取消</button>
       </div>

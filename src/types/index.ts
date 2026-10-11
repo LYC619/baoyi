@@ -924,6 +924,88 @@ export interface UndoResult {
   notes: string[]
 }
 
+/** 整理目录里一条已整理的记录。见 organize:organized */
+export interface OrganizedEntry {
+  software_id: string
+  name: string
+  /** 当前所在目录（source_dir，退回 exe 所在目录） */
+  dir: string
+  exe_path: string
+  /** 记录上的分类 */
+  category: string
+  /** 从路径第一段推出来的分类文件夹名；条目直接躺在整理根下时为空串 */
+  folder_category: string
+  /** 当前文件夹名 */
+  folder: string
+  is_link: boolean
+  link_target: string
+  /** 链接的真实目标还在不在；非链接恒为 true */
+  target_ok: boolean
+  /** 目录本身还在不在 */
+  present: boolean
+  /** 分类文件夹和记录上的分类对不上 */
+  category_mismatch: boolean
+  is_portable: boolean | null
+  move_risk: MoveRisk
+  is_archived: boolean
+}
+
+export interface OrganizedList {
+  root: string
+  entries: OrganizedEntry[]
+}
+
+/** 整理目录里没有任何记录指向的 junction */
+export interface OrphanLink {
+  path: string
+  name: string
+  /** 指向的真实路径；读不到时为空串 */
+  target: string
+  /** 目标已经不在了 */
+  broken: boolean
+  /** 目标目录里带着抱一写的 .baoyi_link 标记：这条链接是整理时建的 */
+  ours: boolean
+}
+
+/** 一次「同步整理目录」做了什么。见 organize:sync */
+export interface OrganizeSyncReport {
+  root: string
+  /** 这次有没有真的跑（没设整理根、或整理根不在了就是 false） */
+  ran: boolean
+  categories_added: string[]
+  software_added: Array<{ name: string; dir: string; category: string }>
+  /** 在资源管理器里挪过位置、被认回来的 */
+  healed: Array<{ name: string; from: string; to: string; why: string }>
+  /** 分类跟着所在文件夹改了的 */
+  recategorized: Array<{ name: string; from: string; to: string }>
+  /** 记录还在、整理目录里的文件夹没了 */
+  missing: Array<{ name: string; dir: string }>
+  orphan_links: OrphanLink[]
+  /** 有目录但没能入库：no-exe 找不到主程序；ambiguous 同名记录不止一条，不敢认 */
+  skipped_dirs: Array<{ dir: string; reason: 'no-exe' | 'ambiguous' }>
+  notes: string[]
+}
+
+export interface RelocateResult {
+  ok: boolean
+  message: string
+}
+
+export interface RelocatePreview extends RelocateResult {
+  from: string
+  to: string
+  category: string
+  folder: string
+  is_link: boolean
+}
+
+export interface RemoveSoftwareResult {
+  ok: boolean
+  message: string
+  /** 顺手删掉了整理目录里的 junction */
+  link_removed: boolean
+}
+
 /** 「关于」页展示的版本与构建信息 */
 export interface AppInfo {
   /** 来自 package.json，打包后取自安装包元数据 */
@@ -1413,7 +1495,8 @@ export interface BaoyiApi {
     list(query?: SoftwareQuery): Promise<SoftwareItem[]>
     get(id: string): Promise<SoftwareItem | null>
     update(id: string, patch: Partial<SoftwareItem>): Promise<SoftwareItem | null>
-    remove(id: string): Promise<void>
+    /** 删记录。条目是整理目录里的链接时，链接一并删掉；真实文件不动 */
+    remove(id: string): Promise<RemoveSoftwareResult>
     counts(unusedDays: number): Promise<SidebarCounts>
     /** launcherPath 为空时启动默认启动端 */
     launch(id: string, launcherPath?: string): Promise<boolean>
@@ -1781,6 +1864,15 @@ export interface BaoyiApi {
     materialize(id: string): Promise<{ ok: boolean; message: string }>
     /** 只删链接，不动源文件；条目路径退回实际位置 */
     unlink(id: string): Promise<{ ok: boolean; message: string }>
+    /** 已整理的条目：当前位置已经在整理根下面的那些，带链接状态 */
+    organized(): Promise<OrganizedList>
+    /** 扫一遍整理目录：子文件夹当分类、认领新软件、修复挪过位置的记录、找孤立链接 */
+    sync(): Promise<OrganizeSyncReport>
+    /** 改已整理条目的分类 / 文件夹名。链接和实体目录都支持 */
+    previewRelocate(id: string, category: string, folder: string): Promise<RelocatePreview>
+    relocate(id: string, category: string, folder: string, expectedFrom?: string): Promise<RelocateResult>
+    /** 删掉整理目录里的孤立链接。只删链接本身 */
+    removeLinks(paths: string[]): Promise<{ removed: number; failed: number; notes: string[] }>
   }
 }
 

@@ -11,7 +11,7 @@
 
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { dirSize, exists, verifyCopy } from '../../../services/fstree.ts'
+import { dirSize, exists, normalizeLinkTarget, verifyCopy } from '../../../services/fstree.ts'
 import { nestedInside, sameVolume } from './plan.ts'
 
 /**
@@ -21,12 +21,49 @@ import { nestedInside, sameVolume } from './plan.ts'
  */
 export { dirSize, exists }
 
+/** 包括失效链接；权限错误必须上抛，不能视为路径不存在。 */
+export async function entryExists(at: string): Promise<boolean> {
+  try { await fsp.lstat(at); return true } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+/** 分类目录必须是整理根的实体子目录，避免经由链接修改库外目录。 */
+export async function checkLibraryPath(root: string, dir: string): Promise<string> {
+  const parts = path.relative(root, dir).split(/[\\/]/).filter(Boolean)
+  if (parts.length !== 2 || !nestedInside(root, dir)) return '只支持整理根下“分类 / 软件”的目录'
+  const parent = path.dirname(dir)
+  if (await entryExists(parent)) {
+    const st = await fsp.lstat(parent)
+    if (!st.isDirectory() || st.isSymbolicLink()) return '分类目录不是实体文件夹，请先检查整理目录'
+  }
+  return ''
+}
+
 /** 目录是不是一个 junction / 符号链接（而不是实体目录） */
 export async function isLink(dir: string): Promise<boolean> {
   try {
     return (await fsp.lstat(dir)).isSymbolicLink()
   } catch {
     return false
+  }
+}
+
+/**
+ * 读一个 junction 指向哪儿。读不到（不是链接、权限不足）返回空串。
+ *
+ * 目标已经不在了的链接，readlink 照样读得出目标 —— 所以上层能据此报出「指向
+ * 已失效的位置」，而不是只知道「坏了」。junction 的目标总是绝对路径；符号链接
+ * 可以是相对的，那要按链接所在的目录解析，否则比对永远对不上。
+ */
+export async function linkTargetOf(dir: string): Promise<string> {
+  try {
+    const raw = normalizeLinkTarget(await fsp.readlink(dir))
+    if (!raw) return ''
+    return path.isAbsolute(raw) ? raw : path.resolve(path.dirname(dir), raw)
+  } catch {
+    return ''
   }
 }
 

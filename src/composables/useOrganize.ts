@@ -6,6 +6,9 @@ import type {
   OrganizePreview,
   OrganizeProgress,
   OrganizeResult,
+  OrganizeSyncReport,
+  OrganizedList,
+  RelocateResult,
   Unsubscribe
 } from '@/types'
 
@@ -71,5 +74,35 @@ export function useOrganize() {
     }
   }
 
-  return { running, progress, percent, phaseLabel, lastResult, preview, run }
+  /** 已整理的条目。读的是主进程现算的位置状态，不缓存 —— 用户随时可能在资源管理器里动过 */
+  function organized(): Promise<OrganizedList> {
+    return window.baoyi.organize.organized()
+  }
+
+  /** 同步整理目录：子文件夹当分类、认领新软件、修复挪过位置的记录、找孤立链接 */
+  function sync(): Promise<OrganizeSyncReport> {
+    return window.baoyi.organize.sync()
+  }
+
+  function relocate(id: string, category: string, folder: string, expectedFrom?: string): Promise<RelocateResult> {
+    return window.baoyi.organize.relocate(id, category, folder, expectedFrom)
+  }
+
+  function removeLinks(paths: string[]): Promise<{ removed: number; failed: number; notes: string[] }> {
+    return window.baoyi.organize.removeLinks(plain(paths))
+  }
+
+  return {
+    running,
+    progress,
+    percent,
+    phaseLabel,
+    lastResult,
+    preview,
+    run,
+    organized,
+    sync,
+    relocate,
+    removeLinks
+  }
 }

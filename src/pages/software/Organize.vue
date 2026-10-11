@@ -7,14 +7,15 @@
  * 逐条改得了主意。底部那个「执行整理」是全程唯一一个不可逆的按钮。
  */
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { AlertTriangle, ArrowLeft, FolderTree, Leaf, Link2, Loader2 } from 'lucide-vue-next'
 import TagBadge from '@/components/ui/TagBadge.vue'
+import OrganizedSoftware from '@/components/software/OrganizedSoftware.vue'
 import { useOrganize } from '@/composables/useOrganize'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSoftwareStore } from '@/stores/software'
-import type { OrganizeAction, OrganizeEntry, OrganizeResult } from '@/types'
+import type { OrganizeAction, OrganizeEntry, OrganizeResult, OrganizedEntry, OrganizeSyncReport } from '@/types'
 import { errorMessage } from '@/utils'
 
 const router = useRouter()
@@ -27,6 +28,13 @@ const entries = ref<OrganizeEntry[]>([])
 const root = ref('')
 const loading = ref(true)
 const completed = ref<OrganizeResult | null>(null)
+const active = ref<'pending' | 'organized'>('pending')
+const organizedEntries = ref<OrganizedEntry[]>([])
+const syncReport = ref<OrganizeSyncReport | null>(null)
+const selectedLinks = ref<string[]>([])
+const actionBusy = ref(false)
+const busy = computed(() => loading.value || actionBusy.value || organize.running.value)
+onBeforeRouteLeave(() => { if (actionBusy.value || organize.running.value) { toast('目录操作尚未结束，请稍后再离开'); return false } return true })
 
 const ACTIONS: Array<{ value: OrganizeAction; label: string }> = [
   { value: 'move', label: '剪切移动' },
@@ -41,12 +49,15 @@ async function load(): Promise<void> {
   const preview = await organize.preview()
   root.value = preview.root
   entries.value = preview.entries
+  organizedEntries.value = (await organize.organized()).entries
 }
 
 async function initialLoad(): Promise<void> {
   loading.value = true
   try {
-    await Promise.all([categories.load(), load()])
+    syncReport.value = await organize.sync()
+    selectedLinks.value = []
+    await Promise.all([categories.load('software'), load(), store.reload()])
     loadError.value = ''
   } catch (err) {
     // 不接错的话预览失败就是一个空页面，还会因为 root 是空串而显示
@@ -58,6 +69,18 @@ async function initialLoad(): Promise<void> {
 }
 
 onMounted(initialLoad)
+
+async function cleanLinks(): Promise<void> {
+  if (busy.value || !selectedLinks.value.length) return
+  if (!window.confirm(`清理所选 ${selectedLinks.value.length} 个孤立链接？\n只删链接入口，真实软件文件保留。\n${selectedLinks.value.join('\n')}`)) return
+  actionBusy.value = true
+  try {
+    const result = await organize.removeLinks(selectedLinks.value)
+    if (result.failed) error(`清理 ${result.removed} 个，失败 ${result.failed} 个：${result.notes.join('；')}`)
+    else success(`已清理 ${result.removed} 个孤立链接`)
+  } catch (cause) { error(errorMessage(cause)) }
+  finally { actionBusy.value = false; await initialLoad() }
+}
 
 /**
  * 目标完整路径。这里算的只是**给用户看的预览** —— 真正落盘用的路径由主进程
@@ -96,7 +119,7 @@ function skipWarned(): void {
 }
 
 async function execute(): Promise<void> {
-  if (organize.running.value) return
+  if (busy.value) return
   if (actionable.value === 0) {
     toast('没有要执行的条目')
     return
@@ -145,21 +168,47 @@ async function execute(): Promise<void> {
 <template>
   <div class="organize">
     <header class="head">
-      <button class="btn btn--subtle" @click="router.push({ name: 'home' })">
+      <button class="btn btn--subtle" :disabled="busy" @click="router.push({ name: 'home' })">
         <ArrowLeft :size="16" />
         软件库
       </button>
-      <h1>整理预览</h1>
-      <span class="head__count">{{ entries.length }}</span>
+      <h1>软件目录整理</h1>
+      <button class="btn btn--ghost head__sync" :disabled="busy" @click="initialLoad"><Loader2 v-if="loading" :size="14" class="spin" />同步整理目录</button>
     </header>
 
+    <nav class="organize-tabs" aria-label="整理视图">
+      <button :class="{ chosen: active === 'pending' }" :aria-pressed="active === 'pending'" :disabled="actionBusy || organize.running.value" @click="active = 'pending'">待整理 <span>{{ entries.length }}</span></button>
+      <button :class="{ chosen: active === 'organized' }" :aria-pressed="active === 'organized'" :disabled="actionBusy || organize.running.value" @click="active = 'organized'">已整理 <span>{{ organizedEntries.length }}</span></button>
+    </nav>
+
     <div class="body">
+      <section v-if="syncReport && !loading && root" class="panel sync-report" aria-label="整理目录同步结果">
+        <p role="status">{{ syncReport.ran ? '同步完成' : '同步未执行' }}：新增分类 {{ syncReport.categories_added.length }}，新增软件 {{ syncReport.software_added.length }}，修复路径 {{ syncReport.healed.length }}，更新分类 {{ syncReport.recategorized.length }}。</p>
+        <p class="hint">进入本页时自动同步，也可手动刷新。新软件会进入“待识别”，可按需补充资料。</p>
+        <details v-if="syncReport.notes.length || syncReport.missing.length || syncReport.skipped_dirs.length || syncReport.categories_added.length || syncReport.software_added.length || syncReport.healed.length || syncReport.recategorized.length">
+          <summary>查看同步明细</summary><ul>
+            <li v-for="name in syncReport.categories_added" :key="'category-' + name">新增分类：{{ name }}</li>
+            <li v-for="row in syncReport.software_added" :key="'add-' + row.dir">新增软件：{{ row.name }}（{{ row.category }}）</li>
+            <li v-for="row in syncReport.healed" :key="'heal-' + row.from">修复路径：{{ row.name }} · {{ row.from }} → {{ row.to }}</li>
+            <li v-for="(row, i) in syncReport.recategorized" :key="'recategory-' + i">更新分类：{{ row.name }} · {{ row.from }} → {{ row.to }}</li>
+            <li v-for="row in syncReport.missing" :key="'missing-' + row.dir" class="warning">目录缺失（记录保留）：{{ row.name }} · {{ row.dir }}</li>
+            <li v-for="row in syncReport.skipped_dirs" :key="row.dir">{{ row.reason === 'no-exe' ? '未找到主程序' : '同名目录无法确定对应关系' }}：{{ row.dir }}</li>
+            <li v-for="note in syncReport.notes" :key="note" class="warning">{{ note }}</li>
+          </ul>
+        </details>
+        <details v-if="syncReport.orphan_links.length" class="orphan-links">
+          <summary>发现 {{ syncReport.orphan_links.length }} 个孤立链接</summary>
+          <p class="hint">这些链接没有软件记录对应。勾选需要清理的链接，目标文件会保留。</p>
+          <label v-for="link in syncReport.orphan_links" :key="link.path"><input v-model="selectedLinks" :value="link.path" type="checkbox" :disabled="busy" /><span>{{ link.name }} · {{ link.broken ? '目标失效' : link.ours ? '抱一链接' : '来源未确认' }}<small class="mono">{{ link.path }} → {{ link.target || '无法读取目标' }}</small></span></label>
+          <button class="btn btn--ghost" :disabled="busy || !selectedLinks.length" @click="cleanLinks">清理所选 {{ selectedLinks.length }} 个链接</button>
+        </details>
+      </section>
       <section v-if="completed" class="panel organize-result" aria-label="本次整理结果">
         <p role="status">本次整理：移动 {{ completed.moved }} 项，创建链接 {{ completed.linked }} 项，跳过 {{ completed.skipped }} 项，失败 {{ completed.failed }} 项。</p>
         <details v-if="completed.failed"><summary>查看未完成项目</summary><ul><li v-for="(step, index) in completed.steps.filter(step => !step.ok)" :key="index">{{ step.name }}：{{ step.note }}</li></ul></details>
         <button class="btn btn--ghost" @click="router.push({ name: 'settings', query: { tab: 'organize' } })">查看整理记录与撤销</button>
       </section>
-      <p v-if="loading" class="state">正在生成方案…（安装版会顺带查一遍注册表引用，稍慢）</p>
+      <p v-if="loading" class="state">正在同步目录并读取软件…</p>
 
       <div v-else-if="loadError" class="state">
         <h2>没能生成整理方案</h2>
@@ -178,9 +227,12 @@ async function execute(): Promise<void> {
         </button>
       </div>
 
+      <OrganizedSoftware v-else-if="active === 'organized'" :entries="organizedEntries" :categories="categories.list.map(c => c.name)" :busy="busy" @busy="actionBusy = $event" @refresh="initialLoad" />
+
       <div v-else-if="entries.length === 0" class="state">
         <h2>没有需要整理的软件</h2>
-        <p>已经在整理目录下的条目不会重复出现在这里。</p>
+        <p>已经归置的软件保留在“已整理”页，可继续调整分类、移动位置或转换链接。</p>
+        <button class="btn btn--primary" @click="active = 'organized'">查看已整理软件</button>
         <button class="btn btn--ghost" @click="router.push({ name: 'home' })">返回卡片墙</button>
       </div>
 
@@ -285,7 +337,7 @@ async function execute(): Promise<void> {
       </template>
     </div>
 
-    <footer v-if="!loading && entries.length > 0 && root" class="bar">
+    <footer v-if="!loading && active === 'pending' && entries.length > 0 && root" class="bar">
       <span class="bar__count">
         将处理 {{ actionable }} / {{ entries.length }} 条
       </span>
@@ -315,6 +367,7 @@ async function execute(): Promise<void> {
 </template>
 
 <style scoped>
+.head__sync{margin-left:auto}.organize-tabs{display:flex;gap:18px;flex:none;padding:0 24px;border-bottom:1px solid var(--divider);background:var(--bg-main)}.organize-tabs button{padding:12px 4px;border-bottom:2px solid transparent;color:var(--text-sub);font-size:13px}.organize-tabs .chosen{border-color:var(--accent);color:var(--text-main)}.organize-tabs span{font-size:11px;margin-left:5px;color:var(--text-faint)}.sync-report{padding:12px 16px;font-size:12px;line-height:1.8}.sync-report .hint{margin-top:4px}.sync-report details{margin-top:7px}.sync-report summary{cursor:pointer;color:var(--text-sub)}.sync-report ul{padding-left:20px;overflow-wrap:anywhere}.warning{color:var(--warning)}.orphan-links label{display:flex;align-items:flex-start;gap:8px;margin:10px 0}.orphan-links input{margin-top:5px;accent-color:var(--accent)}.orphan-links small{display:block;color:var(--text-faint);overflow-wrap:anywhere}.head{flex-wrap:wrap}
 .organize-result{padding:14px;line-height:1.7}.organize-result details{margin:8px 0;color:var(--warning)}.organize-result ul{padding-left:20px}
 .organize {
   display: flex;
