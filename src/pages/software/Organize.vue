@@ -33,8 +33,9 @@ const organizedEntries = ref<OrganizedEntry[]>([])
 const syncReport = ref<OrganizeSyncReport | null>(null)
 const selectedLinks = ref<string[]>([])
 const actionBusy = ref(false)
-const busy = computed(() => loading.value || actionBusy.value || organize.running.value)
-onBeforeRouteLeave(() => { if (actionBusy.value || organize.running.value) { toast('目录操作尚未结束，请稍后再离开'); return false } return true })
+const refreshing = ref(false)
+const busy = computed(() => loading.value || actionBusy.value || refreshing.value || organize.running.value)
+onBeforeRouteLeave(() => { if (actionBusy.value || refreshing.value || organize.running.value) { toast('目录操作尚未结束，请稍后再离开'); return false } return true })
 
 const ACTIONS: Array<{ value: OrganizeAction; label: string }> = [
   { value: 'move', label: '剪切移动' },
@@ -70,16 +71,36 @@ async function initialLoad(): Promise<void> {
 
 onMounted(initialLoad)
 
+/** A local mutation needs one fresh record, not a directory sync or a new page instance. */
+async function refreshEntry(id: string): Promise<void> {
+  refreshing.value = true
+  try {
+    const previous = organizedEntries.value.find(e => e.software_id === id)
+    const result = await organize.organized([id])
+    const updated = result.entries.find(e => e.software_id === id)
+    const pending = !updated && !previous?.is_archived ? (await organize.preview([id])).entries : []
+    organizedEntries.value = organizedEntries.value.filter(e => e.software_id !== id)
+    if (updated) organizedEntries.value.push(updated)
+    organizedEntries.value.sort((a, b) => a.folder_category.localeCompare(b.folder_category, 'zh') || a.name.localeCompare(b.name, 'zh'))
+    entries.value = [...entries.value.filter(e => e.software_id !== id), ...pending]
+    await Promise.all([categories.load('software'), store.reload()])
+  } catch (cause) { error(`操作后读取条目失败，请点击同步重试：${errorMessage(cause)}`) }
+  finally { refreshing.value = false }
+}
+
 async function cleanLinks(): Promise<void> {
   if (busy.value || !selectedLinks.value.length) return
   if (!window.confirm(`清理所选 ${selectedLinks.value.length} 个孤立链接？\n只删链接入口，真实软件文件保留。\n${selectedLinks.value.join('\n')}`)) return
   actionBusy.value = true
   try {
     const result = await organize.removeLinks(selectedLinks.value)
+    const removed = new Set(result.removed_paths)
+    if (syncReport.value) syncReport.value.orphan_links = syncReport.value.orphan_links.filter(link => !removed.has(link.path))
+    selectedLinks.value = selectedLinks.value.filter(link => !removed.has(link))
     if (result.failed) error(`清理 ${result.removed} 个，失败 ${result.failed} 个：${result.notes.join('；')}`)
     else success(`已清理 ${result.removed} 个孤立链接`)
   } catch (cause) { error(errorMessage(cause)) }
-  finally { actionBusy.value = false; await initialLoad() }
+  finally { actionBusy.value = false }
 }
 
 /**
@@ -177,8 +198,8 @@ async function execute(): Promise<void> {
     </header>
 
     <nav class="organize-tabs" aria-label="整理视图">
-      <button :class="{ chosen: active === 'pending' }" :aria-pressed="active === 'pending'" :disabled="actionBusy || organize.running.value" @click="active = 'pending'">待整理 <span>{{ entries.length }}</span></button>
-      <button :class="{ chosen: active === 'organized' }" :aria-pressed="active === 'organized'" :disabled="actionBusy || organize.running.value" @click="active = 'organized'">已整理 <span>{{ organizedEntries.length }}</span></button>
+      <button :class="{ chosen: active === 'pending' }" :aria-pressed="active === 'pending'" :disabled="busy" @click="active = 'pending'">待整理 <span>{{ entries.length }}</span></button>
+      <button :class="{ chosen: active === 'organized' }" :aria-pressed="active === 'organized'" :disabled="busy" @click="active = 'organized'">已整理 <span>{{ organizedEntries.length }}</span></button>
     </nav>
 
     <div class="body">
@@ -227,7 +248,7 @@ async function execute(): Promise<void> {
         </button>
       </div>
 
-      <OrganizedSoftware v-else-if="active === 'organized'" :entries="organizedEntries" :categories="categories.list.map(c => c.name)" :busy="busy" @busy="actionBusy = $event" @refresh="initialLoad" />
+      <OrganizedSoftware v-else-if="active === 'organized'" :entries="organizedEntries" :categories="categories.list.map(c => c.name)" :busy="busy" @busy="actionBusy = $event" @refresh="refreshEntry" />
 
       <div v-else-if="entries.length === 0" class="state">
         <h2>没有需要整理的软件</h2>

@@ -943,6 +943,8 @@ export interface OrganizedEntry {
   target_ok: boolean
   /** 目录本身还在不在 */
   present: boolean
+  /** 主程序是否还存在（卸载可能只移除 EXE，留下目录） */
+  exe_present: boolean
   /** 分类文件夹和记录上的分类对不上 */
   category_mismatch: boolean
   is_portable: boolean | null
@@ -997,6 +999,7 @@ export interface RelocatePreview extends RelocateResult {
   category: string
   folder: string
   is_link: boolean
+  warning?: string
 }
 
 export interface RemoveSoftwareResult {
@@ -1865,14 +1868,14 @@ export interface BaoyiApi {
     /** 只删链接，不动源文件；条目路径退回实际位置 */
     unlink(id: string): Promise<{ ok: boolean; message: string }>
     /** 已整理的条目：当前位置已经在整理根下面的那些，带链接状态 */
-    organized(): Promise<OrganizedList>
+    organized(ids?: string[]): Promise<OrganizedList>
     /** 扫一遍整理目录：子文件夹当分类、认领新软件、修复挪过位置的记录、找孤立链接 */
     sync(): Promise<OrganizeSyncReport>
     /** 改已整理条目的分类 / 文件夹名。链接和实体目录都支持 */
     previewRelocate(id: string, category: string, folder: string): Promise<RelocatePreview>
     relocate(id: string, category: string, folder: string, expectedFrom?: string): Promise<RelocateResult>
     /** 删掉整理目录里的孤立链接。只删链接本身 */
-    removeLinks(paths: string[]): Promise<{ removed: number; failed: number; notes: string[] }>
+    removeLinks(paths: string[]): Promise<{ removed: number; removed_paths: string[]; failed: number; notes: string[] }>
   }
 }
 

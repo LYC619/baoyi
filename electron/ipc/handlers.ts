@@ -635,7 +635,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('organize:undo', (_e, planId: string) => withOrganizeMutation(() => undoOrganize(planId)))
   ipcMain.handle('organize:materialize', (_e, id: string) => withOrganizeMutation(() => materialize(id)))
   ipcMain.handle('organize:unlink', (_e, id: string) => withOrganizeMutation(() => unlink(id)))
-  ipcMain.handle('organize:organized', () => listOrganized())
+  ipcMain.handle('organize:organized', (_e, ids?: string[]) => listOrganized(ids))
   ipcMain.handle('organize:sync', () => withOrganizeMutation(() => syncOrganizeRoot()))
   ipcMain.handle('organize:preview-relocate', (_e, id: string, category: string, folder: string) =>
     previewRelocateOrganized(id, String(category ?? ''), String(folder ?? ''))

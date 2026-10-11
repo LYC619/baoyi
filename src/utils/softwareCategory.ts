@@ -25,5 +25,5 @@ export async function previewSoftwareCategoryChanges(ids: string[], category: st
 
 export function categoryMoveConfirmation(moves: SoftwareCategoryMove[]): string {
   return `修改分类会重新归置 ${moves.length} 个已整理软件。实体目录将移动，链接只改变入口位置。\n\n` +
-    moves.map(m => `${m.name}\n从：${m.preview.from}\n到：${m.preview.to}`).join('\n\n') + '\n\n确认继续？'
+    moves.map(m => `${m.name}\n从：${m.preview.from}\n到：${m.preview.to}${m.preview.warning ? '\n' + m.preview.warning : ''}`).join('\n\n') + '\n\n确认继续？'
 }

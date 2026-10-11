@@ -278,7 +278,12 @@ export async function matchLayout(
       if (used.has(hit.id)) continue
       used.add(hit.id)
       taken.add(key(s.dir))
-      plan.claimed.push({ id: hit.id, name: hit.name, dir: s.dir, category: s.category })
+      if (!s.is_link && hit.link_target) {
+        plan.healed.push({ id: hit.id, name: hit.name, from: hit.dir, to: s.dir,
+          link_target: '', why: '原链接位置现为实体目录，清除旧链接状态' })
+      } else {
+        plan.claimed.push({ id: hit.id, name: hit.name, dir: s.dir, category: s.category })
+      }
     }
   }
 

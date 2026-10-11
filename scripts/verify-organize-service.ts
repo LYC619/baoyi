@@ -42,7 +42,7 @@ async function fixture() {
     assert.ok(path.basename(temp).startsWith('baoyi-organize-service-'))
     await fsp.rm(temp, { recursive: true, force: true })
   }
-  return { temp, root, real, rows, add, service, sync, cleanup }
+  return { temp, root, real, rows, categories, add, service, sync, cleanup }
 }
 async function check(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void>) {
   await test(name, async () => { const f = await fixture(); try { await run(f) } finally { await f.cleanup() } })
@@ -73,6 +73,7 @@ await check('relocation updates category together with paths', async f => {
   const dir = path.join(f.root, 'Old', 'Tool'); await fsp.mkdir(dir); await fsp.writeFile(path.join(dir, 'app.exe'), 'data'); f.add('one', dir)
   assert.equal((await f.service.relocateOrganized('one', 'AI', 'New')).ok, true)
   assert.equal(f.rows.get('one').category, 'AI')
+  assert.equal(f.categories.some(c => c.name === 'AI'), true, 'category is available without a directory sync')
   assert.equal(await fsp.readFile(path.join(f.root, 'AI', 'New', 'app.exe'), 'utf8'), 'data')
 })
 await check('relocation cannot move an unorganized source', async f => {
@@ -101,7 +102,9 @@ await check('orphan cleanup refuses outside and currently owned junctions', asyn
 })
 await check('orphan cleanup removes an unclaimed junction but preserves its files', async f => {
   const orphan = path.join(f.root, 'Old', 'Orphan'); await fsp.symlink(f.real, orphan, 'junction')
-  assert.equal((await f.sync.removeOrphanLinks([orphan])).removed, 1)
+  const outcome = await f.sync.removeOrphanLinks([orphan])
+  assert.equal(outcome.removed, 1)
+  assert.deepEqual(Array.from(outcome.removed_paths ?? []), [orphan], 'only confirmed removals can be dropped from the UI')
   assert.equal(fs.existsSync(path.join(f.real, 'app.exe')), true)
 })
 await check('materialize refuses a junction whose target no longer matches the record', async f => {
@@ -124,4 +127,33 @@ await check('sync broadens a legacy bin source directory without changing the ac
   await f.sync.syncOrganizeRoot()
   assert.equal(row.source_dir, parent)
   assert.equal(row.exe_path, path.join(bin, 'app.exe'))
+})
+
+await check('targeted organized refresh returns only the requested record', async f => {
+  const a = path.join(f.root, 'Old', 'One'), b = path.join(f.root, 'Old', 'Two')
+  await fsp.mkdir(a); await fsp.mkdir(b); f.add('one', a); f.add('two', b)
+  assert.deepEqual(Array.from((await f.service.listOrganized(['one'])).entries, (e: any) => e.software_id), ['one'])
+  assert.equal((await f.service.listOrganized([])).entries.length, 0)
+})
+await check('reinstalling into a former junction is displayed as real and clears stale link metadata on sync', async f => {
+  const dir = path.join(f.root, 'Old', 'Tool')
+  await fsp.mkdir(dir); await fsp.writeFile(path.join(dir, 'app.exe'), 'new installation')
+  const row = f.add('one', dir, f.real); row.is_portable = false
+  assert.equal((await f.service.listOrganized()).entries[0].is_link, false)
+  await f.sync.syncOrganizeRoot()
+  assert.equal(row.link_target, '')
+  assert.equal(row.is_portable, false)
+  assert.equal(row.exe_path, path.join(dir, 'app.exe'))
+  assert.equal(f.rows.size, 1)
+  assert.equal((await f.service.unlink('one')).ok, false)
+  assert.equal(await fsp.readFile(path.join(dir, 'app.exe'), 'utf8'), 'new installation')
+})
+await check('uninstall leaving a directory is reported as missing its main executable', async f => {
+  const dir = path.join(f.root, 'Old', 'Tool'); await fsp.mkdir(dir); f.add('one', dir)
+  const entry = (await f.service.listOrganized()).entries[0]
+  assert.equal(entry.present, true); assert.equal(entry.exe_present, false)
+  await fsp.writeFile(path.join(dir, 'app.exe'), 'reinstalled')
+  await f.sync.syncOrganizeRoot()
+  assert.equal((await f.service.listOrganized()).entries[0].exe_present, true)
+  assert.equal(f.rows.size, 1)
 })

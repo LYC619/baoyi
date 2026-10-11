@@ -39,3 +39,15 @@
 `npm run verify-organize-ui -- release/0.16.0/win-unpacked/抱一.exe output/release-0.16.0/ui` 对真实发布程序重跑上述 10 组场景，10/10 通过，页面异常为 0。运行时确认 `isPackaged: true`、版本 0.16.0 以及本包 `resources/app.asar` 路径。完整结果在 `output/release-0.16.0/ui/run-5h0lul/verification.json`，同目录有界面截图。
 
 `node scripts/verify-packaged-content.cjs release/0.16.0/win-unpacked` 确认 83 个编译文件与本轮构建逐字节一致，SQLite 原生模块、MediaInfo WASM 和存档索引存在且匹配，包内不含用户数据库或便携数据标记。构建日志为 `output/release-0.16.0/build.log`；包内容记录为 `output/release-0.16.0/packaged-content.json`。本地程序未签名。发布说明见 [0.16.0](../releases/0.16.0.md)。
+
+## 0.16.1 实测反馈修复
+
+用户确认移除链接后等待来自自动重新扫描。根因是已整理组件的每次刷新事件都调用 `initialLoad`，连带执行目录同步、所有待整理预览并卸载重建列表组件。现在只查询受影响 ID 的记录；移除链接后只为该 ID 补充待整理预览。其余行的编辑、搜索与类型筛选不被重置。孤立链接清理依主进程返回的成功路径更新，失败项继续勾选，不触发再次扫描。
+
+列表新增绿色软件、链接软件、安装版和待确认类型筛选。磁盘路径仍存在时按实际链接属性显示；原链接被实体目录替换后，同步清除旧链接字段并保留原记录。列表检查主程序存在性，卸载留下目录也会显示异常。新分类归置后直接登记；非绿色实体目录移动预览补充安装路径风险提示。
+
+先补复现用例，确认旧代码在自动重扫、按 ID 查询、实体替换旧链接和主程序缺失场景失败，再修复。最终目录 / 服务检查 28 项、前端及互斥检查 5 组通过；公共自检 634/0、模块 9 组 / 5 模块、发布配置 5/5 通过。日志位于 `output/release-0.16.1/`。
+
+`npm run dist:dir` 通过。真正打包的 0.16.1 通过 12 组真实 Electron / SQLite / IPC 检查，页面异常 0；运行时确认 `isPackaged`、版本及 ASAR 路径。证据为 `output/release-0.16.1/ui/run-e7egKs/verification.json`，同目录有截图。包内 83 个编译文件逐字节一致，SQLite 原生模块和 MediaInfo WASM 检查通过。
+
+卸载 / 重装测试通过合成目录及 EXE 的消失、重建模拟，不调用第三方安装器，也不读取或修改真实资料库。换安装路径或主程序文件名时不自动猜测新的启动端；记录仍保留，需核对。新版运行方式和重装目录约定见 [0.16.1](../releases/0.16.1.md)。

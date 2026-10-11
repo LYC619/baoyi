@@ -147,12 +147,13 @@ export async function syncOrganizeRoot(): Promise<OrganizeSyncReport> {
  */
 export async function removeOrphanLinks(
   paths: string[]
-): Promise<{ removed: number; failed: number; notes: string[] }> {
+): Promise<{ removed: number; removed_paths: string[]; failed: number; notes: string[] }> {
   let removed = 0
+  const removed_paths: string[] = []
   let failed = 0
   const notes: string[] = []
   const root = getSettings().organize_root
-  if (!root) return { removed: 0, failed: paths.length, notes: ['还没有设置整理目录'] }
+  if (!root) return { removed: 0, removed_paths, failed: paths.length, notes: ['还没有设置整理目录'] }
   const layout = await scanOrganizeLayout(root)
   const records = [...listSoftware({}), ...listSoftware({ group: 'archived' })]
   for (const p of new Set(paths)) {
@@ -166,10 +167,11 @@ export async function removeOrphanLinks(
     const outcome = await removeJunction(p)
     if (outcome.ok) {
       removed++
+      removed_paths.push(p)
     } else {
       failed++
       notes.push(`${p}：${outcome.note}`)
     }
   }
-  return { removed, failed, notes }
+  return { removed, removed_paths, failed, notes }
 }

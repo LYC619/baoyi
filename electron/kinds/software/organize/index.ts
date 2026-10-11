@@ -35,10 +35,12 @@ import {
   getSoftware,
   getSoftwareByPath,
   listSoftware,
+  listCategories,
   markPlanUndone,
   remapPaths,
   saveOrganizePlan,
-  updateSoftware
+  updateSoftware,
+  upsertCategory
 } from '../../../services/database'
 import { samePath } from '../../../services/fstree.ts'
 import {
@@ -368,11 +370,13 @@ export async function unlink(id: string): Promise<{ ok: boolean; message: string
  * 和 previewOrganize 正好互补 —— 那边把它们滤掉，这边只要它们。归档的也算：
  * 归档只是卡片墙不显示，文件还在整理目录里占着位置。
  */
-export async function listOrganized(): Promise<OrganizedList> {
+export async function listOrganized(ids?: string[]): Promise<OrganizedList> {
   const root = getSettings().organize_root
   if (!root) return { root: '', entries: [] }
 
-  const items = [...listSoftware({}), ...listSoftware({ group: 'archived' })]
+  const items = ids
+    ? [...new Set(ids)].map(id => getSoftware(id)).filter((item): item is SoftwareItem => item !== null)
+    : [...listSoftware({}), ...listSoftware({ group: 'archived' })]
   const entries: OrganizedEntry[] = []
 
   for (const item of items) {
@@ -380,8 +384,9 @@ export async function listOrganized(): Promise<OrganizedList> {
     const dir = rootDirOf(item)
     const present = await entryExists(dir)
     const liveLink = await isLink(dir)
-    const link = item.link_target !== '' || liveLink
-    const target = liveLink ? await linkTargetOf(dir) : item.link_target
+    // Existing paths are classified by the disk, including reinstalls over old junctions.
+    const link = present ? liveLink : item.link_target !== ''
+    const target = liveLink ? await linkTargetOf(dir) : link ? item.link_target : ''
     const rel = path.relative(root, dir).split(/[\\/]/).filter(Boolean)
     const folderCategory = rel.length > 1 ? rel[0] : ''
 
@@ -397,6 +402,7 @@ export async function listOrganized(): Promise<OrganizedList> {
       link_target: target,
       target_ok: link ? target !== '' && (await exists(target)) : true,
       present,
+      exe_present: await exists(item.exe_path),
       category_mismatch: folderCategory !== '' && folderCategory !== item.category,
       is_portable: item.is_portable,
       move_risk: item.move_risk,
@@ -449,7 +455,17 @@ export async function previewRelocateOrganized(
     if (!await exists(target)) return fail('链接目标已失效，原链接保留，请先修复目标路径')
     preview.is_link = true
   }
+  if (!preview.is_link && item.is_portable !== true && !samePath(from, to)) {
+    preview.warning = '安装版或尚未确认类型的软件移动后，注册表、快捷方式和卸载程序可能仍指向原位置。建议用安装程序重新安装到目标目录。'
+  }
   return { ...preview, ok: true }
+}
+
+/** Register a newly used folder category without rescanning the whole library. */
+function ensureFolderCategory(name: string): void {
+  const categories = listCategories('software')
+  if (categories.some(c => c.name === name)) return
+  upsertCategory({ id: '', name, description: '整理目录下的文件夹', icon: 'folder', sort_order: Math.max(0, ...categories.map(c => c.sort_order)) + 1 }, 'software')
 }
 
 export async function relocateOrganized(id: string, category: string, folder: string, expectedFrom?: string): Promise<RelocateResult> {
@@ -460,6 +476,7 @@ export async function relocateOrganized(id: string, category: string, folder: st
   const item = getSoftware(id)!
   if (samePath(from, to)) {
     updateSoftware(id, { category: preview.category })
+    ensureFolderCategory(preview.category)
     return { ok: true, message: '位置没有变化，分类已同步' }
   }
 
@@ -483,6 +500,7 @@ export async function relocateOrganized(id: string, category: string, folder: st
     })
     remapPaths(id, from, to, target)
     updateSoftware(id, { category: preview.category, source_dir: to })
+    ensureFolderCategory(preview.category)
     return { ok: true, message: `链接已移到 ${to}` }
   }
 
@@ -490,6 +508,7 @@ export async function relocateOrganized(id: string, category: string, folder: st
   if (!outcome.ok) return { ok: false, message: outcome.note }
   remapPaths(id, from, to, '')
   updateSoftware(id, { category: preview.category, source_dir: to })
+  ensureFolderCategory(preview.category)
   return { ok: true, message: outcome.note ? `已移动到 ${to}。${outcome.note}` : `已移动到 ${to}` }
 }
 
