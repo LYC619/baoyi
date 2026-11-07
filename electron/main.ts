@@ -8,19 +8,26 @@ import { closeDb, coversDir, getDb, getSettings, iconsDir, patchSettings, poster
 import { resolvePosterRequest } from './services/poster-protocol'
 import { initPortable } from './services/portable'
 import { initProxy, setHanimeHostsEnabled } from './services/proxy'
-import { buildHanimeHostResolverRules, HANIME_HOSTS, pickStartupIp } from './services/hanime-network-rules'
+import { buildHanimeHostResolverRules, pickStartupIp } from './services/hanime-network-rules'
 import { startHeartbeat } from './services/timing.ts'
 import { imageResponse } from './kinds/image/protocol.ts'
+import { PhotoFolderSync } from './kinds/image/folder-sync.ts'
 import { audioResponse } from './kinds/video/audio-playback.ts'
+import {videoPreviewResponse,videoFrameResponse} from './ipc/video-preview.ts'
+import { BROWSER_CACHE_BUDGET } from './services/storage-usage.ts'
+import { archiveLibrarySnapshots } from './services/snapshot-archive.ts'
 
 // **必须排在最前面，不能挪进 whenReady。** 绿色版要把 userData 指到 exe 旁边，
 // 而下面的 requestSingleInstanceLock 会在 userData 里建锁文件、createWindow 会
 // getSettings() 顺手开库 —— 晚一步，这两样就先落在旧位置了，表现是「绿色版旁边
 // 有个空 data/，真数据还在 %APPDATA%」
 initPortable()
+app.commandLine.appendSwitch('disk-cache-size', String(BROWSER_CACHE_BUDGET))
 const primaryInstance = app.requestSingleInstanceLock()
 let startupError: unknown = null
 let startupReady = false
+let archiveTimer: ReturnType<typeof setTimeout> | undefined
+let photoSync:PhotoFolderSync|undefined
 
 // 必须在 app ready 前设置：Chromium 只会在网络栈初始化时读取这项，之后追加不认
 // （scripts 里做过实验）。这让 Hanime 直连请求也能绕开受污染的系统 DNS；代理模式
@@ -35,7 +42,7 @@ const hanimeStartup = (() => {
     return { enabled: s.hanime_builtin_hosts !== false, ip: pickStartupIp(s.hanime_hosts_active_ip) }
   } catch (cause) { startupError = cause; return { enabled: false, ip: pickStartupIp() } }
 })()
-if (hanimeStartup.enabled) app.commandLine.appendSwitch('host-resolver-rules', buildHanimeHostResolverRules(HANIME_HOSTS, hanimeStartup.ip))
+if (hanimeStartup.enabled) app.commandLine.appendSwitch('host-resolver-rules', buildHanimeHostResolverRules(undefined, hanimeStartup.ip))
 setHanimeHostsEnabled(hanimeStartup.enabled, {
   startupIp: hanimeStartup.ip,
   remember: (ip) => { patchSettings({ hanime_hosts_active_ip: ip }) }
@@ -83,6 +90,8 @@ function registerFileProtocol(): void {
     const url = new URL(request.url)
     if (url.hostname === 'image') return imageResponse(url)
     if (url.hostname === 'audio') return audioResponse(getDb(),request)
+    if (url.hostname === 'video') return videoPreviewResponse(request)
+    if (url.hostname === 'video-frame') return videoFrameResponse(request)
     // 海报按完整路径取（?p=），放行规则见 poster-protocol.ts；图标和封面仍按文件名在各自目录里找
     if (url.hostname === 'poster') {
       const file = resolvePosterRequest(request.url, { postersDir: postersDir(), isReferenced: posterReferenced })
@@ -166,7 +175,17 @@ if (!primaryInstance) {
     // 填错一个代理地址不该变成「应用打不开」
     void initProxy(() => getSettings().proxy)
     createWindow()
+    photoSync=new PhotoFolderSync(getDb,()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('image:changed')})
+    photoSync.start()
+    app.on('browser-window-focus',()=>photoSync?.request())
     startupReady = true
+    // Immutable older recovery points can be compressed after the window is usable.
+    archiveTimer = setTimeout(() => {
+      void archiveLibrarySnapshots(app.getPath('userData')).then(result => {
+        for (const warning of result.warnings) console.warn('[抱一] 快照整理：' + warning)
+      }).catch(cause => console.warn('[抱一] 快照整理未完成，原件保留：', cause))
+    }, 5000)
+    archiveTimer.unref()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -184,6 +203,8 @@ if (!primaryInstance) {
   })
 
   app.on('will-quit', () => {
+    photoSync?.stop()
+    if (archiveTimer) clearTimeout(archiveTimer)
     // 顺序是硬要求：结算要写库，得赶在库关掉之前。所以这两件事放在同一个处理器里
     // 按顺序写，而不是分成两个 app.on —— 那样就依赖注册顺序了。
     if (startupReady) finalizeGameSessions()

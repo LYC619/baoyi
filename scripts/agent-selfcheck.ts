@@ -1377,7 +1377,7 @@ async function main(): Promise<void> {
     const db = new DatabaseSync(':memory:')
     // 0.5 起公共表在 services/schema.ts 的 TABLES_SQL 里，锚点从 resource 起
     // （写 software 会先撞上 kinds/software 那段只含 software_meta 的模板）
-    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS resource'))
+    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS resource ('))
 
     const cols = db.prepare('PRAGMA table_info(identify_logs)').all() as Array<{ name: string }>
     assert.ok(cols.length > 0, 'identify_logs 表没建出来')
@@ -1438,7 +1438,7 @@ async function main(): Promise<void> {
     const db = new DatabaseSync(':memory:')
     // 0.5 起表分散在公共层和品类模块两处，构建产物里是几段独立的模板，
     // 锚点要分开写。software 本身是 resource + software_meta 拼出来的视图
-    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS resource'))
+    db.exec(sqlAround('CREATE TABLE IF NOT EXISTS resource ('))
     db.exec(sqlAround('CREATE TABLE IF NOT EXISTS scan_units'))
     db.exec(sqlAround('CREATE TABLE IF NOT EXISTS software_meta'))
     db.exec(sqlAround('CREATE VIEW IF NOT EXISTS software'))
@@ -1460,7 +1460,7 @@ async function main(): Promise<void> {
       // 0.7 起影视模块也有一条 INSERT INTO resource（列名是拼出来的、带 ${}，prepare 不了），锚点写到 file_name 才落在软件那条上
       'INSERT INTO resource\n         (id, kind, created_at, updated_at, path, icon_path, file_name',
       'INSERT INTO software_meta\n         (resource_id',
-      'INSERT OR IGNORE INTO resource',
+      'INSERT OR IGNORE INTO resource\n',
       'INSERT OR IGNORE INTO software_meta',
       // 0.4 新增的汇总报告。列名写错的表现是「识别跑完了但报告永远打不开」
       'INSERT INTO identification_reports',
@@ -2645,7 +2645,7 @@ async function main(): Promise<void> {
         const shared = b.defaultCategories.map((c) => c.name).filter((n) => aCats.has(n))
         assert.deepEqual(
           shared,
-          a.kind === 'image' || b.kind === 'image' ? [] : ['其他'],
+          a.kind === 'image' || b.kind === 'image' || !a.defaultCategories.length || !b.defaultCategories.length ? [] : ['其他'],
           `${a.kind} 和 ${b.kind} 除了「其他」不该有共有分类，实际：${shared.join(',')}`
         )
         const aTags = new Set(a.defaultTags)
@@ -8033,7 +8033,7 @@ async function videoUserEditedSection(): Promise<void> {
     //   9 = video_meta 多了 hanime_id 列（rollback-v9 撤这个）
     // 一个数字标两件事的话，两个回滚脚本的界限就说不清了。
     // 0.9 抬到 10：拆扫描目录（scan_dirs -> software/game/video_scan_dirs）+ identify_logs.resource_kind 列
-    assert.equal(SCHEMA_VERSION, 15, '项目对话与媒体类型的库形状是 15')
+    assert.equal(SCHEMA_VERSION, 30, '项目便签/启动配置、文档精读和漫画 v2 加入后的库形状是 30')
   })
 }
 
@@ -9542,7 +9542,7 @@ async function proxySection(): Promise<void> {
   await check('Hanime Hosts 状态可供设置页展示', () => {
     const status = getHanimeHostsStatus()
     assert.equal(status.enabled, true)
-    assert.deepEqual(status.hosts, [...HANIME_HOSTS])
+    assert.deepEqual(status.hosts, [...HANIME_HOSTS, 'abre-videos.youjizz.com'])
     assert.deepEqual(status.ips, [...HANIME_CLOUDFLARE_IPS])
     assert.equal(status.startupIp, HANIME_CLOUDFLARE_IPS[0])
     assert.ok(status.resolverRules.includes('MAP hanime1.me'))

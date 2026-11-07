@@ -34,8 +34,8 @@ async function apply() {
     <p v-if="episodeId">文件缺失时可以关闭此窗口，继续保留为待补齐。</p>
     <label v-if="episodeId">操作<select v-model="action" class="input" :disabled="busy"><option value="remove">移除库内记录</option><option value="detach">移出合集，作为独立视频</option></select></label>
     <label v-if="action === 'remove'" class="check"><input v-model="deleteLocal" type="checkbox" :disabled="busy" />同时将专属本地文件移入回收站</label>
-    <p>{{ action === 'detach' ? '文件位置和观看进度会保留，首页将显示独立条目。' : deleteLocal ? '共享文件会保留；已缺失的文件无需处理。' : '本地文件保留，后续普通重扫会跳过已移除的内容。' }}</p>
-    <template v-if="preview"><p>{{ preview.titles.join('、') }} · {{ preview.episodeCount }} 个内容项</p><ul><li v-for="file in preview.files" :key="file.path"><span>{{ file.path }}</span><small>{{ file.shared ? '共享，保留' : !file.present ? '已缺失' : deleteLocal && action === 'remove' ? '移入回收站' : '保留文件' }} · {{ formatBytes(file.size) }}</small></li></ul></template>
+    <p>{{ action === 'detach' ? '文件位置和观看进度会保留，首页将显示独立条目。' : deleteLocal ? '同时清理归属已核实的抱一清单、备份与生成资料，并移除空目录。共享文件和用户修改过的资料会保留。' : '本地文件保留，后续普通重扫会跳过已移除的内容。' }}</p>
+    <template v-if="preview"><p>{{ preview.titles.join('、') }} · {{ preview.episodeCount }} 个内容项</p><ul><li v-for="file in preview.files" :key="file.path"><span>{{ file.path }}</span><small>{{ file.preserveReason || (file.shared ? '共享，保留' : !file.present ? '已缺失' : deleteLocal && action === 'remove' ? '移入回收站' : '保留文件') }} · {{ formatBytes(file.size) }}</small></li></ul></template>
     <p v-if="failure" role="alert">{{ failure }}</p>
     <footer><button v-if="!preview && !busy" class="btn btn--subtle" @click="inspect">重新检查范围</button><button class="btn btn--primary" :disabled="pending || busy || !preview" @click="apply">{{ busy ? '正在处理…' : action === 'detach' ? '确认移出合集' : deleteLocal ? '删除记录并移入回收站' : '确认移除记录' }}</button></footer>
   </dialog>

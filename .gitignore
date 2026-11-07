@@ -35,3 +35,12 @@ reference/
 
 # 本机视频示例每次启动生成的临时端口目录
 /examples/video-discovery/localhost-catalogue.json
+
+# Python 验证与打包生成的字节码缓存
+__pycache__/
+*.py[cod]
+
+# Local owner notes and session history are not public source.
+.user/
+.planning/
+.tmp-split/

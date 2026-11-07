@@ -2,16 +2,15 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
+import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { initSchema } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { insertVideo, type VideoPayload } from '../electron/kinds/video/db.ts'
 import { pngImage } from './helpers/test-images.ts'
 
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
-const executable = path.resolve(process.argv[2] || 'release/0.8.0-field-test-20260908/win-unpacked/抱一.exe')
+const { _electron } = loadPlaywright()
+const executable = path.resolve(process.argv[2] || `release/${JSON.parse(fs.readFileSync('package.json','utf8')).version}/win-unpacked/抱一.exe`)
 assert.ok(fs.existsSync(executable), 'Test build executable is missing')
 const output = path.resolve(process.env.BAOYI_VIDEO_UI_OUTPUT || 'output/video-packaged-verification')
 fs.mkdirSync(output, { recursive: true })
@@ -43,7 +42,7 @@ for (const [key, title, category, collection] of [
   db.prepare('UPDATE video_meta SET poster_path = ? WHERE resource_id = ?').run(cached, id)
 }
 db.close()
-const environment = { ...process.env }; delete environment.ELECTRON_RUN_AS_NODE
+const environment = electronTestEnv()
 const application = await _electron.launch({ executablePath: executable, args: [`--user-data-dir=${profile}`], env: environment, timeout: 30000 })
 const evidence: string[] = []; const errors: string[] = []
 try {
@@ -110,6 +109,8 @@ try {
   assert.ok(relativePoster && !relativePoster.startsWith('..') && !path.isAbsolute(relativePoster), 'Only remove disposable fixture artwork')
   fs.unlinkSync(currentPoster)
   await page.reload()
+  // Poster repair is now inside the library toolbar's More menu.
+  await page.getByRole('button', { name: '更多', exact: true }).click()
   await page.getByRole('button', { name: /补海报 1/ }).waitFor()
   await page.getByRole('button', { name: /补海报 1/ }).click()
   await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('.wall .card__img')].filter(img => img.complete && img.naturalWidth > 0).length === 2)

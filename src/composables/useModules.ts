@@ -11,7 +11,7 @@
 
 import { ref } from 'vue'
 
-export type ModuleKey = 'software' | 'game' | 'video' | 'image' | 'project'
+export type ModuleKey = 'software' | 'game' | 'video' | 'image' | 'project' | 'personal' | 'document'
 
 export interface ModuleTab {
   key: ModuleKey
@@ -21,11 +21,13 @@ export interface ModuleTab {
 }
 
 export const MODULE_TABS: ModuleTab[] = [
+  { key: 'personal', label: '个人', home: 'personal-home' },
+  { key: 'project', label: '项目', home: 'project-home' },
   { key: 'software', label: '软件', home: 'home' },
   { key: 'game', label: '游戏', home: 'game-home' },
   { key: 'video', label: '影视', home: 'video-home' },
   { key: 'image', label: '图片', home: 'image-home' },
-  { key: 'project', label: '项目', home: 'project-home' }
+  { key: 'document', label: '文库', home: 'document-home' }
 ]
 
 /**
@@ -36,8 +38,8 @@ export const MODULE_TABS: ModuleTab[] = [
  */
 export const activeModule = ref<ModuleKey>('software')
 
-const lastPath: Record<ModuleKey, string> = { software: '', game: '', video: '', image: '', project: '' }
-const scrollTop: Record<ModuleKey, number> = { software: 0, game: 0, video: 0, image: 0, project: 0 }
+const lastPath: Record<ModuleKey, string> = { software: '', game: '', video: '', image: '', project: '', personal:'', document:'' }
+const scrollTop: Record<ModuleKey, number> = { software: 0, game: 0, video: 0, image: 0, project: 0, personal:0, document:0 }
 
 /**
  * 路由上挂的模块标记。没标记的（设置 / 引导）返回 null。
@@ -50,6 +52,19 @@ export function moduleOf(meta: { module?: unknown }): ModuleKey | null {
   const m = meta.module
   if (typeof m !== 'string') return null
   return MODULE_TABS.some((t) => t.key === m) ? (m as ModuleKey) : null
+}
+
+/** Shared settings need an explicit module in their URL so a reload keeps the same navigation. */
+export function settingsModule(value: unknown, tab: unknown, fallback: ModuleKey): ModuleKey {
+  const explicit = moduleOf({ module: value })
+  if (explicit) return explicit
+  if (['downloads', 'metadata', 'network', 'online', 'hentai', 'hentai-groups', 'hentai-tags'].includes(String(tab))) return 'video'
+  if (tab === 'project') return 'project'
+  if (tab === 'document') return 'document'
+  if (tab === 'image') return 'image'
+  if (tab === 'saves') return 'game'
+  if (tab === 'organize') return 'software'
+  return fallback
 }
 
 /** 由路由 afterEach 调用：记住「刚才在哪个模块的哪一页」 */

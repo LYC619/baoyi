@@ -56,6 +56,8 @@ export interface VideoJobItem {
   registration: VideoJobStage
   receivedBytes: number
   totalBytes: number
+  bytesPerSecond?: number
+  transferMessage?: string
   error: string
   warnings: string[]
   /** 写清单时算出的缺项（description / poster），入库时一并落到 video_directories.missing */
@@ -90,6 +92,16 @@ export interface VideoDownloadJob {
   retryStage?: VideoJobRetry
 }
 export type VideoJobRetry = 'remaining' | 'metadata' | 'registration'
+
+export interface VideoDownloadCache {
+  jobId: string
+  title: string
+  directory: string
+  bytes: number
+  directories: string[]
+  canClear: boolean
+  reason: string
+}
 
 export interface VideoDirectoryChange {
   from: string

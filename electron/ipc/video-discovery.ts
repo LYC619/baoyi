@@ -1,4 +1,4 @@
-import { dialog, session, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -9,6 +9,7 @@ import { createDiscoveryBrowser } from '../services/discovery-browser.ts'
 import { createWebBrowser } from '../services/web-browser.ts'
 import { createWebBrowserSources } from '../services/web-browser-sources.ts'
 import type { WebBrowserSourceInput } from '../../src/types/web-browser.ts'
+import { onlineFetch, ensureOnlineNetwork, onlineNetworkStatus, probeOnlineNetwork } from '../services/online-network.ts'
 import { createOnlineSource } from '../kinds/video/discovery/online.ts'
 import { DEFAULT_PLAYBACK_SITE, playbackUrl } from '../kinds/video/discovery/playback-sites.ts'
 
@@ -16,17 +17,18 @@ export function registerDiscoveryIpc(getWindow: () => BrowserWindow | null, ipcM
   db: SqlDb, savePoster: (url: string, directory: string, signal?: AbortSignal, referer?: string) => Promise<string>) {
   const browser = createDiscoveryBrowser(getWindow)
   const webBrowser = createWebBrowser(getWindow), webSources = createWebBrowserSources(db)
-  const onlineSession = session.fromPartition('online-source', { cache: false })
-  const online = createOnlineSource(catalogue, (input, init) => onlineSession.fetch(String(input), init))
+  const online = createOnlineSource(catalogue, onlineFetch)
   const assertMain = (event: IpcMainInvokeEvent) => {
     const main = getWindow()
     if (!main || main.isDestroyed() || event.sender !== main.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('只允许主窗口操作来源目录')
   }
+  ipcMain.handle('video-discovery:online-network-status', (event, url: string) => { assertMain(event); return onlineNetworkStatus(url) })
+  ipcMain.handle('video-discovery:online-network-probe', (event, url: string) => { assertMain(event); return probeOnlineNetwork(url) })
   ipcMain.handle('video-discovery:online-connect', (event, url: string) => { assertMain(event); return online.connect(url) })
   ipcMain.handle('video-discovery:online-refresh', (event, id: string) => { assertMain(event); return online.refresh(id) })
   ipcMain.handle('video-discovery:online-next', (event, id: string) => { assertMain(event); return online.next(id) })
   ipcMain.handle('video-discovery:online-detail', (event, selection: DiscoverySelection) => { assertMain(event); return online.detail(selection) })
-  ipcMain.handle('web-browser:open', (event, url: string) => { assertMain(event); return webBrowser.open(url) })
+  ipcMain.handle('web-browser:open', async (event, url: string) => { assertMain(event); await ensureOnlineNetwork(); return webBrowser.open(url) })
   ipcMain.handle('web-browser:list', event => { assertMain(event); return webSources.list() })
   ipcMain.handle('web-browser:save', (event, input: WebBrowserSourceInput) => { assertMain(event); return webSources.save(input) })
   ipcMain.handle('web-browser:remove', (event, id: string) => { assertMain(event); webSources.remove(id) })
@@ -69,17 +71,19 @@ export function registerDiscoveryIpc(getWindow: () => BrowserWindow | null, ipcM
   })
   ipcMain.handle('video-discovery:remove', (event, sourceId: string) => { assertMain(event); catalogue.remove(sourceId) })
   ipcMain.handle('video-discovery:mark', (event, selection: DiscoverySelection, patch: Partial<DiscoveryMark>) => { assertMain(event); return catalogue.mark(selection.sourceId, selection.entryId, patch) })
-  ipcMain.handle('video-discovery:open', (event, sourceId: string, entryId?: string, mode?: 'page' | 'play') => {
+  ipcMain.handle('video-discovery:open', async (event, sourceId: string, entryId?: string, mode?: 'page' | 'play') => {
     assertMain(event)
     if (mode && !['page', 'play'].includes(mode)) throw new Error('打开方式无效')
+    await ensureOnlineNetwork()
     browser.open(catalogue.get(sourceId), entryId, mode)
   })
   // 资料站没有可内播文件时，按番号去播放站搜索页，用通用浏览窗口打开。
-  ipcMain.handle('video-discovery:external-play', (event, selection: DiscoverySelection, siteId?: string) => {
+  ipcMain.handle('video-discovery:external-play', async (event, selection: DiscoverySelection, siteId?: string) => {
     assertMain(event)
     const entry = catalogue.entry(selection.sourceId, selection.entryId).entry
     const url = playbackUrl(siteId || DEFAULT_PLAYBACK_SITE, entry.code)
     if (!url) throw new Error('这部作品没有番号，无法定位在线播放来源')
+    await ensureOnlineNetwork()
     return webBrowser.open(url)
   })
 }

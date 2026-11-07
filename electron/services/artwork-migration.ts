@@ -84,6 +84,8 @@ export function migrateArtworkIntoLibrary(db: SqlDb, options: {
   fallbackDir: string
   recoveryRoot: string
   scanRoots: string[]
+  /** Startup only counts orphans; explicit maintenance may search the library for twins. */
+  orphanStrategy?: 'count' | 'deduplicate'
 }): ArtworkMigrationResult {
   const result: ArtworkMigrationResult = { moved: 0, relinked: 0, updated: 0, removed: 0, keptInCache: 0, orphans: 0, warnings: [] }
   const caches = [...new Set(options.cacheDirs.filter(dir => isDirectory(dir)).map(dir => path.resolve(dir)))]
@@ -168,6 +170,7 @@ export function migrateArtworkIntoLibrary(db: SqlDb, options: {
     for (const name of fs.readdirSync(dir)) {
       const file = path.join(dir, name)
       if (!isPosterExt(file) || referenced.has(keyPath(file)) || !statOrNull(file)?.isFile()) continue
+      if (options.orphanStrategy === 'count') { result.orphans++; continue }
       try {
         index ??= indexLibraryArtwork(options.scanRoots)
         const twin = index.get(imageHash(file))

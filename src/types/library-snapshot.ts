@@ -2,6 +2,8 @@ export interface LibrarySnapshot {
   format: 'baoyi-database-snapshot'; version: 1; id: string; file: string; createdAt: number;
   reason: 'upgrade' | 'manual'; fromSchema: number; targetSchema: number;
   fromVersion: string; targetVersion: string; size: number; sha256: string;
+  /** Original database size/hash stay unchanged when an older snapshot is compressed. */
+  compression?: 'gzip'; storedSize?: number;
 }
 export interface LibrarySnapshotEntry extends LibrarySnapshot { state: 'available' | 'missing' | 'changed' }
 export interface LibrarySnapshotInventory {
@@ -13,3 +15,4 @@ export interface LibrarySafetyInfo {
   version: string; schema: number; dataDirectory: string; database: string;
   inventory: LibrarySnapshotInventory; lastExport: LibraryExportInfo | null;
 }
+export interface SnapshotArchiveResult { archived: number; reclaimedBytes: number; retained: number; warnings: string[] }

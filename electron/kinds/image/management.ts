@@ -6,18 +6,19 @@ import type { SqlDb } from '../../services/schema.ts'
 import { ImageLibrary } from './library.ts'
 import type { ImageMoveResult } from '../../../src/types/image.ts'
 
-type Move = {id:string;source:string;destination:string}
+type Move = {id:string;source:string;destination:string; groupId?:string; directory?:string}
 const same = (a:string,b:string) => path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase()
 const inside = (root:string,file:string) => {const rel=path.relative(root,file);return rel!== '..'&&!rel.startsWith('..'+path.sep)&&!path.isAbsolute(rel)}
 const safeName = (name:string) => name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/[. ]+$/,'').slice(0,80)||'未分类'
 const locks = new Set<string>()
 export function assertImageFilesIdle(id:string){if(locks.has(id))throw new Error('这部作品正在整理，请稍后重试')}
+export function lockImageFiles(id:string){assertImageFilesIdle(id);locks.add(id);return ()=>locks.delete(id)}
 function checkIdle(db:SqlDb,id:string){
   assertImageFilesIdle(id)
   const item=new ImageLibrary(db).get(id)
   if(!item)throw new Error('资源不可用')
   for(const row of db.prepare("SELECT payload FROM image_download_jobs WHERE status IN ('queued','running','paused','failed','interrupted')").all() as {payload:string}[]){
-    try{const job=JSON.parse(row.payload);if(job.resourceId===id||(item.sourceId&&job.work?.id===item.sourceId))throw new Error('请先停止并移除这部作品的未完成下载任务，再整理文件')}catch(error){if(!(error instanceof SyntaxError))throw error}
+    try{const job=JSON.parse(row.payload);if(job.resourceId===id||(item.sourceId&&(job.work?.id===item.sourceId||job.provider===item.source&&job.workId===item.sourceId)))throw new Error('请先停止并移除这部作品的未完成下载任务，再整理文件')}catch(error){if(!(error instanceof SyntaxError))throw error}
   }
 }
 export async function imageFileTarget(db:SqlDb,id:string,protectedPaths:string[]=[]):Promise<string>{
@@ -33,21 +34,40 @@ export async function imageFileTarget(db:SqlDb,id:string,protectedPaths:string[]
   checkIdle(db,id)
   return source
 }
+export function rememberedImageDirectory(db:SqlDb,groupId:string|null):string {
+  if (!groupId) return ''
+  const library=new ImageLibrary(db),group=library.groups().find(g=>g.id===groupId)
+  if (!group) return ''
+  if (group.directory) return group.directory
+  // Only infer a legacy category folder when all matching parent paths agree.
+  const candidates=[...new Set(library.list({groupId,type:group.type}).map(item=>path.dirname(item.path)).filter(parent=>path.basename(parent)===safeName(group.name)))]
+  return candidates.length===1 ? candidates[0] : ''
+}
+async function checkDestinationParent(parent:string) {
+  let ancestor=parent
+  while (!await fs.lstat(ancestor).catch(()=>null)) {
+    const next=path.dirname(ancestor); if (next===ancestor) throw new Error('目标目录不可用')
+    ancestor=next
+  }
+  if (!same(await fs.realpath(ancestor),ancestor) || !(await fs.stat(ancestor)).isDirectory()) throw new Error('目标目录包含链接或不是目录')
+}
 export async function planImageMove(db:SqlDb,ids:string[],root:string,byCategory=false,protectedPaths:string[]=[]):Promise<Move[]>{
   if(!Array.isArray(ids)||!ids.length||ids.length>5000)throw new Error('请选择需要整理的作品')
-  const target=await fs.realpath(root), library=new ImageLibrary(db),groups=library.groups()
-  if(!(await fs.stat(target)).isDirectory())throw new Error('目标必须是目录')
+  const target=root?await fs.realpath(root):'', library=new ImageLibrary(db),groups=library.groups()
+  if(target && !(await fs.stat(target)).isDirectory())throw new Error('目标必须是目录')
   const plan:Move[]=[]
   for(const id of new Set(ids)){
     const source=await imageFileTarget(db,id,protectedPaths),item=library.get(id)!
-    const parent=byCategory?path.join(target,safeName(groups.find(g=>g.id===item.groupId)?.name||'未分类')):target
+    const group=groups.find(g=>g.id===item.groupId)
+    const parent=target?(byCategory?path.join(target,safeName(group?.name||'未分类')):target):(byCategory?rememberedImageDirectory(db,item.groupId):'')
+    if(!parent)throw new Error('分类尚未设置存放目录，请选择目标目录')
+    await checkDestinationParent(parent)
+    if(same(source,parent))continue
     const destination=path.join(parent,path.basename(source))
     if(same(source,destination))continue
     if(inside(source,destination))throw new Error('不能把作品移动到自己的子目录')
-    const parentReal=await fs.realpath(parent).catch(()=>target)
-    if(!inside(target,parentReal))throw new Error('目标分类目录指向根目录之外')
     if(await fs.lstat(destination).catch(()=>null)||plan.some(row=>same(row.destination,destination)))throw new Error('目标存在同名文件或目录：'+destination)
-    plan.push({id,source,destination})
+    plan.push({id,source,destination,...(byCategory&&group?{groupId:group.id,directory:parent}:{})})
   }
   return plan
 }
@@ -64,6 +84,8 @@ export async function moveImageItems(db:SqlDb,plan:Move[],trash:(file:string)=>P
   const completed:Array<Move&{copied:boolean}>=[],warnings:string[]=[]
   try{
     for(const row of plan){
+      await checkDestinationParent(path.dirname(row.destination))
+      if(await fs.lstat(row.destination).catch(()=>null))throw new Error('目标已经存在，请重新预览')
       await fs.mkdir(path.dirname(row.destination),{recursive:true})
       let copied=false
       try{await fs.rename(row.source,row.destination)}catch(error){
@@ -83,6 +105,7 @@ export async function moveImageItems(db:SqlDb,plan:Move[],trash:(file:string)=>P
         const pages=db.prepare('SELECT id,file FROM image_pages WHERE resource_id=?').all(row.id) as {id:string;file:string}[]
         for(const page of pages){if(!inside(row.source,page.file))throw new Error('登记页面位于作品目录之外');db.prepare('UPDATE image_pages SET file=? WHERE id=?').run(path.join(row.destination,path.relative(row.source,page.file)),page.id)}
         db.prepare('UPDATE resource SET path=?,source_dir=?,file_name=?,updated_at=? WHERE id=?').run(row.destination,path.dirname(row.destination),path.basename(row.destination),Date.now(),row.id)
+        if(row.groupId && row.directory)db.prepare('UPDATE image_groups SET directory=? WHERE id=?').run(row.directory,row.groupId)
       }
       db.exec('RELEASE image_move')
     }catch(error){db.exec('ROLLBACK TO image_move; RELEASE image_move');throw error}

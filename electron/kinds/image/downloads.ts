@@ -52,6 +52,8 @@ export function createImageDownloads(deps: Dependencies) {
   for (const row of db.prepare('SELECT * FROM image_download_jobs ORDER BY updated_at').all() as Array<{ id: string; status: string; payload: string }>) {
     try {
       const job = JSON.parse(row.payload) as ImageDownloadJob
+      const identity=job as ImageDownloadJob&{version?:number;provider?:string}
+      if(identity.version!==undefined&&identity.version!==1||identity.provider!==undefined&&identity.provider!=='pica')continue
       if (job.id !== row.id || !job.work?.id || !Array.isArray(job.chapters) || !path.isAbsolute(job.root)) continue
       job.status = row.status as ImageDownloadJob['status']
       job.queueOrder = Number.isSafeInteger(job.queueOrder) && job.queueOrder! >= 0 ? job.queueOrder : nextOrder++
@@ -242,7 +244,7 @@ export function createImageDownloads(deps: Dependencies) {
     const existing=library.list().find(item=>item.source==='pica'&&item.sourceId===work.id)
     if(existing)assertImageFilesIdle(existing.id)
     if (duplicate(work.id)) throw new Error('这部作品已有下载任务')
-    if (groupId && !library.groups().some(g => g.id === groupId && !g.hidden)) throw new Error('下载类型不可用')
+    if (groupId && !library.groups().some(g => g.id === groupId && !g.hidden && g.type === 'comic')) throw new Error('下载类型不可用')
     if (request?.resourceId) {
       const target = library.get(request.resourceId)
       if (!target || target.source !== 'pica' || target.sourceId !== work.id) throw new Error('目标作品不可用')

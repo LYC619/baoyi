@@ -1,3 +1,4 @@
+import { assertProjectRunsStopped } from '../kinds/project/activity.ts'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -136,6 +137,7 @@ import {
 import { removeOrphanLinks, syncOrganizeRoot } from '../kinds/software/organize/sync'
 import { withOrganizeMutation } from '../kinds/software/organize/mutation'
 import { addSingleExe, cancelScan, scanDirectories } from '../kinds/software/scanner'
+import { SOFTWARE_EXTENSIONS } from '../../src/utils/software-package'
 import { ICON_EXTS } from '../kinds/software/icons'
 import { clearSoftwareIcon, refreshSoftwareIcons, setSoftwareIcon } from '../kinds/software/service'
 import { testSearch } from '../services/searchService'
@@ -147,10 +149,18 @@ import { registerVideoImportIpc } from './video-import.ts'
 import { registerVideoAgentOrganizeIpc } from './video-agent-organize.ts'
 import { assertLibraryIdle, registerLibraryBackupIpc } from './library-backup.ts'
 import { registerLibrarySnapshotIpc } from './library-snapshots.ts'
+import { registerStorageIpc } from './storage.ts'
 import { createHanimeBrowser } from '../services/hanime-browser.ts'
+import { videoTaxonomy, editVideoTaxonomy } from '../kinds/video/taxonomy-settings.ts'
+import { ensureOnlineNetwork } from '../services/online-network.ts'
+import { parseProxyInput } from '../services/proxy-rules.ts'
 import { registerImageIpc } from './image.ts'
 import { registerProjectIpc } from './project.ts'
+import { registerWorkspaceIpc } from './workspace.ts'
+import { registerArchiveIpc,closeArchiveAssistant } from './archive.ts'
+import {registerVideoPreviewIpc,closeVideoPreview} from './video-preview.ts'
 import { registerImageSourceIpc } from './image-source.ts'
+import {registerComicIngestIpc,stopComicIngest,reopenComicIngest} from './comic-ingest.ts'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
   const hanimeBrowser = createHanimeBrowser({ getSession:getHanimeSession,getMainWindow:getWindow,isHidden:()=>getSettings().hide_hentai === true })
@@ -161,14 +171,19 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return hanimeBrowser.open(url)
   })
   const videoWorkflow = registerVideoWorkflowIpc(getWindow, ipcMain)
+  registerVideoPreviewIpc(getWindow,ipcMain)
   registerVideoOrganizeIpc(getWindow, ipcMain)
   registerVideoImportIpc(getWindow, ipcMain)
   registerVideoAgentOrganizeIpc(getWindow, ipcMain)
   registerLibraryBackupIpc(getWindow, ipcMain)
   registerLibrarySnapshotIpc(getWindow, ipcMain)
+  registerStorageIpc(getWindow, ipcMain)
   registerImageIpc(getWindow, ipcMain)
-  registerProjectIpc(getWindow, ipcMain)
+  const projectAgent = registerProjectIpc(getWindow, ipcMain)
+  registerWorkspaceIpc(getWindow, ipcMain, projectAgent)
+  registerArchiveIpc(getWindow, ipcMain)
   registerImageSourceIpc(getWindow, ipcMain)
+  registerComicIngestIpc(getWindow,ipcMain)
   const send = (channel: string, payload: unknown) => {
     const win = getWindow()
     if (win && !win.isDestroyed()) {
@@ -185,6 +200,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     node: process.versions.node,
+    dataDirectory: app.getPath('userData'),
     // 绿色版跑起来和装机版长得一模一样，唯一的区别是数据在哪。不给个地方看，
     // 用户没法判断「我的库到底在 exe 旁边还是在 AppData」——
     // 那个疑问在升级和搬机器的时候一定会出现
@@ -193,6 +209,14 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle('app:copy', (_e, text: string) => {
     clipboard.writeText(String(text ?? ''))
+  })
+  ipcMain.handle('app:open-url', async (event, value: string) => {
+    const win=getWindow()
+    if(!win||win.isDestroyed()||event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw new Error('只允许主窗口打开外部链接')
+    if(typeof value!=='string'||value.length>8192)throw new Error('外部链接无效')
+    const url=new URL(value)
+    if(!['http:','https:'].includes(url.protocol))throw new Error('仅支持 HTTP 或 HTTPS 链接')
+    await shell.openExternal(url.href)
   })
 
   /* ------------------------------ 窗口 ------------------------------ */
@@ -247,7 +271,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const result = await dialog.showOpenDialog(win, {
       title: '选择要添加的程序',
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: '可执行文件', extensions: ['exe'] }]
+      filters: [{ name: '程序与手机 APP 安装包', extensions: SOFTWARE_EXTENSIONS }]
     })
     if (result.canceled) return []
 
@@ -413,6 +437,17 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   )
 
   /* ------------------------------ 影视 ------------------------------ */
+  const assertTaxonomyWindow = (event: Electron.IpcMainInvokeEvent) => {
+    const win = getWindow()
+    if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw new Error('只允许主窗口管理影视设置')
+  }
+  ipcMain.handle('video:taxonomy', (event, hentai: boolean) => { assertTaxonomyWindow(event); return videoTaxonomy(getDb(), hentai) })
+  ipcMain.handle('video:edit-taxonomy', (event, edit: import('../../src/types/video-taxonomy').VideoTaxonomyEdit) => {
+    assertTaxonomyWindow(event)
+    const count = editVideoTaxonomy(getDb(), edit)
+    send('video:library-changed', undefined)
+    return count
+  })
   ipcMain.handle('video:list', (_e, query: VideoQuery = {}) => listVideoItems(query))
   ipcMain.handle('video:get', (_e, id: string) => getVideoItem(id))
   ipcMain.handle('video:update', (_e, id: string, patch: Partial<VideoItem>) =>
@@ -421,7 +456,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('video:restore-scraped', (_e, id: string, fields: string[] = []) =>
     restoreVideoScraped(id, fields)
   )
-  ipcMain.handle('video:remove', (_e, id: string) => removeVideo(id))
+  ipcMain.handle('video:remove', async (_e, id: string) => {await removeVideo(id);send('video:library-changed',id)})
   ipcMain.handle('video:counts', () => videoCountsOf())
   ipcMain.handle('video:reveal', (_e, id: string) => revealVideo(id))
   ipcMain.handle('video:reveal-subtitle', (_e, id: string, target: string) =>
@@ -562,11 +597,15 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   /* ------------------------------ 设置 ------------------------------ */
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:patch', async (_e, patch: Partial<AppSettings>) => {
+    if ('video_online_proxy' in patch) parseProxyInput(patch.video_online_proxy ?? 'system://')
+    const previousPrivacy=getSettings().hide_hentai
     const next = patchSettings(patch)
+    if(previousPrivacy!==next.hide_hentai){await Promise.all([closeVideoPreview(),closeArchiveAssistant(),stopComicIngest()]);if(!next.hide_hentai)reopenComicIngest()}
     if (next.hide_hentai) hanimeBrowser.close()
     // 代理改了就当场铺下去，不用重启。只在这个键真出现在 patch 里时动 ——
     // 别的设置保存一次就顺手重设一遍代理，会把正在进行的连接掐掉
     if ('proxy' in patch) await reapplyProxy(next.proxy)
+    if ('video_online_proxy' in patch) await ensureOnlineNetwork()
     // 取页层的换 IP 回退即时生效；Chromium 启动规则那层要重启，设置页会提示
     if ('hanime_builtin_hosts' in patch) setHanimeHostsEnabled(next.hanime_builtin_hosts !== false)
     return next
@@ -667,6 +706,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   })
 
   ipcMain.handle('data:reset', (_e, mode: 'library' | 'all') => {
+    assertProjectRunsStopped()
     assertLibraryIdle()
     const summary = resetData(mode === 'all' ? 'all' : 'library')
     videoWorkflow.resetHistory()

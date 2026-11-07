@@ -1,10 +1,10 @@
-import { app, dialog, net, session, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { app, dialog, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import path from 'node:path'
 import { getVideoItem } from '../kinds/video/service.ts'
 import { loadVideoSeries, loadVideoSources } from '../kinds/video/download/sources.ts'
 import { createVideoDownloadService } from '../kinds/video/download/service.ts'
-import { transferVideo } from '../kinds/video/download/transfer.ts'
-import { createChromiumDownloadFetch } from '../kinds/video/download/chromium-fetch.ts'
+import { transferHanimeMedia } from '../services/hanime-download.ts'
+import { videoTransferOptions } from '../kinds/video/download/options.ts'
 import type {
   VideoDownloadProgress,
   VideoDownloadRequest,
@@ -29,6 +29,7 @@ export function registerVideoDownloadIpc(
   ipcMain: Pick<Electron.IpcMain, 'handle'>
 ): void {
   const service = createVideoDownloadService({
+    concurrency:()=>videoTransferOptions(getSettings()).concurrency,
     getItem: id => getVideoItem(id),
     resolveSources: (videoCode, options) => loadVideoSources(videoCode, undefined, options),
     resolveSeries: (videoCode, options) => loadVideoSeries(videoCode, undefined, options),
@@ -52,10 +53,7 @@ export function registerVideoDownloadIpc(
       })
       return result.canceled ? null : result.filePaths[0] ?? null
     },
-    transfer: options => transferVideo({
-      ...options,
-      fetch: createChromiumDownloadFetch((requestOptions) => net.request(requestOptions), session.fromPartition('persist:hanime-network'))
-    }),
+    transfer: transferHanimeMedia,
     log: message => console.info(message)
     ,registerDownloaded: async input => {
       const directory = path.resolve(input.directory)

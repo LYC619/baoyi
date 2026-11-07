@@ -15,6 +15,7 @@ import { timeAsync, timeSync } from '../../services/timing.ts'
 import { countExes } from './exeCount'
 import { isManualIcon } from './icons.ts'
 import { readPeArch, readPeInfo } from './peReader'
+import { APP_CATEGORY, isMobilePackage, isSoftwareFile, SOFTWARE_EXTENSIONS } from '../../../src/utils/software-package'
 // skippable 和扫描时用的是同一份名单：同一棵目录树，扫描不进去的地方
 // agent 也不该为了数 exe 进去
 import { skippable } from './scanPlan'
@@ -97,6 +98,7 @@ async function listDirectory(ctx: ToolContext, args: any): Promise<string> {
     if (entry.isDirectory()) {
       const { count, truncated, visited } = await timeAsync(`countExes ${entry.name}`, () =>
         countExes(full, {
+          extensions: SOFTWARE_EXTENSIONS,
           maxDepth: COUNT_MAX_DEPTH,
           maxEntries: budget,
           skip: skippable
@@ -105,13 +107,12 @@ async function listDirectory(ctx: ToolContext, args: any): Promise<string> {
       budget = Math.max(0, budget - visited)
       // 带 `+` 是在说「至少这么多，没数完」。别把下界写成确切值 ——
       // agent 拿这个数决定要不要进去，「0 个 exe」和「没数完」对它是两回事
-      dirs.push(`  ${entry.name}/  —— 内含 ${count}${truncated ? '+' : ''} 个 exe`)
+      dirs.push(`  ${entry.name}/  —— 内含 ${count}${truncated ? '+' : ''} 个程序或手机安装包`)
       continue
     }
     if (!entry.isFile()) continue
 
-    const ext = path.extname(entry.name).toLowerCase()
-    if (ext === '.exe') {
+    if (isSoftwareFile(entry.name)) {
       let size = 0
       try {
         size = (await fsp.stat(full)).size
@@ -129,7 +130,7 @@ async function listDirectory(ctx: ToolContext, args: any): Promise<string> {
 
   const lines = [`目录：${dir}`]
   lines.push(dirs.length ? `子目录（${dirs.length}）：\n${dirs.join('\n')}` : '子目录：无')
-  lines.push(exes.length ? `本级 exe（${exes.length}）：\n${exes.join('\n')}` : '本级 exe：无')
+  lines.push(exes.length ? `本级程序与手机安装包（${exes.length}）：\n${exes.join('\n')}` : '本级程序与手机安装包：无')
   if (docs.length) {
     lines.push(`可读文档（${docs.length}，用 read_text_file 读）：${docs.slice(0, 20).join('、')}`)
   }
@@ -157,7 +158,8 @@ function fileFacts(exePath: string): RegisterFileFacts & { arch: string } {
   } catch {
     /* 保持 0 */
   }
-  const pe = readPeInfo(exePath, size)
+  const mobile = isMobilePackage(exePath)
+  const pe = mobile ? { file_description: '', product_name: '', company: '', version: '' } : readPeInfo(exePath, size)
   return {
     file_name: path.basename(exePath),
     file_description: pe.file_description || pe.product_name,
@@ -165,7 +167,7 @@ function fileFacts(exePath: string): RegisterFileFacts & { arch: string } {
     version: pe.version,
     file_size: size,
     external_active_at: readExternalActiveAt(exePath),
-    arch: readPeArch(exePath)
+    arch: mobile ? '' : readPeArch(exePath)
   }
 }
 
@@ -180,6 +182,9 @@ async function getFileInfo(ctx: ToolContext, args: any): Promise<string> {
   if (!stat.isFile()) throw new Error(`${file} 不是文件`)
 
   const facts = fileFacts(file)
+  if (isMobilePackage(file)) {
+    return [`文件：${file}`, `大小：${formatSize(facts.file_size)}`, `类型：手机 APP 安装包（${path.extname(file).slice(1).toUpperCase()}）`, '分类：APP', '尚未解析包内应用名、版本和图标；请依据文件名和本地说明识别，不要编造包内信息。'].join('\n')
+  }
   const pe = readPeInfo(file, facts.file_size)
   return [
     `文件：${file}`,
@@ -202,9 +207,13 @@ function coerceLaunchers(ctx: ToolContext, raw: unknown): Launcher[] {
   for (const item of raw) {
     const src = (item && typeof item === 'object' ? item : { path: item }) as Record<string, unknown>
     const target = resolveInside(ctx, src.path)
+    if (ctx.looseOnly && !ctx.direct && (path.dirname(path.relative(ctx.unitDir, target)) !== '.' || !isMobilePackage(target))) {
+      throw new Error('扫描根只处理直属的手机 APP 安装包；不要注册子目录文件或散落 EXE')
+    }
     if (!fs.existsSync(target)) {
       throw new Error(`启动端不存在：${target}。请只填写你在 list_directory 里真实看到的文件。`)
     }
+    if (isMobilePackage(target) && !fs.statSync(target).isFile()) throw new Error('手机安装包必须是文件')
     out.push({
       path: target,
       label: typeof src.label === 'string' ? src.label.trim().slice(0, 20) : '',
@@ -262,7 +271,11 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
 
   // 分类不再强行改写成「其他」：模型提了一个新分类是有信息量的，
   // 交给确认面板高亮成「新分类」，由用户决定要不要建。空的才兜底。
-  const category = str(args?.category, 20) || '其他'
+  const mobile = launchers.some(l => isMobilePackage(l.path))
+  if (mobile && (launchers.length !== 1 || !isMobilePackage(launchers[0].path))) {
+    throw new Error('每个手机安装包请单独注册，不与其他程序或安装包合并')
+  }
+  const category = mobile ? APP_CATEGORY : str(args?.category, 20) || '其他'
 
   const payload: RegisterPayload = {
     name_zh: nameZh,
@@ -274,8 +287,8 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
     official_url: url,
     launchers,
     source_dir: ctx.unitDir,
-    is_portable: triBool(args?.is_portable),
-    move_risk: moveRisk(args?.move_risk)
+    is_portable: mobile ? false : triBool(args?.is_portable),
+    move_risk: mobile ? 'unknown' : moveRisk(args?.move_risk)
   }
 
   const primary = launchers.find((l) => l.is_default && l.kind === 'main')
@@ -284,7 +297,7 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
   const { arch: _arch, ...facts } = fileFacts(primary.path)
 
   // 图标先取好：暂存条目也要在确认面板上显示图标，失败不影响识别结果
-  const icon = (await extractIcon(primary.path)) ?? ''
+  const icon = mobile ? '' : (await extractIcon(primary.path)) ?? ''
 
   if (ctx.direct) {
     const outcome = timeSync(`registerSoftware ${nameZh}`, () => registerSoftware(payload, facts))
@@ -361,14 +374,14 @@ async function webSearch(ctx: ToolContext, args: any): Promise<string> {
 
 export function buildTools(ctx: ToolContext, withSearch: boolean): AgentTool[] {
   const categories = listCategories()
-  const categoryNames = categories.map((c) => c.name)
+  const categoryNames = [...new Set([...categories.map((c) => c.name), APP_CATEGORY])]
   const pool = tagPool()
 
   const tools: AgentTool[] = [
     {
       name: 'list_directory',
       description:
-        '列出指定目录下的所有文件和文件夹。子目录会附带它内部递归的 exe 数量，用来判断要不要进去看。',
+        '列出指定目录下的文件和文件夹。子目录会附带程序和手机安装包数量，用来判断要不要进去看。',
       parameters: {
         type: 'object',
         properties: {
@@ -381,7 +394,7 @@ export function buildTools(ctx: ToolContext, withSearch: boolean): AgentTool[] {
     {
       name: 'get_file_info',
       description:
-        '读取一个 exe 的详细信息：文件大小、位数（x64/x86）、PE 资源里的文件描述、产品名、公司和版本号。',
+        '读取 EXE 的 PE 信息，或手机 APP 安装包的格式、大小及文件名。手机安装包不解析 PE 资源。',
       parameters: {
         type: 'object',
         properties: {
@@ -420,7 +433,7 @@ export function buildTools(ctx: ToolContext, withSearch: boolean): AgentTool[] {
           description: { type: 'string', description: '详细功能描述，50-100 字' },
           category: {
             type: 'string',
-            description: `按**用途**分类，只能从以下选择：${categories.map((c) => `${c.name}（${c.description}）`).join('；')}`,
+            description: `手机安装包统一选 APP；电脑软件按用途选择：${categories.map((c) => `${c.name}（${c.description}）`).join('；')}`,
             enum: categoryNames
           },
           tags: {

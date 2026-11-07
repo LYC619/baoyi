@@ -20,9 +20,12 @@ import { persistVideoWorkBundle, syncVideoWorkFiles } from '../local-sync.ts'
 import { DestinationExistsError, safeDownloadError, type TransferOptions, type TransferResult } from './transfer.ts'
 import type { VideoSources } from './sources.ts'
 import { selectVideoArtwork } from '../artwork.ts'
+import { createDownloadLimiter } from './limiter.ts'
+import { videoTransferOptions } from './options.ts'
 
 export interface VideoWorkSource { artworkUrls?: string[]; thumbnailUrl?: string; videoCode: string; title: string; description: string; posterUrl: string; tags: string[]; currentEpisode?: SourceEpisodeDetails; episodes: Array<{ videoCode: string; title: string }>; warnings: string[] }
 interface Dependencies {
+  concurrency?: () => number
   db: SqlDb
   downloadsDirectory: () => string
   libraryRoots?: () => string[]
@@ -50,7 +53,10 @@ export function createVideoWorkflow(deps: Dependencies) {
   }
   const drafts = new Map<string, { draft: VideoDownloadDraft; info: VideoWorkSource }>()
   const queue: string[] = []
-  let active: { id: string; controller: AbortController } | null = null
+  const active = new Map<string,AbortController>()
+  const concurrency=()=>deps.concurrency ? videoTransferOptions({video_download_concurrency:deps.concurrency()}).concurrency : 1
+  const slots=createDownloadLimiter(concurrency)
+  let wake:(()=>void)|undefined
   let pumping: Promise<void> | null = null
   const changed = (job: VideoDownloadJob) => {
     job.updatedAt = Date.now(); store.save(job)
@@ -261,7 +267,7 @@ export function createVideoWorkflow(deps: Dependencies) {
 
   async function processJob(job: VideoDownloadJob): Promise<void> {
     const controller = new AbortController(); const signal = controller.signal
-    active = { id: job.id, controller }; job.status = 'running'; job.message = '准备作品目录'; changed(job)
+    active.set(job.id,controller); job.status = 'running'; job.message = '准备作品目录'; changed(job)
     try {
       const same = (a: string, b: string) => path.resolve(a).normalize('NFC').toLowerCase() === path.resolve(b).normalize('NFC').toLowerCase()
       let binding = job.resourceId ? deps.db.prepare('SELECT directory_path FROM video_directories WHERE resource_id = ?').get(job.resourceId) as { directory_path: string } | undefined : undefined
@@ -315,8 +321,9 @@ export function createVideoWorkflow(deps: Dependencies) {
           job.posterUrl = refreshed.posterUrl || job.posterUrl
         } catch (error) { job.warnings.push('资料刷新失败：' + safeDownloadError(error)) }
       }
-      for (const item of job.items) {
-        if ((job.retryStage === 'metadata' || job.retryStage === 'registration') && item.transfer !== 'complete') continue
+      let finishing=Promise.resolve()
+      const processItem=async(item:VideoJobItem)=>{
+        if ((job.retryStage === 'metadata' || job.retryStage === 'registration') && item.transfer !== 'complete') return
         signal.throwIfAborted()
         item.error = ''; item.warnings = []
         try {
@@ -330,7 +337,7 @@ export function createVideoWorkflow(deps: Dependencies) {
             item.posterUrl ||= info.posterUrl; item.tags ||= info.tags; item.thumbnailUrl ||= info.thumbnailUrl
             item.publishedAt ||= info.publishedAt; item.releaseDate ||= info.releaseDate; item.durationSec ||= info.durationSec; item.artist ||= info.artist
             const exact = info.candidates.find(c => c.label === job.sourceLabel)
-            if (job.sourceLabel && !exact && job.strictQuality) { item.transfer = 'skipped'; item.registration = 'skipped'; item.metadata = 'skipped'; item.error = '没有目标画质 ' + job.sourceLabel + '，已跳过'; changed(job); continue }
+            if (job.sourceLabel && !exact && job.strictQuality) { item.transfer = 'skipped'; item.registration = 'skipped'; item.metadata = 'skipped'; item.error = '没有目标画质 ' + job.sourceLabel + '，已跳过'; changed(job); return }
             const candidate = exact || info.candidates[0]
             if (!candidate) throw new Error('没有可用的完整视频下载源')
             if (job.sourceLabel && !exact) item.warnings.push('没有 ' + job.sourceLabel + '，使用 ' + candidate.label)
@@ -346,16 +353,28 @@ export function createVideoWorkflow(deps: Dependencies) {
             else {
               let lastPersist = 0
               job.message = '正在下载 ' + item.title; changed(job)
-              const saved = await deps.transfer({ url: candidate.url, referer: watchUrl(item.videoCode), destination: item.path, signal, onProgress: progress => {
-                item.receivedBytes = progress.receivedBytes; item.totalBytes = progress.totalBytes
-                if (Date.now() - lastPersist > 500) { lastPersist = Date.now(); changed(job) }
+              const saved = await deps.transfer({ url: candidate.url, format:candidate.format, resumeKey:'hanime:'+item.videoCode+':'+candidate.label, referer: watchUrl(item.videoCode), destination: item.path, signal,
+                refreshSource:async()=>{
+                  const refreshed=await deps.resolveSources(item.videoCode,{signal})
+                  if(refreshed.videoCode!==item.videoCode)throw new Error('刷新来源编号不一致')
+                  const source=refreshed.candidates.find(value=>value.label===candidate.label && value.extension===candidate.extension)
+                  if(!source)throw new Error('刷新后缺少原下载画质，请重新解析')
+                  return {url:source.url,format:source.format}
+                },onProgress: progress => {
+                if (!progress.checkingCache) { item.receivedBytes = progress.receivedBytes; item.totalBytes = progress.totalBytes }
+                item.bytesPerSecond=progress.bytesPerSecond
+                const previousMessage=item.transferMessage
+                item.transferMessage=progress.message || (progress.phase==='finalizing'?'正在封装并安全保存':'正在下载')
+                if (Date.now() - lastPersist > 500 || previousMessage!==item.transferMessage || progress.phase==='finalizing') { lastPersist = Date.now(); changed(job) }
               } })
-              item.path = saved.destination; item.receivedBytes = saved.receivedBytes; item.totalBytes = saved.totalBytes; item.warnings.push(...saved.warnings)
+              item.path = saved.destination; item.receivedBytes = saved.receivedBytes; item.totalBytes = saved.totalBytes; item.bytesPerSecond=0;item.transferMessage='';item.warnings.push(...saved.warnings)
             }
             item.transfer = 'complete'; changed(job)
           }
           // A cancellation after file publication must preserve and register the finished file.
-          await finishFile(job, item, signal)
+          const finished=finishing.then(()=>finishFile(job,item,signal))
+          finishing=finished.catch(()=>{})
+          await finished
         } catch (error) {
           if (item.transfer !== 'complete') item.transfer = 'failed'
           item.error = error instanceof DestinationExistsError ? '同名文件已存在且归属未确认，未覆盖；请改名后重试' : safeDownloadError(error)
@@ -363,19 +382,46 @@ export function createVideoWorkflow(deps: Dependencies) {
           if (signal.aborted) throw error
         }
       }
+      let cursor=0
+      await Promise.allSettled(Array.from({length:Math.min(concurrency(),job.items.length)},async()=>{
+        for(;;){
+          if(signal.aborted)return
+          const item=job.items[cursor++];if(!item)return
+          let release:(()=>void)|undefined
+          try{release=await slots.acquire(signal);await processItem(item)}catch(error){if(!signal.aborted)throw error;return}finally{release?.()}
+        }
+      }))
+      await finishing
+      signal.throwIfAborted()
       const saved = job.items.filter(i => i.transfer === 'complete').length
       const pending = job.items.some(i => i.transfer === 'failed' || i.metadata === 'failed' || i.registration === 'failed')
       job.status = pending ? (saved ? 'partial' : 'failed') : 'success'
       job.message = `${saved}/${job.items.length} 个视频已保存` + (job.register ? `，${job.items.filter(i => i.registration === 'complete').length} 个已入库` : '，仅保存文件') + (pending ? '；部分项目待处理' : '')
     } catch (error) {
       job.status = signal.aborted ? 'cancelled' : 'failed'; job.message = safeDownloadError(error)
-    } finally { active = null; delete job.retryStage; changed(job) }
+    } finally { active.delete(job.id); delete job.retryStage; changed(job) }
   }
 
   function schedule(): void {
-    if (pumping) return
+    slots.notify()
+    if (pumping) { wake?.(); return }
     pumping = Promise.resolve().then(async () => {
-      while (queue.length) { const job = jobs.get(queue.shift()!); if (job?.status === 'queued') await processJob(job) }
+      const running=new Map<string,Promise<void>>()
+      const conflict=(a:VideoDownloadJob,b:VideoDownloadJob)=>
+        !!a.resourceId && a.resourceId===b.resourceId ||
+        !!a.directory && a.directory.toLowerCase()===b.directory.toLowerCase() ||
+        path.resolve(a.root,a.title).toLowerCase()===path.resolve(b.root,b.title).toLowerCase() ||
+        a.sources.some(source=>b.sources.some(other=>other.provider===source.provider && other.externalId===source.externalId))
+      while(queue.length || running.size){
+        for(let i=0;i<queue.length && running.size<concurrency();){
+          const job=jobs.get(queue[i])
+          if(!job || job.status!=='queued'){queue.splice(i,1);continue}
+          if([...running.keys()].some(id=>conflict(job,jobs.get(id)!))){i++;continue}
+          queue.splice(i,1)
+          const pending=processJob(job).finally(()=>running.delete(job.id));running.set(job.id,pending)
+        }
+        if(running.size){await Promise.race([...running.values(),new Promise<void>(resolve=>{wake=resolve})]);wake=undefined}
+      }
     }).finally(() => { pumping = null; if (queue.length) schedule() })
   }
   function retry(id: string, stage: VideoJobRetry): VideoDownloadJob {
@@ -395,12 +441,12 @@ export function createVideoWorkflow(deps: Dependencies) {
   function cancel(id: string): boolean {
     const job = jobs.get(id)
     if (!job) return false
-    if (active?.id === id) { active.controller.abort(new Error('下载已取消，已保存内容保留')); return true }
+    if (active.has(id)) { active.get(id)!.abort(new Error('下载已取消，已保存内容保留')); return true }
     if (job.status === 'queued') { job.status = 'cancelled'; job.message = '已取消排队'; changed(job); return true }
     return false
   }
   function clearHistory(): void {
-    if (active || [...jobs.values()].some(job => job.status === 'running' || job.status === 'queued')) throw new Error('请先结束下载任务')
+    if (active.size || [...jobs.values()].some(job => job.status === 'running' || job.status === 'queued')) throw new Error('请先结束下载任务')
     queue.length = 0
     drafts.clear()
     jobs.clear()

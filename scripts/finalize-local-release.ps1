@@ -1,11 +1,12 @@
 param([switch]$VerifyOnly, [string]$EvidenceDirectory = 'output/image-optimization')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$pkg = Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json
+$pkg = Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($pkg.version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version' }
 $target = Join-Path $root ('release/' + $pkg.version)
 if (!(Test-Path -LiteralPath (Join-Path $target 'win-unpacked/resources/app.asar'))) { throw 'Build the directory package first' }
 $utf8 = [System.Text.UTF8Encoding]::new($false)
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Hash([string]$file) { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -15,7 +16,15 @@ function Write-Json([string]$file, $value) {
 function Record([string]$file, [string]$base) {
   $item = Get-Item -LiteralPath $file
   if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw "Unexpected link: $file" }
-  $relative = [System.IO.Path]::GetRelativePath($base, $item.FullName).Replace('\', '/')
+  $fullBase = [System.IO.Path]::GetFullPath($base).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+  $fullFile = [System.IO.Path]::GetFullPath($item.FullName)
+  if ($fullFile.StartsWith($fullBase, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $relative = $fullFile.Substring($fullBase.Length).Replace('\', '/')
+  } else {
+    $baseUri = [System.Uri]$fullBase
+    $targetUri = [System.Uri]$fullFile
+    $relative = [System.Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('\', '/')
+  }
   if ($relative.StartsWith('../') -or [System.IO.Path]::IsPathRooted($relative)) { throw "Outside release scope: $file" }
   [ordered]@{ path = $relative; bytes = $item.Length; sha256 = (Hash $item.FullName) }
 }
@@ -28,9 +37,9 @@ if (!$VerifyOnly) {
   foreach ($file in @($sourceList, $sourceZip, $manifestPath, $sums)) {
     if (Test-Path -LiteralPath $file) { throw "Refusing to overwrite release evidence: $file" }
   }
-  $verification = Get-Content -LiteralPath (Join-Path $target 'verification.json') -Raw | ConvertFrom-Json
+  $verification = Get-Content -LiteralPath (Join-Path $target 'verification.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   if ($verification.status -ne 'passed' -or $verification.version -ne $pkg.version) { throw 'Missing successful acceptance record' }
-  $content = Get-Content -LiteralPath (Join-Path (Join-Path $root $EvidenceDirectory) 'packaged-content.json') -Raw | ConvertFrom-Json
+  $content = Get-Content -LiteralPath (Join-Path (Join-Path $root $EvidenceDirectory) 'packaged-content.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   if ($content.version -ne $pkg.version -or $content.asarSha256 -ne (Hash (Join-Path $target 'win-unpacked/resources/app.asar'))) { throw 'Packaged content changed after verification' }
   $paths = [System.Collections.Generic.List[string]]::new()
   foreach ($name in @('.gitignore', '.npmrc', 'AGENTS.md', 'README.md', 'package.json', 'package-lock.json', 'index.html', 'tsconfig.json', 'vite.config.ts', 'electron-builder.yml', 'electron-builder.portable.yml', 'electron-builder.green.yml')) {
@@ -38,7 +47,7 @@ if (!$VerifyOnly) {
   }
   # Only build inputs and release documentation; never sweep user data or process directories.
   foreach ($name in @('electron', 'src', 'scripts', 'resources', 'docs/third-party', 'docs/releases')) {
-    Get-ChildItem -LiteralPath (Join-Path $root $name) -Recurse -File | ForEach-Object { $paths.Add($_.FullName) }
+    Get-ChildItem -LiteralPath (Join-Path $root $name) -Recurse -File | Where-Object { $_.FullName -notmatch '[\\/]__pycache__[\\/]|\.pyc$' } | ForEach-Object { $paths.Add($_.FullName) }
   }
   $sources = @($paths | Sort-Object -Unique | ForEach-Object { Record $_ $root })
   Write-Json $sourceList $sources
@@ -52,7 +61,9 @@ if (!$VerifyOnly) {
   $baseline = (& git -C $root rev-parse HEAD).Trim()
   if ($LASTEXITCODE -ne 0) { throw 'Cannot record Git baseline' }
   $branch = (& git -C $root branch --show-current).Trim()
-  $dirty = [bool](& git -C $root status --porcelain --untracked-files=normal)
+  $dirty = [bool](& git -C $root status --porcelain --untracked-files=no)
+  $untrackedInputs = @(& git -C $root ls-files --others --exclude-standard -- electron src scripts resources docs/third-party docs/releases)
+  $dirty = $dirty -or $untrackedInputs.Count -gt 0
   $manifest = [ordered]@{
     version = $pkg.version; createdAt = [DateTimeOffset]::Now.ToString('o'); platform = 'win32-x64'
     electronVersion = $pkg.devDependencies.electron; dataMode = 'appdata'
@@ -67,7 +78,7 @@ if (!$VerifyOnly) {
   [System.IO.File]::WriteAllLines($sums, [string[]]@($covered | ForEach-Object { $_.sha256 + '  ' + $_.path }), $utf8)
 }
 
-$sources = @(Get-Content -LiteralPath $sourceList -Raw | ConvertFrom-Json)
+$sources = [object[]](Get-Content -LiteralPath $sourceList -Raw -Encoding UTF8 | ConvertFrom-Json)
 $zip = [System.IO.Compression.ZipFile]::OpenRead($sourceZip)
 try {
   if ($zip.Entries.Count -ne $sources.Count) { throw 'Source archive count mismatch' }
@@ -75,12 +86,12 @@ try {
     $entry = $zip.GetEntry($file.path)
     if (!$entry -or $entry.Length -ne $file.bytes) { throw "Source archive entry mismatch: $($file.path)" }
     $stream = $entry.Open(); $algorithm = [System.Security.Cryptography.SHA256]::Create()
-    try { $actual = [Convert]::ToHexString($algorithm.ComputeHash($stream)).ToLowerInvariant() }
+    try { $actual = [System.BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
     finally { $stream.Dispose(); $algorithm.Dispose() }
     if ($actual -ne $file.sha256 -or $actual -ne (Hash (Join-Path $root $file.path))) { throw "Source hash mismatch: $($file.path)" }
   }
 } finally { $zip.Dispose() }
-$lines = @(Get-Content -LiteralPath $sums)
+$lines = @(Get-Content -LiteralPath $sums -Encoding UTF8)
 foreach ($line in $lines) {
   if ($line -notmatch '^([a-f0-9]{64})  (.+)$') { throw 'Invalid checksum record' }
   $expected = $Matches[1]; $relative = $Matches[2]

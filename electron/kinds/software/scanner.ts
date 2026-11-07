@@ -1,10 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ScanProgress, ScanResult, SoftwareItem } from '../../../src/types'
-import { insertScanned, updateSoftware, upsertScanUnits } from '../../services/database'
+import { insertScanned, listCategories, updateSoftware, upsertCategory, upsertScanUnits } from '../../services/database'
 import { extractIcon } from '../../services/iconExtractor'
 import { readPeInfo } from './peReader'
 import { planRoot, type PlannedUnit } from './scanPlan'
+import { APP_CATEGORY, isMobilePackage, isSoftwareFile } from '../../../src/utils/software-package'
 
 /**
  * 扫描只做一件事：把扫描根拆成若干「识别单元」交给 agent，并数清每个单元里有多少 exe。
@@ -50,15 +51,19 @@ export async function scanDirectories(
   return { found, added, pending, settled, loose_files: loose }
 }
 
-/** 手动添加单个 exe：直接入库成待补全条目，交给 AI 那一步识别 */
+/** 手动添加 EXE 或手机安装包：直接入库成待补全条目，交给 AI 补充说明。 */
 export async function addSingleExe(exePath: string): Promise<SoftwareItem[]> {
+  if (!isSoftwareFile(exePath)) return []
+  const mobile = isMobilePackage(exePath)
   let size = 0
   try {
-    size = fs.statSync(exePath).size
+    const stat = fs.statSync(exePath)
+    if (!stat.isFile()) return []
+    size = stat.size
   } catch {
     return []
   }
-  const pe = readPeInfo(exePath, size)
+  const pe = mobile ? { file_description: '', product_name: '', company: '', version: '' } : readPeInfo(exePath, size)
   const inserted = insertScanned([
     {
       exe_path: exePath,
@@ -70,6 +75,14 @@ export async function addSingleExe(exePath: string): Promise<SoftwareItem[]> {
     }
   ])
   for (const item of inserted) {
+    if (mobile) {
+      const categories = listCategories()
+      if (!categories.some(c => c.name === APP_CATEGORY)) {
+        upsertCategory({ id: '', name: APP_CATEGORY, description: 'Android、iOS、鸿蒙等手机 APP 安装包', icon: 'box', sort_order: Math.max(0, ...categories.map(c => c.sort_order)) + 1 })
+      }
+      Object.assign(item, updateSoftware(item.id, { category: APP_CATEGORY, is_portable: false, move_risk: 'unknown' }))
+      continue
+    }
     const iconPath = await extractIcon(item.exe_path)
     if (iconPath) updateSoftware(item.id, { icon_path: iconPath })
   }

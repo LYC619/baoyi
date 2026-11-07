@@ -30,10 +30,34 @@ export const LIBRARY_BACKUP_COLUMNS = {
   },
   project_meta: { resource_id:'text', origin:'text', status:'text', group_name:'text', pinned:'integer', version:'text', entries:'text', default_entry:'text', evidence:'text' },
   project_sessions: { id:'text',resource_id:'text',title:'text',created_at:'integer',updated_at:'integer',payload:'text' },
-  image_groups: { id: 'text', name: 'text', sort_order: 'integer', hidden: 'integer' },
+  document_categories: {id:'text',submodule:'text',name:'text',description:'text',behavior:'text',sort_order:'integer'},
+  document_custom_groups: {id:'text',submodule:'text',category_id:'text?',name:'text',sort_order:'integer',created_at:'integer',updated_at:'integer'},
+  workspace_sessions: {id:'text',module:'text',title:'text',created_at:'integer',updated_at:'integer',payload:'text'},
+  workspace_changes: {id:'text',session_id:'text',entity:'text',target_id:'text',before_json:'text',after_json:'text',state:'text',created_at:'integer'},
+  archive_actions: {id:'text',session_id:'text',target_id:'text',name:'text',kind:'text',reason:'text',before_json:'text',after_json:'text',state:'text',created_at:'integer',scope:'text'},
+  archive_runs: {session_id:'text',status:'text',text:'text',error:'text',started_at:'integer',updated_at:'integer',scope:'text'},
+  document_meta: { resource_id:'text',document_type:'text',category_id:'text?',submodule:'text?',custom_group_id:'text?',favorite:'integer',type_locked:'integer',edited_fields:'text',format:'text',author:'text',counterpart:'text',issued_on:'text',expires_on:'text',read_state:'text',page:'integer',page_count:'integer',scroll_offset:'real' },
+  document_annotations: { id:'text',resource_id:'text',kind:'text',quote:'text',note:'text',page:'integer',scroll_offset:'real',anchor:'text',created_at:'integer',updated_at:'integer' },
+  document_files: {id:'text',resource_id:'text',path:'text',project_id:'text?',created_at:'integer'},
+  document_insights: {id:'text',resource_id:'text',revision:'integer',active:'integer',core_value:'text',conclusions:'text',suggested_category:'text?',suggested_tags:'text',evidence:'text',limitations:'text',model:'text',prompt_version:'text',source_fingerprint:'text',source_file_id:'text',coverage:'text',session_id:'text',request_id:'text',generated_at:'integer',updated_at:'integer',user_edited:'integer'},
+  document_recycle: {id:'text',resource_id:'text',state:'text',created_at:'integer',expires_at:'integer',payload:'text'},
+  document_file_operations: {id:'text',resource_id:'text',state:'text',created_at:'integer',payload:'text'},
+  project_context: { resource_id:'text',current_text:'text',next_text:'text',baseline:'text',prompt_text:'text',rules:'text',version:'integer',revision:'integer',updated_at:'integer' },
+  project_launch_profiles: {id:'text',resource_id:'text',name:'text',kind:'text',command:'text',args_json:'text',cwd:'text',source:'text',source_ref:'text',port:'integer?',url:'text',trusted:'integer',trust_stamp:'text',revision:'integer',enabled:'integer',created_at:'integer',updated_at:'integer'},
+  project_events: { id:'text',resource_id:'text',title:'text',body:'text',occurred_at:'integer',milestone:'integer',version:'text',source:'text',source_key:'text',evidence:'text',status:'text',revised:'integer',created_at:'integer',updated_at:'integer' },
+  personal_records: { id:'text',kind:'text',name:'text',body:'text',data:'text',created_at:'integer',updated_at:'integer' },
+  skill_card: {id:'text',parent_id:'text',revision:'integer'},
+  skill_metric: {id:'text',card_id:'text',metric_key:'text',label:'text',unit:'text',value_type:'text',version:'integer'},
+  skill_record: {id:'text',card_id:'text',metric_id:'text',version:'integer',value_json:'text',occurred_on:'text',evidence:'text',request_id:'text',undone:'integer',created_at:'integer'},
+  skill_proposal: {id:'text',draft_json:'text',state:'text',card_id:'text',created_at:'integer'},
+  resource_links: { id:'text',owner_type:'text',owner_id:'text',owner_resource_id:'text?',owner_event_id:'text?',owner_personal_id:'text?',target_key:'text',resource_id:'text?',annotation_id:'text?',kind:'text',name:'text',path:'text',quote:'text',location:'text',created_at:'integer' },
+  project_event_generation: { event_id:'text',resource_id:'text',session_id:'text',original:'text',undone:'integer',created_at:'integer' },
+  project_summaries: {id:'text',resource_id:'text',kind:'text',group_key:'text',title:'text',body:'text',sources:'text',source_stamp:'text',session_id:'text',revised:'integer',undone:'integer',original:'text',created_at:'integer',updated_at:'integer'},
+  project_automation: { resource_id:'text',enabled:'integer',last_head:'text',observed_head:'text',pending_since:'integer',session_id:'text',last_error:'text' },
+  image_groups: { id: 'text', name: 'text', item_type:'text', directory:'text', sort_order: 'integer', hidden: 'integer' },
   image_collections: {id:'text',name:'text',created_at:'integer'},
   image_collection_members: {collection_id:'text',resource_id:'text',position:'integer'},
-  image_meta: { resource_id: 'text', item_type: 'text', group_id: 'text?', favorite: 'integer', publication: 'text', cover_page_id: 'text', source: 'text', source_id: 'text' },
+  image_meta: { resource_id: 'text', item_type: 'text', group_id: 'text?', favorite: 'integer', publication: 'text', cover_page_id: 'text', source: 'text', source_id: 'text',authors:'text' },
   image_chapters: { id: 'text', resource_id: 'text', chapter_key: 'text', title: 'text', ordinal: 'integer', source_id: 'text', customized: 'integer' },
   image_pages: { id: 'text', resource_id: 'text', chapter_id: 'text?', file: 'text', entry: 'text', ordinal: 'integer', size: 'integer', missing: 'integer' },
   image_progress: { resource_id: 'text', page_id: 'text', scroll_offset: 'real', updated_at: 'integer' },
@@ -42,7 +66,7 @@ export const LIBRARY_BACKUP_COLUMNS = {
   image_download_jobs: { id: 'text', status: 'text', updated_at: 'integer', payload: 'text' },
   software_meta: {
     resource_id: 'text', file_description: 'text?', company: 'text?', version: 'text?',
-    launchers: 'text?', is_portable: 'integer?', move_risk: 'text?', link_target: 'text?'
+    launchers: 'text?', is_portable: 'integer?', move_risk: 'text?', link_target: 'text?', category_locked: 'integer'
   },
   game_meta: {
     resource_id: 'text', cover_path: 'text?', background_path: 'text?', cover_source: 'text',
@@ -141,7 +165,7 @@ export type LibraryBackupRow<T extends LibraryBackupTableName> = {
   -readonly [C in keyof (typeof LIBRARY_BACKUP_COLUMNS)[T]]: ColumnValue<(typeof LIBRARY_BACKUP_COLUMNS)[T][C]>
 }
 export type LibraryBackupTables = { [T in LibraryBackupTableName]: LibraryBackupRow<T>[] }
-export type LibraryBackupResourceKind = 'software' | 'game' | 'video' | 'image' | 'project'
+export type LibraryBackupResourceKind = 'software' | 'game' | 'video' | 'image' | 'project' | 'document'
 
 export interface LibraryBackup {
   format: typeof LIBRARY_BACKUP_FORMAT
@@ -151,6 +175,7 @@ export interface LibraryBackup {
   /** Unix epoch milliseconds. */
   exported_at: number
   tables: LibraryBackupTables
+  assistant?: {format:'baoyi-hermes-state';version:1;archive:string}
 }
 
 /** Preview and restore return the same summary of the validated incoming data. */

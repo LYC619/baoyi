@@ -9,6 +9,7 @@
 import path from 'node:path'
 import type { MoveRisk, OrganizeAction, SoftwareItem } from '../../../../src/types'
 import { nestedInside, samePath, sanitizeFolder } from '../../../services/fstree.ts'
+import { isMobilePackage } from '../../../../src/utils/software-package.ts'
 
 /**
  * 文件夹名规范和路径包含 / 相等判断都搬到了公共层（services/fstree.ts）——
@@ -89,6 +90,8 @@ export function sameVolume(a: string, b: string): boolean {
  * source_dir 为空（0.1.x 的老条目、手动添加的单个 exe）才退回 exe 所在目录。
  */
 export function rootDirOf(item: Pick<SoftwareItem, 'source_dir' | 'exe_path'>): string {
+  // 单文件安装包不拥有其所在目录，不能把同目录其他文件一起整理或回收。
+  if (isMobilePackage(item.exe_path)) return item.exe_path
   return item.source_dir || path.dirname(item.exe_path)
 }
 
@@ -103,6 +106,7 @@ export function alreadyOrganized(
   item: Pick<SoftwareItem, 'source_dir' | 'exe_path'>,
   root: string
 ): boolean {
+  if (isMobilePackage(item.exe_path)) return false
   if (!root) return false
   return nestedInside(root, rootDirOf(item))
 }

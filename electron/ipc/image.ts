@@ -1,10 +1,12 @@
 import { app, dialog, shell, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { getDb, getSettings } from '../services/database.ts'
 import { imageCollections,saveImageCollection,removeImageCollection } from '../kinds/image/collections.ts'
-import { assertImageFilesIdle,imageFileTarget,planImageMove,moveImageItems,removeImageFiles } from '../kinds/image/management.ts'
+import { assertImageFilesIdle,imageFileTarget,planImageMove,moveImageItems,removeImageFiles,rememberedImageDirectory } from '../kinds/image/management.ts'
 import { ImageLibrary } from '../kinds/image/library.ts'
+import { imageTagCounts, renameImageTag } from '../kinds/image/tags.ts'
 import { isArchive, scanImageImport } from '../kinds/image/scanner.ts'
 import { imageOperation } from '../kinds/image/activity.ts'
 import { auditImage, imagePageInfo } from '../kinds/image/integrity.ts'
@@ -25,6 +27,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
   const handle = (name: string, action: (...args: any[]) => unknown) => ipc.handle('image:' + name, (event, ...args) => { main(event); return action(...args) })
   handle('list', query => library().list(query))
   handle('get', id => library().get(id))
+  handle('gallery', (ids,offset,limit) => library().gallery(ids,offset,limit))
   handle('reveal', (id: string) => {
     const item = library().get(id)
     if (!item?.path || !existsSync(item.path)) return false
@@ -38,18 +41,25 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
   handle('pages', (id, chapter) => library().pages(id, chapter).map(({ id, resourceId, chapterId, ordinal, size, missing }) => ({ id, resourceId, chapterId, ordinal, size, missing })))
   handle('save-chapter', (id, chapterId, title, move) => { library().saveChapter(id, chapterId, title, move); changed() })
   handle('groups', () => library().groups())
+  handle('tag-counts', () => imageTagCounts(getDb()))
+  handle('rename-tag', (from: string, to: string | null) => { const count = renameImageTag(getDb(), from, to); changed(); return count })
   handle('update', (id, patch) => { const item = library().update(id, patch); changed(); return item })
   handle('bulk-update', (ids, patch) => { const count = library().bulkUpdate(ids, patch); changed(); return count })
   const protectedPaths=()=>[app.getPath('home'),app.getPath('userData'),app.getPath('documents'),app.getPath('pictures'),app.getPath('videos'),...getSettings().software_scan_dirs,...getSettings().game_scan_dirs,...getSettings().video_scan_dirs]
   handle('collections',()=>imageCollections(getDb()))
   handle('save-collection',(name,members,id)=>{const result=saveImageCollection(getDb(),name,members,id);changed();return result})
   handle('remove-collection',id=>{removeImageCollection(getDb(),id);changed()})
-  handle('move',async(ids:string[],byCategory=false)=>{
-    const selected=await dialog.showOpenDialog(getWindow()!,{title:'选择整理目标目录',properties:['openDirectory','createDirectory']})
-    focusBack()
-    if(selected.canceled||!selected.filePaths[0])return null
+  handle('move',async(ids:string[],byCategory=false,chooseTarget=false)=>{
+    if(!Array.isArray(ids)||!ids.length||ids.length>5000)throw new Error('请选择需要整理的作品')
+    let root=''
+    if(chooseTarget || !byCategory || ids.some(id=>!rememberedImageDirectory(getDb(),library().get(id)?.groupId||null))){
+      const selected=await dialog.showOpenDialog(getWindow()!,{title:'选择整理目标目录',properties:['openDirectory','createDirectory']})
+      focusBack()
+      if(selected.canceled||!selected.filePaths[0])return null
+      root=selected.filePaths[0]
+    }
     return imageOperation(async()=>{
-      const plan=await planImageMove(getDb(),ids,selected.filePaths[0],byCategory,protectedPaths())
+      const plan=await planImageMove(getDb(),ids,root,byCategory,protectedPaths())
       if(!plan.length)return {moved:0,paths:[],warnings:[]}
       const confirmed=await dialog.showMessageBox(getWindow()!,{type:'question',title:'确认整理和移动',message:`移动 ${plan.length} 个作品目录${byCategory?'，按分类存放':''}`,detail:plan.slice(0,30).map(row=>row.source+'\n→ '+row.destination).join('\n\n')+(plan.length>30?`\n另有 ${plan.length-30} 项`:'')+'\n\n保留全部内容、分类、合集及阅读进度；同名目录不会覆盖。',buttons:['取消','确认移动'],defaultId:0,cancelId:0})
       focusBack()
@@ -87,7 +97,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
       return { token: preview.token, items: items.map((i,index) => ({ index, path: i.path, name: i.name, pages: i.chapters.reduce((n,c) => n+c.pages.length,0), chapters: type === 'comic' ? i.chapters.length : 0, warnings: i.warnings })) }
     })
   })
-  handle('confirm-import', (token: string, selected: Array<{ index: number; name: string }>) => {
+  handle('confirm-import', (token: string, selected: Array<{ index: number; name: string }>, folderCategories=false) => {
     if (!preview || token !== preview.token || Date.now() - preview.at > 1800000) throw new Error('导入预览已过期，请重新选择')
     const snapshot = preview; preview = null
     let imported = 0
@@ -95,8 +105,17 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
     for (const selection of selected) {
       const item = snapshot.items[selection.index]
       if (!item || !item.chapters.some(c => c.pages.length)) continue
-      try { library().register({ ...item, name: selection.name.trim().slice(0,300) || item.name }); imported++ }
-      catch (cause) { errors.push(item.name + '：' + (cause as Error).message) }
+      getDb().exec('SAVEPOINT image_import_item')
+      try {
+        const lib=library(), registered=lib.register({ ...item, name: selection.name.trim().slice(0,300) || item.name })
+        if(folderCategories && item.type!=='comic' && !registered.groupId){
+          const name=path.basename(item.path).slice(0,80)
+          const group=lib.groups().find(g=>g.type===item.type&&g.name===name)||lib.saveGroup({name,type:item.type,directory:isArchive(item.path)?path.dirname(item.path):item.path})
+          lib.update(registered.id,{groupId:group.id})
+        }
+        getDb().exec('RELEASE image_import_item');imported++
+      }
+      catch (cause) { getDb().exec('ROLLBACK TO image_import_item; RELEASE image_import_item');errors.push(item.name + '：' + (cause as Error).message) }
     }
     changed()
     return { imported, errors }

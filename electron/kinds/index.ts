@@ -11,9 +11,10 @@ import { gameKind } from './game/index.ts'
 import { videoKind } from './video/index.ts'
 import { imageKind } from './image/index.ts'
 import { projectKind } from './project/index.ts'
+import { documentKind } from './document/index.ts'
 import type { ResourceKindModule } from './types.ts'
 
-export const KINDS: ResourceKindModule[] = [softwareKind, gameKind, videoKind, imageKind, projectKind]
+export const KINDS: ResourceKindModule[] = [softwareKind, gameKind, videoKind, imageKind, projectKind, documentKind]
 
 export function kindByName(kind: string): ResourceKindModule | undefined {
   return KINDS.find((k) => k.kind === kind)

@@ -4,17 +4,37 @@ import { randomUUID } from 'node:crypto'
 
 export const DOWNLOAD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 export interface TransferProgress {
+  checkingCache?: boolean
   phase: 'downloading' | 'finalizing'
   receivedBytes: number
   /** 0 = unknown; do not invent a percentage. */
   totalBytes: number
   bytesPerSecond: number
+  message?: string
+}
+
+/** Queue time is not network inactivity. Nested connection budgets share this hook. */
+export const DOWNLOAD_QUEUE = Symbol('download-queue')
+export type DownloadRequestInit = RequestInit & { [DOWNLOAD_QUEUE]?: (waiting: boolean) => void }
+export function createDownloadTimeout(ms: number, message: string) {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined, waiting = 0, closed = false
+  const tick = () => { clearTimeout(timer); if (!closed && !waiting) timer = setTimeout(() => controller.abort(new Error(message)), ms) }
+  return { controller, tick,
+    queue: (queued: boolean) => { waiting = Math.max(0, waiting + (queued ? 1 : -1)); tick() },
+    close: () => { closed = true; clearTimeout(timer) }
+  }
 }
 export interface TransferResult extends TransferProgress {
   destination: string
   warnings: string[]
 }
 export interface TransferOptions {
+  /** Stable content/quality identity, never a signed URL. */
+  resumeKey?: string
+  format?: 'direct' | 'hls' | 'dash'
+  /** Resolve the same content and quality again after an expired signed URL. */
+  refreshSource?: () => Promise<{url:string;format?:'direct'|'hls'|'dash'}>
   url: string
   destination: string
   referer: string
@@ -45,7 +65,7 @@ export function httpUrl(raw: string, base?: string): string {
 
 /** Abort stalled boundaries even when a mock/underlying reader ignores its fetch signal. */
 export function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
-  signal.throwIfAborted()
+  if(signal.aborted) { void pending.catch(()=>{}); signal.throwIfAborted() }
   return new Promise<T>((resolve, reject) => {
     const aborted = () => { signal.removeEventListener('abort', aborted); reject(signal.reason) }
     signal.addEventListener('abort', aborted, { once: true })
@@ -55,9 +75,9 @@ export function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<
   })
 }
 
-function checkContainer(head: Buffer): void {
+export function checkContainer(head: Buffer): void {
   const text = head.toString('utf8').trimStart()
-  if (/^#EXTM3U/i.test(text)) throw new Error('收到 HLS 分片清单，当前只支持直链视频下载')
+  if (/^#EXTM3U/i.test(text)) throw new Error('收到 HLS 播放清单，需要分片下载')
   if (head.length === 0) throw new Error('服务器返回空视频文件')
   // Verify the container rather than trusting an .mp4 URL or a server's MIME header.
   const box = head.subarray(4, 8).toString('ascii')
@@ -78,13 +98,9 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
   if (!path.isAbsolute(options.destination)) throw new Error('下载保存位置必须是绝对路径')
   let url = httpUrl(options.url)
   const referer = httpUrl(options.referer)
-  const timeout = new AbortController()
-  const signal = AbortSignal.any([options.signal, timeout.signal])
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const resetTimer = () => {
-    clearTimeout(timer)
-    timer = setTimeout(() => timeout.abort(new Error('下载连接或读取长时间无进展，已超时')), options.idleTimeoutMs ?? 30_000)
-  }
+  const watchdog = createDownloadTimeout(options.idleTimeoutMs ?? 30_000, '下载连接或读取长时间无进展，已超时')
+  const signal = AbortSignal.any([options.signal, watchdog.controller.signal])
+  const resetTimer = watchdog.tick
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   let response: Response | undefined
@@ -95,14 +111,15 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
   let totalBytes = 0
   let bytesPerSecond = 0
   let lastTick = 0
+  let lastSpeedAt=Date.now(),lastSpeedBytes=0
   let phase: TransferProgress['phase'] = 'downloading'
   const warnings: string[] = []
-  const started = Date.now()
   const emit = (force = false) => {
     const now = Date.now()
     if (!force && now - lastTick < 250) return
     lastTick = now
-    bytesPerSecond = Math.round(receivedBytes * 1000 / Math.max(1, now - started))
+    bytesPerSecond = Math.max(0,Math.round((receivedBytes-lastSpeedBytes)*1000/Math.max(1,now-lastSpeedAt)))
+    lastSpeedBytes=receivedBytes;lastSpeedAt=now
     try { options.onProgress?.({ phase, receivedBytes, totalBytes, bytesPerSecond }) } catch { /* UI observers cannot damage a transfer. */ }
   }
   try {
@@ -115,8 +132,8 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
     for (let redirects = 0; ; redirects++) {
       const pending = options.fetch(url, {
         headers: { 'User-Agent': DOWNLOAD_UA, Referer: referer, Accept: '*/*', 'Accept-Encoding': 'identity' },
-        signal, redirect: 'manual'
-      })
+        signal, redirect: 'manual', [DOWNLOAD_QUEUE]: watchdog.queue
+      } as DownloadRequestInit)
       // If cancellation wins before headers, dispose a late response instead of leaking its body.
       void pending.then(res => { if (signal.aborted) void res.body?.cancel().catch(() => {}) }, () => {})
       response = await abortable(pending, signal)
@@ -132,8 +149,10 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
       throw new Error('下载 HTTP ' + response.status + (response.status === 403 ? '：请完成内置 Cloudflare 验证后重新解析' : '：未收到完整视频响应'))
     }
     const mime = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
+    if(/mpegurl/.test(mime))throw new Error('收到 HLS 播放清单，需要分片下载')
+    if(/dash\+xml/.test(mime))throw new Error('收到 DASH 播放清单，需要分片下载')
     if (mime && !mime.startsWith('video/') && !['application/octet-stream', 'binary/octet-stream', 'application/mp4'].includes(mime)) {
-      throw new Error('服务器未返回视频内容（' + mime + '），请验证后重新解析；分片清单暂不支持')
+      throw new Error('服务器未返回视频内容（' + mime + '），请验证后重新解析')
     }
     const length = response.headers.get('content-length') ?? ''
     const encoding = response.headers.get('content-encoding')
@@ -184,7 +203,7 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
     published = true // Commit point: a late cancel cannot undo this completed file.
   } catch (err) { failure = err }
   finally {
-    clearTimeout(timer)
+    watchdog.close()
     if (reader) { void reader.cancel().catch(() => {}); reader.releaseLock() }
     else if (response?.body) void response.body.cancel().catch(() => {})
     if (handle) {

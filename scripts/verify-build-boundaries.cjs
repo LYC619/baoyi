@@ -1,0 +1,6 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const source = fs.readFileSync('dist-electron/main.js', 'utf8')
+assert.match(source, /require\(["']better-sqlite3["']\)/, 'SQLite must remain an external runtime dependency')
+assert.doesNotMatch(source, /node_modules\/better-sqlite3\/lib\/binding/, 'Bundling native loader code breaks relative prebuild paths')
+console.log('PASS native module build boundary')

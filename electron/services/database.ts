@@ -12,6 +12,7 @@ import { openUpgradedDatabase } from './library-snapshots.ts'
 import { FALLBACK_CATEGORY } from './taxonomy'
 import { buildLibraryBackup } from './library-backup.ts'
 import { VIDEO_JOBS_SQL } from '../kinds/video/download/jobs.ts'
+import { migrateDocumentSchema } from '../kinds/document/index.ts'
 import { migratePosterStorage, resolvePosterDirectory } from './poster-storage.ts'
 import { migrateArtworkIntoLibrary } from './artwork-migration.ts'
 import { pruneStrayPlaceholders } from '../kinds/video/catalogue.ts'
@@ -82,11 +83,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   video_download_quality: '',
   video_download_strict_quality: false,
   video_download_register: true,
+  video_download_concurrency: 2,
+  video_download_connections: 4,
   organize_root: '',
   save_backup_root: '',
   save_backup_keep: 10,
   // 空串 = 直连。只有走 Chromium 网络栈的请求受它管，见 AppSettings.proxy 的注释
   proxy: '',
+  video_online_proxy: 'system://',
   // Hanime 内置 Hosts 默认开：国内系统 DNS 对这几个域名常被污染，不开就基本连不上
   hanime_builtin_hosts: true,
   hanime_hosts_active_ip: '',
@@ -199,10 +203,10 @@ export function getDb(): Database.Database {
     try { const parsed = JSON.parse(row?.value ?? '[]'); if (Array.isArray(parsed)) scanRoots = parsed.filter((v): v is string => typeof v === 'string') } catch { /* 坏值当没有 */ }
     const migration = migrateArtworkIntoLibrary(db, {
       cacheDirs: [postersDir(), legacyProjectPostersDir()], fallbackDir: postersDir(),
-      recoveryRoot: app.getPath('userData'), scanRoots
+      recoveryRoot: app.getPath('userData'), scanRoots, orphanStrategy: 'count'
     })
     if (migration.moved || migration.relinked || migration.removed) console.log(`[抱一] 影视图片已归位到作品目录：搬入 ${migration.moved} 张，改指向 ${migration.relinked} 处，清理缓存 ${migration.removed} 张，留在缓存 ${migration.keptInCache} 处`)
-    if (migration.orphans) console.log(`[抱一] 缓存目录里还有 ${migration.orphans} 张无引用、视频库里也没有同款的图，未删除：${postersDir()}`)
+    if (migration.orphans) console.log(`[抱一] 保留 ${migration.orphans} 张无引用海报，启动时不扫描影视库查重：${postersDir()}`)
     for (const warning of migration.warnings) console.warn('[抱一] ' + warning)
   } catch (cause) { console.error('[抱一] 影视图片归位未完成；缓存副本与恢复记录已保留：', cause) }
   return db
@@ -441,6 +445,9 @@ export function updateSoftware(id: string, patch: Partial<SoftwareItem>): Softwa
   if (entries.length === 0) return getSoftware(id)
 
   const tx = d.transaction(() => {
+    if (patch.category !== undefined) {
+      d.prepare('UPDATE software_meta SET category_locked = 1 WHERE resource_id = ?').run(id)
+    }
     for (const [table, cols, key] of [
       ['resource', RESOURCE_COLUMNS, 'id'],
       ['software_meta', META_COLUMNS, 'resource_id']
@@ -512,7 +519,7 @@ export interface RegisterOutcome {
 /**
  * agent 调用 register_software 的落库出口。
  * 以默认启动端的路径作唯一键：同一路径重复注册视为更新，
- * 更新时只覆盖 AI 字段，用户自己填的备注 / 熟练度 / 使用统计一律保留。
+ * 更新其他 AI 字段时保留已有分类，用户备注 / 熟练度 / 使用统计同样保留。
  */
 export function registerSoftware(
   payload: RegisterPayload,
@@ -547,7 +554,11 @@ export function registerSoftware(
       d.prepare(
         `UPDATE resource SET
            name_zh = @name_zh, name_en = @name_en, summary = @summary, description = @description,
-           category = @category, tags = @tags, official_url = @official_url,
+           category = CASE WHEN
+             COALESCE((SELECT category_locked FROM software_meta WHERE resource_id = resource.id), 0) = 1
+             OR (TRIM(COALESCE(category, '')) != '' AND (category != '其他' OR ai_status = 'done'))
+             THEN category ELSE @category END,
+           tags = @tags, official_url = @official_url,
            source_dir = @source_dir, file_name = @file_name, file_size = @file_size,
            external_active_at = @external_active_at,
            ai_status = 'done', updated_at = @updated_at
@@ -556,7 +567,8 @@ export function registerSoftware(
       d.prepare(
         `UPDATE software_meta SET
            launchers = @launchers, is_portable = @is_portable, move_risk = @move_risk,
-           file_description = @file_description, company = @company, version = @version
+           file_description = @file_description, company = @company, version = @version,
+           category_locked = 1
          WHERE resource_id = @id`
       ).run({ ...aiFields, ...facts, id: existing.id })
     })
@@ -578,9 +590,9 @@ export function registerSoftware(
     ).run({ ...aiFields, ...facts, id, created_at: now, updated_at: now, exe_path: primary.path })
     d.prepare(
       `INSERT INTO software_meta
-         (resource_id, file_description, company, version, launchers, is_portable, move_risk)
+         (resource_id, file_description, company, version, launchers, is_portable, move_risk, category_locked)
        VALUES
-         (@id, @file_description, @company, @version, @launchers, @is_portable, @move_risk)`
+         (@id, @file_description, @company, @version, @launchers, @is_portable, @move_risk, 1)`
     ).run({ ...aiFields, ...facts, id })
   })
   tx()
@@ -593,19 +605,22 @@ export function registerSoftware(
  * 只删零使用 + 无备注 + 未归档的，用户写过一个字就留着。
  * 必须在 agent 跑完之后调用，olderThan 传本轮开始的时间戳。
  *
- * ponytail: 「碰过」是启发式判断 —— 用户如果只改过分类不会被算作碰过。
- * 要更严谨得给表加一个 user_touched 标记位，在 updateSoftware 里置位。
+ * 确定过分类的条目同样保留：目录识别选了不同启动端，也不能删除原分类记录。
  */
 export function pruneStaleBySourceDir(dir: string, olderThan: number): number {
-  // 条件里有 software_meta 才有的列吗？没有 —— 全在总表上。但 DELETE 仍然要打在
-  // resource 上（software 是视图），meta 行靠 CASCADE 跟着走。
+  // DELETE 打在 resource 上（software 是只读视图）；子查询读取分类保护标记，
+  // 未分类占位的 meta 行靠 CASCADE 跟着清理。
   const info = getDb()
     .prepare(
       `DELETE FROM resource
        WHERE kind = 'software' AND source_dir = ? AND updated_at < ?
          AND use_count = 0 AND last_used_at = 0 AND is_archived = 0
          AND why_choose = '' AND use_cases = '' AND notes = '' AND alternatives IN ('[]', '')
-         AND mastery_level = 'new'`
+         AND mastery_level = 'new'
+         AND (TRIM(COALESCE(category, '')) = '' OR category = '其他')
+         AND COALESCE(ai_status, 'pending') != 'done'
+         AND NOT EXISTS (SELECT 1 FROM software_meta m
+           WHERE m.resource_id = resource.id AND m.category_locked = 1)`
     )
     .run(dir, olderThan)
   return info.changes
@@ -694,6 +709,12 @@ export function stagePending(
   const knownCategories = new Set(listCategories().map((c) => c.name))
   const pool = new Set(tagPool())
   const newTags = payload.tags.filter((t) => !pool.has(t))
+  const protectedItem=d.prepare(`SELECT r.category FROM resource r LEFT JOIN software_meta m ON m.resource_id = r.id
+    WHERE r.kind = 'software' AND r.path = ? AND
+      (COALESCE(m.category_locked, 0) = 1 OR
+       (TRIM(COALESCE(r.category, '')) != '' AND (r.category != '其他' OR r.ai_status = 'done')))`
+  ).get(primary.path) as {category:string}|undefined
+  const category=protectedItem?.category ?? (payload.category || FALLBACK_CATEGORY)
 
   const existing = d.prepare('SELECT id FROM pending_software WHERE exe_path = ?').get(primary.path) as
     | Row
@@ -716,14 +737,14 @@ export function stagePending(
     name_en: payload.name_en,
     summary: payload.summary,
     description: payload.description,
-    category: payload.category || FALLBACK_CATEGORY,
+    category,
     tags: JSON.stringify(payload.tags),
     official_url: payload.official_url,
     launchers: JSON.stringify(launchers),
     source_dir: payload.source_dir,
     is_portable: payload.is_portable === null ? null : payload.is_portable ? 1 : 0,
     move_risk: payload.move_risk,
-    new_category: knownCategories.has(payload.category) ? 0 : 1,
+    new_category: knownCategories.has(category) ? 0 : 1,
     new_tags: JSON.stringify(newTags)
   }
 
@@ -1442,7 +1463,8 @@ export function counts(unusedDays: number): SidebarCounts {
   const categories = d
     .prepare(
       `SELECT category AS name, COUNT(*) AS count FROM software
-       WHERE is_archived = 0 GROUP BY category ORDER BY count DESC`
+       WHERE is_archived = 0 GROUP BY category
+       ORDER BY COALESCE((SELECT c.sort_order FROM categories c WHERE c.kind = 'software' AND c.name = software.category), 2147483647), name`
     )
     .all() as Array<{ name: string; count: number }>
 
@@ -1795,6 +1817,10 @@ export function getSettings(): AppSettings {
 }
 
 export function patchSettings(patch: Partial<AppSettings>): AppSettings {
+  for(const [key,max] of [['video_download_concurrency',4],['video_download_connections',8]] as const){
+    const value=patch[key]
+    if(value!==undefined && (!Number.isInteger(value) || value<1 || value>max))throw new Error('视频下载并发设置必须是 1–'+max+' 的整数')
+  }
   const d = getDb()
   const current = getSettings()
   const next: AppSettings = {
@@ -2059,6 +2085,12 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
     d.prepare('DELETE FROM image_download_jobs').run()
     d.prepare('DELETE FROM task_records').run()
     if (mode === 'all') {
+      // Personal records are independent of library indexes. Only factory reset clears them.
+      d.prepare('DELETE FROM personal_records').run()
+      d.prepare('DELETE FROM skill_proposal').run()
+      d.prepare('DELETE FROM workspace_sessions').run()
+      d.prepare('DELETE FROM document_categories').run()
+      d.prepare('DELETE FROM resource_links').run()
       // 识别日志只在恢复出厂时清。反复调 prompt 时要的正是「改之前那次是怎么判断的」，
       // 清空识别数据后还能拿旧日志对照，这是它最主要的用途
       d.prepare('DELETE FROM identify_logs').run()
@@ -2073,7 +2105,7 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
 
   // 恢复出厂把内置分类、内置标签和版本号一并装回去。少了最后一项，下次启动
   // 会以为还没迁移过，白跑一遍重建。分类同样来自品类注册表，不是写死的
-  if (mode === 'all') { seedDefaults(d, KINDS); for (const kind of KINDS.filter(k => k.kind === 'image')) kind.schema.migrate?.(d, 0) }
+  if (mode === 'all') { seedDefaults(d, KINDS);migrateDocumentSchema(d,0); for (const kind of KINDS.filter(k => k.kind === 'image')) kind.schema.migrate?.(d, 0) }
 
   const icons = clearIcons()
   const covers = clearCovers()

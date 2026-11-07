@@ -35,6 +35,8 @@ export const IDENTIFY_SYSTEM = `你是「抱一」的软件识别 agent。抱一
 {{search_last}}
 
 ## 什么算一个独立软件
+- .apk、.apks、.xapk、.aab、.ipa、.hap 是手机 APP 安装包，也要收录，每个文件单独注册，category 统一填 APP。不要按电脑软件的用途分类，也不要当作 Windows 安装器过滤。
+- 手机安装包只根据文件名、本地说明及可核实资料识别；工具没有解析包内清单、版本、签名或图标，不要编造。launchers 只填该包文件本身，is_portable 填 false，move_risk 填 unknown。
 - 用户会主动点开、独立使用的程序，算。
 - 一个软件包里的多个 exe 只注册一个条目。例如 x64dbg 目录下 x64dbg.exe 是主程序，
   同目录的 loaddll.exe 只是它的加载器 —— 不能单独成条目，把它作为 kind="extra" 的启动端挂在同一条目下。
@@ -220,18 +222,18 @@ export function limitTags(raw: string[], pool: Set<string>): string[] {
 /** 一个待识别目录的任务描述 */
 export function unitPrompt(unit: ScanUnit, existing: SoftwareItem[]): string {
   const lines = [`请识别目录：${unit.dir}`, '']
-  lines.push(`该目录属于扫描根 ${unit.root}，含子目录在内共有 ${unit.exe_count} 个 exe。`)
+  lines.push(`该目录属于扫描根 ${unit.root}，共有 ${unit.exe_count} 个待查看的程序或手机安装包。`)
 
   if (unit.loose_only) {
     lines.push(
-      '注意：这是扫描根本身，只处理**直接放在这一层**的 exe。子目录由其他任务负责，不要进入子目录。'
+      '注意：这是扫描根本身，只处理**直接放在这一层**的手机 APP 安装包。散落的 EXE 和压缩包不处理；子目录由其他任务负责，不要进入子目录。'
     )
   }
 
   if (existing.length > 0) {
     lines.push('', '该目录下之前已经注册过这些条目（重复识别到同一个软件时，用相同的默认启动端路径即可覆盖，不要另起一条）：')
     for (const item of existing.slice(0, 20)) {
-      lines.push(`  · ${item.name_zh || item.file_name} → ${item.exe_path}`)
+      lines.push(`  · ${item.name_zh || item.file_name} → ${item.exe_path}（当前分类：${item.category}，已有确定分类入库时保留）`)
     }
   }
 
@@ -251,6 +253,7 @@ export function itemPrompt(item: SoftwareItem): string {
     `  版本号：${item.version || '（无）'}`,
     `  文件大小：${mb} MB`,
     `  所在目录：${path.dirname(item.exe_path)}`,
+    `  当前分类：${item.category || '（未分类）'}。已有确定分类会在入库时保留，请补充其他识别信息。`,
     '',
     `要求：这是用户明确指定的程序，注册时**必须**把 ${item.exe_path} 作为 is_default 为 true 的启动端。`,
     '如果同目录下有它的 32 位版本或附属程序，可以一并作为其他启动端列进去。',

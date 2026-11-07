@@ -12,6 +12,7 @@
  */
 
 import path from 'node:path'
+import { isMobilePackage } from '../../../../src/utils/software-package'
 import fsp from 'node:fs/promises'
 import type {
   OrganizeCommand,
@@ -87,11 +88,13 @@ export async function previewOrganize(ids?: string[]): Promise<OrganizePreview> 
     if (!ids?.length && alreadyOrganized(item, root)) continue
 
     const from = rootDirOf(item)
-    const action = defaultAction(item.is_portable, item.move_risk)
+    const mobile = isMobilePackage(item.exe_path)
+    const action = mobile ? 'skip' : defaultAction(item.is_portable, item.move_risk)
     const folder = defaultFolder(item)
     const to = targetDir(root, item.category, folder)
 
     const warnings: string[] = []
+    if (mobile) warnings.push('手机 APP 安装包保留原文件，本次不参与电脑软件的整目录整理')
     if (!(await exists(from))) warnings.push(`源目录已经不在了：${from}`)
     if (nestedInside(from, to)) warnings.push('目标路径落在源目录内部，无法移动')
 
@@ -178,7 +181,9 @@ export async function runOrganize(
       note: ''
     }
 
-    if (cmd.action === 'move') {
+    if (isMobilePackage(item.exe_path)) {
+      step.note = '手机 APP 安装包不参与电脑软件的整目录整理'
+    } else if (cmd.action === 'move') {
       // 已经是链接的条目不能「移动」：那会把链接搬走，真实文件留在原地，
       // 而链接的相对含义已经变了。要先转实体再谈移动
       if (await isLink(from)) {
@@ -438,6 +443,7 @@ export async function previewRelocateOrganized(
   const fail = (message: string) => ({ ...preview, message })
   if (!root) return fail('还没有设置整理目标目录')
   if (!item) return fail('找不到这个条目')
+  if (isMobilePackage(item.exe_path)) return fail('手机 APP 安装包不参与电脑软件的整目录整理')
   const invalid = await checkLibraryPath(root, from) || await checkLibraryPath(root, to)
   if (invalid) return fail(invalid)
   if (!samePath(from, to) && await entryExists(to)) return fail(`目标已存在，没有动：${to}`)

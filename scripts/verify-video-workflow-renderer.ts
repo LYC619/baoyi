@@ -21,6 +21,7 @@ import TaskCenter from '@/components/tasks/TaskCenter.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useTaskCenter } from '@/composables/useTaskCenter'
 import { useVideoStore } from '@/stores/video'
+import { trackRoute } from '@/composables/useModules'
 import '@/styles/global.scss'
 
 const clone = value => JSON.parse(JSON.stringify(value))
@@ -76,7 +77,7 @@ const draft = { id: 'draft', resourceId: '', videoCode: '200', title: '新链接
   { videoCode: '203', title: '队列内内容', order: 4, state: 'queued', qualities: [] }
 ] }
 window.baoyi = {
-  settings: { getAll: async () => clone(prefs()), patch: async patch => { Object.assign(preferences, patch); return clone(prefs()) } },
+  settings: { getAll: async () => clone(prefs()), patch: async patch => { Object.assign(preferences, patch); return clone({ ...prefs(), ...patch }) } },
   tasks: { list: async () => [], save: async () => true, clear: async () => true },
   app: { copyText: async value => calls.push(['copy', value]) },
   video: {
@@ -125,9 +126,10 @@ settingsStore.settings = { ...settingsStore.settings, ...preferences, theme: 'li
 settingsStore.loaded = true
 const Settings = { setup: () => () => h('main', { style: 'padding:20px' }, [h('h1', '设置夹具'), h('button', { onClick: () => router.back() }, '返回下载草稿')]) }
 const router = createRouter({ history: createWebHashHistory(), routes: [
-  { path: '/', redirect: '/video' }, { path: '/video', name: 'video-home', component: Home },
-  { path: '/video/:id', name: 'video-detail', component: Detail, props: true }, { path: '/settings', name: 'settings', component: Settings }
+  { path: '/', redirect: '/video' }, { path: '/video', name: 'video-home', component: Home, meta: { module: 'video' } },
+  { path: '/video/:id', name: 'video-detail', component: Detail, props: true, meta: { module: 'video' } }, { path: '/settings', name: 'settings', component: Settings }
 ] })
+router.afterEach(to => trackRoute(to))
 const app = createApp({ setup: () => () => h('div', { style: 'height:100vh;display:flex;flex-direction:column' }, [
   h('header', { style: 'height:38px;min-height:38px;display:flex;justify-content:flex-end' }, [h(TaskCenter)]),
   h(RouterView, null, { default: ({ Component }) => h(Transition, { name: 'page', mode: 'out-in' }, () => Component ? h(Component, { class: 'app__view' }) : null) })
@@ -158,7 +160,8 @@ const server = await createServer({
       })
     }
   }],
-  server: { host: '127.0.0.1', port: 0 }, logLevel: 'error'
+  // Fixtures never edit source while running. Avoid scanning large local reference/media directories.
+  server: { host: '127.0.0.1', port: 0, watch: null }, logLevel: 'error'
 })
 await server.listen()
 const address = server.httpServer!.address()
@@ -177,6 +180,7 @@ async function runWorkflowRenderer() {
 const { page, errors, temporary, url, close } = await createWorkflowRendererFixture()
 let passed = 0, failed = 0
 async function test(name: string, action: () => Promise<void>) {
+  if(process.argv.includes('--downloads-only') && !/首页链接|已有作品可补|确认下载|详情统一下载|持久队列|renderer 重新|隐藏设置|解析来源期间/.test(name))return
   try { await action(); passed++; console.log('PASS ' + name) }
   catch (cause) { failed++; console.error('FAIL ' + name + ': ' + (cause instanceof Error ? cause.message.split('\n').slice(0, 4).join(' ') : cause)) }
   finally {
@@ -194,10 +198,14 @@ const route = async (name: string, params = {}) => {
       && !document.querySelector('.detail__state')?.textContent?.includes('载入中')
   })
 }
+const scope=async(privateScope:boolean)=>{
+  await page.evaluate(async(privateScope:boolean)=>{const store=(window as any).__fixture.videoStore;store.select(privateScope?{kind:'type',value:'hentai'}:{kind:'group',value:'all'});await store.reload()},privateScope)
+}
 try {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
   await page.waitForFunction(() => !!(window as any).__fixture, null, { timeout: 20000 })
   await test('首页链接入口、默认缺项、取消不创建作品、设置往返保留草稿', async () => {
+    await scope(true)
     const add = page.getByRole('button', { name: /从 Hanime 添加/ })
     assert.equal(await add.count(), 1, '首页必须提供统一链接入口')
     assert.equal(await page.getByRole('button', { name: '打开 Hanime', exact: true }).count(), 0, '「打开 Hanime」已并进「从 Hanime 添加」')
@@ -217,6 +225,7 @@ try {
     await dialog.getByLabel('仅保存文件').check()
     await dialog.getByRole('button', { name: /关闭下载面板/ }).click()
     assert.equal(await page.evaluate(() => (window as any).__fixture.calls.filter((c: any[]) => c[0] === 'enqueue').length), 0)
+    await scope(false)
     assert.equal(await page.locator('.wall .card').count(), 2)
   })
   await test('作品搜索显示命中的内容，已知文件计数和待处理筛选', async () => {
@@ -243,6 +252,7 @@ try {
   })
   await test('确认下载提交画质与仅保存选项，队列内可取消，键盘可关闭面板', async () => {
     await route('video-home')
+    await scope(true)
     const trigger = page.getByRole('button', { name: '从 Hanime 添加', exact: true })
     await trigger.focus()
     await page.keyboard.press('Enter')
@@ -324,7 +334,8 @@ try {
   })
   await test('扫描逐项结果可打开作品与修正，不把汇总当作每项成功', async () => {
     await route('video-home')
-    await page.getByRole('button', { name: /扫描本地|加影视/ }).click()
+    await scope(false)
+    await page.getByRole('button', { name: /导入目录|扫描本地|加影视/ }).click()
     await page.waitForFunction(() => document.querySelector('.scan-results')?.textContent?.includes('清单损坏'))
     assert.match(await page.locator('.scan-results').innerText(), /待确认/)
     const correction = page.locator('.scan-results li').filter({ hasText: '归属需要确认' })
@@ -332,7 +343,9 @@ try {
     await page.locator('.video-items').waitFor()
   })
   await test('960×640 与 1280×900：首屏内容行、长标题、主题和键盘焦点', async () => {
-    await page.getByRole('button', { name: '列表视图', exact: true }).click()
+    await route('video-home')
+    await page.getByRole('button', { name: '视图', exact: true }).click()
+    await page.getByRole('button', { name: '紧凑列表', exact: true }).click()
     await route('video-detail', { id: 'work-1' })
     for (const [width, height, minimum] of [[960, 640, 3], [1280, 900, 5]]) {
       await page.setViewportSize({ width, height })
@@ -381,6 +394,7 @@ try {
   })
   await test('解析来源期间仍可用 Escape 取消，迟到草稿不重新打开面板', async () => {
     await route('video-home')
+    await scope(true)
     await page.getByRole('button', { name: '从 Hanime 添加', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '从 Hanime 添加作品' })
     await dialog.getByLabel('来源页面链接').fill('https://hanime1.me/watch?v=200')

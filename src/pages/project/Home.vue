@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import {computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { FolderKanban, Plus, Search, Pin, ArrowUpRight, FolderOpen, Settings2, History, Code2, BookOpen, Wrench, RefreshCw } from 'lucide-vue-next'
+import { FolderKanban, Plus, Search, Pin, ArrowUpRight, FolderOpen, History, Code2, BookOpen, Wrench, RefreshCw, LayoutGrid, List } from 'lucide-vue-next'
 import { useProjectStore } from '@/stores/project'
+import {useProjectLaunch} from '@/composables/useProjectLaunch'
+const launcher=useProjectLaunch()
 import { useToast } from '@/composables/useToast'
 import { rememberScroll, recallScroll } from '@/composables/useModules'
 import { useLibrarySelection } from '@/composables/useLibrarySelection'
@@ -22,18 +24,23 @@ watch(selecting, async active => { if (!active) { await nextTick(); bulkTrigger.
 const sourceNames: Record<string, string> = { self: '自己建立', 'third-party': '第三方', mixed: '混合来源', unknown: '来源未标记' }
 const stateNames: Record<string, string> = { active: '使用中', maintaining: '维护中', paused: '已暂停', archived: '已归档' }
 const heading = computed(() => store.pinned ? '置顶项目' : store.group || store.category || '全部项目')
-const filtered = computed(() => !!(store.search.trim() || store.category || store.group || store.source || store.state || store.pinned))
+const filtered = computed(() => !!(store.search.trim() || store.category || store.group || store.source || store.state || store.pinned || store.availability))
+const opening=ref(new Set<string>())
 const icon = (category: string) => category === '软件项目' ? Code2 : category === '调研写作' ? BookOpen : category === '资料处理' ? Wrench : FolderKanban
-function clearFilters() { store.search = ''; store.category = ''; store.group = ''; store.source = ''; store.state = ''; store.pinned = false }
+function clearFilters() { store.search = ''; store.category = ''; store.group = ''; store.source = ''; store.state = ''; store.pinned = false; store.availability = '' }
 function detail(item: ProjectItem) { if (selecting.value) { if (!store.loading && !store.error) selection.toggle(item.id) } else void router.push('/project/' + item.id) }
 async function bulkCompleted(failedIds: string[]) { selectedIds.value = new Set(failedIds); await store.refresh() }
-async function open(item: ProjectItem) { try { await window.baoyi.project.open(item.id) } catch (e) { toastError((e as Error).message) } }
+async function open(item: ProjectItem,entryId?:string) { if(opening.value.has(item.id))return;opening.value.add(item.id);try { await window.baoyi.project.open(item.id,entryId) } catch (e) { toastError((e as Error).message) } finally{opening.value.delete(item.id)} }
+function openChoice(item:ProjectItem,event:Event){const input=event.target as HTMLSelectElement;if(input.value)void open(item,input.value);input.value=''}
 async function pin(item: ProjectItem) { try { await window.baoyi.project.update(item.id, { pinned: !item.pinned }); await store.refresh() } catch (e) { toastError((e as Error).message) } }
 async function showHistory() { try { records.value = await window.baoyi.project.moveRecords(); history.value = true } catch (e) { toastError((e as Error).message) } }
 async function recover(id: string) { busy.value = true; try { success(await window.baoyi.project.recoverMove(id)); records.value = await window.baoyi.project.moveRecords(); await store.refresh() } catch (e) { toastError((e as Error).message) } finally { busy.value = false } }
 function key(event: KeyboardEvent) { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && !importer.value && !history.value) { event.preventDefault(); searchInput.value?.focus() } }
 onMounted(async () => { document.addEventListener('keydown', key); await store.refresh(); await nextTick(); if (scroll.value) scroll.value.scrollTop = recallScroll('project') })
 onBeforeUnmount(() => { document.removeEventListener('keydown', key); rememberScroll('project', scroll.value?.scrollTop || 0) })
+const gitClock=ref(Date.now()),gitTimer=setInterval(()=>gitClock.value=Date.now(),1000)
+onBeforeUnmount(()=>clearInterval(gitTimer))
+async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refresh:true});await store.refresh()}catch(e){toastError((e as Error).message)}}
 </script>
 
 <template>
@@ -47,18 +54,21 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', key); rememberSc
       <h3>项目类型</h3>
       <nav><button v-for="c in store.categories" :key="c" :class="{ active: store.category === c }" @click="store.category = store.category === c ? '' : c; store.pinned = false; store.group = ''"><component :is="icon(c)" :size="16" />{{ c }}<span>{{ store.items.filter(i => i.category === c).length }}</span></button></nav>
       <template v-if="store.groups.length"><h3>我的分组</h3><nav><button v-for="g in store.groups" :key="g" :class="{ active: store.group === g }" @click="store.group = store.group === g ? '' : g; store.category = ''; store.pinned = false"><span class="pj-dot" />{{ g }}</button></nav></template>
-      <div class="pj-sidebar-bottom"><button @click="showHistory"><History :size="17" />移动记录</button><button @click="router.push('/settings')"><Settings2 :size="17" />设置</button></div>
+      <div class="pj-sidebar-bottom"><button @click="showHistory"><History :size="17" />移动记录</button></div>
     </aside>
     <main ref="scroll" class="pj-content">
       <header class="pj-page-header"><div><h1>{{ heading }}<small>{{ store.shown.length }} 个项目</small></h1></div><button class="pj-button pj-primary" :disabled="bulkBusy" @click="importer = true"><Plus :size="18" />添加项目</button></header>
       <div class="pj-toolbar">
-        <label class="pj-search"><Search :size="18" /><input ref="searchInput" v-model="store.search" placeholder="搜索项目、标签或位置…" aria-label="搜索项目" /><kbd>Ctrl K</kbd></label>
+        <label class="pj-search"><Search :size="18" /><input ref="searchInput" v-model="store.search" placeholder="搜索名称、分组、入口或路径，多词用空格…" aria-label="搜索项目" /><kbd>Ctrl K</kbd></label>
         <select v-model="store.source" aria-label="筛选项目来源"><option value="">全部来源</option><option v-for="(label, value) in sourceNames" :key="value" :value="value">{{ label }}</option></select>
         <select v-model="store.state" aria-label="筛选项目状态"><option value="">全部状态</option><option v-for="(label, value) in stateNames" :key="value" :value="value">{{ label }}</option></select>
+        <select v-model="store.availability" aria-label="筛选项目位置"><option value="">全部位置</option><option value="available">位置可用</option><option value="missing">位置失效</option></select>
         <select v-model="store.sort" aria-label="项目排序"><option value="recent">最近打开</option><option value="updated">最近更新</option><option value="name">按名称</option></select>
         <button class="pj-icon" aria-label="刷新项目" :disabled="store.loading || bulkBusy" @click="store.refresh"><RefreshCw :size="17" /></button>
+        <div class="pj-view-switch" role="group" aria-label="项目显示方式"><button class="pj-icon" :aria-pressed="store.layout==='cards'" aria-label="卡片视图" @click="store.layout='cards'"><LayoutGrid :size="16"/></button><button class="pj-icon" :aria-pressed="store.layout==='list'" aria-label="列表视图" @click="store.layout='list'"><List :size="16"/></button></div>
         <button ref="bulkTrigger" v-if="!selecting" class="pj-button" :disabled="!store.shown.length || store.loading" @click="selection.toggleMode">批量管理</button>
       </div>
+      <div v-if="store.items.length" class="pj-filter-summary"><span>显示 {{store.shown.length}} / {{store.items.length}} 个项目<span v-if="store.availability"> · {{store.availability==='missing'?'位置失效':'位置可用'}}</span></span><button v-if="filtered" @click="clearFilters">清空筛选</button></div>
       <p v-if="store.error" class="pj-error" role="alert">{{ store.error }} <button class="pj-button" @click="store.refresh">重试</button></p>
 
       <LibraryBulkPanel v-if="selecting" kind="project" :pending="store.loading || !!store.error" @refresh="store.refresh" :items="store.shown" :ids="[...selectedIds]" :categories="store.categories" @all="selection.selectAll" @clear="selection.clear" @close="selection.toggleMode" @busy="bulkBusy = $event" @completed="bulkCompleted" />
@@ -69,7 +79,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', key); rememberSc
         <button v-if="filtered" class="pj-button" @click="clearFilters">清空筛选</button>
         <button v-else class="pj-button pj-primary" @click="importer = true">添加项目</button>
       </div>
-      <div v-else class="pj-grid">
+      <div v-else class="pj-grid" :class="{'pj-list':store.layout==='list'}">
         <article v-for="item in store.shown" :key="item.id" class="pj-card" :class="{ 'pj-card-selected': selectedIds.has(item.id) }" :data-project-id="item.id">
           <div class="pj-card-top">
             <input v-if="selecting" type="checkbox" :checked="selectedIds.has(item.id)" :disabled="bulkBusy || store.loading || !!store.error" :aria-label="`选择 ${item.name}`" @change="selection.toggle(item.id)" />
@@ -79,12 +89,16 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', key); rememberSc
           </div>
           <button class="pj-card-title" :disabled="bulkBusy" @click="detail(item)">{{ item.name }}</button>
           <p class="pj-card-summary">{{ item.summary || '添加一句简介，下次更快找到它。' }}</p>
+          <button v-if="!selecting" class="pj-git-status" :title="item.git?.message||'只读取 Git 短状态'" @click="refreshGit(item.id)">{{item.git?.available?`${item.git.branch} · ${item.git.changed} 处改动`:'读取 Git 状态'}}<small v-if="item.git"> · {{new Date(item.git.readAt).toLocaleTimeString()}} · {{gitClock-item.git.readAt>30000?'已过期，点击刷新':'点击刷新'}}</small></button>
+          <div v-if="item.contextPreview?.current||item.contextPreview?.next" class="pj-context-preview"><p v-if="item.contextPreview.current"><span>当前</span>{{item.contextPreview.current}}</p><p v-if="item.contextPreview.next"><span>下一步</span>{{item.contextPreview.next}}</p></div>
           <div class="pj-tags"><span>{{ item.category }}</span><span v-if="item.group">{{ item.group }}</span><span v-for="tag in item.tags.slice(0, 2)" :key="tag">#{{ tag }}</span></div>
           <div class="pj-card-path" :title="item.path"><FolderOpen :size="13" /><span>{{ item.path }}</span></div>
           <footer>
+            <button v-if="!selecting" class="pj-button" :disabled="bulkBusy" @click="router.push({path:'/project/'+item.id,query:{tab:'notes',handoff:'1'}})">下一步 Prompt</button>
+            <button v-if="!selecting" class="pj-button" :disabled="bulkBusy||launcher.busy.value" @click="launcher.open(item)">启动</button><button v-if="!selecting&&launcher.last(item.id)" class="pj-button" :disabled="bulkBusy||launcher.busy.value||!item.available" :title="launcher.last(item.id)?.profileName" @click="launcher.rerun(item)">重跑上次</button>
             <span :class="{ 'pj-missing': !item.available }">{{ item.available ? stateNames[item.state] : '位置失效' }}</span>
             <button class="pj-button" :disabled="bulkBusy" @click="detail(item)">{{ selecting ? selectedIds.has(item.id) ? '取消选择' : '选择' : '详情' }}</button>
-            <button v-if="!selecting" class="pj-icon" aria-label="打开项目默认入口" @click="open(item)"><ArrowUpRight :size="19" /></button>
+            <select v-if="!selecting&&item.entries.length>1" class="pj-entry-choice" :aria-label="'打开项目入口 '+item.name" :disabled="opening.has(item.id)||bulkBusy" value="" @change="openChoice(item,$event)"><option value="" disabled>打开其他入口</option><option v-for="entry in item.entries" :key="entry.id" :value="entry.id">{{entry.label}}</option></select><button v-if="!selecting" class="pj-icon" aria-label="打开项目默认入口" :title="item.entries.find(e=>e.id===item.defaultEntryId)?.label||'请先设置默认入口'" :disabled="opening.has(item.id)||!item.defaultEntryId" @click="open(item)"><ArrowUpRight :size="19" /></button>
           </footer>
         </article>
       </div>
@@ -102,5 +116,8 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', key); rememberSc
 </template>
 
 <style scoped>
+.pj-git-status{display:block;text-align:left;margin:10px 0;color:var(--text-sub);font-size:12px}.pj-git-status small{font-size:10px;color:var(--text-faint)}
+
+.pj-context-preview{font-size:12px;line-height:1.7;color:var(--text-sub);margin:10px 0}.pj-context-preview p{margin:4px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.pj-context-preview span{color:var(--text-faint);margin-right:8px}
 .pj-content>.library-bulk{margin:0 0 18px}.pj-card-selected{outline:2px solid var(--accent);outline-offset:-2px}.pj-card-top>input{width:18px;height:18px;accent-color:var(--accent)}
 </style>

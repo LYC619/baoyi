@@ -117,5 +117,28 @@ try {
     assert.throws(() => parseCatalogue({ ...saved, entries: [{ ...saved.entries[0], mediaUrl: base + '/watch.html' }] }), /视频文件/)
     assert.equal((db.prepare("SELECT COUNT(*) AS n FROM resource WHERE kind='video'").get() as { n: number }).n, 0)
   })
+  await test('connection closure retries once; persistent failure is actionable and retains catalogue', async () => {
+    let calls = 0
+    const flaky: typeof fetch = async (_input, init) => {
+      calls++; assert.equal(init?.credentials, 'include')
+      if (calls === 1) throw new Error('net::ERR_CONNECTION_CLOSED')
+      return new Response('<html>ok</html>', { headers: { 'Content-Type': 'text/html' } })
+    }
+    assert.equal((await readOnlinePage(base, flaky)).html, '<html>ok</html>'); assert.equal(calls, 2)
+    const snapshot = JSON.stringify(catalogue.get(id)); calls = 0
+    const failed = createOnlineSource(catalogue, async () => { calls++; throw new Error('net::ERR_CONNECTION_CLOSED') })
+    await assert.rejects(() => failed.detail({ sourceId: id, entryId: first }), /网站连接失败.*ERR_CONNECTION_CLOSED.*设置/)
+    assert.equal(calls, 2); assert.equal(JSON.stringify(catalogue.get(id)), snapshot)
+  })
+  await test('HTTP denial and partial-body errors are not blindly retried', async () => {
+    let calls = 0
+    await assert.rejects(() => readOnlinePage(base, async () => { calls++; return new Response('', { status: 403 }) }), /HTTP 403/)
+    assert.equal(calls, 1); calls = 0
+    await assert.rejects(() => readOnlinePage(base, async () => {
+      calls++
+      return new Response(new ReadableStream({ start(controller) { controller.error(new Error('net::ERR_CONNECTION_CLOSED')) } }))
+    }), /ERR_CONNECTION_CLOSED/)
+    assert.equal(calls, 1)
+  })
   console.log(`Online source verification: ${passed} passed`)
 } finally { db.close() }

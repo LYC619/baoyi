@@ -13,6 +13,8 @@ import WebSourceEntry from '@/components/video/WebSourceEntry.vue'
 const router = useRouter(), settings = useSettingsStore(), api = window.baoyi.video.discovery
 const sources = ref<DiscoverySourceSummary[]>([]), sourceId = ref(''), cards = ref<DiscoveryCard[]>([])
 const query = ref(''), tag = ref(''), board = ref(''), status = ref('all'), sort = ref('source'), limit = ref(60)
+const detailError = ref('')
+const failureMessage = (cause: unknown) => String(cause instanceof Error ? cause.message : cause).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
 const error = ref(''), busy = ref(false), importing = ref(false), marking = ref(false), removing = ref(false)
 const selected = ref<DiscoveryCard | null>(null), download = pendingDiscoveryDownload
 const playing = ref<DiscoveryCard | null>(null), onlineBusy = ref(false), detailBusy = ref(false)
@@ -39,12 +41,12 @@ async function loadSources(prefer = sourceId.value) {
   sourceId.value = sources.value.some(item => item.id === prefer) ? prefer : ''
 }
 async function loadEntries() {
-  const version = ++round; selected.value = null; playing.value = null; detailBusy.value = false; removing.value = false; cards.value = []; error.value = ''
+  const version = ++round; selected.value = null; playing.value = null; detailBusy.value = false; detailError.value = ''; detailRound++; removing.value = false; cards.value = []; error.value = ''
   query.value = ''; tag.value = ''; board.value = ''; status.value = 'all'; limit.value = 60
   if (!source.value) { busy.value = false; return }
   busy.value = true
   try { const values = await api.entries(sourceId.value); if (round === version) cards.value = values }
-  catch (cause) { if (round === version) error.value = String(cause instanceof Error ? cause.message : cause) }
+  catch (cause) { if (round === version) error.value = failureMessage(cause) }
   finally { if (round === version) busy.value = false }
 }
 watch(sourceId, loadEntries)
@@ -54,19 +56,19 @@ watch([query, tag, board, status, sort], () => { limit.value = 60 })
 async function importSource() {
   importing.value = true; error.value = ''
   try { const result = await api.importSource(); if (result) { await loadSources(result.id); await loadEntries() } }
-  catch (cause) { error.value = String(cause instanceof Error ? cause.message : cause) }
+  catch (cause) { error.value = failureMessage(cause) }
   finally { importing.value = false }
 }
 async function action(run: () => Promise<unknown>) {
   error.value = ''
-  try { await run() } catch (cause) { error.value = String(cause instanceof Error ? cause.message : cause) }
+  try { await run() } catch (cause) { error.value = failureMessage(cause) }
 }
 function mark(card: DiscoveryCard, patch: Partial<DiscoveryMark>) {
   const id = sourceId.value
   marking.value = true
   markQueue = markQueue.then(async () => {
     try { const result = await api.mark({ sourceId: id, entryId: card.entry.id }, patch); card.mark = result }
-    catch (cause) { error.value = String(cause instanceof Error ? cause.message : cause) }
+    catch (cause) { error.value = failureMessage(cause) }
   }).finally(() => { marking.value = false })
 }
 async function connected(result: DiscoverySourceSummary) { await action(async () => { await loadSources(result.id) }) }
@@ -78,20 +80,20 @@ async function updateOnline(mode: 'refresh' | 'next') {
     const summaries = await api.sources(), values = await api.entries(id)
     sources.value = summaries
     if (sourceId.value === id) cards.value = values
-  } catch (cause) { if (sourceId.value === id) error.value = String(cause instanceof Error ? cause.message : cause) }
+  } catch (cause) { if (sourceId.value === id) error.value = failureMessage(cause) }
   finally { onlineBusy.value = false }
 }
 async function enrich(card: DiscoveryCard) {
   if (!source.value?.online) return
   const id = sourceId.value, version = round, request = ++detailRound
-  detailBusy.value = true; error.value = ''
+  detailBusy.value = true; detailError.value = ''
   try {
     const updated = await api.online.detail({ sourceId: id, entryId: card.entry.id })
     if (version === round) { card.entry = updated.entry; card.resourceId = updated.resourceId }
-  } catch (cause) { if (version === round && request === detailRound) error.value = String(cause instanceof Error ? cause.message : cause) }
+  } catch (cause) { if (version === round && request === detailRound) detailError.value = failureMessage(cause) }
   finally { if (version === round && request === detailRound) detailBusy.value = false }
 }
-function showDetail(card: DiscoveryCard) { playing.value = null; selected.value = card; void enrich(card) }
+function showDetail(card: DiscoveryCard) { error.value = ''; playing.value = null; selected.value = card; void enrich(card) }
 async function save(card: DiscoveryCard) {
   const id = sourceId.value
   if (source.value?.online && !card.entry.downloads.length) {
@@ -170,7 +172,7 @@ onBeforeUnmount(() => { round++; libraryUnsubscribe?.() })
       <div v-else-if="sourceId === 'legacy-hanime'" class="discovery-empty legacy-source"><Globe :size="42" :stroke-width="1" /><h2>在站点中浏览</h2><p>沿用现有浏览窗口。选好后，使用窗口菜单“下载当前视频”保存。</p><button class="btn btn--primary" @click="openLegacy">打开 Hanime</button></div>
       <WebSourceEntry v-else @connected="connected" />
     </main>
-    <DiscoveryDetail v-if="selected && source && !download && !playing" :key="sourceId + selected.entry.id" :source-id="sourceId" :source-name="source.name" :card="selected" :busy="marking" :loading="detailBusy" :error="error" @close="selected = null" @mark="mark(selected!, $event)" @play="open(selected!, 'play')" @page="open(selected!)" @download="save(selected!)" @local="router.push({ name: 'video-detail', params: { id: selected!.resourceId } })" />
+    <DiscoveryDetail v-if="selected && source && !download && !playing" :key="sourceId + selected.entry.id" :source-id="sourceId" :source-name="source.name" :card="selected" :busy="marking" :loading="detailBusy" :error="detailError || error" :retryable="!!detailError && !!source?.online" @retry="enrich(selected!)" @close="selected = null" @mark="mark(selected!, $event)" @play="open(selected!, 'play')" @page="open(selected!)" @download="save(selected!)" @local="router.push({ name: 'video-detail', params: { id: selected!.resourceId } })" />
     <DiscoveryPlayer v-if="playing && !download" :key="sourceId + playing.entry.id" :card="playing" :busy="detailBusy" :error="error" @close="playing = null" @download="save(playing!)" @page="open(playing!, 'page')" />
     <DownloadPanel v-if="download" :key="JSON.stringify(download)" :discovery="download" @close="download = null" />
   </div>

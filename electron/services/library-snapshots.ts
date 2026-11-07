@@ -88,13 +88,14 @@ function validSnapshot(value: unknown, name: string): value is LibrarySnapshot {
   const s = value as LibrarySnapshot
   return s.format === 'baoyi-database-snapshot' && s.version === 1 && typeof s.id === 'string'
     && /^\d{13}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s.id)
-    && name === s.id + '.json' && s.file === s.id + '.db'
+    && name === s.id + '.json'
+    && (s.compression === undefined && s.file === s.id + '.db' || s.compression === 'gzip' && s.file === s.id + '.db.gz' && Number.isSafeInteger(s.storedSize) && s.storedSize! > 0)
     && ['upgrade', 'manual'].includes(s.reason) && Number.isSafeInteger(s.createdAt) && s.createdAt > 0
     && Number.isSafeInteger(s.fromSchema) && s.fromSchema >= 0 && Number.isSafeInteger(s.targetSchema) && s.targetSchema >= 0
     && typeof s.fromVersion === 'string' && s.fromVersion.length <= 80 && typeof s.targetVersion === 'string' && s.targetVersion.length <= 80
     && Number.isSafeInteger(s.size) && s.size > 0 && typeof s.sha256 === 'string' && /^[0-9a-f]{64}$/.test(s.sha256)
 }
-export function readSnapshotInventory(directory: string): LibrarySnapshotInventory {
+export function readSnapshotInventory(directory: string, limit = 100): LibrarySnapshotInventory {
   const root = snapshotDirectory(directory), names = readDirectory(root), snapshots: LibrarySnapshotEntry[] = [], warnings: string[] = []
   const manifests = names.filter(n => n.endsWith('.json')).sort().reverse()
   if (manifests.length > 1000) warnings.push('快照较多，仅检查最近 1000 份说明文件')
@@ -104,14 +105,14 @@ export function readSnapshotInventory(directory: string): LibrarySnapshotInvento
       if (!stat.isFile() || stat.size > 16384) throw new Error('说明文件无效')
       const value: unknown = JSON.parse(fs.readFileSync(file, 'utf8'))
       if (!validSnapshot(value, name)) throw new Error('说明内容无效')
-      snapshots.push({ ...value, state: fileState(path.join(root, value.file), value.size) })
+      snapshots.push({ ...value, state: fileState(path.join(root, value.file), value.compression === 'gzip' ? value.storedSize! : value.size) })
     } catch { warnings.push(`快照说明不可读：${name}`) }
   }
-  const orphans = names.filter(n => n.endsWith('.db') && !names.includes(n.slice(0, -3) + '.json')).length
+  const orphans = names.filter(n => /\.db(?:\.gz)?$/.test(n) && !names.includes(n.replace(/\.db(?:\.gz)?$/, '.json'))).length
   if (orphans) warnings.push(`${orphans} 份数据库快照缺少说明文件，原文件已保留`)
   const legacyBackups = readDirectory(directory).filter(n => /^baoyi\.db\.v[0-9.]+\.bak$/.test(n)).length
   const recoveryDirectory = path.join(directory, 'recovery'), recoveryBackups = readDirectory(recoveryDirectory).filter(n => /^baoyi-before-restore-.+\.db$/.test(n)).length
-  return { directory: root, snapshots: snapshots.sort((a, b) => b.createdAt - a.createdAt).slice(0, 100), total: snapshots.length, legacyBackups, recoveryDirectory, recoveryBackups, warnings }
+  return { directory: root, snapshots: snapshots.sort((a, b) => b.createdAt - a.createdAt).slice(0, Math.min(1000, Math.max(1, limit))), total: snapshots.length, legacyBackups, recoveryDirectory, recoveryBackups, warnings }
 }
 export function recordMetadataExport(db: SqlDb, file: string): void {
   const value = { file, createdAt: Date.now(), size: fs.statSync(file).size }

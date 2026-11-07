@@ -15,6 +15,7 @@ import * as hanime from '../electron/kinds/video/hentai/hanime.ts'
 import * as proxyRules from '../electron/services/proxy-rules.ts'
 import * as networkRules from '../electron/services/hanime-network-rules.ts'
 import * as hanimeDirect from '../electron/services/hanime-direct.ts'
+import * as downloadLimiter from '../electron/kinds/video/download/limiter.ts'
 
 const URL_A = 'https://hanime1.me/search?query=fixture-a'
 const URL_B = 'https://hanime1.me/search?query=fixture-b'
@@ -156,8 +157,10 @@ async function harness(onLoad: FakeWindow['onLoad'] = (win, url) => {
   const windows: FakeWindow[] = []
   const partitions: string[] = []
   const fetchCalls: unknown[][] = []
+  let closedConnections=0,clearedDns=0
   const isolatedSession = {
     setProxy: async () => {},
+    closeAllConnections:async()=>{closedConnections++},clearHostResolverCache:async()=>{clearedDns++},
     fetch: (...args: unknown[]) => { fetchCalls.push(args); return Promise.resolve(new Response('fixture')) }
   }
   let handler!: (url: string) => Promise<string | null>
@@ -166,6 +169,7 @@ async function harness(onLoad: FakeWindow['onLoad'] = (win, url) => {
     app: { isReady: () => true },
     session: { fromPartition: (partition: string) => { partitions.push(partition); return isolatedSession } },
     BrowserWindow: class extends FakeWindow {
+      static getAllWindows(){return windows}
       constructor(options: WindowOptions) { super(options, onLoad); windows.push(this) }
     }
   }
@@ -179,7 +183,8 @@ async function harness(onLoad: FakeWindow['onLoad'] = (win, url) => {
     },
     './proxy-rules.ts': proxyRules,
     './hanime-network-rules.ts': networkRules,
-    './hanime-direct.ts': hanimeDirect
+    './hanime-direct.ts': hanimeDirect,
+    '../kinds/video/download/limiter.ts': downloadLimiter
   }
   runInNewContext(compiled, {
     exports, URL, console,
@@ -189,7 +194,8 @@ async function harness(onLoad: FakeWindow['onLoad'] = (win, url) => {
     require: (id: string) => { assert.ok(id in dependencies, 'Unexpected dependency: ' + id); return dependencies[id] }
   }, { filename: 'electron/services/proxy.ts' })
   await exports.applyProxy('')
-  return { clock, windows, open: handler, verify: exports.openHanimeVerification, partitions, isolatedSession, fetchCalls, fetch: injectedFetch }
+  return { clock, windows, open: handler, verify: exports.openHanimeVerification, partitions, isolatedSession, fetchCalls, fetch: injectedFetch,
+    recover:exports.recoverHanimeConnections,connectionCounts:()=>({closedConnections,clearedDns}) }
 }
 
 const tests: [string, () => Promise<void>][] = []
@@ -428,6 +434,18 @@ test('renderer termination settles a pending inspection as failure', async () =>
   assert.equal(h.clock.timers.size, 0)
 })
 
+test('network recovery waits for page bodies and does not disrupt verification',async()=>{
+  const h=await harness()
+  const response=await h.fetch(URL_A)
+  assert.equal(await h.recover(),false,'an unread response still owns its connection')
+  await response.text()
+  assert.equal(await h.recover(),true)
+  assert.deepEqual(h.connectionCounts(),{closedConnections:1,clearedDns:1})
+  const verification=h.verify(URL_A);await flush()
+  assert.equal(await h.recover(),false,'verification cookies and sockets must be left alone')
+  h.windows[0].close();await verification
+  assert.deepEqual(h.connectionCounts(),{closedConnections:1,clearedDns:1})
+})
 let failed = 0
 for (const [name, run] of tests) {
   try { await run(); console.log('PASS ' + name) }

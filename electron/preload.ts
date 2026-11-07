@@ -48,9 +48,76 @@ function plain<T>(value: T): T {
 }
 
 const api: BaoyiApi = {
+  archive: {
+    insights:{policy:()=>ipcRenderer.invoke('archive:insight-policy'),savePolicy:value=>ipcRenderer.invoke('archive:insight-save-policy',plain(value)),onChanged:callback=>subscribe('archive:insights-changed',callback),preview:(ids,range)=>ipcRenderer.invoke('archive:insight-preview',plain(ids),range&&plain(range)),cleanupPreview:()=>ipcRenderer.invoke('archive:insight-cleanup-preview'),cleanup:token=>ipcRenderer.invoke('archive:insight-cleanup',token),clearCache:()=>ipcRenderer.invoke('archive:insight-clear-cache'),start:(token,force)=>ipcRenderer.invoke('archive:insight-start',token,force),list:()=>ipcRenderer.invoke('archive:insight-list'),detail:id=>ipcRenderer.invoke('archive:insight-detail',id),cancel:id=>ipcRenderer.invoke('archive:insight-cancel',id),edit:(id,revision,content)=>ipcRenderer.invoke('archive:insight-edit',id,revision,plain(content)),activate:(id,versionId,revision)=>ipcRenderer.invoke('archive:insight-activate',id,versionId,revision),adopt:(id,revision)=>ipcRenderer.invoke('archive:insight-adopt',id,revision)},
+    projectHandoffPreview:(id,includeRules)=>ipcRenderer.invoke('archive:project-handoff-preview',id,includeRules),projectHandoffGenerate:input=>ipcRenderer.invoke('archive:project-handoff-generate',plain(input)),projectHandoffCancel:id=>ipcRenderer.invoke('archive:project-handoff-cancel',id),projectHandoffAdopt:(id,revision,prompt)=>ipcRenderer.invoke('archive:project-handoff-adopt',id,revision,prompt),
+    status:()=>ipcRenderer.invoke('archive:status'),sessions:query=>ipcRenderer.invoke('archive:sessions',query),session:id=>ipcRenderer.invoke('archive:session',id),
+    send:input=>ipcRenderer.invoke('archive:send',plain(input)),cancel:()=>ipcRenderer.invoke('archive:cancel'),steer:text=>ipcRenderer.invoke('archive:steer',text),rename:(id,title)=>ipcRenderer.invoke('archive:rename',id,title),archive:id=>ipcRenderer.invoke('archive:archive',id),
+    memory:()=>ipcRenderer.invoke('archive:memory'),editMemory:input=>ipcRenderer.invoke('archive:memory-edit',plain(input)),skills:()=>ipcRenderer.invoke('archive:skills'),
+    actions:id=>ipcRenderer.invoke('archive:actions',id),undo:id=>ipcRenderer.invoke('archive:undo',id),source:id=>ipcRenderer.invoke('archive:source',id),onEvent:callback=>subscribe('archive:event',callback)
+  },
+  workspace: {
+    preferences:{get:module=>ipcRenderer.invoke('workspace:preferences:get',module),save:(module,value)=>ipcRenderer.invoke('workspace:preferences:save',module,value),dataDirectory:()=>ipcRenderer.invoke('workspace:preferences:data-directory'),chooseDataDirectory:()=>ipcRenderer.invoke('workspace:preferences:choose-data-directory')},
+    recycle:{previewBatch:(ids,withFiles)=>ipcRenderer.invoke('workspace:recycle:preview-batch',plain(ids),withFiles),confirmBatch:token=>ipcRenderer.invoke('workspace:recycle:confirm-batch',token),locations:id=>ipcRenderer.invoke('workspace:recycle:locations',id),preview:(id,paths)=>ipcRenderer.invoke('workspace:recycle:preview',id,paths),confirm:token=>ipcRenderer.invoke('workspace:recycle:confirm',token),list:()=>ipcRenderer.invoke('workspace:recycle:list'),restore:(id,alternate)=>ipcRenderer.invoke('workspace:recycle:restore',id,alternate),resume:id=>ipcRenderer.invoke('workspace:recycle:resume',id),cleanup:()=>ipcRenderer.invoke('workspace:recycle:cleanup')},
+    files:{choose:id=>ipcRenderer.invoke('workspace:files:choose',id),preview:(token,mode,target,name)=>ipcRenderer.invoke('workspace:files:preview',token,mode,target,name),confirm:token=>ipcRenderer.invoke('workspace:files:confirm',token),operations:id=>ipcRenderer.invoke('workspace:files:operations',id),recover:id=>ipcRenderer.invoke('workspace:files:recover',id)},
+    agent:{
+      sessions:module=>ipcRenderer.invoke('workspace:agent:sessions',module),session:id=>ipcRenderer.invoke('workspace:agent:session',id),create:(module,context)=>ipcRenderer.invoke('workspace:agent:create',module,plain(context)),send:(id,text)=>ipcRenderer.invoke('workspace:agent:send',id,text),cancel:id=>ipcRenderer.invoke('workspace:agent:cancel',id),changes:id=>ipcRenderer.invoke('workspace:agent:changes',id),apply:(session,id)=>ipcRenderer.invoke('workspace:agent:apply',session,id),undo:(session,id)=>ipcRenderer.invoke('workspace:agent:undo',session,id),
+      onSession:callback=>{const handler=(_:Electron.IpcRendererEvent,session:any)=>callback(session);ipcRenderer.on('workspace:session',handler);return ()=>ipcRenderer.removeListener('workspace:session',handler)}
+    },
+    documents: {
+      covers:{get:id=>ipcRenderer.invoke('workspace:documents:covers:get',id),source:(id,token)=>ipcRenderer.invoke('workspace:documents:covers:source',id,token),range:(id,token,offset,length)=>ipcRenderer.invoke('workspace:documents:covers:range',id,token,offset,length),put:(id,token,png)=>ipcRenderer.invoke('workspace:documents:covers:put',id,token,png)},
+      categories:(submodule?: any)=>ipcRenderer.invoke('workspace:documents:categories',submodule),saveCategory:input=>ipcRenderer.invoke('workspace:documents:save-category',plain(input)),removeCategory:(id,target)=>ipcRenderer.invoke('workspace:documents:remove-category',id,target),
+      analyzeImport:(token,path)=>ipcRenderer.invoke('workspace:documents:analyze-import',token,path),
+      customGroups:(submodule?: any, categoryId?: any)=>ipcRenderer.invoke('workspace:documents:custom-groups',submodule, categoryId),saveCustomGroup:input=>ipcRenderer.invoke('workspace:documents:save-custom-group',plain(input)),removeCustomGroup:id=>ipcRenderer.invoke('workspace:documents:remove-custom-group',id),
+      moveToSubmodule:(id: string, targetSubmodule: any, targetCategoryId?: string)=>ipcRenderer.invoke('workspace:documents:move-to-submodule',id,targetSubmodule,targetCategoryId),
+      list:(options?: any)=>ipcRenderer.invoke('workspace:documents:list',plain(options)),get:id=>ipcRenderer.invoke('workspace:documents:get',id),
+      update:(id,patch)=>ipcRenderer.invoke('workspace:documents:update',id,plain(patch)),remove:id=>ipcRenderer.invoke('workspace:documents:remove',id),
+      prepareImport:(directory,categoryId)=>ipcRenderer.invoke('workspace:documents:prepare-import',directory,categoryId),confirmImport:(token,paths,categoryId,submodule,customGroupId,choices,insightProvider)=>ipcRenderer.invoke('workspace:documents:confirm-import',token,plain(paths),categoryId,submodule,customGroupId,choices && plain(choices),insightProvider),
+      relocate:id=>ipcRenderer.invoke('workspace:documents:relocate',id),open:id=>ipcRenderer.invoke('workspace:documents:open',id),reveal:id=>ipcRenderer.invoke('workspace:documents:reveal',id),
+      content:id=>ipcRenderer.invoke('workspace:documents:content',id),
+      textIndex:(id,encoding)=>ipcRenderer.invoke('workspace:documents:text:index',id,encoding),
+      searchText:(id,query,page,start,encoding)=>ipcRenderer.invoke('workspace:documents:text:search',id,query,page,start,encoding),
+      textSlice:(id,byteOffset,byteLength,encoding)=>ipcRenderer.invoke('workspace:documents:text:slice',id,byteOffset,byteLength,encoding),
+      pdfRange:(id,offset,length)=>ipcRenderer.invoke('workspace:documents:pdf:range',id,offset,length),
+      position:(id,loc,count)=>ipcRenderer.invoke('workspace:documents:position',id,plain(loc),count),
+      annotations:id=>ipcRenderer.invoke('workspace:documents:annotations',id),annotate:(id,input)=>ipcRenderer.invoke('workspace:documents:annotate',id,plain(input)),
+      removeAnnotation:(id,annotation)=>ipcRenderer.invoke('workspace:documents:remove-annotation',id,annotation),export:(id,ids,obsidian)=>ipcRenderer.invoke('workspace:documents:export',id,plain(ids),obsidian),markdown:(id,ids)=>ipcRenderer.invoke('workspace:documents:markdown',id,plain(ids)),
+      pickDirectory:()=>ipcRenderer.invoke('workspace:documents:organize:pick-directory'),
+      previewOrganize:options=>ipcRenderer.invoke('workspace:documents:organize:preview',plain(options)),
+      executeOrganize:options=>ipcRenderer.invoke('workspace:documents:organize:execute',plain(options)),
+      organizeHistory:()=>ipcRenderer.invoke('workspace:documents:organize:history'),
+      undoOrganize:id=>ipcRenderer.invoke('workspace:documents:organize:undo',id)
+    },
+    links: {
+      projectReferences:ids=>ipcRenderer.invoke('workspace:links:project-references',plain(ids)),
+      list:(owner,id)=>ipcRenderer.invoke('workspace:links:list',owner,id),add:(owner,id,target,annotation)=>ipcRenderer.invoke('workspace:links:add',owner,id,target,annotation),
+      remove:(owner,id,link)=>ipcRenderer.invoke('workspace:links:remove',owner,id,link),resources:()=>ipcRenderer.invoke('workspace:links:resources'),backlinks:id=>ipcRenderer.invoke('workspace:links:backlinks',id)
+    },
+    timeline: {
+      context:id=>ipcRenderer.invoke('workspace:timeline:context',id),updateContext:(id,patch)=>ipcRenderer.invoke('workspace:timeline:update-context',id,plain(patch)),
+      events:id=>ipcRenderer.invoke('workspace:timeline:events',id),save:(id,input)=>ipcRenderer.invoke('workspace:timeline:save',id,plain(input)),
+      publish:(id,event)=>ipcRenderer.invoke('workspace:timeline:publish',id,event),dismiss:(id,event)=>ipcRenderer.invoke('workspace:timeline:dismiss',id,event),remove:(id,event)=>ipcRenderer.invoke('workspace:timeline:remove',id,event),
+      check:id=>ipcRenderer.invoke('workspace:timeline:check',id),generate:(id,ai)=>ipcRenderer.invoke('workspace:timeline:generate',id,ai),cancel:id=>ipcRenderer.invoke('workspace:timeline:cancel',id),export:id=>ipcRenderer.invoke('workspace:timeline:export',id)
+    },
+    skills:{list:()=>ipcRenderer.invoke('workspace:skills:list'),proposals:()=>ipcRenderer.invoke('workspace:skills:proposals'),confirm:(id,draft)=>ipcRenderer.invoke('workspace:skills:confirm',id,plain(draft)),cancel:id=>ipcRenderer.invoke('workspace:skills:cancel',id),undoRecord:id=>ipcRenderer.invoke('workspace:skills:undo-record',id)},
+    personal:{captureState:(name,unit,value,date,metricId)=>ipcRenderer.invoke('workspace:personal:capture-state',name,unit,value,date,metricId),chooseAvatar:()=>ipcRenderer.invoke('workspace:personal:choose-avatar'),list:kind=>ipcRenderer.invoke('workspace:personal:list',kind),save:input=>ipcRenderer.invoke('workspace:personal:save',plain(input)),remove:id=>ipcRenderer.invoke('workspace:personal:remove',id),overview:()=>ipcRenderer.invoke('workspace:personal:overview')},
+    onChanged:callback=>subscribe('workspace:changed',callback)
+  },
   project: {
-    overview:id=>ipcRenderer.invoke('project:overview',id),preferences:value=>ipcRenderer.invoke('project:preferences',plain(value)),
+    launch:{
+      profiles:id=>ipcRenderer.invoke('project:launch:profiles',id),save:(id,input)=>ipcRenderer.invoke('project:launch:save',id,plain(input)),remove:(id,profile,revision)=>ipcRenderer.invoke('project:launch:remove',id,profile,revision),revoke:(id,profile)=>ipcRenderer.invoke('project:launch:revoke',id,profile),
+      preview:(id,profile)=>ipcRenderer.invoke('project:launch:preview',id,profile),start:(id,profile,approval)=>ipcRenderer.invoke('project:launch:start',id,profile,plain(approval)),runs:id=>ipcRenderer.invoke('project:launch:runs',id),stop:id=>ipcRenderer.invoke('project:launch:stop',id),openPreview:(id,profile,run)=>ipcRenderer.invoke('project:launch:open-preview',id,profile,run),onRun:callback=>subscribe('project:run',callback)
+    },
+    applications:()=>ipcRenderer.invoke('project:applications'),selectApplication:id=>ipcRenderer.invoke('project:select-application',id),openApplication:(id,application)=>ipcRenderer.invoke('project:open-application',id,application),rules:id=>ipcRenderer.invoke('project:rules',id),
+    overview:(id,options)=>ipcRenderer.invoke('project:overview',id,plain(options)),git:(id,options)=>ipcRenderer.invoke('project:git',id,plain(options)),preferences:value=>ipcRenderer.invoke('project:preferences',plain(value)),
+    files:(id,relative,options)=>ipcRenderer.invoke('project:files',id,relative,plain(options)),readFile:(id,relative,cursor)=>ipcRenderer.invoke('project:read-file',id,relative,plain(cursor)),
+    openFile:(id,relative)=>ipcRenderer.invoke('project:open-file',id,relative),scripts:(id,relative)=>ipcRenderer.invoke('project:scripts',id,relative),openTerminal:(id,relative)=>ipcRenderer.invoke('project:open-terminal',id,relative),
+    saveEntry:(id,entry,expected)=>ipcRenderer.invoke('project:save-entry',id,plain(entry),plain(expected)),removeEntry:(id,entryId,expected)=>ipcRenderer.invoke('project:remove-entry',id,entryId,plain(expected)),
     sessions:id=>ipcRenderer.invoke('project:sessions',id),createSession:id=>ipcRenderer.invoke('project:create-session',id),session:id=>ipcRenderer.invoke('project:session',id),
+    organize:id=>ipcRenderer.invoke('project:organize',id),resumeOrganize:id=>ipcRenderer.invoke('project:resume-organize',id),undoEvent:(id,event)=>ipcRenderer.invoke('project:undo-event',id,event),undoBatch:(id,session,apply)=>ipcRenderer.invoke('project:undo-batch',id,session,apply),
+    selectRepository:(id,relative)=>ipcRenderer.invoke('project:select-repository',id,relative),
+    summarize:(id,kind,key)=>ipcRenderer.invoke('project:summarize',id,kind,key),summaries:id=>ipcRenderer.invoke('project:summaries',id),editSummary:(id,summaryId,patch)=>ipcRenderer.invoke('project:edit-summary',id,summaryId,plain(patch)),undoSummary:(id,summaryId)=>ipcRenderer.invoke('project:undo-summary',id,summaryId),
+    automation:(id,enabled)=>ipcRenderer.invoke('project:automation',id,enabled),
     sendMessage:(id,text)=>ipcRenderer.invoke('project:send-message',id,text),cancelMessage:id=>ipcRenderer.invoke('project:cancel-message',id),
     applyProposal:(id,message)=>ipcRenderer.invoke('project:apply-proposal',id,message),onSession:callback=>subscribe('project:session',callback),
     list:()=>ipcRenderer.invoke('project:list'),get:id=>ipcRenderer.invoke('project:get',id),
@@ -63,11 +130,25 @@ const api: BaoyiApi = {
     move:token=>ipcRenderer.invoke('project:move',token),moveRecords:()=>ipcRenderer.invoke('project:move-records'),recoverMove:id=>ipcRenderer.invoke('project:recover-move',id),
     onChanged:callback=>subscribe('project:changed',callback)
   },
+  comic: {
+    defaults:()=>ipcRenderer.invoke('comic:defaults'),browse:(query,proxy)=>ipcRenderer.invoke('comic:browse',plain(query),plain(proxy)),cover:(id,proxy)=>ipcRenderer.invoke('comic:cover',id,plain(proxy)),cancelBrowse:()=>ipcRenderer.invoke('comic:cancel-browse'),
+    logs:id=>ipcRenderer.invoke('comic:logs',id),
+    preview:(input,proxy)=>ipcRenderer.invoke('comic:preview',input,plain(proxy)),
+    cancelPreview:()=>ipcRenderer.invoke('comic:cancel-preview'),
+    start:(token,chapters,directory,groupId,root)=>ipcRenderer.invoke('comic:start',token,plain(chapters),directory,groupId,root),
+    jobs:()=>ipcRenderer.invoke('comic:jobs'),stop:(id,cancel)=>ipcRenderer.invoke('comic:stop',id,cancel),
+    retry:(id,proxy)=>ipcRenderer.invoke('comic:retry',id,plain(proxy)),dismiss:id=>ipcRenderer.invoke('comic:dismiss',id),
+    revalidate:(id,token,root)=>ipcRenderer.invoke('comic:revalidate',id,token,root),clean:id=>ipcRenderer.invoke('comic:clean',id)
+  },
   image: {
+    
+    tagCounts: () => ipcRenderer.invoke('image:tag-counts'),
+    renameTag: (from, to) => ipcRenderer.invoke('image:rename-tag', from, to),
     collections: () => ipcRenderer.invoke('image:collections'),
     saveCollection: (name,members,id) => ipcRenderer.invoke('image:save-collection',name,plain(members),id),
     removeCollection: id => ipcRenderer.invoke('image:remove-collection',id),
-    move: (ids,byCategory) => ipcRenderer.invoke('image:move',plain(ids),byCategory),
+    move: (ids,byCategory,chooseTarget) => ipcRenderer.invoke('image:move',plain(ids),byCategory,chooseTarget),
+    gallery: (ids,offset,limit) => ipcRenderer.invoke('image:gallery',plain(ids),offset,limit),
     readerPreferences: (id, value) => ipcRenderer.invoke('image:reader-preferences', id, value === undefined ? undefined : plain(value)),
     bookmarks: id => ipcRenderer.invoke('image:bookmarks', id), saveBookmark: (id, pageId, offset, label) => ipcRenderer.invoke('image:save-bookmark', id, pageId, offset, label),
     removeBookmark: (id, bookmarkId) => ipcRenderer.invoke('image:remove-bookmark', id, bookmarkId),
@@ -80,7 +161,7 @@ const api: BaoyiApi = {
     remove: (id,deleteFiles) => ipcRenderer.invoke('image:remove', id,deleteFiles), groups: () => ipcRenderer.invoke('image:groups'),
     saveGroup: group => ipcRenderer.invoke('image:save-group', plain(group)), removeGroup: id => ipcRenderer.invoke('image:remove-group', id),
     prepareImport: (type, multiple, archive) => ipcRenderer.invoke('image:prepare-import', type, multiple, archive),
-    confirmImport: (token, selected) => ipcRenderer.invoke('image:confirm-import', token, plain(selected)),
+    confirmImport: (token, selected, folderCategories) => ipcRenderer.invoke('image:confirm-import', token, plain(selected), folderCategories),
     rescan: id => ipcRenderer.invoke('image:rescan', id), relocate: id => ipcRenderer.invoke('image:relocate', id),
     reveal: id => ipcRenderer.invoke('image:reveal', id),
     saveProgress: (id, page, offset) => ipcRenderer.invoke('image:progress', id, page, offset), preferences: value => ipcRenderer.invoke('image:preferences', plain(value)),
@@ -88,9 +169,10 @@ const api: BaoyiApi = {
     sourceLogout: () => ipcRenderer.invoke('image:source-logout'), sourceSearch: (query,page) => ipcRenderer.invoke('image:source-search', query,page),
     sourceFavorites: (page,sort) => ipcRenderer.invoke('image:source-favorites',page,sort),
     sourceRanking: period => ipcRenderer.invoke('image:source-ranking',period), sourceCover: url => ipcRenderer.invoke('image:source-cover',url),
-    sourceDetail: id => ipcRenderer.invoke('image:source-detail', id), download: (work,chapters,group) => ipcRenderer.invoke('image:download', work,plain(chapters),group),
+    downloadTarget:(provider,id,group)=>ipcRenderer.invoke('image:download-target',provider,id,group),chooseDownloadRoot:(provider,current)=>ipcRenderer.invoke('image:choose-download-root',provider,current),
+    sourceDetail: id => ipcRenderer.invoke('image:source-detail', id), download: (work,chapters,group,root) => ipcRenderer.invoke('image:download', work,plain(chapters),group,root),
     sourceOwned: ids => ipcRenderer.invoke('image:source-owned', plain(ids)),
-    downloadBatch: (ids,group) => ipcRenderer.invoke('image:download-batch',plain(ids),group),
+    downloadBatch: (ids,group,root) => ipcRenderer.invoke('image:download-batch',plain(ids),group,root),
     jobs: () => ipcRenderer.invoke('image:jobs'), retryJob: id => ipcRenderer.invoke('image:retry-job',id), cancelJob: id => ipcRenderer.invoke('image:cancel-job',id),
     dismissJob: id => ipcRenderer.invoke('image:dismiss-job',id), onChanged: callback => subscribe('image:changed',callback),
     onJobsChanged: callback => subscribe('image:jobs-changed',callback),
@@ -122,7 +204,8 @@ const api: BaoyiApi = {
   },
   app: {
     info: () => ipcRenderer.invoke('app:info'),
-    copyText: (text: string) => ipcRenderer.invoke('app:copy', String(text))
+    copyText: (text: string) => ipcRenderer.invoke('app:copy', String(text)),
+    openUrl: (url: string) => ipcRenderer.invoke('app:open-url', url)
   },
   win: {
     minimize: () => ipcRenderer.send('win:minimize'),
@@ -186,6 +269,9 @@ const api: BaoyiApi = {
     ,onCoverProgress: (cb) => subscribe('game:cover-progress', cb)
   },
   video: {
+    preview:{frames:(token,retry)=>ipcRenderer.invoke('video-preview:frames',token,retry),releaseFrames:id=>ipcRenderer.invoke('video-preview:release-frames',id),onFrames:callback=>subscribe('video-preview:frames',callback),frameCache:()=>ipcRenderer.invoke('video-preview:frame-cache'),clearFrames:()=>ipcRenderer.invoke('video-preview:clear-frames'),onClosed:callback=>subscribe('video-preview:closed',callback),choices:(id,episodeId)=>ipcRenderer.invoke('video-preview:choices',id,episodeId),open:(id,key)=>ipcRenderer.invoke('video-preview:open',id,key),release:token=>ipcRenderer.invoke('video-preview:release',token),external:(token,custom)=>ipcRenderer.invoke('video-preview:external',token,custom),pickPlayer:()=>ipcRenderer.invoke('video-preview:pick-player'),copyPath:token=>ipcRenderer.invoke('video-preview:copy',token),reveal:token=>ipcRenderer.invoke('video-preview:reveal',token)},
+    taxonomy: hentai => ipcRenderer.invoke('video:taxonomy', hentai),
+    editTaxonomy: edit => ipcRenderer.invoke('video:edit-taxonomy', plain(edit)),
     list: (query: VideoQuery = {}) => ipcRenderer.invoke('video:list', plain(query)),
     get: (id: string) => ipcRenderer.invoke('video:get', id),
     update: (id: string, patch: Partial<VideoItem>) =>
@@ -224,6 +310,8 @@ const api: BaoyiApi = {
     setDefaultAsset: (episodeId: string, assetId: string) => ipcRenderer.invoke('video:default-asset', episodeId, assetId),
     discovery: {
       online: {
+        networkStatus: url => ipcRenderer.invoke('video-discovery:online-network-status', url),
+        probe: url => ipcRenderer.invoke('video-discovery:online-network-probe', url),
         connect: url => ipcRenderer.invoke('video-discovery:online-connect', url),
         refresh: id => ipcRenderer.invoke('video-discovery:online-refresh', id),
         next: id => ipcRenderer.invoke('video-discovery:online-next', id),
@@ -251,6 +339,8 @@ const api: BaoyiApi = {
     pickDownloadRoot: (draftId: string) => ipcRenderer.invoke('video-workflow:pick-root', draftId),
     enqueueDownload: (request) => ipcRenderer.invoke('video-workflow:enqueue', plain(request)),
     downloadJobs: () => ipcRenderer.invoke('video-workflow:list'),
+    downloadCaches: () => ipcRenderer.invoke('video-workflow:caches'),
+    clearDownloadCache: id => ipcRenderer.invoke('video-workflow:clear-cache', id),
     retryDownloadJob: (id, stage) => ipcRenderer.invoke('video-workflow:retry', id, stage),
     cancelDownloadJob: (id) => ipcRenderer.invoke('video-workflow:cancel', id),
     dismissDownloadJob: (id) => ipcRenderer.invoke('video-workflow:dismiss', id),
@@ -343,6 +433,10 @@ const api: BaoyiApi = {
     snapshotInfo: () => ipcRenderer.invoke('data:snapshot-info'),
     createSnapshot: () => ipcRenderer.invoke('data:create-snapshot'),
     openSnapshotDir: () => ipcRenderer.invoke('data:open-snapshot-dir'),
+    archiveSnapshots: () => ipcRenderer.invoke('data:archive-snapshots'),
+    exportSnapshot: (id: string) => ipcRenderer.invoke('data:export-snapshot', id),
+    storageUsage: () => ipcRenderer.invoke('data:storage-usage'),
+    clearBrowserCache: () => ipcRenderer.invoke('data:clear-browser-cache'),
     restoreJson: () => ipcRenderer.invoke('data:restore-json'),
     exportJson: () => ipcRenderer.invoke('data:export-json'),
     exportMarkdown: () => ipcRenderer.invoke('data:export-markdown'),

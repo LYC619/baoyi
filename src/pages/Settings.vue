@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, version as vueVersion, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { activeModule, moduleTarget } from '@/composables/useModules'
+import { activeModule, moduleTarget, MODULE_TABS, type ModuleKey } from '@/composables/useModules'
 import {
   ArrowLeft,
   Bot,
@@ -37,16 +37,24 @@ import IdentifyLog from '@/components/identify/IdentifyLog.vue'
 import ReportDialog from '@/components/identify/ReportDialog.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import ProjectSettings from '@/components/project/ProjectSettings.vue'
+import PersonalSettings from '@/components/personal/PersonalSettings.vue'
+import ModulePreferences from '@/components/workspace/ModulePreferences.vue'
+import DocumentSettings from '@/components/workspace/DocumentSettings.vue'
+import ImageSettings from '@/components/settings/ImageSettings.vue'
+import VideoTaxonomySettings from '@/components/settings/VideoTaxonomySettings.vue'
+import OnlineSourceSettings from '@/components/settings/OnlineSourceSettings.vue'
 import {useProjectStore} from '@/stores/project'
 import LibrarySafetyPanel from '@/components/settings/LibrarySafetyPanel.vue'
+import StorageUsagePanel from '@/components/settings/StorageUsagePanel.vue'
 import FfmpegPanel from '@/components/settings/FfmpegPanel.vue'
+import DownloadCachePanel from '@/components/settings/DownloadCachePanel.vue'
 import { useAI } from '@/composables/useAI'
 import { useScan } from '@/composables/useScan'
 import { useMediaScan } from '@/composables/useMediaScan'
 import { useVideoImport } from '@/composables/useVideoImport'
 import { useTaskCenter } from '@/composables/useTaskCenter'
 import { useToast } from '@/composables/useToast'
-import { ICON_NAMES, useCategoriesStore } from '@/stores/categories'
+import { ICON_NAMES } from '@/stores/categories'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
 import { useGameStore } from '@/stores/game'
@@ -76,7 +84,6 @@ const store = useSoftwareStore()
 const video = useVideoStore()
 const game = useGameStore()
 const project = useProjectStore()
-const catStore = useCategoriesStore()
 const { success, error, toast } = useToast()
 const scan = useScan()
 const gameScan = useMediaScan('game')
@@ -87,28 +94,42 @@ const ai = useAI()
 
 /* -------------------------------- 分页 -------------------------------- */
 
+const GLOBAL_TABS=['appearance','ai','search','data','about']
+const globalScope=computed(()=>route.query.scope==='global'||(!route.query.scope&&GLOBAL_TABS.includes(String(route.query.tab))))
 const ALL_TABS = [
-  { id:'project',label:'项目偏好',icon:FolderTree,modules:['project'] },
-  { id: 'scan', label: '扫描与识别', icon: Telescope, modules: ['software', 'game', 'video'] },
-  { id: 'organize', label: '目录整理', icon: FolderTree, modules: ['software'] },
-  { id: 'ai', label: 'AI 配置', icon: Bot, modules: ['software', 'game', 'video', 'project'] },
-  { id: 'search', label: '搜索服务', icon: Globe, modules: ['game', 'video'] },
-  { id: 'appearance', label: '外观', icon: Palette, modules: ['software', 'game', 'video', 'image', 'project'] },
-  { id: 'taxonomy', label: '分类与标签', icon: Tags, modules: ['software', 'game', 'video', 'project'] },
+  { id: 'personal', label: '个人设置', icon: Tags, modules: ['personal'] },
+  { id: 'project', label: '项目偏好', icon: FolderTree, modules: ['project'] },
+  { id: 'scan', label: '扫描与识别', icon: Telescope, modules: ['software', 'game', 'video', 'image', 'document'] },
+  { id: 'organize', label: '目录整理', icon: FolderTree, modules: ['software', 'video', 'image', 'document'] },
+  { id: 'categories', label: '分类', icon: FolderTree, modules: ['software', 'game', 'video', 'image', 'document', 'project'] },
+  { id: 'groups', label: '分组', icon: FolderTree, modules: ['document'] },
+  { id: 'tags', label: '标签', icon: Tags, modules: ['software', 'game', 'video', 'image', 'document', 'project'] },
+  { id: 'saves', label: '存档与备份', icon: Database, modules: ['game'] },
+  { id: 'reader', label: '阅读偏好', icon: Eye, modules: ['image', 'document'] },
+  { id: 'metadata', label: '影视刮削', icon: Telescope, modules: ['video'] },
   { id: 'logs', label: '识别日志', icon: ScrollText, modules: ['software', 'game', 'video'] },
-  { id: 'data', label: '数据管理', icon: Database, modules: ['software', 'game', 'video', 'image', 'project'] },
-  { id: 'about', label: '关于', icon: Info, modules: ['software', 'game', 'video', 'image', 'project'] }
+  { id: 'hentai', label: '里番区基础设置', icon: Eye, modules: ['video'] },
+  { id: 'network', label: '网络与出站代理', icon: Globe, modules: ['video'] },
+  { id: 'downloads', label: '下载与缓存', icon: Download, modules: ['video'] },
+  { id: 'hentai-groups', label: '里番分组', icon: FolderTree, modules: ['video'] },
+  { id: 'hentai-tags', label: '里番标签', icon: Tags, modules: ['video'] },
+  { id: 'appearance', label: '外观', icon: Palette, modules: [] },
+  { id: 'ai', label: 'AI 配置', icon: Bot, modules: [] },
+  { id: 'search', label: '联网搜索', icon: Globe, modules: [] },
+  { id: 'data', label: '数据管理', icon: Database, modules: [] },
+  { id: 'about', label: '关于', icon: Info, modules: [] }
 ] as const
 
 // 根据当前模块过滤标签页
 const TABS = computed(() =>
-  ALL_TABS.filter((t) => (t.modules as readonly string[]).includes(activeModule.value))
+  ALL_TABS.filter(t=>globalScope.value?GLOBAL_TABS.includes(t.id):!GLOBAL_TABS.includes(t.id)&&(t.modules as readonly string[]).includes(activeModule.value))
 )
 
 type TabId = (typeof ALL_TABS)[number]['id']
 
 function tabFromRoute(value: unknown): TabId {
-  const id = String(Array.isArray(value) ? value[0] : (value ?? '')) as TabId
+  const raw = String(Array.isArray(value) ? value[0] : (value ?? ''))
+  const id = (({ online: 'network', taxonomy: 'categories', image: 'reader', document: 'scan' } as Record<string, string>)[raw] || raw) as TabId
   const availableTabs = TABS.value
   return availableTabs.some((t) => t.id === id) ? id : availableTabs[0]?.id ?? 'scan'
 }
@@ -117,13 +138,19 @@ function tabFromRoute(value: unknown): TabId {
 // 路由本身是 hash 模式，再叠一层 hash 容易读错，所以用 query 而不是 #logs
 const tab = ref<TabId>(tabFromRoute(route.query.tab))
 watch(
-  () => route.query.tab,
-  (v) => (tab.value = tabFromRoute(v))
+  () => [route.query.tab, activeModule.value,route.query.scope],
+  ([v]) => (tab.value = tabFromRoute(v))
 )
 
 function go(id: TabId): void {
   tab.value = id
-  void router.replace({ name: 'settings', query: { tab: id } })
+  void router.replace({ name: 'settings', query: { tab: id, module: activeModule.value,scope:GLOBAL_TABS.includes(id)?'global':'module' } })
+}
+
+function switchScope(module: ModuleKey | 'global'): void {
+  void router.replace({ name: 'settings', query: module === 'global'
+    ? { scope: 'global', module: activeModule.value, tab: 'appearance' }
+    : { scope: 'module', module } })
 }
 
 /**
@@ -427,11 +454,6 @@ async function testSearchConn(): Promise<void> {
 
 /* ---------------------------- TMDB 刮削配置 ---------------------------- */
 
-/*
- * 和联网搜索并排放在这一页，不单开一个「影视」Tab：两者是同一类东西 ——
- * 用户自带 Key 的外部数据源，都影响识别质量而不影响别的。分成两页反而要用户
- * 记住「刮削」和「搜索」在设置里是两处。
- */
 
 const tmdbKey = ref(settings.settings.tmdb.api_key)
 const tmdbApiDomain = ref(settings.settings.tmdb.api_domain)
@@ -901,6 +923,10 @@ async function setUnusedDays(): Promise<void> {
 /* --------------------------- 分类与标签 --------------------------- */
 
 const tags = ref<Tag[]>([])
+const taxonomyLoaded = ref(0)
+const taxonomyCategories = ref<Category[]>([])
+const taxonomyLoading = ref(false), taxonomySaving = ref(false)
+let taxonomyRevision = 0
 const tagFilter = ref<'all' | 'ai' | 'fragment'>('all')
 /** 合并时勾中的源标签 */
 const mergePick = ref<number[]>([])
@@ -909,21 +935,45 @@ const newCategory = ref('')
 const newTag = ref('')
 
 async function loadTaxonomy(): Promise<void> {
-  if(activeModule.value==='project')await project.refresh()
-  await catStore.load(activeModule.value)
-  tags.value = await window.baoyi.tags.list(activeModule.value)
-  await refreshTaxonomy()
+  const module = activeModule.value, revision = ++taxonomyRevision
+  taxonomyCategories.value = []; tags.value = []
+  if (!['software', 'game', 'video', 'project'].includes(module)) { taxonomyLoading.value = false; return }
+  taxonomyLoading.value = true
+  try {
+    const [categories, loadedTags] = await Promise.all([window.baoyi.categories.list(module), window.baoyi.tags.list(module)])
+    if (revision !== taxonomyRevision || activeModule.value !== module) return
+    taxonomyCategories.value = module === 'video' ? categories.filter(category => category.name !== '里番') : categories; tags.value = loadedTags
+    await refreshTaxonomy(module)
+    taxonomyLoaded.value++
+  } catch (cause) { if (revision === taxonomyRevision) error(errorMessage(cause)) }
+  finally { if (revision === taxonomyRevision) taxonomyLoading.value = false }
 }
 
 onMounted(loadTaxonomy)
-watch(activeModule, () => { mergePick.value=[]; mergeInto.value=null; void loadTaxonomy(); tab.value=tabFromRoute(route.query.tab) })
-
+watch(activeModule, () => { newCategory.value=''; newTag.value=''; mergePick.value=[]; mergeInto.value=null; void loadTaxonomy(); tab.value=tabFromRoute(route.query.tab) })
 const taxonomyStore = computed(() => activeModule.value === 'game' ? game : activeModule.value === 'video' ? video : store)
-async function refreshTaxonomy(): Promise<void> { if(activeModule.value==='project')await project.refresh();else await taxonomyStore.value.reload() }
+async function refreshTaxonomy(module = activeModule.value): Promise<void> {
+  if (module === 'project') await project.refresh()
+  else if (module === 'game') await game.reload()
+  else if (module === 'video') await video.reload()
+  else if (module === 'software') await store.reload()
+}
+async function mutateTaxonomy(action: (module: ModuleKey) => Promise<unknown>): Promise<boolean> {
+  if (taxonomySaving.value || taxonomyLoading.value) return false
+  const module = activeModule.value
+  taxonomySaving.value = true
+  try {
+    await action(module)
+    await refreshTaxonomy(module)
+    if (activeModule.value === module) await loadTaxonomy()
+    return true
+  } catch (cause) { error(errorMessage(cause)); return false }
+  finally { taxonomySaving.value = false }
+}
 
 /** 每个分类名下挂着多少软件。侧边栏计数已经算过一遍，直接借用 */
 const categoryCount = computed(
-  () => activeModule.value==='project' ? new Map(catStore.list.map(c=>[c.name,project.items.filter(i=>i.category===c.name).length])) : new Map(taxonomyStore.value.counts.categories.map((c) => [c.name, c.count]))
+  () => activeModule.value==='project' ? new Map(taxonomyCategories.value.map(c=>[c.name,project.items.filter(i=>i.category===c.name).length])) : new Map(taxonomyStore.value.counts.categories.map((c) => [c.name, c.count]))
 )
 
 const visibleTags = computed(() => {
@@ -940,8 +990,7 @@ const TAG_SOURCE_META: Record<Tag['source'], { label: string; tone: 'muted' | 'a
 }
 
 async function saveCategory(c: Category, patch: Partial<Category>): Promise<void> {
-  await catStore.upsert({ ...c, ...patch }, activeModule.value)
-  await refreshTaxonomy()
+  await mutateTaxonomy(module => window.baoyi.categories.upsert(plain({ ...c, ...patch }), module))
 }
 
 function onCategoryField(c: Category, field: 'name' | 'description' | 'icon', e: Event): void {
@@ -953,48 +1002,43 @@ function onCategoryField(c: Category, field: 'name' | 'description' | 'icon', e:
 async function addCategory(): Promise<void> {
   const name = newCategory.value.trim()
   if (!name) return
-  if (catStore.list.some((c) => c.name === name)) {
+  if (taxonomyCategories.value.some((c) => c.name === name)) {
     toast('已经有同名分类了')
     return
   }
-  const max = catStore.list.reduce((n, c) => Math.max(n, c.sort_order), 0)
-  await catStore.upsert({ id: '', name, description: '', icon: 'box', sort_order: max + 1 }, activeModule.value)
+  const max = taxonomyCategories.value.reduce((n, c) => Math.max(n, c.sort_order), 0)
+  await mutateTaxonomy(module => window.baoyi.categories.upsert({ id: '', name, description: '', icon: 'box', sort_order: max + 1 }, module))
   newCategory.value = ''
-  await refreshTaxonomy()
 }
 
 async function shiftCategory(id: string, delta: number): Promise<void> {
-  catStore.list = await window.baoyi.categories.move(id, delta)
+  await mutateTaxonomy(() => window.baoyi.categories.move(id, delta))
 }
 
 async function dropCategory(c: Category): Promise<void> {
   const n = categoryCount.value.get(c.name) ?? 0
   const warn = n > 0 ? `\n名下 ${n} 个条目会归入「其他」。` : ''
   if (!window.confirm(`删除分类「${c.name}」？${warn}\n不会删除任何实际文件。`)) return
-  await catStore.remove(c.id)
-  await refreshTaxonomy()
+  await mutateTaxonomy(() => window.baoyi.categories.remove(c.id))
 }
 
 async function addTag(): Promise<void> {
   const name = newTag.value.trim()
   if (!name) return
-  tags.value = await window.baoyi.tags.create(name, activeModule.value)
+  await mutateTaxonomy(module => window.baoyi.tags.create(name, module))
   newTag.value = ''
 }
 
 function onTagRename(t: Tag, e: Event): void {
   const value = (e.target as HTMLInputElement).value.trim()
   if (!value || value === t.name) return
-  void window.baoyi.tags.rename(t.id, value).then(async (list) => {
-    tags.value = list
-    await refreshTaxonomy()
-  })
+  void mutateTaxonomy(() => window.baoyi.tags.rename(t.id, value))
 }
 
 async function dropTag(t: Tag): Promise<void> {
   const warn = t.usage_count > 0 ? `\n${t.usage_count} 个条目会失去这个标签。` : ''
   if (!window.confirm(`删除标签「${t.name}」？${warn}`)) return
-  tags.value = await window.baoyi.tags.remove(t.id)
+  await mutateTaxonomy(() => window.baoyi.tags.remove(t.id))
   mergePick.value = mergePick.value.filter((id) => id !== t.id)
   await refreshTaxonomy()
 }
@@ -1017,7 +1061,7 @@ async function doMerge(): Promise<void> {
   const names = tags.value.filter((t) => from.includes(t.id)).map((t) => t.name)
   if (!window.confirm(`把「${names.join('、')}」并入「${target}」？\n所有条目上的引用会一起替换。`)) return
 
-  tags.value = await window.baoyi.tags.merge(from, into)
+  if (!await mutateTaxonomy(() => window.baoyi.tags.merge(from, into))) return
   mergePick.value = []
   mergeInto.value = null
   await refreshTaxonomy()
@@ -1238,13 +1282,13 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   // 文案必须把「游戏也会清」写出来。0.6 那版只说「软件条目」而代码只清 software，
   // 两边是对上的；现在改成清全部品类，文案不跟着改就成了一句谎话
   const shared =
-    `会清掉：全部软件、游戏、影视、图片、项目及内容记录，待识别目录、整理记录、任务和下载记录、图标缓存、游戏封面与影视海报。\n` +
+    `会清掉：全部软件、游戏、影视、图片、资料、项目及内容记录（含摘录与项目日志），待识别目录、整理记录、任务和下载记录、图标缓存、游戏封面与影视海报。\n` +
     `不会删除资源文件，软件、游戏和视频都还在原处。\n` +
     `存档备份也一份不删，备份记录一并留着，不然你就再也找不到那些文件了。`
   const warning =
     mode === 'library'
-      ? `清空识别数据，重新开始识别。\n\n${shared}\n\n保留：API Key、搜索配置、扫描目录、自定义分类、识别日志。\n已经整理过的文件夹会留在整理后的位置，整理记录清掉之后就无法再自动撤销了。\n\n确认继续？`
-      : `恢复出厂：连 API Key、搜索配置、扫描目录、自定义分类、识别日志、整理记录一起清空，并重新走一遍引导流程。\n\n${shared}\n整理记录清掉之后就无法再自动撤销整理了。\n\n确认继续？`
+      ? `清空识别数据，重新开始识别。\n\n${shared}\n\n保留：个人记录及其引用快照、API Key、搜索配置、扫描目录、自定义分类、识别日志。\n已经整理过的文件夹会留在整理后的位置，整理记录清掉之后就无法再自动撤销了。\n\n确认继续？`
+      : `恢复出厂：连个人信息、背包、技能、经历、状态和待办，以及 API Key、搜索配置、扫描目录、自定义分类、识别日志、整理记录一起清空，并重新走一遍引导流程。\n\n${shared}\n整理记录清掉之后就无法再自动撤销整理了。\n\n确认继续？`
   if (!window.confirm(warning)) return
 
   resetting.value = true
@@ -1294,20 +1338,24 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
         返回
       </button>
       <h1>
-        设置
-        <span class="head__module">
+        {{globalScope?'全局设置':'模块设置'}}
+        <span v-if="!globalScope" class="head__module">
           {{
-            {software:'软件',game:'游戏',video:'影视',image:'图片',project:'项目'}[activeModule]
+            {software:'软件',game:'游戏',video:'影视',image:'图片',project:'项目',document:'文库',personal:'个人'}[activeModule]
           }}
         </span>
       </h1>
+      <nav class="scope-nav" aria-label="设置模块">
+        <button :class="{ on: globalScope }" @click="switchScope('global')">全局</button>
+        <button v-for="module in MODULE_TABS" :key="module.key" :class="{ on: !globalScope && activeModule === module.key }" @click="switchScope(module.key)">{{ module.label }}</button>
+      </nav>
     </header>
 
     <div class="layout">
       <nav class="nav no-select">
+        <template v-for="t in TABS" :key="t.id">
+        <div v-if="t.id === 'hentai'" class="nav__divider"><span>里番区</span></div>
         <button
-          v-for="t in TABS"
-          :key="t.id"
           class="nav__item"
           :class="{ on: tab === t.id }"
           @click="go(t.id)"
@@ -1315,11 +1363,20 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
           <component :is="t.icon" :size="15" />
           {{ t.label }}
         </button>
+        </template>
       </nav>
 
       <div class="body">
         <!-- ------------------------- 扫描与识别 ------------------------- -->
-        <ProjectSettings v-if="tab==='project'"/><template v-else-if="tab === 'scan'">
+<ImageSettings v-if="!globalScope && activeModule === 'image'" :section="tab" />
+        <DocumentSettings v-else-if="!globalScope && activeModule === 'document'" :section="tab" />
+        <template v-else-if="tab==='project'"><ModulePreferences module="project"/><ProjectSettings/></template>
+        <PersonalSettings v-else-if="tab==='personal'"/>
+        <VideoTaxonomySettings v-else-if="tab === 'hentai-groups' || tab === 'hentai-tags'" :key="tab" :section="tab === 'hentai-groups' ? 'groups' : 'tags'" :hentai="true" />
+        <template v-else-if="tab === 'organize' && activeModule === 'video'">
+          <section class="panel"><h2>影视整理目录</h2><p class="sec-desc">创建合集时选择移动或复制，文件会放入此目录下以合集名命名的文件夹。</p><div class="row"><span class="hint mono">{{ settings.settings.video_organize_root || '尚未设置' }}</span><button class="btn btn--ghost" @click="pickVideoOrganizeRoot"><FolderOpen :size="14" />选择整理根目录</button></div></section>
+        </template>
+        <template v-else-if="tab === 'scan'">
           <section class="panel">
             <div class="sec-head">
               <h2>扫描目录</h2>
@@ -1333,7 +1390,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               真正的判断交给下一步的 AI 识别。
             </p>
             <p v-else-if="activeModule === 'video'" class="sec-desc">
-              影视扫描先读取本地文件名、NFO 和 HanimeViewer 资料并入库，不调用 Agent，也不消耗模型或搜索额度。
+              影视扫描先读取本地文件名、NFO 和 HanimeViewer 资料，生成预览，确认后才入库；本地扫描不消耗模型或搜索额度。
               资料不足的作品会列入待处理，可选中后使用「Agent 复查所选」。
             </p>
             <p v-else class="sec-desc">
@@ -1371,8 +1428,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             <h2 class="sec-head">视频导入与文件整理</h2>
             <p class="sec-desc">扫描结果先进入导入确认窗口，核对后再录入。关掉窗口后，影视墙上会有「导入待确认」入口，这里也能重新打开。需要联网补充资料时，可以启用 Agent。</p>
             <div class="row"><label class="hint"><input type="checkbox" :checked="videoImport.useAgent.value" @change="videoImport.setAgent(($event.target as HTMLInputElement).checked)" /> 导入时启用 Agent</label><button class="btn btn--ghost" @click="videoImport.show()">打开导入确认</button></div>
-            <p class="sec-desc" style="margin-top: 18px">整理根目录：创建合集时勾选移动或复制，文件将自动放进此目录下以合集名命名的新文件夹。</p>
-            <div class="row"><span class="hint mono" style="overflow-wrap:anywhere">{{ settings.settings.video_organize_root || '尚未设置' }}</span><button class="btn btn--ghost" @click="pickVideoOrganizeRoot"><FolderOpen :size="14" />{{ settings.settings.video_organize_root ? '修改整理根目录' : '设置整理根目录' }}</button></div>
+
           </section>
           <section v-if="activeModule === 'software'" class="panel">
             <h2 class="sec-head">AI 识别</h2>
@@ -1697,9 +1753,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
           </section>
         </template>
 
-        <!-- -------------------------- 搜索服务 -------------------------- -->
         <template v-else-if="tab === 'search'">
-          <FfmpegPanel />
           <section class="panel">
             <div class="sec-head">
               <h2>联网搜索</h2>
@@ -1714,9 +1768,8 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               </label>
             </div>
             <p class="sec-desc">
-              遇到 <span class="mono">AmazTool.exe</span> 这种从文件名和 PE 信息都看不出来是什么的程序时，
-              AI 可以自己上网查一下再下结论。一眼能认出的软件（7-Zip、Everything）不会触发搜索，
-              不用担心额度被白白消耗。
+              AI 识别软件、游戏或影视时，可使用联网搜索查证本地资料中没有的信息。
+              这些配置在支持联网搜索的模块间共用；影视的 TMDB 资料源在“影视刮削”中单独设置。
             </p>
             <p v-if="switchHint" class="hint hint--block">{{ switchHint }}。</p>
 
@@ -1762,13 +1815,14 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </p>
 
             <p class="sec-desc sec-desc--foot">
-              查证顺序是先本地后联网：PE 信息 → 目录里的说明文档 → 联网搜索。
-              本地文档往往比搜索更准 —— 它写的就是这一份程序本身。
-              开关关掉时 agent 那边根本不会注册 <span class="mono">web_search</span> 工具，
-              提示词也会改成「只依据本地信息判断」，不会白花轮数去调一个用不了的工具。
+              优先使用本地信息，必要时才搜索。关闭后，识别过程中不会调用联网搜索服务。
+              调用详情可在顶部“日志”的“识别与调用”中查看。
             </p>
           </section>
 
+        </template>
+
+        <template v-else-if="tab === 'metadata'">
           <!-- TMDB 用于影视资料补全；首轮本地入库不依赖它。 -->
           <section v-if="activeModule === 'video'" class="panel">
             <div class="sec-head">
@@ -1831,22 +1885,28 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </p>
 
             <p class="sec-desc sec-desc--foot">
-              两个域名各填只填域名，不带 <span class="mono">https://</span> 和路径。
+              两个地址都只填域名，不带 <span class="mono">https://</span> 和路径。
               官方的 <span class="mono">api.themoviedb.org</span> 在国内多数网络下连不上，
               填自己的反代能解决；海报下载只允许走这里填的图片域名，别处的地址一概不收。
             </p>
           </section>
 
-          <!--
-            代理。放在 TMDB 之后、日志之前 —— 它服务的是「联网刮削」这一组，
-            而不是某一个站。
-          -->
+        </template>
+
+        <template v-else-if="tab === 'downloads'">
+          <p class="hint">此处为影视共用下载配置，适用于里番和「找视频」的下载任务。</p>
+          <FfmpegPanel />
+          <DownloadCachePanel />
+        </template>
+
+        <template v-else-if="tab === 'network'">
+          <section class="panel"><h2>通用在线来源</h2><p class="sec-desc">找视频的来源浏览与连接配置。</p><OnlineSourceSettings /></section>
           <section v-if="activeModule === 'video'" class="panel">
             <div class="sec-head">
-              <h2>出站代理</h2>
+              <h2>Hanime 专用代理</h2>
             </div>
             <p class="sec-desc">
-              代理只用于 Hanime 刮削链路，改完保存即刻生效，不用重启。
+              用于 Hanime 的页面、资料和视频下载专用会话。保存后新请求使用此配置；正在传输的连接继续完成。
             </p>
 
             <div class="form">
@@ -1902,8 +1962,8 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
                 </label>
               </div>
               <p class="sec-desc">
-                仅覆盖 Hanime 镜像域名，不影响 TMDB、豆瓣或普通图片请求。
-                启动时把域名固定到上次通了的地址（没有就是地址池第一个）；连不上时按顺序换下一个重试，通了就记住。
+                覆盖 Hanime 镜像及已知视频 CDN，不影响 TMDB、豆瓣或普通图片请求。
+                镜像使用上次可用地址并支持失败重试；旧版 HLS 视频通过 CDN 官方别名解析，避免错误 DNS 导致一直停在 0 B。
                 开关对重试即时生效，对启动规则要重启。
               </p>
               <p v-if="hanimeNetwork.resolverRules" class="sec-desc">
@@ -1932,12 +1992,15 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               代理，而「配了没反应」是这里最容易出现的现象
             -->
             <p class="sec-desc sec-desc--foot">
-              目前只有里番（Hanime）那条刮削链路走代理，TMDB 和豆瓣仍是直连。
+              此配置作用于 Hanime 专用会话，不是全局代理。TMDB、豆瓣、AI 服务和其他来源不会随之切换。
               本机回环地址一律不走代理，所以海报那条自定义协议不受影响。
               SOCKS5 和自定义规则由 Chromium 负责最终解析。
             </p>
           </section>
 
+        </template>
+
+        <template v-else-if="tab === 'hentai'">
           <section v-if="activeModule === 'video'" class="panel">
             <div class="sec-head">
               <h2>隐藏里番</h2>
@@ -1948,7 +2011,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </div>
             <p class="sec-desc">
               打开后影视侧边栏不再出现「里番」这一格，海报墙也不铺这些条目，
-              侧栏的观看状态、类型、标签、归档几处计数都不把它们算进去。
+              侧栏的类型、标签、归档几处计数都不把它们算进去。
             </p>
 
             <!--
@@ -1961,12 +2024,12 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               已经打开过的详情页地址也照样能打开。
             </p>
           </section>
-
-          <!-- 额度花在哪了：搜索调用记录挪进了顶部「日志 → 识别与调用」，和识别日志放一起看（实测第四轮） -->
         </template>
 
         <!-- ---------------------------- 外观 ---------------------------- -->
         <template v-else-if="tab === 'appearance'">
+
+
           <section class="panel">
             <h2 class="sec-head">主题</h2>
             <div class="row">
@@ -2030,11 +2093,12 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
         </template>
 
         <!-- ------------------------ 分类与标签 ------------------------ -->
-        <template v-else-if="tab === 'taxonomy'">
-          <section class="panel">
+        <fieldset v-else-if="tab === 'categories' || tab === 'tags'" class="taxonomy-fields" :disabled="taxonomyLoading || taxonomySaving">
+          <p v-if="taxonomyLoading" class="hint" role="status">正在读取当前模块…</p>
+          <section v-if="tab === 'categories'" class="panel">
             <div class="sec-head">
               <h2>分类</h2>
-              <span class="hint">{{ catStore.list.length }} 个</span>
+              <span class="hint">{{ taxonomyCategories.length }} 个</span>
             </div>
             <p class="sec-desc">
               分类按<b>用途</b>分 —— 回答的是「我现在要干这件事，该开哪个」，
@@ -2043,14 +2107,14 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </p>
 
             <ul class="cats">
-              <li v-for="(c, i) in catStore.list" :key="c.id">
+              <li v-for="(c, i) in taxonomyCategories" :key="c.id">
                 <div class="cats__line">
                   <div class="cats__move">
                     <button :disabled="i === 0" title="上移" @click="shiftCategory(c.id, -1)">
                       <ChevronUp :size="13" />
                     </button>
                     <button
-                      :disabled="i === catStore.list.length - 1"
+                      :disabled="i === taxonomyCategories.length - 1"
                       title="下移"
                       @click="shiftCategory(c.id, 1)"
                     >
@@ -2109,12 +2173,14 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
             </p>
           </section>
 
-          <section class="panel">
+          <VideoTaxonomySettings v-if="tab === 'tags' && activeModule === 'video'" :key="taxonomyLoaded" section="tags" :hentai="false" @updated="loadTaxonomy" />
+          <section v-if="tab === 'tags'" class="panel">
             <div class="sec-head">
-              <h2>标签</h2>
+              <h2>{{ activeModule === 'video' ? '识别标签池（影视通用）' : '标签' }}</h2>
               <span class="hint">{{ tags.length }} 个</span>
             </div>
-            <p class="sec-desc">
+            <p v-if="activeModule === 'video'" class="sec-desc">在此预设识别时优先使用的标签。沿用原有共享标签池：改名、合并或删除会更新全部影视作品中的同名通用标签，包含里番。只修改某个区域时，使用上方影视标签或左侧里番标签。</p>
+            <p v-else class="sec-desc">
               标签描述<b>特征</b>（便携、开源、CLI），用途交给分类，两边说同一件事就是浪费。
               只有「自建」和「已确认」的会作为标签池注入 prompt —— AI 自己造的词不进池，
               否则它造一个新词下一轮就当既成事实继续用，标签只会越长越碎。
@@ -2182,58 +2248,13 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               </button>
             </div>
           </section>
-        </template>
+        </fieldset>
 
         <!-- -------------------------- 识别日志 -------------------------- -->
         <template v-else-if="tab === 'logs'">
           <IdentifyLog :resource-kind="activeModule" @retry="retryUnit" />
         </template>
-        <!-- -------------------------- 数据管理 -------------------------- -->
-        <template v-else-if="tab === 'data'">
-          <section class="panel">
-            <h2 class="sec-head">数据位置</h2>
-            <div class="datadir">
-              <span class="datadir__label">存放位置</span>
-              <button class="datadir__path mono truncate" :title="dataDir" @click="openDataDir">
-                {{ dataDir || '读取中…' }}
-              </button>
-              <button class="btn btn--subtle" title="在资源管理器中打开" @click="openDataDir">
-                <FolderOpen :size="14" />
-              </button>
-            </div>
-            <p class="sec-desc">
-              数据库是该目录下的 <span class="mono">baoyi.db</span>，图标缓存在
-              <span class="mono">icons/</span>。同目录里 <span class="mono">Cache</span>、
-              <span class="mono">GPUCache</span> 那些是 Electron 自己的，与抱一的数据无关。
-              所有数据都存在本机，不上传、不同步。
-            </p>
-
-            <div class="row">
-              <button class="btn btn--ghost" @click="exportJson">
-                <Download :size="14" />
-                备份全部资料（JSON）
-              </button>
-              <button class="btn btn--ghost" :disabled="restoringBackup || resetting" @click="restoreJson">
-                <FolderOpen :size="14" />
-                {{ restoringBackup ? '正在恢复…' : '从备份恢复' }}
-              </button>
-              <button class="btn btn--ghost" @click="exportMarkdown">
-                <Download :size="14" />
-                导出软件清单（Markdown）
-              </button>
-            </div>
-            <p class="hint hint--block">
-              JSON 备份全部品类的资料、观看记录和任务记录，不包含资源文件或 API 配置。
-              恢复前会预览并自动备份当前数据库，确认后重启应用。Markdown 为软件清单。
-            </p>
-          </section>
-
-          <LibrarySafetyPanel :refresh-key="backupRefresh" />
-          <!--
-            存档备份目录。放在「数据管理」而不是新开一个游戏 Tab：这一项回答的是
-            「东西存在磁盘哪儿」，和上面的数据位置是同一类问题。游戏详情页里
-            备份不出来时也会指到这里。
-          -->
+        <template v-else-if="tab === 'saves'">
           <section class="panel">
             <h2 class="sec-head">存档备份目录</h2>
             <div class="datadir">
@@ -2295,6 +2316,50 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
               </span>
             </div>
           </section>
+        </template>
+        <!-- -------------------------- 数据管理 -------------------------- -->
+        <template v-else-if="tab === 'data'">
+          <section class="panel">
+            <h2 class="sec-head">数据位置</h2>
+            <div class="datadir">
+              <span class="datadir__label">存放位置</span>
+              <button class="datadir__path mono truncate" :title="dataDir" @click="openDataDir">
+                {{ dataDir || '读取中…' }}
+              </button>
+              <button class="btn btn--subtle" title="在资源管理器中打开" @click="openDataDir">
+                <FolderOpen :size="14" />
+              </button>
+            </div>
+            <p class="sec-desc">
+              数据库是该目录下的 <span class="mono">baoyi.db</span>，图标缓存在
+              <span class="mono">icons/</span>。同目录里 <span class="mono">Cache</span>、
+              <span class="mono">GPUCache</span> 保存网页和渲染缓存，可在下方查看分类占用。
+              所有数据都存在本机，不上传、不同步。
+            </p>
+
+            <div class="row">
+              <button class="btn btn--ghost" @click="exportJson">
+                <Download :size="14" />
+                备份全部资料（JSON）
+              </button>
+              <button class="btn btn--ghost" :disabled="restoringBackup || resetting" @click="restoreJson">
+                <FolderOpen :size="14" />
+                {{ restoringBackup ? '正在恢复…' : '从备份恢复' }}
+              </button>
+              <button class="btn btn--ghost" @click="exportMarkdown">
+                <Download :size="14" />
+                导出软件清单（Markdown）
+              </button>
+            </div>
+            <p class="hint hint--block">
+              JSON 备份全部品类的资料、观看记录和任务记录，不包含资源文件或 API 配置。
+              恢复前会预览并自动备份当前数据库，确认后重启应用。Markdown 为软件清单。
+            </p>
+          </section>
+
+          <StorageUsagePanel :refresh-key="backupRefresh" />
+          <LibrarySafetyPanel :refresh-key="backupRefresh" @storage-changed="backupRefresh++" />
+
 
           <section class="panel">
             <h2 class="sec-head">统计</h2>
@@ -2429,6 +2494,13 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
 </template>
 
 <style scoped>
+.taxonomy-fields{border:0;padding:0;margin:0;min-width:0}
+
+.scope-nav { display:flex; gap:4px; flex-wrap:wrap; margin-left:auto; }
+.scope-nav button { padding:7px 12px; border-radius:var(--radius-btn); color:var(--text-sub); }
+.scope-nav button:hover, .scope-nav .on { background:var(--active-surface); color:var(--accent); }
+.nav__divider { border-top:1px solid var(--divider); margin:14px 0 6px; padding:12px 12px 2px; font-size:12px; color:var(--text-faint); }
+
 .settings {
   height: 100%;
   min-height: 0;
@@ -2441,6 +2513,7 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-wrap: wrap;
   padding: 14px 24px;
   background: var(--bg-main);
   border-bottom: 1px solid var(--divider);

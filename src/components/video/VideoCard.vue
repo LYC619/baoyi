@@ -6,8 +6,13 @@
  * （那边是存档失效，这边是缺集数），而把差异塞进 props 的结果是一个谁都读不懂的
  * 组件。理由和两个侧栏不合并是同一条，见 game/Sidebar.vue 顶上那段。
  */
-import { computed, ref, watch } from 'vue'
-import { Check, Film, Tv } from 'lucide-vue-next'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import VideoHoverPreview from './VideoHoverPreview.vue'
+import { Check, Film, Tv, Play } from 'lucide-vue-next'
+import {useVideoPreview,recentVideoAsset} from '@/composables/useVideoPreview'
+import {useVideoFrames,claimVideoHover,releaseVideoHover} from '@/composables/useVideoFrames'
+import {videoFrameHover} from '@/utils/video-frame-hover'
+import type {VideoPreviewSession} from '@/types/video-preview'
 import type { VideoItem } from '@/types'
 import type { VideoWorkContent } from '@/types/video-workflow'
 import { formatDuration, posterUrl, videoTitle } from '@/utils'
@@ -15,6 +20,34 @@ import { videoDateLabel, videoEpisodeLabel } from '@/utils/video-content'
 import { WATCH_STATUS_LABEL } from '@/stores/video'
 
 const props = withDefaults(defineProps<{ item: VideoItem; episode?: VideoWorkContent; status?: string; recent?: string; selectable?: boolean; selected?: boolean; locked?: boolean; showPublished?: boolean }>(), { status: '', recent: '', selectable: false, selected: false, showPublished: false })
+const preview=useVideoPreview()
+const frames=useVideoFrames(),frameSession=ref<VideoPreviewSession|null>(null),frameMessage=ref(''),frameActive=ref(false),frameClosing=ref(false),position=ref(0),anchor=ref<HTMLElement>()
+let frameGeneration=0
+let leaveTimer:ReturnType<typeof setTimeout>|undefined
+const frameIndex=computed(()=>{const times=frames.state.value?.times||[],target=position.value*(frames.state.value?.duration||0);return Math.max(0,times.reduce((best,time,index)=>Math.abs(time-target)<Math.abs(times[best]-target)?index:best,0))})
+function stopFrames(){frameGeneration++;hover.leave();clearTimeout(leaveTimer);leaveTimer=undefined;frames.stop();const session=frameSession.value;frameSession.value=null;frameActive.value=false;frameClosing.value=false;frameMessage.value='';releaseVideoHover(stopFrames);if(session)void window.baoyi.video.preview.release(session.token).catch(()=>{})}
+async function startFrames(){
+  if(props.selectable||props.item.media_kind&&props.item.media_kind!=='video')return
+  stopFrames()
+  claimVideoHover(stopFrames);const own=++frameGeneration;position.value=0;frameActive.value=true;frameMessage.value='正在查找本地视频…'
+  try{
+    const choices=await window.baoyi.video.preview.choices(props.item.id,props.episode?.id);if(own!==frameGeneration)return
+    const remembered=recentVideoAsset(props.item.id,props.episode?.id),selected=choices.assets.find(asset=>asset.key===remembered)
+    const episode=choices.assets[0]?.episodeId,versions=choices.assets.filter(asset=>asset.episodeId===episode),asset=selected||versions[0]
+    if(!asset){frameMessage.value='没有可用的本地视频';return}
+    const session=await window.baoyi.video.preview.open(props.item.id,asset.key)
+    if(own!==frameGeneration){await window.baoyi.video.preview.release(session.token);return}
+    frameSession.value=session;frameMessage.value='';await frames.start(session.token)
+  }catch(e){if(own===frameGeneration)frameMessage.value=(e as Error).message}
+}
+const hover=videoFrameHover(()=>void startFrames())
+function enter(event:PointerEvent){keepFrames();if(frameActive.value)return;if(!props.selectable&&event.pointerType!=='touch')hover.enter()}
+function keepFrames(){clearTimeout(leaveTimer);frameClosing.value=false}
+function leaveFrames(){hover.leave();clearTimeout(leaveTimer);leaveTimer=setTimeout(()=>{frameClosing.value=true;leaveTimer=setTimeout(stopFrames,120)},140)}
+function previewFromFrame(){const session=frameSession.value,seconds=frames.state.value?.times[frameIndex.value]||0;stopFrames();void preview.open(props.item.id,props.episode?.id,seconds,session?.asset.key)}
+watch(()=>[props.item.id,props.episode?.id,props.selectable],stopFrames)
+onBeforeUnmount(stopFrames)
+function space(event:KeyboardEvent){if(!props.selectable){event.preventDefault();void preview.open(props.item.id,props.episode?.id)}}
 defineEmits<{ (e: 'open', id: string): void; (e: 'poster-error', id: string): void; (e: 'select', id: string, event: MouseEvent): void }>()
 
 const title = computed(() => props.episode ? props.episode.title || props.episode.original_title || videoEpisodeLabel(props.episode, props.item.category === '里番') : videoTitle(props.item))
@@ -58,8 +91,9 @@ const videoCount = computed(() => typeof props.item.available_files === 'number'
 </script>
 
 <template>
-  <button :disabled="selectable && locked" class="card" :class="{ 'card--selected': selectable && selected }" type="button" :title="title" :aria-label="selectable ? '选择作品：' + title : undefined" :aria-pressed="selectable ? selected : undefined" @click="selectable ? $emit('select', item.id, $event) : $emit('open', item.id)">
-    <div class="card__poster" :style="{ '--hue': hue }">
+  <article class="card" :class="{ 'card--selected': selectable && selected }" :title="title" @pointerenter="enter" @pointerleave="leaveFrames" @focusout="!($event.relatedTarget&&($event.currentTarget as HTMLElement).contains($event.relatedTarget as Node))&&leaveFrames()">
+    <button class="card__open" :disabled="selectable && locked" type="button" :aria-label="(selectable?'选择作品：':'打开作品：')+title" :aria-pressed="selectable ? selected : undefined" @click="selectable ? $emit('select', item.id, $event) : $emit('open', item.id)" @keydown.space="space">
+    <div ref="anchor" class="card__poster" :style="{ '--hue': hue }">
       <img v-if="poster && !posterFailed" :src="poster" :alt="title" class="card__img"
         @error="posterFailed = true; !episode && $emit('poster-error', item.id)" />
       <span v-else class="card__initial">{{ initial }}</span>
@@ -91,11 +125,15 @@ const videoCount = computed(() => typeof props.item.available_files === 'number'
       <p v-else-if="recent" class="card__detail">最近新增：{{ recent }}</p>
       </template>
     </div>
-  </button>
+    </button>
+    <button v-if="!selectable&&(!item.media_kind||item.media_kind==='video')" class="card__preview" aria-label="试看视频" title="内嵌试看" @click="previewFromFrame"><Play :size="15"/></button>
+    <VideoHoverPreview v-if="frameActive&&anchor" :anchor="anchor" :closing="frameClosing" :state="frames.state.value" :message="frameMessage||frames.error.value" :label="frameSession?.asset.label||frameSession?.asset.name||''" :position="position" @enter="keepFrames" @leave="leaveFrames" @close="stopFrames" @seek="position=$event" @play="previewFromFrame" @open="stopFrames();$emit('open',item.id)"/>
+  </article>
 </template>
 
 <style scoped>
 .card {
+  position:relative;
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -104,6 +142,8 @@ const videoCount = computed(() => typeof props.item.available_files === 'number'
   width: 100%;
   align-self: start;
 }
+.card__open{display:flex;flex-direction:column;gap:7px;text-align:left;width:100%;min-width:0;padding:0}.card__preview{position:absolute;right:8px;top:8px;display:flex;align-items:center;gap:4px;background:#000a;color:white;border-radius:5px;padding:7px;font-size:12px}
+.card__open:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 
 .card--selected { background: var(--hover-surface); outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 5px; }
 .card__selection { position: absolute; top: 6px; left: 6px; z-index: 1; display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--divider); border-radius: 4px; background: var(--bg-main); color: var(--text-main); }
@@ -159,7 +199,7 @@ const videoCount = computed(() => typeof props.item.available_files === 'number'
 .card__type {
   position: absolute;
   right: 7px;
-  top: 7px;
+  top: 45px;
   display: grid;
   place-items: center;
   width: 20px;

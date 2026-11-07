@@ -7,8 +7,8 @@ import { formatBytes } from '@/utils'
 import type { ImageDownloadJob, ImageDownloadProgress } from '@/types/image'
 
 const downloads = useImageDownloads(), error = ref(''), router = useRouter()
-const props = withDefaults(defineProps<{ filter?: 'attention' | 'all' }>(), { filter: 'all' })
-const shownJobs = computed(() => downloads.jobs.value.filter(job => props.filter === 'all' || job.status !== 'success'))
+const props = withDefaults(defineProps<{ filter?: 'attention' | 'all'; jobId?: string }>(), { filter: 'all' })
+const shownJobs = computed(() => downloads.jobs.value.filter(job => (!props.jobId||job.id===props.jobId)&&(props.filter === 'all' || job.status !== 'success')))
 const busy = ref(new Set<string>()), optionsBusy = ref(false)
 const labels: Record<ImageDownloadJob['status'], string> = { queued: '排队中', running: '下载中', paused: '已暂停', success: '已入库', failed: '失败', cancelled: '已停止', interrupted: '中断待恢复' }
 const phases: Record<ImageDownloadProgress['phase'], string> = {
@@ -51,7 +51,7 @@ async function action(job: ImageDownloadJob, type: 'retry' | 'cancel' | 'dismiss
 
 <template>
   <section v-if="shownJobs.length" class="image-download-list">
-    <div class="download-controls"><h3>漫画下载</h3><label>同时下载作品 <input type="number" min="1" max="4" step="1" aria-label="同时下载漫画数" :disabled="optionsBusy" :value="downloads.options.value.jobConcurrency || 3" @change="changeJobConcurrency" /></label><label>每部图片并发 <input type="number" min="1" max="3" step="1" aria-label="图片下载并发" :disabled="optionsBusy" :value="downloads.options.value.concurrency" @change="changeConcurrency" /></label></div>
+    <div v-if="!jobId" class="download-controls"><h3>漫画下载</h3><label>同时下载作品 <input type="number" min="1" max="4" step="1" aria-label="同时下载漫画数" :disabled="optionsBusy" :value="downloads.options.value.jobConcurrency || 3" @change="changeJobConcurrency" /></label><label>每部图片并发 <input type="number" min="1" max="3" step="1" aria-label="图片下载并发" :disabled="optionsBusy" :value="downloads.options.value.concurrency" @change="changeConcurrency" /></label></div>
     <p v-if="error" role="alert" class="download-error">{{ error }}</p>
     <article v-for="job in shownJobs" :key="job.id" :data-job-id="job.id">
       <header class="download-heading">

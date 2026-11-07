@@ -11,6 +11,7 @@ import type {
 import { useToast } from '@/composables/useToast'
 import { createLatestGuard, errorMessage, plain } from '@/utils'
 import { useSettingsStore } from './settings'
+import { isMobilePackage } from '@/utils/software-package'
 
 export type Selection = { kind: 'group' | 'category' | 'tag'; value: string }
 
@@ -127,7 +128,7 @@ export const useSoftwareStore = defineStore('software', () => {
     const ok = await window.baoyi.software.launch(id, launcherPath)
     if (ok) {
       const item = items.value.find((x) => x.id === id)
-      if (item) {
+      if (item && !isMobilePackage(item.exe_path)) {
         item.last_used_at = Date.now()
         item.use_count += 1
       }

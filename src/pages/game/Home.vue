@@ -9,7 +9,7 @@ import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
  */
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { FilePlus, FolderPlus, Image, ListChecks, Search, Settings, X } from 'lucide-vue-next'
+import { FilePlus, FolderPlus, Image, ListChecks, Search, X } from 'lucide-vue-next'
 import GameCard from '@/components/game/GameCard.vue'
 import LibraryBulkPanel from '@/components/library/LibraryBulkPanel.vue'
 import { useLibrarySelection } from '@/composables/useLibrarySelection'
@@ -69,6 +69,7 @@ let focusedAt=0
 function refreshOnFocus(){if(Date.now()-focusedAt>2000){focusedAt=Date.now();void store.load()}}
 
 onMounted(async () => {
+  if (store.selection.kind === 'save') store.select({ kind: 'group', value: 'all' })
   window.addEventListener('focus',refreshOnFocus)
   // 在封面墙上也订阅：用户可能从详情页启动完就退回来，等游戏关掉时人在这一屏。
   // 不订阅的话卡片上的时长要等到下一次开库才更新
@@ -300,9 +301,7 @@ const emptyHint = computed(() => {
             {{ coversBusy ? '补图中' : `补齐封面（${coverScope.length}）` }}
           </button>
           </LibraryToolbarMenu>
-          <button class="btn btn--subtle" title="设置" @click="router.push({ name: 'settings' })">
-            <Settings :size="16" />
-          </button>
+
         </div>
       </header>
 

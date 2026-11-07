@@ -11,7 +11,6 @@ import {
   List,
   Plus,
   Rows3,
-  Settings,
   Sparkles,
   Timer
 } from 'lucide-vue-next'
@@ -299,9 +298,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
             </Transition>
           </div>
 
-          <button class="btn btn--subtle" title="设置" @click="router.push({ name: 'settings' })">
-            <Settings :size="16" />
-          </button>
+
         </div>
       </header>
 

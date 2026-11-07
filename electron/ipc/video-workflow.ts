@@ -1,11 +1,12 @@
-import { app, dialog, nativeImage, net, shell, session, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { app, dialog, nativeImage, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { getDb, getSettings, patchSettings, postersDir } from '../services/database.ts'
 import { createVideoWorkflow } from '../kinds/video/download/workflow.ts'
 import { loadVideoSources, loadVideoWork } from '../kinds/video/download/sources.ts'
-import { createChromiumDownloadFetch } from '../kinds/video/download/chromium-fetch.ts'
+import { transferHanimeMedia } from '../services/hanime-download.ts'
+import { videoTransferOptions } from '../kinds/video/download/options.ts'
 import { transferVideo } from '../kinds/video/download/transfer.ts'
 import { fetchHanimeResource } from '../kinds/video/hentai/hanime.ts'
 import { isHanimeHost } from '../services/hanime-network-rules.ts'
@@ -22,7 +23,8 @@ import { resolveMissav } from '../kinds/video/discovery/missav.ts'
 import { downloadHls } from '../kinds/video/download/hls.ts'
 import { locateFfmpeg, validateFfmpeg } from '../kinds/video/download/ffmpeg.ts'
 import { registerDiscoveryIpc } from './video-discovery.ts'
-import { DISCOVERY_PARTITION } from '../services/discovery-browser.ts'
+import { onlineFetch } from '../services/online-network.ts'
+import { inspectDownloadCaches, clearDownloadCaches } from '../kinds/video/download/cache-management.ts'
 
 /** 装成一个普通 Chrome。图床常带 Cloudflare 防盗链：缺 UA / Referer 直接 403。 */
 const POSTER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
@@ -60,7 +62,8 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     db: getDb(), downloadsDirectory: () => getSettings().video_scan_dirs[0] || app.getPath('videos'),
     libraryRoots: () => getSettings().video_scan_dirs,
     resolveWork: (code, options) => loadVideoWork(code, options), resolveSources: (code, options) => loadVideoSources(code, undefined, options),
-    transfer: options => transferVideo({ ...options, fetch: createChromiumDownloadFetch(opts => net.request(opts), session.fromPartition('persist:hanime-network')) }),
+    transfer: transferHanimeMedia,
+    concurrency:()=>videoTransferOptions(getSettings()).concurrency,
     // 下载时作品目录已经定下来了，封面直接写进 <目录>/.baoyi/artwork（和清单同一套约定）；
     // 只有还没目录的极少情况才暂放缓存目录（A2）
     savePoster: async (url, directory, signal, referer) => {
@@ -68,7 +71,7 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
       if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) throw new Error('封面地址无效')
       const timeout = AbortSignal.timeout(20000)
       const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
-      const response = isHanimeHost(target.hostname) ? await fetchHanimeResource(url, { signal: requestSignal }) : await net.fetch(url, { signal: requestSignal, headers: posterRequestHeaders(target, referer) })
+      const response = isHanimeHost(target.hostname) ? await fetchHanimeResource(url, { signal: requestSignal }) : await onlineFetch(url, { signal: requestSignal, headers: posterRequestHeaders(target, referer) })
       if (!response.ok || !response.body) throw new Error('封面请求失败：HTTP ' + response.status)
       const chunks: Uint8Array[] = []; let size = 0
       const reader = response.body.getReader()
@@ -89,13 +92,13 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   }
   const workflow = createVideoWorkflow(workflowOptions)
   const catalogue = createDiscoveryCatalogue(getDb())
-  const discoveryFetch: typeof globalThis.fetch = (url, init) => session.fromPartition(DISCOVERY_PARTITION).fetch(url instanceof URL ? url.href : url, init)
+  const discoveryFetch = onlineFetch
   const discovery = createDiscoveryWorkflow({ ...workflowOptions, catalogue,
     transfer: options => transferVideo({ ...options, fetch: discoveryFetch }),
     resolvePlayback: (code, signal) => resolveMissav(code, discoveryFetch, signal),
     hlsTransfer: ({ url, destination, headers, signal, onProgress }) => {
       const ffmpeg = locateFfmpeg(getSettings().ffmpeg_path, getSettings().software_scan_dirs)
-      if (!ffmpeg) throw new Error('没有找到 FFmpeg。请到设置的「HLS 下载工具」重新检测或选择 ffmpeg.exe。PotPlayer 可播放 m3u8，但下载为 MP4 仍需要 FFmpeg。')
+      if (!ffmpeg) throw new Error('没有找到 FFmpeg。请到设置 → 下载与缓存重新检测或选择 ffmpeg.exe。PotPlayer 可播放 m3u8，但下载为 MP4 仍需要 FFmpeg。')
       return downloadHls({ url, destination, headers, signal, fetch: discoveryFetch, ffmpeg, onProgress })
     } })
   registerDiscoveryIpc(getWindow, ipcMain, catalogue, getDb(), workflowOptions.savePoster!)
@@ -109,6 +112,29 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   })
   ipcMain.handle('video-workflow:enqueue', (event, request: VideoEnqueueRequest) => { assertMain(event); return workerFor(request?.draftId).enqueue(request) })
   ipcMain.handle('video-workflow:list', event => { assertMain(event); return allJobs().filter(visible) })
+  ipcMain.handle('video-workflow:caches', event => {
+    assertMain(event)
+    const jobs = allJobs(), visibleIds = new Set(jobs.filter(visible).map(job => job.id))
+    return inspectDownloadCaches(jobs).filter(cache => visibleIds.has(cache.jobId))
+  })
+  ipcMain.handle('video-workflow:clear-cache', async (event, id: string) => {
+    assertMain(event)
+    const job = allJobs().find(job => job.id === id && visible(job))
+    if (!job) throw new Error('下载任务不存在或当前不可见')
+    const before = inspectDownloadCaches(allJobs()).find(cache => cache.jobId === id)
+    if (!before?.canClear) throw new Error(before?.reason || '没有可清理的缓存')
+    const choice = await dialog.showMessageBox(getWindow()!, { type: 'warning', title: '清理下载缓存',
+      message: `清理「${job.title}」的 ${(before.bytes / 1048576).toFixed(1)} MB 下载缓存？`,
+      detail: '完整视频和资料库条目会保留。清理后，未完成的内容需要重新下载。\n\n' + before.directories.join('\n'),
+      buttons: ['保留缓存', '清理缓存'], defaultId: 0, cancelId: 0, noLink: true })
+    if (choice.response !== 1) return { cleared: false, bytes: 0 }
+    assertMain(event)
+    const jobs = allJobs(), current = jobs.find(job => job.id === id && visible(job))
+    if (!current) throw new Error('下载任务状态已变化，请刷新后重试')
+    const after = inspectDownloadCaches(jobs).find(cache => cache.jobId === id)
+    if (!after?.canClear || JSON.stringify(after.directories) !== JSON.stringify(before.directories) || after.bytes !== before.bytes) throw new Error('缓存状态已变化，请刷新后重新确认')
+    return { cleared: true, bytes: clearDownloadCaches(current, jobs) }
+  })
   ipcMain.handle('video-workflow:retry', (event, id: string, stage: VideoJobRetry) => { assertMain(event); return workerFor(id).retry(id, stage) })
   ipcMain.handle('video-workflow:cancel', (event, id: string) => { assertMain(event); return workerFor(id).cancel(id) })
   ipcMain.handle('video-workflow:dismiss', (event, id: string) => { assertMain(event); return workerFor(id).dismiss(id) })

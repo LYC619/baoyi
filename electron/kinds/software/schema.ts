@@ -94,7 +94,9 @@ export const SOFTWARE_META_SQL = `
     -- 挪位置的风险：safe / risky / unknown
     move_risk TEXT DEFAULT 'unknown',
     -- 整理成 junction 后链接的真实指向。空串 = 实体目录
-    link_target TEXT DEFAULT ''
+    link_target TEXT DEFAULT '',
+    -- 分类已经确定，包含用户明确选择的“其他”。
+    category_locked INTEGER NOT NULL DEFAULT 0
   );
 `
 
@@ -197,6 +199,9 @@ export function splitIntoResource(d: SqlDb): void {
  * 否则 splitIntoResource 会去 SELECT 一个不存在的列。
  */
 export function migrateSoftware(d: SqlDb, _from: number): void {
+  if (!columnsOf(d, 'software_meta').has('category_locked')) {
+    d.exec('ALTER TABLE software_meta ADD COLUMN category_locked INTEGER NOT NULL DEFAULT 0')
+  }
   if (objectType(d, 'software') === 'table') {
     const existing = columnsOf(d, 'software')
     const added: Array<[string, string]> = [

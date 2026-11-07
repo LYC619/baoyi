@@ -1,9 +1,9 @@
-export type ImageType = 'photo' | 'comic'
+export type ImageType = 'photo' | 'comic' | 'misc'
 export type ImageReadMode = 'single' | 'double' | 'scroll'
 export interface ImagePreferences { mode: ImageReadMode; direction: 'ltr' | 'rtl'; fit: 'screen' | 'width' | 'original'; coverSingle?: boolean; zoom?: number }
 export interface ImageReaderPreferences { preferences: Required<ImagePreferences>; customized: boolean }
 export interface ImageBookmark { id: string; resourceId: string; pageId: string; ordinal: number; offset: number; label: string; missing: boolean; createdAt: number }
-export interface ImageGroup { id: string; name: string; sortOrder: number; hidden: boolean }
+export interface ImageGroup { id: string; name: string; type: ImageType; directory: string; sortOrder: number; hidden: boolean }
 export interface ImageCollection { id:string; name:string; members:string[] }
 export interface ImageMoveResult { moved:number; paths:string[]; warnings:string[] }
 export interface ImagePage { id: string; resourceId: string; chapterId: string | null; ordinal: number; size: number; missing: boolean }
@@ -20,6 +20,7 @@ export interface ImageAudit {
 export interface ImageChapter { id: string; title: string; ordinal: number; pageCount: number; sourceId: string }
 export interface ImageProgress { pageId: string; chapterId: string | null; ordinal: number; offset: number; updatedAt: number }
 export interface ImageItem {
+  authors: string[];
   collectionId?: string; collectionName?: string; collectionOrder?: number;
   id: string; type: ImageType; path: string; sourceDir: string; name: string; description: string; tags: string[]; groupId: string | null;
   favorite: boolean; read: boolean; publication: 'unknown' | 'ongoing' | 'completed'; coverPageId: string; pageCount: number;
@@ -32,7 +33,7 @@ export interface ScannedImagePage { file: string; entry: string; size: number }
 export interface ScannedImageChapter { key: string; title: string; sourceId?: string; pages: ScannedImagePage[] }
 export interface ScannedImage {
   path: string; type: ImageType; name: string; sourceDir: string; chapters: ScannedImageChapter[]; warnings: string[];
-  source?: string; sourceId?: string; description?: string; tags?: string[]; publication?: ImageItem['publication'];
+  source?: string; sourceId?: string; description?: string; tags?: string[]; authors?:string[]; publication?: ImageItem['publication'];
 }
 export interface ImageImportPreview { token: string; items: Array<{ index: number; path: string; name: string; pages: number; chapters: number; warnings: string[] }> }
 export type ImageSourceRank = 'H24' | 'D7' | 'D30'
@@ -70,6 +71,8 @@ export interface ImageDownloadJob {
   repairPages?: Record<string, string[]>;
 }
 export interface ImageApi {
+  tagCounts(): Promise<Array<{ name: string; count: number }>>;
+  renameTag(from: string, to: string | null): Promise<number>;
   list(query?: ImageQuery): Promise<ImageItem[]>; get(id: string): Promise<ImageItem | null>;
   pages(id: string, chapterId?: string): Promise<ImagePage[]>;
   pageInfo(pageId: string): Promise<ImagePageInfo>; audit(id: string): Promise<ImageAudit>;
@@ -79,11 +82,12 @@ export interface ImageApi {
   saveChapter(id: string, chapterId: string, title: string, move: number): Promise<void>;
   update(id: string, patch: ImagePatch): Promise<ImageItem>; remove(id: string, deleteFiles?:boolean): Promise<boolean | void>;
   collections():Promise<ImageCollection[]>; saveCollection(name:string,members:string[],id?:string):Promise<ImageCollection>; removeCollection(id:string):Promise<void>;
-  move(ids:string[],byCategory?:boolean):Promise<ImageMoveResult|null>;
+  move(ids:string[],byCategory?:boolean,chooseTarget?:boolean):Promise<ImageMoveResult|null>;
+  gallery(ids:string[],offset:number,limit:number):Promise<{ pages: Array<ImagePage & { name:string; folder:string }>; total:number }>;
   bulkUpdate(ids: string[], patch: ImageBulkPatch): Promise<number>;
   groups(): Promise<ImageGroup[]>; saveGroup(group: Partial<ImageGroup> & { name: string }): Promise<ImageGroup>; removeGroup(id: string): Promise<void>;
   prepareImport(type: ImageType, multiple: boolean, archive: boolean): Promise<ImageImportPreview | null>;
-  confirmImport(token: string, selected: Array<{ index: number; name: string }>): Promise<{ imported: number; errors: string[] }>;
+  confirmImport(token: string, selected: Array<{ index: number; name: string }>, folderCategories?:boolean): Promise<{ imported: number; errors: string[] }>;
   rescan(id: string): Promise<ImageItem>; relocate(id: string): Promise<ImageItem | null>; reveal(id: string): Promise<boolean>;
   saveProgress(id: string, pageId: string, offset: number): Promise<void>;
   preferences(value?: ImagePreferences): Promise<ImagePreferences>;
@@ -98,8 +102,10 @@ export interface ImageApi {
   sourceCover(url: string): Promise<string>;
   sourceDetail(id: string): Promise<{ work: ImageSourceWork; chapters: ImageSourceChapter[] }>;
   sourceOwned(workIds: string[]): Promise<ImageSourceOwned>;
-  download(workId: string, chapters: string[], groupId: string | null): Promise<ImageDownloadJob | null>;
-  downloadBatch(workIds: string[], groupId: string | null): Promise<ImageBatchDownloadResult | null>;
+  downloadTarget(provider:'pica'|'jm',workId?:string,groupId?:string|null):Promise<{root:string;directory:string;groupId:string|null;locked:boolean}>;
+  chooseDownloadRoot(provider:'pica'|'jm',current?:string):Promise<string|null>;
+  download(workId: string, chapters: string[], groupId: string | null,root?:string): Promise<ImageDownloadJob | null>;
+  downloadBatch(workIds: string[], groupId: string | null,root?:string): Promise<ImageBatchDownloadResult | null>;
   jobs(): Promise<ImageDownloadJob[]>; retryJob(id: string): Promise<void>; cancelJob(id: string): Promise<void>; dismissJob(id: string): Promise<void>;
   pauseJob(id: string): Promise<void>; resumeJob(id: string): Promise<void>;
   moveJob(id: string, direction: 'up' | 'down'): Promise<void>;

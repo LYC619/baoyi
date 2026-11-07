@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { getSoftware, recordLaunch } from '../../services/database'
 import type { SoftwareItem } from '../../../src/types'
+import { isMobilePackage } from '../../../src/utils/software-package'
 
 /**
  * 把渲染进程传来的启动端路径核对回条目自己的 launchers 列表。
@@ -29,6 +30,12 @@ export async function launchSoftware(id: string, launcherPath?: string): Promise
 
   const target = resolveTarget(item, launcherPath)
   if (!fs.existsSync(target)) return false
+
+  // Windows 无法直接执行手机安装包，定位文件供传输或交给用户已有的安装工具。
+  if (isMobilePackage(target)) {
+    shell.showItemInFolder(target)
+    return true
+  }
 
   try {
     const child = spawn(target, [], {

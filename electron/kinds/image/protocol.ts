@@ -1,4 +1,5 @@
 import { nativeImage } from 'electron'
+import { createHash } from 'node:crypto'
 import { getDb } from '../../services/database.ts'
 import { readImagePage } from './files.ts'
 
@@ -14,7 +15,7 @@ export async function imageResponse(url: URL): Promise<Response> {
     // Always authorize before consulting the thumbnail cache, including after a group was hidden.
     const { data, mime } = await readImagePage(getDb(), id)
     if (url.searchParams.get('thumb') !== '1') return new Response(new Uint8Array(data), { headers: { 'Content-Type': mime, 'Cache-Control':'no-store' } })
-    const key = id + ':' + data.length + ':' + data.subarray(0,64).toString('hex')
+    const key = id + ':' + createHash('sha256').update(data).digest('hex')
     let image = thumbnails.get(key)
     if (!image) {
       const decoded = nativeImage.createFromBuffer(data)

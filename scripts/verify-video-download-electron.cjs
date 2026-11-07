@@ -17,7 +17,9 @@ let passed = 0
 const seen = []
 const server = http.createServer((req, res) => {
   seen.push({ url: req.url, referer: req.headers.referer, cookie: req.headers.cookie })
-  if (req.url === '/redirect') {
+  if (req.url === '/etag' && req.headers['if-none-match'] === '"fixture"') {
+    res.writeHead(304, { etag: '"fixture"' }); res.end()
+  } else if (req.url === '/redirect') {
     res.writeHead(302, { location: '/video', 'set-cookie': 'fixture=redirect; Path=/' })
     res.end()
   } else {
@@ -54,6 +56,10 @@ app.whenReady().then(async () => {
   await test('image requests omit existing session cookies', async () => {
     assert.match(await (await fetch(base + '/video', { ...init({}), credentials: 'omit' })).text(), /ftyp/)
     assert.equal(seen.at(-1).cookie, undefined)
+  })
+  await test('conditional fragment validation returns a bodyless 304 with its strong ETag', async () => {
+    const response = await fetch(base + '/etag', init({ 'If-None-Match': '"fixture"' }))
+    assert.equal(response.status, 304); assert.equal(response.body, null); assert.equal(response.headers.get('etag'), '"fixture"')
   })
   await test('session configured proxy carries download request', async () => {
     await ses.setProxy({ mode: 'fixed_servers', proxyRules: base, proxyBypassRules: '<-loopback>' })

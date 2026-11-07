@@ -43,6 +43,7 @@ import {
   HANIME_CLOUDFLARE_IPS
 } from './hanime-network-rules.ts'
 import { fetchViaAddress } from './hanime-direct.ts'
+import { createBudgetedFetch, createDownloadLimiter } from '../kinds/video/download/limiter.ts'
 
 export { normalizeProxyRules }
 
@@ -127,8 +128,18 @@ export async function applyProxy(raw: string): Promise<string> {
  * Hanime 的 Cloudflare 验证结果保存在这个专用 session 里，所以必须让请求带上
  * session cookie；该 session 只服务 Hanime，不会把 cookie 扩散到其他站点。
  */
-const netFetch: typeof globalThis.fetch = (input, init) =>
-  getHanimeSession().fetch(input as any, { ...(init as any), credentials: 'include' }) as any
+const pageRequests=createDownloadLimiter(()=>16)
+let recovering:Promise<void>|null=null
+export async function waitForHanimeNetworkRecovery():Promise<void>{if(recovering)await recovering}
+/** Do not close session sockets while a page, verification or site window owns them. */
+export async function recoverHanimeConnections():Promise<boolean>{
+  if(recovering){await recovering;return true}
+  if(pageRequests.active || challenge || BrowserWindow.getAllWindows().some(win=>!win.isDestroyed() && win.webContents.session===getHanimeSession()))return false
+  recovering=(async()=>{await getHanimeSession().closeAllConnections();await getHanimeSession().clearHostResolverCache()})()
+  try{await recovering;return true}finally{recovering=null}
+}
+const trackedPageFetch=createBudgetedFetch((input,init)=>getHanimeSession().fetch(input as any,{...(init as any),credentials:'include'}) as any,pageRequests)
+const netFetch:typeof globalThis.fetch=async(input,init)=>{await waitForHanimeNetworkRecovery();return trackedPageFetch(input,init)}
 
 function urlOf(input: Parameters<typeof globalThis.fetch>[0]): URL | null {
   try { return new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url) } catch { return null }

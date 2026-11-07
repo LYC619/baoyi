@@ -1,0 +1,158 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+import { _electron } from 'playwright'
+import { expect } from 'playwright/test'
+import { initSchema } from '../electron/services/schema.ts'
+import { KINDS } from '../electron/kinds/index.ts'
+import { DocumentLibrary } from '../electron/workspace/documents.ts'
+import { outlinePdf } from './helpers/pdf-fixture.ts'
+
+const output = path.resolve(process.argv[3] || 'output/library-review')
+await fs.mkdir(output, { recursive: true })
+const profile = await fs.mkdtemp(path.join(output, 'ui-'))
+const db = new DatabaseSync(path.join(profile, 'baoyi.db'))
+initSchema(db, KINDS)
+for (const [key, value] of Object.entries({ onboarded: true, theme: 'light', hanime_builtin_hosts: false }))
+  db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, JSON.stringify(value))
+const docs = new DocumentLibrary(db), ids: string[] = []
+const group = docs.saveCustomGroup({ submodule: 'reading', name: '研究分组' })
+for (let i = 0; i < 8; i++) {
+  const file = path.join(profile, `资料${i}.md`)
+  await fs.writeFile(file, '# 格式标题\n\n**重点内容**\n\n- 列表条目\n\n第二段正文。')
+  const item = await docs.register(file, i === 7 ? undefined : i === 6 ? 'certificate' : i === 5 ? 'paper' : 'book', false, i === 7 ? null : undefined)
+  docs.update(item.id, { tags: i < 3 ? ['研究', '知识'] : [], ...(i === 0 ? { customGroupId: group.id } : {}) })
+  if (i === 1) docs.savePosition(item.id, { page: 2, offset: 0.1 }, 5)
+  ids.push(item.id)
+}
+const large = path.join(profile, '大PDF.pdf')
+const pdf = Buffer.from(outlinePdf(5, true, 'Large range fixture'))
+// Insert a large whitespace gap before xref and update its absolute offset.
+const xref = pdf.lastIndexOf('\nxref\n') + 1, newXref = xref + 150 * 1024 * 1024
+const tail = pdf.subarray(xref).toString().replace(/startxref\n\d+/, 'startxref\n' + newXref)
+const file = await fs.open(large, 'w')
+await file.write(pdf.subarray(0, xref), 0, xref, 0)
+await file.truncate(newXref)
+await file.write(tail, newXref, 'utf8'); await file.close()
+const largeId = (await docs.register(large, 'book')).id
+const incoming = path.join(profile, 'incoming')
+await fs.mkdir(incoming)
+const importFiles = [path.join(incoming, '甲.pdf'), path.join(incoming, '乙.pdf')]
+for (const input of importFiles) await fs.writeFile(input, outlinePdf(1))
+db.close()
+const env = Object.fromEntries(Object.entries(process.env).filter((e): e is [string,string] => e[1] !== undefined))
+delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL
+const packagedExe = process.argv[2]
+const app = await _electron.launch({ executablePath: path.resolve(packagedExe || 'node_modules/electron/dist/electron.exe'), args: [...(packagedExe ? [] : [path.resolve('.')]), '--user-data-dir=' + profile, '--disable-gpu'], env })
+const page = await app.firstWindow(), errors: string[] = []
+page.on('pageerror', e => errors.push(e.message))
+page.setDefaultTimeout(15000)
+try {
+  assert.equal(await app.evaluate(({ app }) => app.getPath('userData')), profile)
+  if (packagedExe) {
+    const pkg = JSON.parse(await fs.readFile(path.resolve('package.json'), 'utf8'))
+    assert.deepEqual(await app.evaluate(({ app }) => ({ version: app.getVersion(), packaged: app.isPackaged })), { version: pkg.version, packaged: true })
+  }
+  await app.evaluate(({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows()[0]; win.unmaximize(); win.setMinimumSize(600, 600); win.setSize(1280, 900) })
+  await page.locator('.app__view').waitFor()
+  await page.evaluate(() => { location.hash = '/document' })
+  await page.locator('.document-home').waitFor()
+  // Reading defaults to a shelf; the pending item must not leak into the library.
+  await expect(page.locator('.document-grid').first()).toBeVisible()
+  await expect(page.locator('.document-row').filter({ hasText: '资料7' })).toHaveCount(0)
+  await page.getByRole('button', { name: '列表视图', exact: true }).click()
+  await expect(page.locator('.document-grid')).toHaveCount(0)
+  await page.getByRole('button', { name: '网格视图', exact: true }).click()
+  await expect(page.locator('.document-grid').first()).toBeVisible()
+  await expect(page.locator('.ws-sidebar h2', { hasText: '阅读状态' })).toHaveCount(0)
+  await page.getByRole('button', { name: '状态：在读', exact: true }).click()
+  await expect(page.locator('.document-row')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: /最近在读/ })).toHaveCount(0)
+  await page.getByRole('button', { name: /^全部标签/ }).click()
+  await page.getByRole('button', { name: '显示选项', exact: true }).click()
+  await page.getByLabel('资料分组').selectOption('tag')
+  await expect(page.locator('.document-section-heading', { hasText: '研究' })).toBeVisible()
+  await expect(page.locator('.document-section-heading', { hasText: '无标签' })).toBeVisible()
+  await page.getByLabel('资料分组').selectOption('custom')
+  await expect(page.locator('.document-section-heading', { hasText: '研究分组' })).toBeVisible()
+  await page.getByLabel('卡片大小').fill('230')
+  await page.getByRole('button', { name: '显示选项', exact: true }).click()
+  await page.reload(); await page.locator('.document-home').waitFor()
+  await expect(page.locator('.document-section-heading', { hasText: '研究分组' })).toBeVisible()
+  await page.locator('.document-subnav').getByRole('button', { name: '资料', exact: true }).click()
+  await expect(page.locator('.document-grid')).toHaveCount(0)
+  await page.locator('.document-subnav').getByRole('button', { name: '阅读', exact: true }).click()
+  await expect(page.locator('.document-grid').first()).toBeVisible()
+  await page.getByRole('button', { name: /待归类/ }).click()
+  await expect(page.locator('.document-row')).toHaveCount(1)
+  await expect(page.locator('.document-row')).toContainText('资料7')
+  await page.getByRole('button', { name: /^全部\d*/ }).first().click()
+  for (const width of [1280, 960, 800]) {
+    await app.evaluate(({ BrowserWindow }, w) => { const win = BrowserWindow.getAllWindows()[0]; win.setMinimumSize(600, 600); win.setSize(w, 900) }, width)
+    await page.waitForFunction(w => innerWidth <= w && innerWidth > w - 25, width)
+    assert.equal(await page.locator('.ws-main').evaluate(e => e.scrollWidth <= e.clientWidth + 2), true, `toolbar overflow at ${width}`)
+    await page.getByRole('button', { name: '导入资料', exact: true }).click()
+    await expect(page.getByRole('button', { name: '扫描文件夹', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '导入资料', exact: true }).click()
+    await page.screenshot({ path: path.join(output, `library-${width}.png`) })
+  }
+  await page.evaluate(id => { location.hash = '/document/' + id }, ids[0])
+  await expect(page.locator('.document-prose h1')).toHaveText('格式标题')
+  await expect(page.locator('.document-prose strong')).toHaveText('重点内容')
+  await expect(page.locator('.novel-prose')).toHaveCount(0)
+  await page.evaluate(() => { location.hash = '/document' })
+  await page.locator('.document-row').filter({ hasText: '资料0' }).first().click()
+  await page.getByRole('complementary', { name: '资料详情' }).getByRole('button', { name: '收藏', exact: true }).click()
+  await page.getByLabel('关闭资料详情').click()
+  await page.locator('.ws-sidebar').getByRole('button', { name: /^收藏/ }).click()
+  await expect(page.locator('.document-row')).toHaveCount(1)
+  await page.locator('.sidebar-section').getByRole('button', { name: /^全部/ }).click()
+  await page.locator('.sidebar-list').getByRole('button', { name: /^书籍/ }).click()
+  await page.getByLabel('搜索资料').fill('资料6')
+  await expect(page.locator('.document-row')).toHaveCount(0)
+  await page.locator('.scope-toggle').click()
+  await expect(page.locator('.document-row')).toHaveCount(1)
+  await expect(page.locator('.document-row')).toContainText('资料6')
+  await page.locator('.sidebar-section').getByRole('button', { name: /^全部/ }).click()
+  await app.evaluate(({ dialog }, files) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files }) }, importFiles)
+  await page.getByRole('button', { name: '导入资料', exact: true }).click()
+  await page.getByRole('button', { name: '选择文件', exact: true }).click()
+  await expect(page.getByLabel('归类 甲')).toHaveValue('')
+  await page.getByLabel('归类 甲').selectOption('book')
+  await expect(page.getByLabel('归类 乙')).toHaveValue('')
+  await page.getByRole('button', { name: '导入所选 2 份资料', exact: true }).click()
+  await expect(page.getByLabel('归类 甲')).toHaveCount(0)
+  const imported = await page.evaluate(async () => (window as any).baoyi.workspace.documents.list())
+  assert.equal(imported.find((i: any) => i.name === '甲').submodule, 'reading')
+  assert.equal(imported.find((i: any) => i.name === '乙').submodule, null)
+  await page.locator('.document-row').filter({ hasText: '资料0' }).first().click()
+  await page.getByRole('complementary', { name: '资料详情' }).getByRole('button', { name: '编辑', exact: true }).click()
+  await page.getByLabel('自定义分组', { exact: true }).selectOption('')
+  await page.getByRole('button', { name: '保存资料', exact: true }).click()
+  await expect(page.locator('#document-edit')).toHaveCount(0)
+  const cleared = await page.evaluate(id => (window as any).baoyi.workspace.documents.get(id), ids[0])
+  await page.getByLabel('关闭资料详情').click()
+  await page.getByRole('button', { name: /待归类/ }).click()
+  await page.locator('.document-row').filter({ hasText: '资料7' }).first().click()
+  await page.getByRole('complementary', { name: '资料详情' }).getByRole('button', { name: '编辑', exact: true }).click()
+  await page.getByLabel('备注', { exact: true }).fill('仅补充备注，稍后归类')
+  await page.getByRole('button', { name: '保存资料', exact: true }).click()
+  await expect(page.locator('#document-edit')).toHaveCount(0)
+  const pending = await page.evaluate(id => (window as any).baoyi.workspace.documents.get(id), ids[7])
+  assert.deepEqual({ group: cleared.customGroupId ?? null, submodule: pending.submodule }, { group: null, submodule: null }, 'editing must save cleared groups and preserve pending classification')
+  await page.getByLabel('关闭资料详情').click()
+  await page.locator('.sidebar-section').getByRole('button', { name: /^全部/ }).click()
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+  await page.screenshot({ path: path.join(output, 'library-800-dark.png') })
+  await page.getByLabel('搜索资料').fill('大PDF')
+  await expect(page.locator('.document-row img')).toBeVisible({ timeout: 60000 })
+  await page.evaluate(id => { location.hash = '/document/' + id }, largeId)
+  await expect(page.locator('.pdf-page canvas').first()).toBeVisible({ timeout: 60000 })
+  assert.deepEqual(errors, [])
+  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ status: 'PASS', profile, errors }, null, 2))
+  console.log('PASS: view switching/persistence, pending isolation, integrated state tags, grouping, responsive toolbar, Markdown, 150MiB PDF cover and reader')
+} catch (error) {
+  await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {})
+  throw error
+} finally { await app.close() }

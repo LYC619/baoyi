@@ -133,7 +133,7 @@ async function finish(): Promise<void> {
         <h2 class="head">选择要扫描的目录</h2>
         <p class="desc">
           通常是你放绿色软件的盘符目录，或 Program Files。
-          抱一只读取 .exe 的图标和版本信息，不会移动或修改任何文件。
+          抱一读取 EXE 的图标和版本信息，也能识别手机 APP 安装包；扫描不会移动或修改文件。
         </p>
 
         <ul v-if="dirs.length" class="dirs">

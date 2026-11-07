@@ -135,7 +135,7 @@ export function createDiscoveryWorkflow(deps: Dependencies) {
           const destination = path.join(job.directory, safeWorkFolderName(job.title) + '.mp4')
           job.message = '正在下载视频（HLS 分片）'; changed(job)
           const result = await deps.hlsTransfer({ url: resolved.m3u8, destination, headers: resolved.headers, signal,
-            onProgress: progress => { item.receivedBytes = progress.receivedBytes; item.totalBytes = progress.totalBytes; if (!item.path) item.path = destination; changed(job) } })
+            onProgress: progress => { if (!progress.checkingCache) { item.receivedBytes = progress.receivedBytes; item.totalBytes = progress.totalBytes }; item.transferMessage = progress.message; item.bytesPerSecond = progress.bytesPerSecond; if (!item.path) item.path = destination; changed(job) } })
           item.path = result.destination; item.warnings.push(...result.warnings); item.transfer = 'complete'; changed(job)
         }
       }

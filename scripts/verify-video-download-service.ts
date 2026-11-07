@@ -59,9 +59,12 @@ await test('player src supported, duplicate URLs removed', () => {
   const r = parseVideoSources('<video id="player" src="https://cdn.test/main.webm"><source src="https://cdn.test/main.webm" size="720"></video>')
   assert.equal(r.candidates.length, 1); assert.equal(r.candidates[0].extension, 'webm')
 })
-await test('HLS and DASH are not offered as completed video files', () => {
+await test('HLS and DASH are offered with MP4 output and their transfer formats', () => {
   const r = parseVideoSources('<video id="player"><source src="https://cdn.test/a.m3u8" type="video/mp4"><source src="https://cdn.test/a.mpd"><source src="https://cdn.test/a.mp4" size="720"></video>')
-  assert.equal(r.candidates.length, 1); assert.ok(r.warnings.some((s: string) => /分片/.test(s)))
+  assert.equal(r.candidates.length, 3)
+  assert.equal(r.candidates.find((c: any) => c.url.endsWith('.m3u8')).format, 'hls')
+  assert.equal(r.candidates.find((c: any) => c.url.endsWith('.mpd')).format, 'dash')
+  assert.ok(r.candidates.every((c: any) => c.extension === 'mp4'))
 })
 await test('reject unsafe scheme, credentials, images and unknown extension', () => {
   for (const url of ['javascript:alert(1)', 'file:///C:/x.mp4', 'https://user:pass@cdn.test/v.mp4', 'https://cdn.test/thumb.jpg', 'https://cdn.test/payload.exe']) {

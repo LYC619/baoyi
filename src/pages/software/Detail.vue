@@ -26,6 +26,7 @@ import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSoftwareStore } from '@/stores/software'
 import { previewSoftwareCategoryChanges, categoryMoveConfirmation } from '@/utils/softwareCategory'
+import { isMobilePackage } from '@/utils/software-package'
 import type { MasteryLevel, SoftwareItem } from '@/types'
 import {
   MASTERY_META,
@@ -137,10 +138,10 @@ async function launchWith(launcherPath: string): Promise<void> {
   if (!item.value) return
   try {
     const ok = await store.launch(item.value.id, launcherPath)
-    if (ok) {
+    if (ok && !isMobilePackage(launcherPath)) {
       item.value.last_used_at = Date.now()
       item.value.use_count += 1
-    } else {
+    } else if (!ok) {
       error('启动失败，文件可能已被移动或删除')
     }
   } catch (err) {
@@ -355,15 +356,16 @@ async function dropLink(): Promise<void> {
 
     <template v-else>
       <header class="head">
-        <button class="btn btn--subtle" @click="router.back()">
+        <button class="btn btn--subtle" @click="router.push({ name: 'home' })">
           <ArrowLeft :size="16" />
           返回
         </button>
 
         <div class="head__actions">
           <button class="btn btn--primary" @click="launch">
-            <Play :size="14" fill="currentColor" />
-            启动
+            <FolderOpen v-if="isMobilePackage(item.exe_path)" :size="14" />
+            <Play v-else :size="14" fill="currentColor" />
+            {{ isMobilePackage(item.exe_path) ? '定位安装包' : '启动' }}
           </button>
           <button class="btn btn--ghost" @click="reveal">
             <FolderOpen :size="14" />
@@ -589,8 +591,9 @@ async function dropLink(): Promise<void> {
                 :key="l.path"
                 :class="{ 'launchers__row--extra': l.kind === 'extra' }"
               >
-                <button class="launchers__go" :title="`启动 ${l.path}`" @click="launchWith(l.path)">
-                  <Play :size="13" />
+                <button class="launchers__go" :title="`${isMobilePackage(l.path) ? '定位安装包' : '启动'} ${l.path}`" @click="launchWith(l.path)">
+                  <FolderOpen v-if="isMobilePackage(l.path)" :size="13" />
+                  <Play v-else :size="13" />
                 </button>
                 <div class="launchers__body">
                   <div class="launchers__line">

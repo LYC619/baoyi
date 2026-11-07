@@ -16,8 +16,10 @@ import { ensureWorkDirectory } from '../bundle.ts'
 import { sourceEpisodeFacts } from '../episode-details.ts'
 import { isVideoExtension, type SourceCandidate, type VideoSeries, type VideoSources } from './sources.ts'
 import { DestinationExistsError, safeDownloadError, type TransferOptions, type TransferResult } from './transfer.ts'
+import { videoTransferOptions } from './options.ts'
 
 interface Dependencies {
+  concurrency?: () => number
   getItem: (resourceId: string) => { id: string; hanime_id: string; name_zh?: string } | null | Promise<{ id: string; hanime_id: string; name_zh?: string } | null>
   resolveSources: (videoCode: string, options?: { signal?: AbortSignal }) => Promise<VideoSources>
   resolveSeries?: (videoCode: string, options?: { signal?: AbortSignal }) => Promise<VideoSeries>
@@ -60,7 +62,9 @@ export function createVideoDownloadService(deps: Dependencies) {
   const completed = new Map<string, string>()
   const completedDirectories = new Set<string>()
   const seriesCatalogs = new Map<string, { catalog: VideoSeriesCatalog; expires: number }>()
-  let active: { requestId: string; controller: AbortController } | null = null
+  const active = new Map<string,{resourceId:string;controller:AbortController}>()
+  const concurrency=()=>deps.concurrency ? videoTransferOptions({video_download_concurrency:deps.concurrency()}).concurrency : 1
+  const busy=(requestId:string,resourceId:string)=>active.has(requestId)||active.size>=concurrency()||[...active.values()].some(value=>value.resourceId===resourceId)
   let lastDirectory = ''
   const log = (message: string) => { try { deps.log('[视频下载] ' + safeDownloadError(message)) } catch { /* Logging is not a file operation. */ } }
   const prune = () => {
@@ -145,7 +149,7 @@ export function createVideoDownloadService(deps: Dependencies) {
       requestId, resourceId, status, path: '', message, total: 0, completed: 0, failed: 0, skipped: 0, fallback: 0, results: [], warnings: [], ...overrides
     })
     if (!requestId || !resourceId || typeof input?.sourceLabel !== 'string' || input.sourceLabel.length > 40) return empty('failed', '系列下载请求参数无效')
-    if (active) return empty('failed', '已有视频下载正在进行，请等待完成或取消后再试')
+    if (busy(requestId,resourceId)) return empty('failed', '已有视频下载正在进行，请等待完成或取消后再试')
     if (completed.has(requestId)) return empty('failed', '下载请求编号已使用，请重新发起下载')
     const cached = seriesCatalogs.get(resourceId)
     if (!cached || cached.expires <= now()) return empty('failed', '系列播放清单已过期，请重新解析')
@@ -158,22 +162,22 @@ export function createVideoDownloadService(deps: Dependencies) {
     const episodes = cached.catalog.episodes.filter(episode => videoCodes.includes(episode.videoCode))
     const sourceLabel = input.sourceLabel
     const controller = new AbortController()
-    active = { requestId, controller }
+    active.set(requestId,{resourceId,controller})
     const results: VideoSeriesEpisodeResult[] = []
     const warnings = [...cached.catalog.warnings]
     let directory = ''
     let current = { receivedBytes: 0, totalBytes: 0, bytesPerSecond: 0 }
     let completedCount = 0; let failedCount = 0; let skippedCount = 0; let fallbackCount = 0
-    const emit = (phase: VideoSeriesDownloadProgress['phase'], index: number, episode: { videoCode: string; title: string }, message: string, episodeResult?: VideoSeriesEpisodeResult) => {
-      try { onProgress({ requestId, resourceId, phase, episodeIndex: index, episodeTotal: episodes.length, videoCode: episode.videoCode, title: episode.title, message, ...current, ...(episodeResult ? { episodeResult } : {}) }) }
+    const emit = (phase: VideoSeriesDownloadProgress['phase'], index: number, episode: { videoCode: string; title: string }, message: string, episodeResult?: VideoSeriesEpisodeResult, stats=current) => {
+      try { onProgress({ requestId, resourceId, phase, episodeIndex: index, episodeTotal: episodes.length, videoCode: episode.videoCode, title: episode.title, message, ...stats, ...(episodeResult ? { episodeResult } : {}) }) }
       catch { /* A closed renderer cannot damage the queue. */ }
     }
-    const record = (index: number, result: VideoSeriesEpisodeResult) => {
+    const record = (index: number, result: VideoSeriesEpisodeResult, stats=current) => {
       results.push(result)
       warnings.push(...result.warnings)
       log(requestId + '：' + result.videoCode + ' ' + result.title + '：' + result.message + (result.path ? ' → ' + result.path : ''))
       result.warnings.forEach(warning => log(requestId + '：提醒：' + warning))
-      emit('episode-done', index, result, result.message, result)
+      emit('episode-done', index, result, result.message, result, stats)
     }
     try {
       const item = await deps.getItem(resourceId)
@@ -186,11 +190,12 @@ export function createVideoDownloadService(deps: Dependencies) {
       if (!selected) return empty('cancelled', '已取消选择保存目录，未创建文件', { total: episodes.length })
       if (!path.isAbsolute(selected)) throw new Error('系列保存目录必须是绝对路径')
       directory = ensureWorkDirectory(path.resolve(selected), cached.catalog.title)
-      for (let i = 0; i < episodes.length; i++) {
+      let registering=Promise.resolve()
+      const processEpisode=async(i:number)=>{
         const episode = { ...episodes[i] }
         controller.signal.throwIfAborted()
-        current = { receivedBytes: 0, totalBytes: 0, bytesPerSecond: 0 }
-        emit('resolving', i + 1, episode, '正在解析第 ' + (i + 1) + ' 集下载地址')
+        let current = { receivedBytes: 0, totalBytes: 0, bytesPerSecond: 0 }
+        emit('resolving', i + 1, episode, '正在解析第 ' + (i + 1) + ' 集下载地址',undefined,current)
         let selectedLabel = ''
         let destination = ''
         const episodeWarnings: string[] = []
@@ -212,35 +217,51 @@ export function createVideoDownloadService(deps: Dependencies) {
           }
           const title = cached.catalog.title + ' - ' + episode.title
           destination = path.join(directory, downloadFilename(title, episode.videoCode, candidate.label, candidate.extension))
-          emit('downloading', i + 1, episode, '正在下载第 ' + (i + 1) + ' 集')
+          emit('downloading', i + 1, episode, '正在下载第 ' + (i + 1) + ' 集',undefined,current)
           const saved = await deps.transfer({
-            url: candidate.url, referer: watchUrl(episode.videoCode), destination, signal: controller.signal,
+            url: candidate.url, format:candidate.format, resumeKey:'hanime:'+episode.videoCode+':'+candidate.label, referer: watchUrl(episode.videoCode), destination, signal: controller.signal,
+            refreshSource:async()=>{
+              const refreshed=await deps.resolveSources(episode.videoCode,{signal:controller.signal})
+              if(refreshed.videoCode!==episode.videoCode)throw new Error('刷新来源编号不一致')
+              const source=refreshed.candidates.find(value=>value.label===candidate.label && value.extension===candidate.extension)
+              if(!source)throw new Error('刷新后缺少原下载画质')
+              return {url:source.url,format:source.format}
+            },
             onProgress: progress => {
-              current = { receivedBytes: progress.receivedBytes, totalBytes: progress.totalBytes, bytesPerSecond: progress.bytesPerSecond }
-              emit(progress.phase, i + 1, episode, progress.phase === 'finalizing' ? '正在安全保存第 ' + (i + 1) + ' 集' : '正在下载第 ' + (i + 1) + ' 集')
+              current = progress.checkingCache ? { ...current, bytesPerSecond: 0 } : { receivedBytes: progress.receivedBytes, totalBytes: progress.totalBytes, bytesPerSecond: progress.bytesPerSecond }
+              emit(progress.phase, i + 1, episode, progress.message || (progress.phase === 'finalizing' ? '正在安全保存第 ' + (i + 1) + ' 集' : '正在下载第 ' + (i + 1) + ' 集'),undefined,current)
             }
           })
           current = { receivedBytes: saved.receivedBytes, totalBytes: saved.totalBytes, bytesPerSecond: saved.bytesPerSecond ?? 0 }
           if (deps.registerDownloaded) {
             try {
-              const registered = await deps.registerDownloaded({ facts: sourceEpisodeFacts(info), resourceId, directory, workTitle: cached.catalog.title, episodeTitle: episode.title, videoCode: episode.videoCode, episode: i + 1, path: saved.destination, label: candidate.label })
+              const registration=registering.then(()=>deps.registerDownloaded!({ facts: sourceEpisodeFacts(info), resourceId, directory, workTitle: cached.catalog.title, episodeTitle: episode.title, videoCode: episode.videoCode, episode: i + 1, path: saved.destination, label: candidate.label }))
+              registering=registration.then(()=>{},()=>{})
+              const registered=await registration
               episodeWarnings.push(...(registered?.warnings || []).map(safeDownloadError))
             } catch (registrationError) { episodeWarnings.push('入库待重试：' + safeDownloadError(registrationError)) }
           }
           episodeWarnings.push(...saved.warnings.map(safeDownloadError))
           completedCount++
-          record(i + 1, { ...episode, status: 'success', path: saved.destination, sourceLabel: candidate.label, message: '下载完成', warnings: episodeWarnings })
+          record(i + 1, { ...episode, status: 'success', path: saved.destination, sourceLabel: candidate.label, message: '下载完成', warnings: episodeWarnings },current)
         } catch (err) {
           const message = safeDownloadError(err)
           if (controller.signal.aborted) {
-            record(i + 1, { ...episode, status: 'cancelled', path: '', sourceLabel: selectedLabel, message, warnings: episodeWarnings })
+            record(i + 1, { ...episode, status: 'cancelled', path: '', sourceLabel: selectedLabel, message, warnings: episodeWarnings },current)
             throw err
           }
           const skipped = err instanceof DestinationExistsError
           if (skipped) skippedCount++; else failedCount++
-          record(i + 1, { ...episode, status: skipped ? 'skipped' : 'failed', path: skipped ? destination : '', sourceLabel: selectedLabel, message: skipped ? '目标文件已存在，未覆盖' : message, warnings: episodeWarnings })
+          record(i + 1, { ...episode, status: skipped ? 'skipped' : 'failed', path: skipped ? destination : '', sourceLabel: selectedLabel, message: skipped ? '目标文件已存在，未覆盖' : message, warnings: episodeWarnings },current)
         }
       }
+      let cursor=0
+      await Promise.allSettled(Array.from({length:Math.min(concurrency(),episodes.length)},async()=>{
+        while(!controller.signal.aborted){const index=cursor++;if(index>=episodes.length)return;try{await processEpisode(index)}catch(error){if(controller.signal.aborted)return;throw error}}
+      }))
+      await registering
+      controller.signal.throwIfAborted()
+      results.sort((a,b)=>episodes.findIndex(value=>value.videoCode===a.videoCode)-episodes.findIndex(value=>value.videoCode===b.videoCode))
       emit('done', episodes.length, { videoCode: cached.catalog.videoCode, title: cached.catalog.title }, '系列下载处理完成')
       const status: VideoSeriesDownloadResult['status'] = failedCount > 0 ? 'failed' : 'success'
       const message = status === 'success' ? '系列下载完成，已归档并入库' : '系列下载完成，但有 ' + failedCount + ' 集失败'
@@ -253,7 +274,7 @@ export function createVideoDownloadService(deps: Dependencies) {
       return { requestId, resourceId, status: cancelled ? 'cancelled' : 'failed', path: directory, message: cancelled ? '系列下载已取消；' + message : message, total: episodes.length, completed: completedCount, failed: failedCount, skipped: skippedCount, fallback: fallbackCount, results, warnings }
     } finally {
       if (directory) rememberCompleted(requestId, directory, true)
-      active = null
+      active.delete(requestId)
     }
   }
   async function run(input: VideoDownloadRequest, onProgress: (progress: VideoDownloadProgress) => void): Promise<VideoDownloadResult> {
@@ -264,10 +285,10 @@ export function createVideoDownloadService(deps: Dependencies) {
       requestId, resourceId, status, path: destination, message, ...progress, warnings
     })
     if (!requestId || !resourceId || !identifier(input?.sourceId)) return result('failed', '下载请求参数无效')
-    if (active) return result('failed', '已有视频下载正在进行，请等待完成或取消后再试')
+    if (busy(requestId,resourceId)) return result('failed', '已有视频下载正在进行，请等待完成或取消后再试')
     if (completed.has(requestId)) return result('failed', '下载请求编号已使用，请重新发起下载')
     const controller = new AbortController()
-    active = { requestId, controller }
+    active.set(requestId,{resourceId,controller})
     const emit = (phase: VideoDownloadProgress['phase'], message: string) => {
       try { onProgress({ requestId, resourceId, phase, message, ...progress }) } catch { /* A closed page cannot corrupt a download. */ }
     }
@@ -293,10 +314,17 @@ export function createVideoDownloadService(deps: Dependencies) {
       log(requestId + '：开始传输 → ' + destination)
       emit('downloading', '正在连接视频源')
       const saved = await deps.transfer({
-        url: token.candidate.url, referer: watchUrl(token.videoCode), destination, signal: controller.signal,
+        url: token.candidate.url, format:token.candidate.format, resumeKey:'hanime:'+token.videoCode+':'+token.candidate.label, referer: watchUrl(token.videoCode), destination, signal: controller.signal,
+        refreshSource:async()=>{
+          const refreshed=await deps.resolveSources(token.videoCode,{signal:controller.signal})
+          if(refreshed.videoCode!==token.videoCode)throw new Error('刷新来源编号不一致')
+          const source=refreshed.candidates.find(value=>value.label===token.candidate.label && value.extension===token.candidate.extension)
+          if(!source)throw new Error('刷新后缺少原下载画质')
+          return {url:source.url,format:source.format}
+        },
         onProgress: update => {
-          progress = { receivedBytes: update.receivedBytes, totalBytes: update.totalBytes, bytesPerSecond: update.bytesPerSecond }
-          emit(update.phase, update.phase === 'finalizing' ? '正在校验并安全保存文件' : '正在下载')
+          progress = update.checkingCache ? { ...progress, bytesPerSecond: 0 } : { receivedBytes: update.receivedBytes, totalBytes: update.totalBytes, bytesPerSecond: update.bytesPerSecond }
+          emit(update.phase, update.message || (update.phase === 'finalizing' ? '正在校验并安全保存文件' : '正在下载'))
         }
       })
       // transfer resolves only AFTER its commit point. Do not check cancellation here.
@@ -318,11 +346,11 @@ export function createVideoDownloadService(deps: Dependencies) {
       const cancelled = controller.signal.aborted
       log(requestId + '：' + (cancelled ? '取消收尾：' : '下载失败：') + message)
       return result(cancelled ? 'cancelled' : 'failed', cancelled ? '下载已取消；' + message : message)
-    } finally { active = null }
+    } finally { active.delete(requestId) }
   }
   function cancel(requestId: string): { ok: boolean; message?: string } {
-    if (!identifier(requestId) || active?.requestId !== requestId) return { ok: false, message: '该下载已结束或不存在' }
-    active.controller.abort(new Error('用户取消下载'))
+    if (!identifier(requestId) || !active.has(requestId)) return { ok: false, message: '该下载已结束或不存在' }
+    active.get(requestId)!.controller.abort(new Error('用户取消下载'))
     log(requestId + '：收到取消请求，等待传输和临时文件清理结束')
     return { ok: true }
   }

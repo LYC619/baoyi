@@ -57,16 +57,20 @@ export function locateFfmpeg(configured = '', extraRoots: string[] = []): string
 }
 
 /** 把合并好的媒体流用 `-c copy` 封装成 MP4（不重编码）。取消时结束子进程。 */
-export function remuxToMp4(ffmpeg: string, input: string, output: string, signal: AbortSignal): Promise<void> {
+export function remuxToMp4(ffmpeg: string, input: string | string[], output: string, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted()
   return new Promise((resolve, reject) => {
-    const args = ['-y', '-hide_banner', '-loglevel', 'error', '-fflags', '+genpts', '-i', input,
+    const inputs=Array.isArray(input)?input:[input]
+    const args = ['-y', '-hide_banner', '-loglevel', 'error', '-fflags', '+genpts',
+      ...inputs.flatMap(file=>['-protocol_whitelist','file,crypto,data','-i',file]),
+      ...(inputs.length>1?['-map','0:v:0','-map','1:a:0']:[]),
       '-c', 'copy', '-movflags', '+faststart', '-avoid_negative_ts', 'make_zero', '-f', 'mp4', output]
     const child = spawn(ffmpeg, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
     let stderr = ''
     child.stderr?.on('data', chunk => { stderr = (stderr + String(chunk)).slice(-2000) })
     const onAbort = () => { child.kill() }
     signal.addEventListener('abort', onAbort, { once: true })
+    if(signal.aborted)onAbort()
     child.on('error', error => { signal.removeEventListener('abort', onAbort); reject(error) })
     child.on('close', code => {
       signal.removeEventListener('abort', onAbort)

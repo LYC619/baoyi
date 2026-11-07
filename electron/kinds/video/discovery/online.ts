@@ -2,6 +2,7 @@ import type { DiscoveryCard, DiscoveryEntry, DiscoverySelection, DiscoverySource
 import type { DiscoveryCatalogue } from './catalogue.ts'
 import { canonicalOnlineUrl, onlineId, parseVideoObjectPage } from './adapters/video-object.ts'
 import { isJavdbUrl, parseJavdbDetail, parseJavdbList } from './adapters/javdb.ts'
+import { ONLINE_USER_AGENT, onlineConnectionClosed, onlineErrorMessage, onlineVerificationPage } from '../../../services/online-network-rules.ts'
 
 type AdapterId = 'video-object' | 'javdb'
 interface LoadedList { name: string; url: string; entries: DiscoveryEntry[]; nextPageUrl: string }
@@ -9,11 +10,11 @@ interface LoadedList { name: string; url: string; entries: DiscoveryEntry[]; nex
 const MAX_BYTES = 2 * 1024 * 1024
 /** 装成一个普通 Chrome。Electron 默认 UA 带 `Electron/`，会被站点当成非浏览器。 */
 const JAVDB_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'User-Agent': ONLINE_USER_AGENT,
   'Accept-Language': 'zh-TW,zh;q=0.9,ja;q=0.8,en;q=0.7'
 }
 /** 挑战页也是 200，只能看内容分辨；命中就当被拦，别当成「没有作品」。 */
-const looksBlocked = (html: string) => /cf-browser-verification|__cf_chl|Just a moment|Checking your browser|Attention Required|you have been blocked/i.test(String(html || '').slice(0, 200_000))
+const looksBlocked = onlineVerificationPage
 
 /** Explicit redirects and streamed accounting keep both redirects and decompressed bodies bounded. */
 export async function readOnlinePage(rawUrl: string, fetchPage: typeof fetch, sameSite?: string, extraHeaders: Record<string, string> = {}): Promise<{ html: string; url: string }> {
@@ -23,7 +24,17 @@ export async function readOnlinePage(rawUrl: string, fetchPage: typeof fetch, sa
   try {
     for (let hop = 0; hop <= 5; hop++) {
       checkSite()
-      const response = await fetchPage(url, { signal: controller.signal, redirect: 'manual', credentials: 'omit', headers: { Accept: 'text/html,application/xhtml+xml', ...extraHeaders } })
+      const request = () => fetchPage(url, { signal: controller.signal, redirect: 'manual', credentials: 'include', headers: { Accept: 'text/html,application/xhtml+xml', ...extraHeaders } })
+      let response: Response
+      try { response = await request() }
+      catch (cause) {
+        // Retry only an idempotent GET whose connection was closed before headers.
+        // HTTP errors, parser failures and partial response bodies are never retried.
+        if (controller.signal.aborted || !onlineConnectionClosed(cause)) throw cause
+        await new Promise(resolve => setTimeout(resolve, 350))
+        if (controller.signal.aborted) throw cause
+        response = await request()
+      }
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         await response.body?.cancel()
         const location = response.headers.get('location')
@@ -51,7 +62,7 @@ export async function readOnlinePage(rawUrl: string, fetchPage: typeof fetch, sa
     throw new Error('网页重定向次数超过 5 次')
   } catch (error) {
     if (controller.signal.aborted) throw new Error('读取网页超时（15 秒），请稍后重试')
-    throw error
+    throw new Error(onlineErrorMessage(error))
   } finally { clearTimeout(timer) }
 }
 
@@ -89,7 +100,7 @@ export function createOnlineSource(catalogue: DiscoveryCatalogue, fetchPage: typ
   }
   async function loadList(adapter: AdapterId, url: string, sameSite?: string): Promise<LoadedList> {
     const page = await readOnlinePage(url, fetchPage, sameSite, adapter === 'javdb' ? JAVDB_HEADERS : {})
-    if (looksBlocked(page.html)) throw new Error('来源返回了人机验证页，请更换网络或代理后重试')
+    if (looksBlocked(page.html)) throw new Error('来源要求人机验证。请打开来源网页完成验证，再返回重试；已缓存资料保留。')
     if (adapter === 'javdb') {
       const parsed = parseJavdbList({ html: page.html, url: page.url })
       if (!parsed.entries.length) throw new Error('这个页面没有解析到 JAVDB 作品，请确认是列表 / 搜索 / 排行榜页')
@@ -131,8 +142,8 @@ export function createOnlineSource(catalogue: DiscoveryCatalogue, fetchPage: typ
       const previous = source(selection.sourceId), config = previous.online!, card = catalogue.entry(previous.id, selection.entryId)
       if (!card.entry.pageUrl) return card
       if (config.adapter === 'javdb') {
-        const page = await readOnlinePage(card.entry.pageUrl, fetchPage, undefined, JAVDB_HEADERS)
-        if (looksBlocked(page.html)) throw new Error('来源返回了人机验证页，请更换网络或代理后重试')
+        const page = await readOnlinePage(card.entry.pageUrl, fetchPage, undefined, { ...JAVDB_HEADERS, Referer: new URL(config.url).origin + '/' })
+        if (looksBlocked(page.html)) throw new Error('来源要求人机验证。请打开来源网页完成验证，再返回重试；已缓存资料保留。')
         const updated = mergeDetail(card.entry, parseJavdbDetail({ html: page.html, url: page.url }))
         catalogue.importSource({ ...previous, entries: previous.entries.map(entry => entry.id === card.entry.id ? updated : entry) })
         return catalogue.entry(previous.id, card.entry.id)

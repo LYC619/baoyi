@@ -12,7 +12,7 @@ import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRefs, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { CircleAlert, FolderPlus, ImageDown, Link, List, Search, Settings, X } from 'lucide-vue-next'
+import { CheckSquare, CircleAlert, FolderPlus, ImageDown, Link, List, Search, X } from 'lucide-vue-next'
 import AudioLibrary from '@/components/video/AudioLibrary.vue'
 import Sidebar from '@/components/video/Sidebar.vue'
 import VideoBulkPanel from '@/components/video/VideoBulkPanel.vue'
@@ -237,6 +237,7 @@ async function reviewSelected(): Promise<void> {
   finally { reviewingSelected.value = false; bulkBusy.value = false }
 }
 onMounted(async () => {
+  if (store.selection.kind === 'status' || (store.selection.kind === 'category' && ['其他', '其他分类'].includes(store.selection.value))) store.select({ kind: 'group', value: 'all' })
   unlistenLibrary = window.baoyi.video.onLibraryChanged?.(requestLibraryRefresh)
   document.addEventListener('visibilitychange', resumeLibraryRefresh)
   void workflow.refresh()
@@ -376,6 +377,7 @@ const emptyHint = computed(() => {
         </div>
 
         <div class="toolbar__actions">
+          <button ref="organizeTrigger" type="button" class="btn btn--ghost" :disabled="bulkBusy" :aria-pressed="selecting" @click="toggleSelecting(); bulkOpen = selecting"><CheckSquare :size="15"/>{{ selecting ? '退出批量管理' : '批量管理' }}</button>
           <select v-model="store.sort" class="select" aria-label="作品排序" @change="store.load()">
             <option v-for="o in SORTS" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
@@ -412,9 +414,7 @@ const emptyHint = computed(() => {
           <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || !(selecting ? selectedWorks : shownItems).length" @click="requestAgent">Agent 整理</button>
           <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || scanning || !(selecting ? selectedWorks : shownItems).length" @click="requestLayout">统一移动</button>
           </LibraryToolbarMenu>
-          <button class="btn btn--subtle" title="设置" aria-label="设置" @click="router.push({ name: 'settings' })">
-            <Settings :size="16" />
-          </button>
+
         </div>
       </header>
 
@@ -436,7 +436,7 @@ const emptyHint = computed(() => {
           <button v-if="pendingOnly && !selecting" type="button" :disabled="store.queryPending || bulkBusy" @click="selectReview">选择待复查作品</button>
           <button v-if="selecting && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || !selectedWorks.length" @click="organize('organize')">创建合集</button>
 
-          <button ref="organizeTrigger" type="button" :disabled="bulkBusy" :aria-pressed="selecting" @click="toggleSelecting(); bulkOpen = selecting">{{ selecting ? '退出批量管理' : '批量管理' }}</button>
+
           <button v-if="!selecting && videoImport.pendingCount.value" type="button" class="import-pending" @click="videoImport.show()"><CircleAlert :size="13" />导入待确认 {{ videoImport.pendingCount.value }}</button>
 
         </div>

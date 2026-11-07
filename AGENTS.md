@@ -1,7 +1,7 @@
-# 项目协作约定
+# Contributor guidance
 
-## 子代理与并发
+Use Node.js 22.12 or newer. Install with npm ci. Run npm run build and checks appropriate to the change.
 
-- 用户反馈当前模型渠道可能限制并发会话。默认在主会话中串行完成实现、审查和验证，不主动新增子代理或并行任务会话。
-- 接续中断任务时，优先读取已有子代理的记录和已保存成果，避免重复派发相同工作。
-- 现有子代理完成后，由主会话收集、核对并整合结果；只有用户明确要求时才创建新的子代理。
+Use isolated profiles and synthetic data for tests. Preserve user files and prior builds. Never commit account credentials, databases, downloaded media, personal notes, or test profiles.
+
+Prepare the pinned Hermes and comic runtimes before packaging; see README.md. Keep package.json and both root version entries in package-lock.json aligned.

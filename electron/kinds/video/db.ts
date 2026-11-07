@@ -904,7 +904,8 @@ export function videoCounts(d: SqlDb, hideHentai = false): VideoCounts {
     d
       .prepare(
         `SELECT category AS name, COUNT(*) AS count FROM video
-         WHERE is_archived = 0${hide} GROUP BY category ORDER BY count DESC`
+         WHERE is_archived = 0${hide} GROUP BY category
+         ORDER BY COALESCE((SELECT c.sort_order FROM categories c WHERE c.kind = 'video' AND c.name = video.category), 2147483647), name`
       )
       .all() as Array<{ name: string; count: number }>
   ).map((r) => ({ name: String(r.name ?? ''), count: Number(r.count) || 0 }))

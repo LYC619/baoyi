@@ -15,7 +15,8 @@ export async function imagePageInfo(db: SqlDb, pageId: string): Promise<ImagePag
 export async function auditImage(db: SqlDb, id: string): Promise<ImageAudit> {
   const library = new ImageLibrary(db), item = library.get(id)
   if (!item) throw new Error('资源不可用')
-  const manifest = item.source === 'pica' ? await readImageManifest(item.path, item.sourceId) : null
+  const canRepair=item.source==='pica'
+  const manifest = canRepair ? await readImageManifest(item.path, item.sourceId) : item.source==='jm'?await readImageManifest(item.path,item.sourceId,'jm'):null
   const report: ImageAudit = { resourceId: id, checkedAt: Date.now(), total: 0, ok: 0, missing: 0, damaged: 0, unverified: 0, catalogComplete: !!manifest && manifest.chapters.every(c => !!c.pageIds?.length), entries: [] }
   const indexed = db.prepare('SELECT id,file,entry,chapter_id,ordinal,missing FROM image_pages WHERE resource_id=? ORDER BY ordinal').all(id) as Array<{ id: string; file: string; entry: string; chapter_id: string; ordinal: number; missing: number }>
   const seen = new Set<string>(), normalize = (file: string) => path.resolve(file).toLowerCase()
@@ -29,7 +30,7 @@ export async function auditImage(db: SqlDb, id: string): Promise<ImageAudit> {
       entry.status = (cause as NodeJS.ErrnoException).code === 'ENOENT' || (cause as Error).message === '页面不可用' ? 'missing' : 'damaged'
       entry.reason = entry.status === 'missing' ? '文件缺失' : String((cause as Error).message)
     }
-    entry.repairable = !!entry.sourcePageId && ['missing', 'damaged'].includes(entry.status)
+    entry.repairable = canRepair && !!entry.sourcePageId && ['missing', 'damaged'].includes(entry.status)
     report.entries.push(entry); report[entry.status]++; report.total++
   }
   for (const chapter of manifest?.chapters || []) {

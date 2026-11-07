@@ -41,8 +41,8 @@ function fixture() {
   const db = new DatabaseSync(':memory:'); db.exec('PRAGMA foreign_keys = ON'); initSchema(db, KINDS)
   const file = (name: string, content = 'synthetic media') => { const p = path.join(root, name); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, content); return p }
   const source = (number: number) => ({ provider: 'hanime', externalId: String(810000 + number), pageUrl: 'https://hanime1.me/watch?v=' + (810000 + number), scope: 'episode' as const, evidence: 'nfo' as const })
-  const work = (number = 1, folder = 'Library') => registerVideoContent(db, { title: `故事 ${number}`, items: [{ title: `故事 ${number}`,
-    originalTitle: `Original Story #${number}`, number, order: number, sources: [source(number)],
+  const work = (number = 1, folder = 'Library', hentai = true) => registerVideoContent(db, { title: `故事 ${number}`, items: [{ title: `故事 ${number}`,
+    originalTitle: `Original Story #${number}`, number, order: number, sources: hentai ? [source(number)] : [],
     files: [{ path: file(`${folder}/Original Story #${number} [中文字幕]_720P.mp4`) }] }] }).resourceId
   const close = () => { db.close(); assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir())); assert.ok(path.basename(root).startsWith('baoyi-library-usability-')); fs.rmSync(root, { recursive: true, force: true }) }
   return { root, db, file, source, work, close }
@@ -201,34 +201,39 @@ await test('publication range uses episode dates and normalizes legacy Unix seco
   assert.equal(videoDateLabel(Date.UTC(2026,5,4)/1000),'2026-06-04')
 })
 
-await test('publication filters match real episode dates with inclusive calendar boundaries', f => {
-  const a=f.work(1),b=f.work(2),unknown=f.work(3)
+// Hanime sources route registration into the explicit hentai partition. Exercise
+// the same filters in both partitions instead of querying those fixtures as ordinary videos.
+for (const hentai of [false, true]) {
+const scope = hentai ? { type: 'hentai' as const } : {}
+const partition = hentai ? 'hentai' : 'ordinary'
+await test(`publication filters match real episode dates with inclusive calendar boundaries (${partition})`, f => {
+  const a=f.work(1,'Library',hentai),b=f.work(2,'Library',hentai),unknown=f.work(3,'Library',hentai)
   f.db.prepare('UPDATE episode SET published_at=? WHERE resource_id=?').run(Date.UTC(2026,5,4,23,59,59),a)
   f.db.prepare('UPDATE episode SET published_at=? WHERE resource_id=?').run(Date.UTC(2025,0,1),b)
-  assert.deepEqual(listVideos(f.db,{publishedFrom:'2026-06-04',publishedTo:'2026-06-04'}).map(w=>w.id),[a])
-  assert.deepEqual(listVideos(f.db,{sort:'published'}).map(w=>w.id),[a,b,unknown])
-  assert.deepEqual(listVideos(f.db,{sort:'published-asc'}).map(w=>w.id),[b,a,unknown])
+  assert.deepEqual(listVideos(f.db,{...scope,publishedFrom:'2026-06-04',publishedTo:'2026-06-04'}).map(w=>w.id),[a])
+  assert.deepEqual(listVideos(f.db,{...scope,sort:'published'}).map(w=>w.id),[a,b,unknown])
+  assert.deepEqual(listVideos(f.db,{...scope,sort:'published-asc'}).map(w=>w.id),[b,a,unknown])
   assert.throws(()=>listVideos(f.db,{publishedFrom:'2026-02-31'}),/日期/)
 })
 
-await test('local availability filter can distinguish present missing and undownloaded content', async f => {
-  const a=f.work(1),b=f.work(2)
+await test(`local availability filter can distinguish present missing and undownloaded content (${partition})`, async f => {
+  const a=f.work(1,'Library',hentai),b=f.work(2,'Library',hentai)
   fs.unlinkSync(listEpisodes(f.db,b)[0].path)
-  const c=registerVideoContent(f.db,{title:'Pending',directory:path.dirname(f.file('Pending/.keep')),items:[{title:'Pending 1',order:1,files:[]}]}).resourceId
+  const c=registerVideoContent(f.db,{title:'Pending',category:hentai?'里番':'其他',directory:path.dirname(f.file('Pending/.keep')),items:[{title:'Pending 1',order:1,files:[]}]}).resourceId
   const h=localService(f)
-  assert.deepEqual(Array.from(await h.service.listVideoItems({local:'available'}),w=>w.id),[a])
-  assert.deepEqual(Array.from(await h.service.listVideoItems({local:'missing'}),w=>w.id),[b])
-  assert.deepEqual(Array.from(await h.service.listVideoItems({local:'none'}),w=>w.id).sort(),[b,c].sort())
+  assert.deepEqual(Array.from(await h.service.listVideoItems({...scope,local:'available'}),w=>w.id),[a])
+  assert.deepEqual(Array.from(await h.service.listVideoItems({...scope,local:'missing'}),w=>w.id),[b])
+  assert.deepEqual(Array.from(await h.service.listVideoItems({...scope,local:'none'}),w=>w.id).sort(),[b,c].sort())
 })
 
-await test('pending metadata reasons say what is missing: description, poster, or unreviewed', async f => {
+await test(`pending metadata reasons say what is missing: description, poster, or unreviewed (${partition})`, async f => {
   const h = localService(f)
-  const id = f.work()
+  const id = f.work(1,'Library',hentai)
   f.db.prepare("UPDATE resource SET ai_status = 'done' WHERE id = ?").run(id)
   // 待补齐只对绑定了目录的作品有意义：直接绑一个目录（清单缺什么由 missing 列说）
   f.db.prepare("INSERT INTO video_directories (resource_id,bundle_id,root,relative_path,directory_path,metadata_state,missing,created_at,updated_at) VALUES (?,?,?,?,?,?,?,1,1)")
     .run(id, 'bundle-' + id, f.root, 'Library', path.join(f.root, 'Library'), 'pending', JSON.stringify(['description']))
-  const reasons = async () => Array.from((await h.service.listVideoItems()).find(w => w.id === id)!.pending_reasons ?? [])
+  const reasons = async () => Array.from((await h.service.listVideoItems(scope)).find(w => w.id === id)!.pending_reasons ?? [])
   assert.deepEqual((await reasons()).filter(r => r.startsWith('metadata')), ['metadata', 'metadata:description'], '只缺简介')
   f.db.prepare("UPDATE video_directories SET missing = ? WHERE resource_id = ?").run(JSON.stringify(['description', 'poster']), id)
   f.db.prepare("UPDATE video_meta SET poster_path = '' WHERE resource_id = ?").run(id)
@@ -236,9 +241,10 @@ await test('pending metadata reasons say what is missing: description, poster, o
   f.db.prepare("UPDATE resource SET ai_status = 'pending' WHERE id = ?").run(id)
   f.db.prepare("UPDATE video_directories SET metadata_state = 'complete', missing = '[]' WHERE resource_id = ?").run(id)
   assert.deepEqual((await reasons()).filter(r => r.startsWith('metadata')), ['metadata', 'metadata:review'], '清单齐了但从没经过识别确认')
-  assert.deepEqual(Array.from(await h.service.listVideoItems({ issue: 'metadata:review' }), w => w.id), [id], '细分原因可以直接当筛选条件')
-  assert.deepEqual(Array.from(await h.service.listVideoItems({ issue: 'metadata:description' }), w => w.id), [], '不缺简介的不进缺简介筛选')
+  assert.deepEqual(Array.from(await h.service.listVideoItems({ ...scope, issue: 'metadata:review' }), w => w.id), [id], '细分原因可以直接当筛选条件')
+  assert.deepEqual(Array.from(await h.service.listVideoItems({ ...scope, issue: 'metadata:description' }), w => w.id), [], '不缺简介的不进缺简介筛选')
 })
+}
 
 console.log(`Video library usability: ${passed} passed / ${failed} failed`)
 process.exitCode = failed ? 1 : 0

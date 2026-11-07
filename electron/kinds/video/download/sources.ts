@@ -4,7 +4,7 @@ import { HANIME_BASE, parseDetail, parseSearch, searchUrl, toVideoCode, watchUrl
 import { abortable, DOWNLOAD_UA, httpUrl, safeDownloadError } from './transfer.ts'
 import type { VideoWorkSource } from './workflow.ts'
 
-export interface SourceCandidate { url: string; label: string; extension: string }
+export interface SourceCandidate { url: string; label: string; extension: string; format?: 'direct' | 'hls' | 'dash' }
 export interface VideoSources { publishedAt?: number; releaseDate?: number; durationSec?: number; artist?: string; videoCode: string; title: string; originalTitle?: string; description?: string; posterUrl?: string; thumbnailUrl?: string; artworkUrls?: string[]; tags?: string[]; candidates: SourceCandidate[]; warnings: string[] }
 export interface SeriesEpisode { videoCode: string; title: string }
 export interface VideoSeries { videoCode: string; title: string; episodes: SeriesEpisode[]; warnings: string[] }
@@ -38,8 +38,16 @@ export function parseVideoSources(html: string, base = HANIME_BASE): VideoSource
     const pathname = new URL(url).pathname.toLowerCase()
     const extension = /\.([a-z0-9]+)$/.exec(pathname)?.[1] ?? ''
     const mime = type.split(';')[0].trim().toLowerCase()
-    if (['m3u8', 'mpd', 'ts', 'm4s'].includes(extension) || /mpegurl|dash\+xml|mp2t/.test(mime)) {
-      warnings.add('部分清晰度使用 HLS/DASH 分片，当前只支持完整视频直链')
+    const format = extension === 'm3u8' || /mpegurl/.test(mime) ? 'hls' : extension === 'mpd' || /dash\+xml/.test(mime) ? 'dash' : undefined
+    if (format) {
+      if (!candidates.some(candidate => candidate.url === url)) {
+        const height = /^(\d{2,4})p?$/.exec(size.trim())?.[1]
+        candidates.push({ url, label: height ? height + 'p' : '原始画质', extension: 'mp4', format })
+      }
+      return
+    }
+    if (['ts', 'm4s'].includes(extension) || /mp2t/.test(mime)) {
+      warnings.add('播放器只提供单个媒体分片，缺少完整播放清单')
       return
     }
     // A video MIME must not turn an explicitly non-video file (image/executable) into a candidate.
@@ -147,7 +155,7 @@ export async function loadVideoSources(
   const { html, pageUrl } = await loadPageHtml(videoCode, fetcher, options)
   const result = parseVideoSources(html, pageUrl)
   if (result.videoCode !== videoCode) throw new Error('页面单集编号不一致，请重新识别后再下载')
-  if (!result.candidates.length) throw new Error(result.warnings[0] || '播放器没有可下载的完整视频直链，请验证后重新解析')
+  if (!result.candidates.length) throw new Error(result.warnings[0] || '播放器没有可用视频下载源，请验证后重新解析')
   const metadata = await supplementPoster(result, videoCode, fetcher, options)
   return { ...metadata, title: result.title || '站点单集 ' + videoCode }
 }

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_VERSION } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
 
@@ -237,7 +237,7 @@ test('v13 库升级新增项目表并保留既有资源与自定义分类',()=>{
     db.prepare("INSERT INTO software_meta(resource_id) VALUES('old-resource')").run()
     db.prepare("INSERT INTO categories(id,kind,name) VALUES('custom-before-upgrade','software','我的自定义类别')").run()
     initSchema(db,KINDS)
-    assert.equal((db.prepare("SELECT value FROM settings WHERE key='_schema'").get() as any).value,'15')
+    assert.equal((db.prepare("SELECT value FROM settings WHERE key='_schema'").get() as any).value,String(SCHEMA_VERSION))
     assert.equal((db.prepare("SELECT notes FROM resource WHERE id='old-resource'").get() as any).notes,'保留旧备注')
     assert.ok(db.prepare("SELECT id FROM categories WHERE id='custom-before-upgrade'").get())
     assert.equal((db.prepare('SELECT COUNT(*) n FROM project_meta').get() as any).n,0)

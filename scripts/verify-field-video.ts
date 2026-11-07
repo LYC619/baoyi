@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createCipheriv } from 'node:crypto'
 import { downloadHls } from '../electron/kinds/video/download/hls.ts'
+import { downloadDelay } from '../electron/kinds/video/download/resource.ts'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-hls-field-'))
 try {
@@ -29,11 +30,11 @@ try {
   await assert.rejects(downloadHls({ url: 'https://media.test/index.m3u8', destination, headers: {}, signal: new AbortController().signal, fetch: changed, ffmpeg: path.join(root, 'unavailable-ffmpeg'), retries: 0 }))
   assert.equal(fs.readFileSync(path.join(temp, 'merged-media.bin'), 'utf8'), 'new media', 'changed playlists must not reuse old segments')
   let active = 0
-  const failing: typeof fetch = async input => {
+  const failing: typeof fetch = async (input, init) => {
     const url = String(input)
     if (url.endsWith('.m3u8')) return new Response('#EXTM3U\n#EXTINF:1,\na.ts\n#EXTINF:1,\nb.ts\n#EXT-X-ENDLIST')
     active++
-    try { await new Promise(resolve => setTimeout(resolve, url.endsWith('a.ts') ? 1 : 800)); if (url.endsWith('a.ts')) throw new Error('broken segment'); return new Response('slow segment') }
+    try { await downloadDelay(url.endsWith('a.ts') ? 1 : 800,init!.signal!); if (url.endsWith('a.ts')) throw new Error('broken segment'); return new Response('slow segment') }
     finally { active-- }
   }
   await assert.rejects(downloadHls({ url: 'https://media.test/index.m3u8', destination, headers: {}, signal: new AbortController().signal, fetch: failing, ffmpeg: '', retries: 0, workers: 2 }), /broken segment/)

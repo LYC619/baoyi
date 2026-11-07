@@ -64,7 +64,7 @@ export function useScan() {
     try {
       const result = await window.baoyi.scan.run(plain(dirs))
       lastResult.value = result
-      const message = `发现 ${result.found} 个程序，${result.added} 个新增目录，${result.pending} 个待识别，${result.settled} 个已识别过`
+      const message = `发现 ${result.found} 个程序或手机安装包，${result.added} 个新增目录，${result.pending} 个待识别，${result.settled} 个已识别过`
       if (result.loose_files.length) tasks.log(task.id, 'warn', `另有 ${result.loose_files.length} 个散落文件，本次未处理`)
       tasks.finish(task.id, task.cancelled ? 'cancelled' : 'success', (task.cancelled ? '扫描已停止：' : '扫描完成：') + message)
       return result

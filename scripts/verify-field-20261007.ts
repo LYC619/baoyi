@@ -16,7 +16,7 @@ test('照片不允许写入漫画分类，历史错分照片不会随漫画隐�
     const library=new ImageLibrary(db),group=library.saveGroup({name:'漫画独有'})
     db.prepare("INSERT INTO resource(id,kind,path,file_name,created_at,updated_at) VALUES('photo','image','D:/photos','photos',1,1)").run()
     db.prepare("INSERT INTO image_meta(resource_id,item_type) VALUES('photo','photo')").run()
-    assert.throws(()=>library.update('photo',{groupId:group.id}),/相册|照片/)
+    assert.throws(()=>library.update('photo',{groupId:group.id}),/分类/)
     db.prepare('UPDATE image_meta SET group_id=?').run(group.id)
     library.saveGroup({...group,hidden:true})
     initSchema(db,KINDS)

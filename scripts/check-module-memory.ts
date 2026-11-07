@@ -77,7 +77,14 @@ assert.equal(recallScroll('software'), 820)
 //    重了的表现是「点这个 Tab 跳到了另一个模块」，而它不报错
 const keys = MODULE_TABS.map((t) => t.key)
 const homes = MODULE_TABS.map((t) => t.home)
-assert.deepEqual(keys, ['software', 'game', 'video', 'image', 'project'], 'Tab 顺序就是顶栏从左到右的顺序')
+assert.deepEqual(keys, ['personal', 'project', 'software', 'game', 'video', 'image', 'document'], 'Tab 顺序就是顶栏从左到右的顺序')
+for (const key of ['personal', 'document'] as const) {
+  trackRoute(route(`/${key}/example?from=project`, key))
+  trackRoute(route('/settings'))
+  assert.equal(moduleTarget(key), `/${key}/example?from=project`)
+  rememberScroll(key, 123)
+  assert.equal(recallScroll(key), 123)
+}
 trackRoute(route('/project/p1','project'))
 assert.equal(moduleTarget('project'), '/project/p1')
 rememberScroll('project', 320)

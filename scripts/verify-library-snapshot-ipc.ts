@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_VERSION } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
 assert.ok(fs.existsSync('electron/ipc/library-snapshots.ts'), 'snapshot information requires guarded IPC')
@@ -21,7 +21,7 @@ load('electron/ipc/library-snapshots.ts').registerLibrarySnapshotIpc(() => win, 
 try {
   for (const [name, handler] of events) await assert.rejects(async () => handler({ ...event, senderFrame: {} }), /主窗口/, name)
   const before = await events.get('data:snapshot-info')!(event)
-  assert.equal(before.version, '0.10.0'); assert.equal(before.schema, 13); assert.equal(before.dataDirectory, root); assert.equal(before.inventory.total, 0)
+  assert.equal(before.version, '0.10.0'); assert.equal(before.schema, SCHEMA_VERSION); assert.equal(before.dataDirectory, root); assert.equal(before.inventory.total, 0)
   const created = await events.get('data:create-snapshot')!(event)
   assert.equal(created.reason, 'manual'); assert.equal(created.state, 'available')
   assert.equal((await events.get('data:snapshot-info')!(event)).inventory.total, 1)

@@ -8,15 +8,13 @@
  */
 import { computed, ref } from 'vue'
 import { Archive, Box, ChevronDown, CircleAlert, Clapperboard, Film, Flame, Folder, Hash, Music2, Tv } from 'lucide-vue-next'
-import { VIDEO_TYPE_LABEL, WATCH_STATUS_LABEL, useVideoStore } from '@/stores/video'
-import type { VideoFilterType, WatchStatus } from '@/types'
+import { VIDEO_TYPE_LABEL, useVideoStore } from '@/stores/video'
+import type { VideoFilterType } from '@/types'
 
 const store = useVideoStore()
 const props = withDefaults(defineProps<{ pendingActive?: boolean; pendingCount?: number; privateHidden?: boolean }>(), { pendingActive: false, pendingCount: 0, privateHidden: false })
 defineEmits<{ pending: [] }>()
 
-/** 在看排第一：这一格是这组里唯一有行动含义的那一格（接着看什么） */
-const STATUSES: WatchStatus[] = ['watching', 'unwatched', 'watched', 'dropped']
 const TYPES: Exclude<VideoFilterType,'hentai'>[] = ['movie', 'series', 'other', 'audio']
 
 const tagsOpen = ref(false)
@@ -27,8 +25,7 @@ const collections = computed(() => {
   return [{ name: '', count: Math.max(0, (total || 0) - saved.reduce((sum, row) => sum + row.count, 0)) }, ...saved]
 })
 const categories = computed(() => {
-  const list = store.counts.categories.filter(c => c.name !== '里番')
-  return list.some(c => c.name === '其他') ? list : [...list, { name: '其他', count: 0 }]
+  return store.counts.categories.filter(c => !['里番', '其他', '其他分类'].includes(c.name))
 })
 const tagCounts = computed(() => (inHentaiScope.value ? props.privateHidden ? [] : store.counts.hanime_tags : store.counts.tags))
 const archivedCount = computed(() => inHentaiScope.value ? props.privateHidden ? 0 : store.counts.hentai_archived ?? 0 : store.counts.archived)
@@ -76,21 +73,6 @@ const isActive = (kind: string, value: string) => !props.pendingActive && store.
         <Flame :size="15" />
         <span class="row__label">里番</span>
         <span class="row__count">{{ store.counts.hentai ?? 0 }}</span>
-      </button>
-
-      <p class="sidebar__title">观看</p>
-      <!-- 四态是闭集，计数为 0 的也留着。分类那边相反，空分类不出现 ——
-           分类是开集，会越长越多 -->
-      <button
-        v-for="s in STATUSES"
-        :key="s"
-        class="row"
-        :class="{ 'row--active': isActive('status', s) }"
-        @click="store.select({ kind: 'status', value: s })"
-      >
-        <span class="dot" :class="`dot--${s}`" />
-        <span class="row__label">{{ WATCH_STATUS_LABEL[s] }}</span>
-        <span class="row__count">{{ store.counts.status[s] }}</span>
       </button>
 
       <template v-if="categories.length > 0">

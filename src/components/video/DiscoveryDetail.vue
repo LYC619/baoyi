@@ -3,8 +3,8 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { X, Heart, Play, Download, ExternalLink, FolderOpen } from 'lucide-vue-next'
 import type { DiscoveryCard, DiscoveryMark } from '@/types/video-discovery'
 import DiscoveryPoster from './DiscoveryPoster.vue'
-const props = defineProps<{ sourceId: string; sourceName: string; card: DiscoveryCard; busy: boolean; loading?: boolean; error?: string }>()
-const emit = defineEmits<{ close: []; mark: [patch: Partial<DiscoveryMark>]; play: []; page: []; download: []; local: [] }>()
+const props = defineProps<{ sourceId: string; sourceName: string; card: DiscoveryCard; busy: boolean; loading?: boolean; error?: string; retryable?: boolean }>()
+const emit = defineEmits<{ close: []; mark: [patch: Partial<DiscoveryMark>]; play: []; page: []; download: []; local: []; retry: [] }>()
 const panel = ref<HTMLElement | null>(null), notes = ref(props.card.mark.notes)
 let previousFocus: HTMLElement | null = null
 watch(() => props.card.mark.notes, value => { notes.value = value })
@@ -29,6 +29,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
           <p class="eyebrow">{{ sourceName }}<span v-if="card.entry.code"> · {{ card.entry.code }}</span></p>
           <h2 id="discovery-detail-title">{{ card.entry.title }}</h2>
           <p v-if="error" class="detail-error" role="alert">{{ error }}</p>
+          <div v-if="error && retryable" class="detail-actions"><button class="btn btn--ghost" :disabled="loading" @click="emit('retry')">重试详情</button><button class="btn btn--ghost" @click="emit('page')">打开来源网页</button><span class="detail-hint">当前显示已缓存资料。</span></div>
           <p class="detail-facts"><span v-if="card.entry.year">{{ card.entry.year }}</span><span v-if="card.entry.rating">来源评分 {{ Number(card.entry.rating.value.toFixed(1)) }} / {{ card.entry.rating.scale }} · {{ card.entry.rating.votes }} 人</span><span v-if="card.resourceId" class="owned">本地已收录</span></p>
           <div class="detail-tags"><span v-for="tag in card.entry.tags" :key="tag">{{ tag }}</span></div>
           <div class="detail-actions">

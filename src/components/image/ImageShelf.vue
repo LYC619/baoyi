@@ -5,6 +5,7 @@ import { useToast } from '@/composables/useToast'
 import { ArrowLeft, ArrowRight, ListChecks, X, Heart, Check } from 'lucide-vue-next'
 import type { ImageGroup, ImageItem, ImageType } from '@/types/image'
 import ImageCover from './ImageCover.vue'
+import { vMasonry } from '@/composables/masonry'
 import ImageBulkPanel from './ImageBulkPanel.vue'
 import { imageShelfEntries, type ImageShelfEntry } from '@/utils/image-shelf'
 import { libraryBlocks, type LibraryGrouping } from '@/utils/library-grouping'
@@ -61,10 +62,10 @@ function finish(count: number) { selected.value = new Set(); notice.value = `已
     <p v-if="selecting && pending" role="status" class="shelf-pending">当前结果尚未就绪，刷新后可继续操作。</p>
     <ImageBulkPanel v-if="selecting" :pending="pending" :ids="[...selected]" :groups="groups" :type="type" @applied="finish" @busy="busy=$event" />
     <section v-for="block in blocks" :key="block.key" class="shelf-group"><h3 v-if="block.name">{{block.name}} <small>{{block.items.length}}</small></h3>
-    <div class="image-shelf" :class="{'image-shelf--list':layout==='list','image-shelf--photo':type==='photo'}" :style="cardSize&&layout!=='list'?{gridTemplateColumns:`repeat(auto-fill,minmax(${cardSize}px,1fr))`}:{}">
-      <article v-for="entry in block.items" :key="entry.id" class="image-card" :class="{selected:entry.members.every(item=>selected.has(item.id))}">
+    <div class="image-shelf" :class="{'image-shelf--list':layout==='list','image-shelf--photo':type!=='comic'}" :style="{'--photo-size':(cardSize||220)+'px',...(cardSize&&layout!=='list'&&layout!=='adaptive'?{gridTemplateColumns:`repeat(auto-fill,minmax(min(100%,${cardSize}px),1fr))`}:{})}" :data-layout="layout">
+      <article v-for="entry in block.items" :key="entry.id" v-masonry="layout==='adaptive'" class="image-card" :class="{selected:entry.members.every(item=>selected.has(item.id))}">
         <label v-if="selecting" class="shelf-select"><input type="checkbox" :aria-label="`选择 ${entry.name}`" :checked="entry.members.every(item=>selected.has(item.id))" :disabled="pending||busy" @change="toggleEntry(entry)" /></label>
-        <button class="image-card__open" :disabled="busy||(selecting&&pending)" @click="openEntry(entry)"><ImageCover :page-id="entry.item.coverPageId" :name="entry.name" :photo="entry.item.type==='photo'"/><div class="image-card__info"><strong>{{entry.name}}</strong><p><template v-if="entry.item.collectionId">合集 · {{entry.members.length}} 册 · </template><template v-else-if="entry.item.type==='comic'">{{entry.item.chapterCount}} 章 · </template>{{entry.members.reduce((n,i)=>n+i.pageCount,0)}} 页<Heart v-if="entry.item.favorite" :size="13"/></p><span v-if="entry.members.every(item=>item.read)" class="shelf-read"><Check :size="12"/>已读</span></div></button>
+        <button class="image-card__open" :disabled="busy||(selecting&&pending)" @click="openEntry(entry)"><ImageCover :page-id="entry.item.coverPageId" :revision="entry.item.type!=='comic'?entry.item.updatedAt:undefined" :name="entry.name" :photo="entry.item.type!=='comic'" :shape="type!=='comic'?layout:undefined"/><div class="image-card__info"><strong>{{entry.name}}</strong><p v-if="entry.item.authors?.length" class="image-card__authors">{{entry.item.authors.join("、")}}</p><p><template v-if="entry.item.collectionId">合集 · {{entry.members.length}} 册 · </template><template v-else-if="entry.item.type==='comic'">{{entry.item.chapterCount}} 章 · </template>{{entry.members.reduce((n,i)=>n+i.pageCount,0)}} 页<Heart v-if="entry.item.favorite" :size="13"/></p><span v-if="type==='comic' && entry.members.every(item=>item.read)" class="shelf-read"><Check :size="12"/>已读</span></div></button>
       </article>
     </div></section>
     <nav v-if="pageCount>1" class="shelf-bottom" aria-label="底部书架分页"><button class="im-icon" aria-label="上一页书架底部" title="上一页" :disabled="current===1||busy" @click="changePage(current-1)"><ArrowLeft :size="18" /></button><output>{{ current }} / {{ pageCount }}</output><button class="im-icon" aria-label="下一页书架底部" title="下一页" :disabled="current===pageCount||busy" @click="changePage(current+1)"><ArrowRight :size="18" /></button></nav>
@@ -75,3 +76,5 @@ function finish(count: number) { selected.value = new Set(); notice.value = `已
 </style>
 
 <style scoped>.shelf-group{margin-bottom:26px}.shelf-group h3{font-size:16px;font-weight:500;margin:0 0 14px}.shelf-group small{color:var(--text-faint);font-size:12px;margin-left:8px}</style>
+
+<style scoped>.image-shelf[data-layout=adaptive]{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--photo-size)),1fr));grid-auto-rows:4px;grid-auto-flow:row dense;gap:0 16px;align-items:start}.image-shelf--photo .image-card__info{min-height:65px}.shelf-group{min-width:0}</style>

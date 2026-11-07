@@ -1,6 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
-import { trackRoute } from '@/composables/useModules'
+import { trackRoute, activeModule, settingsModule } from '@/composables/useModules'
 
 const router = createRouter({
   // 生产环境走 file:// 加载，必须用 hash 路由
@@ -74,6 +74,9 @@ const router = createRouter({
     { path: '/image/:id', name: 'image-detail', component: () => import('@/pages/image/Detail.vue'), props: true, meta: { module: 'image' } },
     { path: '/project', name: 'project-home', component: () => import('@/pages/project/Home.vue'), meta: { module: 'project' } },
     { path: '/project/:id', name: 'project-detail', component: () => import('@/pages/project/Detail.vue'), props: true, meta: { module: 'project' } },
+    { path: '/document', name: 'document-home', component: () => import('@/pages/document/Home.vue'), meta: { module: 'document' } },
+    { path: '/document/:id', name: 'document-reader', component: () => import('@/pages/document/Reader.vue'), props: true, meta: { module: 'document' } },
+    { path: '/personal', name: 'personal-home', component: () => import('@/pages/personal/Home.vue'), meta: { module: 'personal' } },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ]
 })
@@ -85,6 +88,11 @@ router.beforeEach((to) => {
 
   if (!onboarded && to.name !== 'onboarding') return { name: 'onboarding' }
   if (onboarded && to.name === 'onboarding') return { name: 'home' }
+  if (to.name === 'settings') {
+    const module = settingsModule(to.query.module, to.query.tab, activeModule.value)
+    if (to.query.module !== module) return { name: 'settings', query: { ...to.query, module }, replace: true }
+    activeModule.value = module
+  }
   return true
 })
 

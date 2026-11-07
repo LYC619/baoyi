@@ -1,7 +1,8 @@
 import { BrowserWindow, Menu, session } from 'electron'
 import type { DiscoverySource, DiscoverySelection } from '../../src/types/video-discovery.ts'
 
-export const DISCOVERY_PARTITION = 'persist:video-discovery'
+import { ONLINE_SOURCE_PARTITION } from './online-network-rules.ts'
+export const DISCOVERY_PARTITION = ONLINE_SOURCE_PARTITION
 /** Remote content has no preload, IPC bridge, Node access or native download access. */
 export function createDiscoveryBrowser(getMainWindow: () => BrowserWindow | null) {
   let window: BrowserWindow | null = null

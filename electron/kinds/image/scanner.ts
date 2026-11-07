@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { listArchive, MAX_IMAGE_BYTES } from './archive.ts'
 import type { ImageType, ScannedImage, ScannedImagePage } from '../../../src/types/image.ts'
+import {readImageManifest,manifestPath} from './manifest.ts'
 
 export const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif'])
 export const isArchive = (file: string) => /\.(zip|cbz)$/i.test(file)
@@ -28,8 +29,23 @@ async function collect(file: string, warnings: string[], depth = 0): Promise<Sca
 }
 async function scanOne(input: string, type: ImageType): Promise<ScannedImage> {
   const file = await fs.realpath(input), stat = await fs.stat(file)
+  if([input,file].some(value=>path.resolve(value).split(/[\\/]/).some(part=>part.toLowerCase()==='.baoyi-ingest')))throw new Error('摄入暂存目录尚未完成，不能导入图库')
   const result: ScannedImage = { path: file, type, name: path.basename(file, isArchive(file) ? path.extname(file) : ''), sourceDir: path.dirname(file), chapters: [], warnings: [] }
-  if (type === 'photo' || !stat.isDirectory()) {
+  const manifest=stat.isDirectory()?await readImageManifest(file):null
+  if(manifest?.version===2){
+    if(type!=='comic')throw new Error('漫画来源目录应作为漫画导入')
+    if(!manifest.selectionComplete)throw new Error('漫画所选章节尚未完成')
+    const actual=await collect(file,result.warnings),declared=new Set(Object.values(manifest.pages).map(page=>path.resolve(manifestPath(file,page.file)).toLowerCase())),byFile=new Map(actual.map(page=>[page.file.toLowerCase(),page]))
+    if(result.warnings.length||actual.length!==declared.size||actual.some(page=>page.entry||!declared.has(page.file.toLowerCase())))throw new Error('漫画页面与来源清单不一致，请先检查文件')
+    result.source=manifest.source;result.sourceId=manifest.sourceId;result.name=manifest.name;result.authors=manifest.authors;result.description=manifest.description;result.tags=manifest.tags;result.publication=manifest.publication
+    result.chapters=[...manifest.chapters].sort((a,b)=>a.order-b.order).map(chapter=>({key:chapter.id,sourceId:chapter.id,title:chapter.title,pages:chapter.pageIds.map(id=>{
+      const saved=manifest.pages[chapter.id+':'+id],page=byFile.get(manifestPath(file,saved.file).toLowerCase())
+      if(!page||page.size!==saved.size)throw new Error('漫画页面大小与来源清单不一致')
+      return page
+    })}))
+    return result
+  }
+  if (type !== 'comic' || !stat.isDirectory()) {
     result.chapters.push({ key: '.', title: result.name, pages: await collect(file, result.warnings) })
   } else {
     const loose: ScannedImagePage[] = []
@@ -45,25 +61,18 @@ async function scanOne(input: string, type: ImageType): Promise<ScannedImage> {
     if (loose.length) result.chapters.unshift({ key: '.', title: '未分章', pages: loose })
   }
   if (!result.chapters.some(c => c.pages.length)) result.warnings.push('没有找到可导入的图片')
-  if (stat.isDirectory()) {
-    try {
-      const metadata = path.join(file, '.baoyi-image.json'), info = await fs.lstat(metadata)
-      if (!info.isSymbolicLink() && info.size < 8 * 1024 ** 2) {
-        const saved = JSON.parse(await fs.readFile(metadata, 'utf8'))
-        if (saved.version === 1 && saved.source === 'pica' && typeof saved.sourceId === 'string' && Array.isArray(saved.chapters)) {
+  if (manifest?.version===1) {
+        const saved=manifest
           result.source = 'pica'; result.sourceId = saved.sourceId; result.name = String(saved.name || result.name).slice(0,300)
           result.description = String(saved.description || '').slice(0,50000); result.tags = Array.isArray(saved.tags) ? saved.tags.filter((t:unknown)=>typeof t==='string').slice(0,50) : []
           result.publication = saved.publication === 'completed' ? 'completed' : 'ongoing'
           for (const chapter of result.chapters) { const match = saved.chapters.find((c:any)=>c.directory===chapter.key); if(match && typeof match.id === 'string'){chapter.key=match.id;chapter.sourceId=match.id;chapter.title=String(match.title||chapter.title).slice(0,300)} }
-        }
-      }
-    } catch { /* An optional sidecar cannot prevent a local folder from being read. */ }
   }
   if (result.chapters.reduce((sum,c) => sum + c.pages.length, 0) > 50000) throw new Error('单部作品超过 50000 页，请分卷导入')
   return result
 }
 export async function scanImageImport(root: string, type: ImageType, multiple: boolean): Promise<ScannedImage[]> {
-  if (!['photo','comic'].includes(type)) throw new Error('未知图片类型')
+  if (!['photo','comic','misc'].includes(type)) throw new Error('未知图片类型')
   if (!multiple) return [await scanOne(root, type)]
   const result: ScannedImage[] = []
   const entries = (await fs.readdir(root, { withFileTypes: true })).filter(e => !ignored(e.name) && !e.isSymbolicLink() && (e.isDirectory() || isArchive(e.name))).sort((a,b) => compare(a.name,b.name))

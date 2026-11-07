@@ -3,8 +3,8 @@
  *
  * 结构参考 pi 的 agent-loop（参考/pi-main/packages/agent/src/agent-loop.ts）：
  * 「请求 → 拿到 tool_calls → 本地执行 → 结果回灌 → 再请求」，直到模型不再要求调用工具。
- * pi 里的流式、压缩、steering、会话持久化在这里都不需要，所以只保留循环本体
- * 以及四条护栏：最大轮数、重复调用检测、同一个错误反复出现就终止、可中断。
+ * 会话持久化与来源检查点由调用方管理；循环负责预算暂停、重复调用检测、
+ * 同一个错误反复出现就终止、可中断，不静默删除调用方的历史。
  */
 
 import type { AgentEvent, AgentStopReason, AIConfig } from '../../../src/types'
@@ -17,6 +17,8 @@ export interface AgentTool {
   description: string
   /** JSON Schema，直接透传给模型 */
   parameters: Record<string, unknown>
+  /** Trusted tool implementation may request a larger bounded evidence page. */
+  maxOutput?: number
   execute(args: any, signal?: AbortSignal): Promise<string>
 }
 
@@ -39,6 +41,8 @@ export interface AgentRunOptions {
   tools: AgentTool[]
   /** 一次运行最多允许几轮「模型请求 + 工具执行」 */
   maxTurns?: number
+  /** Pause before sending an oversized context; persistent callers can checkpoint and resume. */
+  maxContextChars?: number
   /** 需要结构化提交的调用方可以显式要求工具；其他流程仍由模型决定。 */
   toolChoice?: 'auto' | 'required'
   /** 指定提交工具成功后即可结束，无须再请求一轮自然语言总结。 */
@@ -143,11 +147,11 @@ async function requestTurn(
   const body = JSON.stringify({
     model: config.model,
     messages,
-    tools: tools.map((t) => ({
+    ...(tools.length ? { tools: tools.map((t) => ({
       type: 'function',
       function: { name: t.name, description: t.description, parameters: t.parameters }
     })),
-    tool_choice: toolChoice,
+    tool_choice: toolChoice } : {}),
     temperature: 0.2,
     stream: false
   })
@@ -173,9 +177,9 @@ async function requestTurn(
 
       if (!res.ok) {
         const detail = await res.text().catch(() => '')
-        const err = new Error(
+        const err = Object.assign(new Error(
           `HTTP ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 300)}` : ''}`
-        )
+        ), { status: res.status })
         if (isRetryable(res.status) && attempt < MAX_RETRY) {
           lastError = err
           await sleep(800 * (attempt + 1))
@@ -200,6 +204,8 @@ async function requestTurn(
     } catch (err) {
       // 用户主动取消不重试
       if (signal?.aborted) throw err
+      const status = (err as { status?: number })?.status
+      if (status && !isRetryable(status)) throw err
       lastError = err instanceof Error ? err : new Error(String(err))
       if (attempt < MAX_RETRY) {
         await sleep(800 * (attempt + 1))
@@ -236,6 +242,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 
   while (turns < maxTurns) {
     if (signal?.aborted) return { stopReason: 'aborted', error: '', turns, tokens, text }
+    if(opts.maxContextChars&&JSON.stringify(messages).length>opts.maxContextChars)return {stopReason:'max_turns',error:'已达到本次上下文预算，原始工具结果已保留；可从检查点继续。',turns,tokens,text}
     turns++
     onEvent?.({ type: 'turn', index: turns })
 
@@ -280,7 +287,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         messages.push({
           role: 'tool',
           tool_call_id: call?.id ?? name,
-          content: clip(content)
+          content: clip(content, Math.min(50000, byName.get(name)?.maxOutput || MAX_TOOL_OUTPUT))
         })
 
       /**

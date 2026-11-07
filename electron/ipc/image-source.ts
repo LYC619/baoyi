@@ -8,6 +8,7 @@ import { createImageDownloads } from '../kinds/image/downloads.ts'
 import { imageOperation } from '../kinds/image/activity.ts'
 import { createImageUpdates } from '../kinds/image/updates.ts'
 import { restoreWindowFocus } from '../services/window-focus.ts'
+import {comicProvider,downloadTarget,rememberDownloadRoot,validateDownloadRoot} from '../kinds/image/download-target.ts'
 
 export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<IpcMain,'handle'>):void{
   const credentialFile=path.join(app.getPath('userData'),'pica-auth.bin')
@@ -20,6 +21,13 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
   const updates=createImageUpdates({db:getDb(),source,queue})
   function handle(name:string,fn:(...args:any[])=>unknown){ipc.handle('image:'+name,(event:IpcMainInvokeEvent,...args)=>{const win=getWindow();if(!win||win.isDestroyed()||event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw new Error('只允许主窗口操作图片来源');return fn(...args)})}
   handle('source-status',()=>!!token)
+  handle('download-target',(provider,id,group)=>downloadTarget(getDb(),app.getPath('userData'),comicProvider(provider),id,group))
+  handle('choose-download-root',async(provider,current)=>{
+    provider=comicProvider(provider)
+    const selected=await dialog.showOpenDialog(getWindow()!,{title:'选择漫画存放根目录',defaultPath:typeof current==='string'?current:undefined,properties:['openDirectory','createDirectory']})
+    restoreWindowFocus(getWindow());if(selected.canceled||!selected.filePaths[0])return null
+    const root=await validateDownloadRoot(selected.filePaths[0]);await rememberDownloadRoot(app.getPath('userData'),provider,root);return root
+  })
   handle('source-owned',(workIds:string[])=>{
     if(!Array.isArray(workIds)||!workIds.length||workIds.length>200||workIds.some(id=>typeof id!=='string'||!id||id.length>100))throw new Error('来源作品标识无效')
     const ids=[...new Set(workIds)],marks=ids.map(()=>'?').join(',')
@@ -44,18 +52,20 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
   handle('source-ranking',period=>{if(!token)throw new Error('请先登录哔咔');return source.ranking(period)})
   handle('source-cover',url=>{if(!token)throw new Error('请先登录哔咔');return source.cover(url)})
   handle('source-detail',(id:string)=>{if(!token)throw new Error('请先登录哔咔');return source.detail(id)})
-  handle('download',async(workId:string,selected:string[],groupId:string|null)=>{
+  handle('download',async(workId:string,selected:string[],groupId:string|null,root?:string)=>{
     if(!token)throw new Error('请先登录哔咔')
     const {work,chapters}=await source.detail(workId),chosen=chapters.filter(c=>selected.includes(c.id))
     if(!chosen.length)throw new Error('请选择有效章节')
+    if(root!==undefined){const target=await downloadTarget(getDb(),app.getPath('userData'),'pica',workId,groupId);return queue.enqueue(work,chosen,await validateDownloadRoot(target.locked?target.root:root),target.locked?target.groupId:groupId)}
     const result=await dialog.showOpenDialog(getWindow()!,{title:'选择漫画下载根目录（补章请选择原根目录）',properties:['openDirectory','createDirectory']})
     restoreWindowFocus(getWindow())
     if(result.canceled||!result.filePaths[0])return null
     return queue.enqueue(work,chosen,result.filePaths[0],groupId)
   })
-  handle('download-batch',async(workIds:string[],groupId:string|null)=>{
+  handle('download-batch',async(workIds:string[],groupId:string|null,root?:string)=>{
     if(!token)throw new Error('请先登录哔咔')
     if(!Array.isArray(workIds)||workIds.length<1||workIds.length>200)throw new Error('一次请选择 1 到 200 部漫画')
+    if(root!==undefined)return queue.enqueueBatch(workIds,await validateDownloadRoot(root),groupId)
     const result=await dialog.showOpenDialog(getWindow()!,{title:`选择 ${workIds.length} 部漫画的下载根目录`,properties:['openDirectory','createDirectory']})
     restoreWindowFocus(getWindow())
     if(result.canceled||!result.filePaths[0])return null

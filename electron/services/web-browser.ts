@@ -1,7 +1,8 @@
 import { BrowserWindow, Menu, clipboard, session } from 'electron'
 import { isWebNavigation, normalizeWebUrl } from './web-browser-url.ts'
 
-export const WEB_BROWSER_PARTITION = 'persist:general-web-browser'
+import { ONLINE_BROWSER_PARTITION } from './online-network-rules.ts'
+export const WEB_BROWSER_PARTITION = ONLINE_BROWSER_PARTITION
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 
 /** Plain user-addressed browser; remote pages never receive the app's preload. */

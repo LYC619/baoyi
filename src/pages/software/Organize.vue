@@ -227,7 +227,7 @@ async function execute(): Promise<void> {
       <section v-if="completed" class="panel organize-result" aria-label="本次整理结果">
         <p role="status">本次整理：移动 {{ completed.moved }} 项，创建链接 {{ completed.linked }} 项，跳过 {{ completed.skipped }} 项，失败 {{ completed.failed }} 项。</p>
         <details v-if="completed.failed"><summary>查看未完成项目</summary><ul><li v-for="(step, index) in completed.steps.filter(step => !step.ok)" :key="index">{{ step.name }}：{{ step.note }}</li></ul></details>
-        <button class="btn btn--ghost" @click="router.push({ name: 'settings', query: { tab: 'organize' } })">查看整理记录与撤销</button>
+        <p class="hint">右上角设置 → 软件 → 目录整理，可设置目标目录、查看记录与撤销。</p>
       </section>
       <p v-if="loading" class="state">正在同步目录并读取软件…</p>
 
@@ -240,12 +240,7 @@ async function execute(): Promise<void> {
       <div v-else-if="!root" class="state">
         <h2>还没有设置整理目标目录</h2>
         <p>整理需要一个归置软件的根目录，比如 E:\Toolkit。它和扫描目录是分开的。</p>
-        <button
-          class="btn btn--primary"
-          @click="router.push({ name: 'settings', query: { tab: 'organize' } })"
-        >
-          去设置
-        </button>
+        <p class="hint">右上角设置 → 软件 → 目录整理，可设置目标目录、查看记录与撤销。</p>
       </div>
 
       <OrganizedSoftware v-else-if="active === 'organized'" :entries="organizedEntries" :categories="categories.list.map(c => c.name)" :busy="busy" @busy="actionBusy = $event" @refresh="refreshEntry" />

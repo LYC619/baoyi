@@ -6,7 +6,6 @@ import type { VideoDirectory } from '@/types/video-library'
 import type { VideoOrganizeJournal, VideoOrganizeMode } from '@/types/video-organize'
 import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
 import { videoTitle } from '@/utils'
-import { useRouter } from 'vue-router'
 import { useOrganizeSession } from './useOrganizeSession'
 import OrganizePreview from './OrganizePreview.vue'
 import OrganizeHistory from './OrganizeHistory.vue'
@@ -17,7 +16,6 @@ const props = withDefaults(defineProps<{
 }>(), { mode: 'organize', resourceId: '', directory: null, returnFocus: null })
 const emit = defineEmits<{ close: []; changed: [journal: VideoOrganizeJournal] }>()
 const workflow = useVideoWorkflow()
-const router = useRouter()
 const tab = ref<'preview' | 'history'>(props.mode === 'history' ? 'history' : 'preview')
 const session = useOrganizeSession({ works: () => props.works, resourceId: props.resourceId || undefined,
   privacyReady: () => workflow.privacyReady.value, privateHidden: () => !workflow.privacyReady.value || workflow.hideHentai.value,
@@ -131,7 +129,7 @@ onBeforeUnmount(() => {
                 <div class="organize-file-options">
                   <fieldset class="organize-file-actions" :disabled="inputLocked"><legend>文件整理</legend><label><input v-model="fileAction" type="radio" value="none" />保留位置</label><label><input v-model="fileAction" type="radio" value="move" />移动</label><label><input v-model="fileAction" type="radio" value="copy" />复制</label></fieldset>
                   <template v-if="copyFiles">
-                    <div class="organize-field"><span>整理根目录</span><p class="organize-path">{{ targetDirectory || '请先在设置中保存影视整理根目录' }}</p><p class="organize-hint">将在根目录下新建以合集名命名的文件夹。</p><button class="btn btn--ghost" type="button" :disabled="!!busy" @click="emit('close'); router.push({ name: 'settings', query: { tab: 'scan' } })">前往设置修改</button></div>
+                    <div class="organize-field"><span>整理根目录</span><p class="organize-path">{{ targetDirectory || '请先在设置中保存影视整理根目录' }}</p><p class="organize-hint">将在根目录下新建以合集名命名的文件夹。</p><p class="organize-hint">修改位置：右上角设置 → 影视 → 目录整理。</p></div>
                     <p class="organize-hint">{{ transfer === 'move' ? '全部复制并校验成功后移除原文件，共享文件保留原件。' : '复制后保留原件。' }}下方列出各文件去向，目标重名时不会覆盖。</p>
                   </template>
                 </div>

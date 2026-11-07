@@ -1,0 +1,18 @@
+Document reader dependencies added in BaoYi 0.17.0
+
+PDF.js / pdfjs-dist 6.4.299 — Mozilla Foundation — Apache-2.0
+https://github.com/mozilla/pdf.js
+License: pdfjs-license.txt. Bundled CMaps, standard fonts and WebAssembly
+retain their upstream LICENSE files under dist/pdfjs/ in the application.
+Text layer geometry CSS is adapted from PDF.js (Apache-2.0).
+
+Marked 18.1.1 — MIT
+https://github.com/markedjs/marked
+License: marked-license.txt
+
+DOMPurify 3.4.17 — Apache-2.0 OR MPL-2.0
+https://github.com/cure53/DOMPurify
+Redistributed under Apache-2.0. License: dompurify-license.txt
+
+These dependencies run locally. PDF workers, fonts, CMaps and decoder assets
+are packaged with the app; the reader does not fetch them from a CDN.

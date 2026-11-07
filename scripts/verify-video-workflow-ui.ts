@@ -246,7 +246,10 @@ await regression('持久层拒绝清理历史时保留记录并报告失败', as
 await regression('隐藏视频任务后，迟到的重新识别错误不能泄露文件路径', async () => {
   let rejectGet!: (cause: Error) => void
   const pendingGet = new Promise((_resolve, reject) => { rejectGet = reject })
-  const loader = createRendererLoader({ vue: { ...Vue, inject: () => null, getCurrentInstance: () => null, onMounted() {}, onBeforeUnmount() {} } }, {
+  const loader = createRendererLoader({
+    vue: { ...Vue, inject: () => null, getCurrentInstance: () => null, onMounted() {}, onBeforeUnmount() {} },
+    '@/stores/settings': { useSettingsStore: () => Vue.reactive({ loaded: true, settings: { ...settings } }) }
+  }, {
     window: { baoyi: { video: { ...api, get: () => pendingGet }, settings: { getAll: async () => ({ ...settings, hide_hentai: false }) } } }, console: { info() {}, warn() {}, error() {} }
   })
   const setup = loader('src/components/tasks/TaskCenter.vue').default.setup({}, { expose() {} })

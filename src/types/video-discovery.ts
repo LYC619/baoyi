@@ -29,8 +29,12 @@ export interface DiscoveryMark { favorite: boolean; watched: boolean; notes: str
 export interface DiscoveryCard { entry: DiscoveryEntry; mark: DiscoveryMark; resourceId: string }
 export interface DiscoverySourceSummary { id: string; name: string; homeUrl: string; count: number; updatedAt: number; online?: DiscoveryOnlineConfig }
 export interface DiscoverySelection { sourceId: string; entryId: string }
+export type OnlineProbeOutcome = 'response_received'|'verification_required'|'restricted'|'rate_limited'|'proxy_auth_required'|'server_error'|'http_error'
+export interface OnlineNetworkProbe {resolved:string;status:number;statusText:string;finalUrl:string;contentType:string;outcome:OnlineProbeOutcome;pageInspected:boolean;sampleTruncated:boolean}
 export interface DiscoveryApi {
   online: {
+    networkStatus(url: string): Promise<{ resolved: string }>
+    probe(url: string): Promise<OnlineNetworkProbe>
     connect(url: string): Promise<DiscoverySourceSummary>
     refresh(sourceId: string): Promise<DiscoverySourceSummary>
     next(sourceId: string): Promise<DiscoverySourceSummary>

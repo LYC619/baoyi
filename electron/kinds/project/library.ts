@@ -25,9 +25,9 @@ export function validateProjectEntries(value:unknown):ProjectEntry[]{
 export class ProjectLibrary {
   db:SqlDb
   constructor(db:SqlDb){this.db=db}
-  private item(r:Row):ProjectItem{return {id:r.id,path:r.path,name:r.name_zh,summary:r.summary||'',category:r.category,source:r.origin,state:r.status,group:r.group_name,tags:JSON.parse(r.tags||'[]'),pinned:!!r.pinned,notes:r.notes||'',version:r.version,entries:validateProjectEntries(JSON.parse(r.entries)),defaultEntryId:r.default_entry,evidence:r.evidence,createdAt:r.created_at,updatedAt:r.updated_at,lastOpenedAt:r.last_used_at||0,available:existsSync(r.path)}}
-  list():ProjectItem[]{return (this.db.prepare("SELECT r.*,p.* FROM resource r JOIN project_meta p ON p.resource_id=r.id WHERE r.kind='project' ORDER BY p.pinned DESC,r.last_used_at DESC,r.updated_at DESC").all() as Row[]).map(r=>this.item(r))}
-  get(id:string):ProjectItem|null{const r=this.db.prepare("SELECT r.*,p.* FROM resource r JOIN project_meta p ON p.resource_id=r.id WHERE r.id=? AND r.kind='project'").get(id) as Row|undefined;return r?this.item(r):null}
+  private item(r:Row):ProjectItem{return {id:r.id,path:r.path,name:r.name_zh,summary:r.summary||'',category:r.category,source:r.origin,state:r.status,group:r.group_name,tags:JSON.parse(r.tags||'[]'),pinned:!!r.pinned,notes:r.notes||'',version:r.version,entries:validateProjectEntries(JSON.parse(r.entries)),defaultEntryId:r.default_entry,evidence:r.evidence,createdAt:r.created_at,updatedAt:r.updated_at,lastOpenedAt:r.last_used_at||0,available:existsSync(r.path),contextPreview:{current:(r.context_current||'').slice(0,90),next:(r.context_next||'').slice(0,90)}}}
+  list():ProjectItem[]{return (this.db.prepare("SELECT r.*,p.*,substr(c.current_text,1,90) AS context_current,substr(c.next_text,1,90) AS context_next FROM resource r JOIN project_meta p ON p.resource_id=r.id LEFT JOIN project_context c ON c.resource_id=r.id WHERE r.kind='project' ORDER BY p.pinned DESC,r.last_used_at DESC,r.updated_at DESC").all() as Row[]).map(r=>this.item(r))}
+  get(id:string):ProjectItem|null{const r=this.db.prepare("SELECT r.*,p.*,substr(c.current_text,1,90) AS context_current,substr(c.next_text,1,90) AS context_next FROM resource r JOIN project_meta p ON p.resource_id=r.id LEFT JOIN project_context c ON c.resource_id=r.id WHERE r.id=? AND r.kind='project'").get(id) as Row|undefined;return r?this.item(r):null}
   register(scan:ProjectCandidate,defaultState:ProjectItem['state']='active'):ProjectItem{
     if(!path.isAbsolute(scan.path))throw new Error('项目路径无效')
     const existing=this.db.prepare('SELECT id,kind FROM resource WHERE path=? COLLATE NOCASE').get(scan.path) as Row|undefined
@@ -63,5 +63,21 @@ export class ProjectLibrary {
     }catch(error){this.db.exec('ROLLBACK TO project_update; RELEASE project_update');throw error}
   }
   opened(id:string):void{this.db.prepare("UPDATE resource SET last_used_at=?,use_count=COALESCE(use_count,0)+1 WHERE id=? AND kind='project'").run(Date.now(),id)}
+  saveEntry(id:string,entry:ProjectEntry,expected?:ProjectEntry):ProjectItem {
+    const current=this.get(id);if(!current)throw new Error('项目不存在')
+    const next=validateProjectEntries([entry])[0],old=current.entries.find(e=>e.id===next.id)
+    if(expected){
+      const original=validateProjectEntries([expected])[0]
+      if(original.id!==next.id||!old||JSON.stringify(old)!==JSON.stringify(original))throw new Error('此入口已变化，请关闭编辑框后重新打开；你的输入仍保留')
+    }else if(old)throw new Error('此入口已存在，请刷新后编辑')
+    return this.update(id,{entries:old?current.entries.map(e=>e.id===next.id?next:e):[...current.entries,next],defaultEntryId:current.defaultEntryId||next.id})
+  }
+  removeEntry(id:string,entryId:string,expected:ProjectEntry):ProjectItem {
+    const current=this.get(id);if(!current)throw new Error('项目不存在')
+    const old=current.entries.find(e=>e.id===entryId),original=validateProjectEntries([expected])[0]
+    if(!old||original.id!==entryId||JSON.stringify(old)!==JSON.stringify(original))throw new Error('此入口已变化，请刷新后再移除')
+    const entries=current.entries.filter(e=>e.id!==entryId)
+    return this.update(id,{entries,defaultEntryId:current.defaultEntryId===entryId?entries[0]?.id||'':current.defaultEntryId})
+  }
   remove(id:string):void{this.db.prepare("DELETE FROM resource WHERE id=? AND kind='project'").run(id)}
 }

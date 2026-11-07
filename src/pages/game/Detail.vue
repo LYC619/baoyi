@@ -933,7 +933,7 @@ function copyPath(path: string): void {
               确认是存档再记下来。有了它才谈得上备份。
             </p>
             <p v-if="item.save_paths.length > 0" class="hint">
-              备份放在设置 › 数据管理里指定的目录，一次备一份，不会覆盖上一份。
+              备份放在右上角设置 › 游戏 › 存档与备份里指定的目录，一次备一份，不会覆盖上一份。
               超过那里设的保留上限时会问一句要不要清掉最早的几份。
             </p>
           </section>

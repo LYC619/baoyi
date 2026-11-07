@@ -19,8 +19,12 @@ import { LIBRARY_BACKUP_LIMITS, type LibraryBackup } from '../src/types/library-
 import { buildLibraryBackup, previewLibraryBackup, restoreLibraryBackup } from '../electron/services/library-backup.ts'
 
 const expectedTables = [
+  'document_files','document_file_operations','document_recycle','document_insights',
   'image_collections','image_collection_members',
-  'project_meta', 'project_sessions', 'image_groups', 'image_meta', 'image_chapters', 'image_pages', 'image_progress', 'image_reader_state', 'image_bookmarks', 'image_download_jobs',
+  'document_categories','document_custom_groups','archive_actions','archive_runs',
+  'workspace_sessions','workspace_changes','skill_card','skill_metric','skill_record','skill_proposal',
+  'project_summaries','project_launch_profiles',
+  'project_meta', 'project_sessions', 'document_meta', 'document_annotations', 'project_context', 'project_event_generation', 'project_automation', 'project_events', 'personal_records', 'resource_links', 'image_groups', 'image_meta', 'image_chapters', 'image_pages', 'image_progress', 'image_reader_state', 'image_bookmarks', 'image_download_jobs',
   'resource', 'software_meta', 'game_meta', 'video_meta', 'episode', 'video_sources',
   'video_directories', 'video_assets', 'video_episode_assets', 'video_download_jobs',
   'video_discovery_sources', 'video_discovery_marks',
@@ -97,7 +101,7 @@ function jobFixture(status: VideoDownloadJob['status'] = 'success'): VideoDownlo
     sources: [{ provider: 'fixture', externalId: '0071', scope: 'episode', pageUrl: 'https://example.invalid/0071', evidence: 'confirmed' }],
     items: [{ videoCode: '0071', title: '第一集', order: 1, path: 'Z:\\library-backup-fixture\\series\\4k.mp4',
       sourceLabel: '2160p', transfer: 'complete', metadata: 'complete', registration: 'complete',
-      receivedBytes: 98765, totalBytes: 98765, error: '', warnings: ['原始提示'] }],
+      receivedBytes: 98765, totalBytes: 98765, bytesPerSecond:0,transferMessage:'',missing:[],error: '', warnings: ['原始提示'] }],
     warnings: ['任务提示'], retryStage: 'metadata'
   }
 }
@@ -208,7 +212,8 @@ await test('export covers exactly the real metadata tables without settings or c
   assert.equal(backup.schema_version, SCHEMA_VERSION)
   assert.ok(Number.isSafeInteger(backup.exported_at))
   assert.deepEqual(Object.keys(backup.tables).sort(), [...expectedTables].sort())
-  assert.deepEqual(source.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('settings', 'sqlite_sequence') ORDER BY name").all()
+  // Local extraction queue is runtime state, intentionally excluded from metadata snapshots.
+  assert.deepEqual(source.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('settings', 'sqlite_sequence', 'document_insight_runs') ORDER BY name").all()
     .map(r => (r as { name: string }).name), [...expectedTables].sort(), 'the current schema must have no uncovered metadata table')
   for (const table of expectedTables) assert.deepEqual(backup.tables[table], rows(source, table), table)
   assert.ok(!JSON.stringify(backup).includes('source-secret-NEVER-EXPORT'))
@@ -224,7 +229,7 @@ await test('round trip preserves every column, IDs, watch/manual metadata, versi
   const summary = previewLibraryBackup(target, backup)
   assert.equal(databaseState(target), previewBefore, 'preview must leave data, rowids, settings and sequences unchanged')
   assert.equal(summary.total_rows, expectedTables.reduce((n, table) => n + backup.tables[table].length, 0))
-  assert.deepEqual(summary.resources, { software: 1, game: 1, video: 2, image: 0, project:0 })
+  assert.deepEqual(summary.resources, { software: 1, game: 1, video: 2, image: 0, project:0, document:0 })
   for (const table of expectedTables) assert.equal(summary.table_counts[table], backup.tables[table].length)
   assert.deepEqual(restoreLibraryBackup(target, backup), summary)
   for (const table of expectedTables) assert.deepEqual(rows(target, table), rows(source, table), table)
@@ -700,5 +705,16 @@ await test('one savepoint composes with a caller transaction and rolls back afte
   assert.ok(late.statements.some(sql => /^INSERT OR ABORT INTO main\."video_assets"/i.test(sql)), 'real FK failure must occur after earlier metadata has been written')
 })
 
+await test('classification protection survives backups and pre-16 backups still restore', (source,target)=>{
+  seed(source)
+  source.prepare('UPDATE software_meta SET category_locked = 1').run()
+  const backup=buildLibraryBackup(source)
+  restoreLibraryBackup(target,backup)
+  assert.equal((target.prepare('SELECT category_locked FROM software_meta').get() as any).category_locked,1)
+  const legacy:any=structuredClone(backup);legacy.schema_version=15
+  for(const row of legacy.tables.software_meta)delete row.category_locked
+  restoreLibraryBackup(target,legacy)
+  assert.equal((target.prepare('SELECT category_locked FROM software_meta').get() as any).category_locked,0)
+})
 console.log(`Library backup regression (${useBetterSqlite ? 'better-sqlite3' : 'node:sqlite'}): ${passed} passed, ${failed} failed`)
 if (failed) process.exitCode = 1

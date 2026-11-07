@@ -23,6 +23,9 @@ function files(directory) {
     return entry.isDirectory() ? files(file) : [file]
   })
 }
+for (const file of files(path.join(root, 'resources/agent-skills'))) {
+  assert.deepEqual(asar.extractFile(archive, path.relative(root, file)), fs.readFileSync(file), file)
+}
 let compiledFiles = 0
 for (const folder of ['dist', 'dist-electron']) {
   for (const file of files(path.join(root, folder))) {
@@ -35,5 +38,23 @@ for (const [source, target] of [
   ['resources/save-manifest.json', 'save-manifest.json'],
   ['node_modules/mediainfo.js/dist/MediaInfoModule.wasm', 'MediaInfoModule.wasm']
 ]) assert.deepEqual(fs.readFileSync(path.join(directory, 'resources', target)), fs.readFileSync(path.join(root, source)))
-assert.ok(fs.statSync(path.join(directory, 'resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node')).size > 0)
-console.log(JSON.stringify({ version: pkg.version, directory, compiledFiles, asarSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex'), nativeDatabase: true, mediaInfoWasm: true, dataMode: 'appdata' }, null, 2))
+for (const [source, target] of [
+  ['resources/hermes/bridge.py', 'hermes/bridge.py'],
+  ['resources/hermes/state.py', 'hermes/state.py'],
+  ['output/hermes-runtime/manifest.json', 'hermes-runtime/manifest.json'],
+  ['output/hermes-runtime/runtime-stamp.json', 'hermes-runtime/runtime-stamp.json']
+]) assert.deepEqual(fs.readFileSync(path.join(directory, 'resources', target)), fs.readFileSync(path.join(root, source)))
+assert.ok(fs.existsSync(path.join(directory, 'resources/hermes-runtime/python/python.exe')))
+assert.ok(fs.existsSync(path.join(directory, 'resources/hermes-runtime/hermes/run_agent.py')))
+for(const file of files(path.join(root,'resources/hermes')).filter(file=>!file.includes('__pycache__')&&!file.endsWith('.pyc'))){
+  assert.deepEqual(fs.readFileSync(path.join(directory,'resources/hermes',path.relative(path.join(root,'resources/hermes'),file))),fs.readFileSync(file),file)
+}
+const hermes=require('./check-hermes-runtime.cjs').checkRuntime(path.join(directory,'resources/hermes-runtime'))
+const comic=require('./check-comic-runtime.cjs').checkComicRuntime(path.join(directory,'resources/comic-runtime'))
+for(const folder of ['comic','project-runner'])for(const file of files(path.join(root,'resources',folder)).filter(file=>!file.includes('__pycache__')&&!file.endsWith('.pyc'))){
+  assert.deepEqual(fs.readFileSync(path.join(directory,'resources',folder,path.relative(path.join(root,'resources',folder),file))),fs.readFileSync(file),file)
+}
+for(const worker of ['document-worker.js','video-frame-worker.js','video-frame-generation-worker.js','comic-verify-worker.js'])assert.ok(entries.includes('/dist-electron/'+worker),worker)
+const native = 'node_modules/better-sqlite3/prebuilds/win32-x64.node'
+assert.deepEqual(fs.readFileSync(path.join(directory, 'resources/app.asar.unpacked', native)), fs.readFileSync(path.join(root, native)))
+console.log(JSON.stringify({ version: pkg.version, directory, compiledFiles, asarSha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex'), hermes, comic, agentSkills: true, nativeDatabase: true, mediaInfoWasm: true, dataMode: 'appdata' }, null, 2))

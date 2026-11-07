@@ -9,6 +9,7 @@ import { persistVideoWorkBundle } from './local-sync.ts'
 import { metadataTags } from './local-metadata.ts'
 import { episodeSidecarPath } from './bundle.ts'
 import { referencedVideoFiles, videoFileKey } from './file-references.ts'
+import { videoCompanionFiles, pruneVideoDirectories } from './removal-files.ts'
 
 const key = (p: string) => path.resolve(p).normalize('NFC').toLowerCase()
 function selected(d: SqlDb, input: VideoRemovalRequest) {
@@ -34,16 +35,23 @@ export function previewVideoRemoval(d: SqlDb, input: VideoRemovalRequest): Video
     works[i].parts.forEach(a => add(a.path))
   }
   for (const e of episodes) if (e.path) add(episodeSidecarPath(e.path))
+  const preserved=new Map<string,string>(), cleanupDirectories:string[]=[]
+  if(!input.episodeId && input.action==='remove')for(const library of libraries) {
+    if(!library.directory)continue
+    const companions=videoCompanionFiles(library.directory)
+    if(companions.length)cleanupDirectories.push(library.directory.path)
+    for(const file of companions){add(file.path);if(file.preserveReason)preserved.set(key(file.path),file.preserveReason)}
+  }
   const files = [...paths.values()].map(file => {
     let size = 0, present = false
     try { const stat = fs.lstatSync(file); size = stat.size; present = stat.isFile() && !stat.isSymbolicLink() } catch { /* Missing content can still be removed. */ }
-    return { path: file, size, present, shared: protectedFiles.has(videoFileKey(file)) }
+    return { path: file, size, present, shared: protectedFiles.has(videoFileKey(file)), ...(preserved.has(key(file))?{preserveReason:preserved.get(key(file))}:{}) }
   }).sort((a,b) => a.path.localeCompare(b.path))
   const request = { resourceIds: ids, episodeId: input.episodeId, action: input.action, deleteLocal: !!input.deleteLocal }
   const stamps = files.map(f => { try { const s = fs.lstatSync(f.path); return [f.path,s.ino,s.size,s.mtimeMs] } catch { return [f.path,'missing'] } })
   const fingerprint = createHash('sha256').update(JSON.stringify({ request, works,
-    episodes: episodes.map(e => ({ ...e, assets: e.assets.map(({ checked_at: _checked, ...asset }) => asset) })), files, stamps })).digest('hex')
-  return { fingerprint, request, titles: input.episodeId ? episodes.map(e => e.title) : works.map(w => w.name_zh || w.file_name), episodeCount: episodes.length, files }
+    episodes: episodes.map(e => ({ ...e, assets: e.assets.map(({ checked_at: _checked, ...asset }) => asset) })), files, stamps,cleanupDirectories })).digest('hex')
+  return { fingerprint, request, titles: input.episodeId ? episodes.map(e => e.title) : works.map(w => w.name_zh || w.file_name), episodeCount: episodes.length, files,cleanupDirectories }
 }
 
 export async function applyVideoRemoval(d: SqlDb, preview: VideoRemovalPreview, trash?: (file: string) => Promise<void>) {
@@ -53,7 +61,11 @@ export async function applyVideoRemoval(d: SqlDb, preview: VideoRemovalPreview, 
   const { episodeId, deleteLocal, action } = current.request
   if (deleteLocal) {
     if (!trash) throw new Error('当前环境无法移入回收站')
-    for (const file of current.files.filter(f => f.present && !f.shared)) await trash(file.path)
+    // Keep the authoritative manifest until companions succeed, so a partial failure can be retried.
+    const removing=current.files.filter(f => f.present && !f.shared && !f.preserveReason)
+      .sort((a,b)=>Number(path.basename(a.path)==='baoyi.json')-Number(path.basename(b.path)==='baoyi.json'))
+    for (const file of removing) await trash(file.path)
+    pruneVideoDirectories(current.cleanupDirectories||[],current.files.map(f=>f.path))
   }
   let detachedId = ''
   d.exec('SAVEPOINT video_removal')

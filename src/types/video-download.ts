@@ -1,4 +1,4 @@
-/** Single-episode downloads live only for the current process; never update the media library. */
+/** Signed download source tokens live only for the current process; published files can be registered. */
 export interface VideoDownloadSource {
   id: string
   label: string

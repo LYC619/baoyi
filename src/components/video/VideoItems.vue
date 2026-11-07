@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Check, Clapperboard, FolderOpen, LayoutGrid, List, ListOrdered, LocateFixed, Loader2, Play, RefreshCw } from 'lucide-vue-next'
+import { Check, Clapperboard, Eye, FolderOpen, LayoutGrid, List, ListOrdered, LocateFixed, Loader2, Play, RefreshCw } from 'lucide-vue-next'
 import type { VideoAsset, VideoItem, WatchStatus } from '@/types'
 import type { VideoWorkContent, VideoWorkLibrary } from '@/types/video-workflow'
 import { errorMessage, formatBytes, formatDuration, posterUrl } from '@/utils'
 import { useToast } from '@/composables/useToast'
+import {useVideoPreview} from '@/composables/useVideoPreview'
 import { videoEpisodeLabel, videoSeasonLabel, registeredVideoContent } from '@/utils/video-content'
 
 const props = defineProps<{ item: VideoItem; library: VideoWorkLibrary | null; checking?: boolean; checkMessage?: string; marking?: boolean; selectedId?: string }>()
 const emit = defineEmits<{ changed: []; check: []; watched: [content: VideoWorkContent | null, status: WatchStatus]; select: [content: VideoWorkContent]; remove: [content: VideoWorkContent] }>()
 const { error, success } = useToast()
+const preview=useVideoPreview()
 /**
  * 「管理集数」模式（B8）：每行两个数字框（部 / 季、集），改完一次提交；有冲突整组不改，提示原样透出。
  * 「移出合集」也放进这个模式里 —— 它们都是"改这一集在合集里的位置"这一类操作。
@@ -197,6 +199,7 @@ async function copyPath(row: ContentRow): Promise<void> {
         <div class="video-item__state" :class="`video-item__state--${selected(row)?.state || 'missing'}`" :title="checkedAt(selected(row))"><span>{{ selected(row) ? stateLabels[selected(row)!.state] : '尚未下载' }}</span><small v-if="selected(row)?.checked_at">已检查</small></div>
         <div class="video-item__actions">
           <button type="button" :disabled="!!busy || selected(row)?.state !== 'present'" :aria-label="`播放：${row.title}`" title="播放所选文件" @click="play(row)"><Loader2 v-if="busy === row.id" :size="15" class="spin" /><Play v-else :size="15" /></button>
+          <button v-if="!item.media_kind||item.media_kind==='video'" type="button" :disabled="selected(row)?.state!=='present'" :aria-label="`内嵌试看：${row.title}`" title="内嵌试看" @click="preview.open(item.id,row.content?.id,0,selected(row)?.id)"><Eye :size="15" /></button>
           <button type="button" :disabled="!selected(row)" :aria-label="`打开文件位置：${row.title}`" title="打开文件位置" @click="reveal(row)"><FolderOpen :size="15" /></button>
           <button type="button" :disabled="!!busy || !selected(row)" :aria-label="`重新定位文件：${row.title}`" title="重新定位文件" @click="relocate(row)"><LocateFixed :size="15" /></button>
         </div>
@@ -228,7 +231,7 @@ async function copyPath(row: ContentRow): Promise<void> {
 .video-item__numbering label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-sub); }
 .video-item__numbering input { width: 64px; height: 26px; padding: 0 6px; border: 1px solid var(--divider); border-radius: 4px; background: var(--bg-main); color: var(--text-main); font-size: 12px; }
 .video-items--cards .video-item__numbering { padding: 8px 0 0; }
-.video-items__columns, .video-item { display: grid; grid-template-columns: 26px minmax(110px, 1fr) minmax(90px, .65fr) 66px 84px; align-items: center; gap: 10px; }
+.video-items__columns, .video-item { display: grid; grid-template-columns: 26px minmax(110px, 1fr) minmax(90px, .65fr) 66px minmax(118px, max-content); align-items: center; gap: 10px; }
 .video-items__columns { color: var(--text-faint); font-size: 10px; padding: 5px 0; border-bottom: 1px solid var(--divider); }
 .video-items__list { list-style: none; margin: 0; padding: 0; }
 .video-item { min-height: 48px; padding: 5px 0; }
@@ -247,7 +250,7 @@ async function copyPath(row: ContentRow): Promise<void> {
 .video-item__state { color: var(--text-sub); font-size: 11px; }
 .video-item__state--missing, .video-item__state--offline { color: var(--warning); }
 .video-item__actions { display: flex; gap: 2px; }
-.video-item__actions button { width: 27px; height: 28px; display: grid; place-items: center; color: var(--text-sub); border-radius: 4px; }
+.video-item__actions button { flex-shrink: 0; width: 27px; height: 28px; display: grid; place-items: center; color: var(--text-sub); border-radius: 4px; }
 .video-item__actions button:hover:not(:disabled) { background: var(--hover-surface); color: var(--accent); }
 .video-item__actions button:disabled { opacity: .35; cursor: default; }
 .video-items--cards { padding: 16px; }

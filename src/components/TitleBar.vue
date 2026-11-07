@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Copy, Minus, Square, X } from 'lucide-vue-next'
+import { Copy, Minus, Square, X, Settings, MessageSquare } from 'lucide-vue-next'
+import {useArchiveAssistant} from '@/composables/useArchiveAssistant'
 import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
 import TaskCenter from '@/components/tasks/TaskCenter.vue'
 import {
@@ -15,14 +16,17 @@ import { useGameStore } from '@/stores/game'
 import { useVideoStore } from '@/stores/video'
 import { useImageStore } from '@/stores/image'
 import { useProjectStore } from '@/stores/project'
+import { useDocumentsStore } from '@/stores/documents'
 
 const route = useRoute()
+const archiveAssistant=useArchiveAssistant()
 const router = useRouter()
 const software = useSoftwareStore()
 const game = useGameStore()
 const video = useVideoStore()
 const images = useImageStore()
 const projects = useProjectStore()
+const documents = useDocumentsStore()
 
 const maximized = ref(false)
 let unsubscribe: (() => void) | null = null
@@ -35,6 +39,7 @@ onMounted(async () => {
   void video.refreshCounts()
   void images.refresh()
   void projects.refresh()
+  void documents.refresh()
 })
 
 onUnmounted(() => unsubscribe?.())
@@ -59,7 +64,9 @@ const stats = computed<Record<ModuleKey, { total: number | null; pending: number
   game: { total: game.counts.all, pending: 0 },
   video: { total: video.counts.all, pending: 0 },
   image: { total: images.count, pending: 0 },
-  project: { total: projects.items.length, pending: 0 }
+  project: { total: projects.items.length, pending: 0 },
+  document: { total: documents.items.length, pending: 0 },
+  personal: { total: null, pending: 0 }
 }))
 
 function go(key: ModuleKey): void {
@@ -81,11 +88,11 @@ function go(key: ModuleKey): void {
         :key="tab.key"
         class="tab"
         :class="{ 'tab--on': activeModule === tab.key }"
-        :title="activeModule === tab.key ? `返回${tab.label}库首页` : `切换到${tab.label}库`"
+        :title="activeModule === tab.key ? `返回${tab.label}首页` : `切换到${tab.label}`"
         @click="go(tab.key)"
       >
         <span>{{ tab.label }}</span>
-        <span class="tab__n">{{ stats[tab.key].total ?? '—' }}</span>
+        <span v-if="tab.key!=='personal'" class="tab__n">{{ stats[tab.key].total ?? '—' }}</span>
         <!-- 待办角标只挂在没亮的那个 Tab 上：亮着的模块，页面里已经有一条更详细的提示了 -->
         <span
           v-if="activeModule !== tab.key && stats[tab.key].pending > 0"
@@ -96,6 +103,8 @@ function go(key: ModuleKey): void {
     </nav>
 
     <TaskCenter />
+    <button v-if="showTabs" class="ctl titlebar-settings" :class="{'assistant-active':archiveAssistant.busy.value}" title="归档助理 · Ctrl J" aria-label="归档助理" @click="archiveAssistant.open.value?archiveAssistant.open.value=false:archiveAssistant.show()"><MessageSquare :size="17"/></button>
+    <button v-if="showTabs" class="ctl titlebar-settings" title="设置" aria-label="设置" @click="router.push({ name: 'settings', query: { module: activeModule, scope: 'module' } })"><Settings :size="16"/></button>
 
     <div class="titlebar__controls">
       <button class="ctl" title="最小化" @click="minimize">
@@ -125,6 +134,8 @@ function go(key: ModuleKey): void {
 }
 
 .titlebar__brand {
+  flex-shrink: 0;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -139,6 +150,9 @@ function go(key: ModuleKey): void {
 
 /* ------------------------------ 模块切换 ------------------------------ */
 .tabs {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -147,6 +161,8 @@ function go(key: ModuleKey): void {
 }
 
 .tab {
+  flex-shrink: 0;
+  white-space: nowrap;
   position: relative;
   display: flex;
   align-items: center;
@@ -186,11 +202,13 @@ function go(key: ModuleKey): void {
 }
 
 .titlebar__controls {
+  flex-shrink: 0;
   display: flex;
   height: 100%;
   -webkit-app-region: no-drag;
 }
 
+.titlebar-settings{-webkit-app-region:no-drag;height:100%;flex-shrink:0}
 .ctl {
   width: 44px;
   display: grid;
@@ -208,4 +226,5 @@ function go(key: ModuleKey): void {
   background: #e81123;
   color: #fff;
 }
+@media(max-width:1050px){.tab__n{display:none}.tab{padding-inline:7px}.tabs{margin-left:12px;gap:0}.ctl{width:36px}}
 </style>

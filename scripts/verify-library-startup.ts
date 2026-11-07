@@ -10,7 +10,7 @@ import { createRendererLoader } from './helpers/renderer-harness.ts'
 assert.match(fs.readFileSync('electron/main.ts', 'utf8'), /showErrorBox/, 'startup protection failure must be visible')
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-startup-')), file = path.join(root, 'baoyi.db')
 const initial = new DatabaseSync(file); schema.initSchema(initial, KINDS); initial.prepare('UPDATE settings SET value=? WHERE key=?').run('11', schema.SCHEMA_KEY); initial.close()
-let fail = true, calls = 0
+let fail = true, calls = 0, startupOrphanStrategy = ''
 class TestDatabase extends DatabaseSync {
   constructor(file: string, options?: { readonly?: boolean }) { super(file, { readOnly: options?.readonly }) }
   pragma(sql: string) { this.exec('PRAGMA ' + sql) }
@@ -24,13 +24,14 @@ const loader = createRendererLoader({
   './taxonomy': { FALLBACK_CATEGORY: 'Other' }, './library-backup.ts': { buildLibraryBackup: () => ({}) },
   '../kinds/video/download/jobs.ts': { VIDEO_JOBS_SQL },
   './poster-storage.ts': { migratePosterStorage: () => ({ removed: 0, updated: 0, warnings: [] }), resolvePosterDirectory: () => root },
-  './artwork-migration.ts': { migrateArtworkIntoLibrary: () => ({ moved: 0, relinked: 0, removed: 0, warnings: [] }) },
+  './artwork-migration.ts': { migrateArtworkIntoLibrary: (_db: unknown, options: { orphanStrategy?: string }) => { startupOrphanStrategy = options.orphanStrategy || ''; return { moved: 0, relinked: 0, removed: 0, warnings: [] } } },
   '../kinds/video/catalogue.ts': { pruneStrayPlaceholders: () => 0 }, './portable': { isPortable: () => false }
 }, { Buffer, Date, process })
 const database = loader('electron/services/database.ts')
 assert.throws(() => database.getDb(), /initialization failure/)
 fail = false
 assert.ok(database.getDb().prepare('SELECT 1 FROM settings').get()); assert.equal(calls, 2, 'failed initialization must not leave a cached half-initialized connection')
+assert.equal(startupOrphanStrategy, 'count', 'the actual startup path must defer media-library deduplication')
 database.closeDb()
 
 for (const primary of [true, false]) {

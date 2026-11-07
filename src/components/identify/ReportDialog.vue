@@ -53,7 +53,7 @@ const troubles = computed(() =>
           <Globe :size="14" />
           <template v-if="report.searches > 0">
             本轮共联网搜索 <b>{{ report.searches }}</b> 次。搜索按次计费的服务商可据此对账 ——
-            逐次记录在「设置 → 搜索服务 → 最近调用日志」。
+            逐次记录在「顶部日志 → 识别与调用」。
           </template>
           <template v-else>
             本轮没有用到联网搜索，全靠本地文件信息和模型自身知识判断。

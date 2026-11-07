@@ -17,6 +17,7 @@ import type { ScanUnit } from '../../../src/types'
 // 带 .ts 后缀：selfcheck 用 node --experimental-strip-types 直接加载这个文件，
 // Node 的 ESM 解析不会替你补后缀（Vite 两种都收，所以只有这条路会报错）
 import { countExes } from './exeCount.ts'
+import { isMobilePackage, isSoftwareFile, SOFTWARE_EXTENSIONS } from '../../../src/utils/software-package.ts'
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', '.svn', '.hg', '$recycle.bin', 'system volume information',
@@ -89,7 +90,7 @@ async function readLevel(dir: string): Promise<Level> {
     }
     if (!entry.isFile()) continue
     const ext = path.extname(entry.name).toLowerCase()
-    if (ext === '.exe') level.hasExe = true
+    if (isSoftwareFile(entry.name)) level.hasExe = true
     else if (!ARCHIVE_EXTS.has(ext)) level.hasFiles = true
   }
   return level
@@ -120,6 +121,7 @@ function looksLikeCollection(level: Level): boolean {
 /** 递归统计一个目录下的 exe 数量。遍历本体在 exeCount.ts，那里只有这一份 */
 async function countUnitExes(root: string, opts: PlanOptions): Promise<number> {
   const { count } = await countExes(root, {
+    extensions: SOFTWARE_EXTENSIONS,
     maxDepth: MAX_DEPTH,
     maxExes: MAX_EXES_PER_UNIT,
     skip: skippable,
@@ -166,6 +168,7 @@ async function planDir(
 export async function planRoot(root: string, opts: PlanOptions = {}): Promise<ScanPlan> {
   const units: PlannedUnit[] = []
   const loose: string[] = []
+  let mobileCount = 0
   opts.onDir?.(root)
 
   let entries: fs.Dirent[]
@@ -178,10 +181,14 @@ export async function planRoot(root: string, opts: PlanOptions = {}): Promise<Sc
   for (const entry of entries) {
     if (opts.cancelled?.()) break
     if (!entry.isFile()) continue
+    if (isMobilePackage(entry.name)) mobileCount++
     if (LOOSE_EXTS.has(path.extname(entry.name).toLowerCase())) {
       loose.push(path.join(root, entry.name))
     }
   }
+
+  // 根目录里的手机安装包也可以识别；散落的 Windows 安装器保持只提示。
+  if (mobileCount > 0) units.push({ dir: root, root, exe_count: mobileCount, loose_only: true })
 
   for (const entry of entries) {
     if (opts.cancelled?.()) break

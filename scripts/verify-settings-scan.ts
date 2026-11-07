@@ -19,7 +19,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function harness(kind: 'software' | 'game' | 'video' = 'video') {
+function harness(kind: 'software' | 'game' | 'video' = 'game') {
   const notices: Array<{ type: string; message: string }> = []
   const scanCalls: Array<{ kind: string; dirs: string[] }> = []
   const reloads: string[] = []
@@ -56,7 +56,10 @@ function harness(kind: 'software' | 'game' | 'video' = 'video') {
       return () => { listeners.delete(module) }
     }
   })
+  const previewCalls: string[][] = []
+  let prepareImpl: () => Promise<any> = async () => ({ id: 'preview', revision: 1, roots: [], entries: [], status: 'ready' })
   const baoyi = {
+    videoImport: { onChanged: () => () => {}, list: async () => [], prepare: (dirs: string[]) => { previewCalls.push(structuredClone(dirs)); return prepareImpl() } },
     video: mediaApi('video'), game: mediaApi('game'),
     scan: {
       units: async () => [],
@@ -68,6 +71,7 @@ function harness(kind: 'software' | 'game' | 'video' = 'video') {
       cancel: () => { cancellations++ }
     },
     settings: {
+      getAll: async () => ({}),
       hanimeVerify: () => verifyImpl(),
       proxyStatus: () => statusImpl()
     }
@@ -80,6 +84,7 @@ function harness(kind: 'software' | 'game' | 'video' = 'video') {
     '@/composables/useAI': { useAI: () => ({ running: Vue.ref(false) }) },
     '@/composables/useToast': { useToast: () => Object.fromEntries(['success', 'error', 'toast'].map(type => [type, (message: string) => notices.push({ type, message })])) },
     '@/stores/settings': { useSettingsStore: () => settings },
+    '@/stores/project': { useProjectStore: () => ({ refresh: async () => {} }) },
     '@/stores/software': { useSoftwareStore: () => stores('software') },
     '@/stores/video': { useVideoStore: () => stores('video') },
     '@/stores/game': { useGameStore: () => stores('game') },
@@ -97,6 +102,7 @@ function harness(kind: 'software' | 'game' | 'video' = 'video') {
 
   return {
     state, taskCenter, settings, notices, scanCalls, reloads, listeners, routes, activeModule, load,
+    previewCalls, setPrepare: (fn: typeof prepareImpl) => { prepareImpl = fn },
     setScan: (fn: typeof scanImpl) => { scanImpl = fn },
     setSoftwareScan: (fn: typeof softwareScanImpl) => { softwareScanImpl = fn },
     setReadiness: (fn: typeof readinessImpl) => { readinessImpl = fn },
@@ -115,7 +121,39 @@ async function test(name: string, run: () => void | Promise<void>) {
   catch (err) { failed++; console.error(`FAIL ${name}: ${(err instanceof Error ? err.message : String(err)).slice(0, 380)}`) }
 }
 
-for (const kind of ['video', 'game', 'software'] as const) {
+// Video settings now opens the existing preview/confirm workflow; it no longer runs the legacy direct scanner.
+await test('影视设置扫描使用真实预览流程，目录快照过桥且不直接入库', async () => {
+  const h = harness('video')
+  const pending = deferred<any>()
+  try {
+    h.setPrepare(() => pending.promise)
+    const run = h.state.runScan()
+    h.settings.settings.video_scan_dirs.push('D:\\Library\\Added')
+    await h.state.runScan()
+    assert.deepEqual(h.previewCalls, [['D:\\Library\\Video']])
+    assert.equal(h.scanCalls.length, 0)
+    pending.resolve({ id: 'preview', revision: 1, roots: [], entries: [], status: 'ready' })
+    await run
+    assert.equal(h.load('src/composables/useVideoImport.ts').useVideoImport().open.value, true)
+    assert.equal(h.state.busy.value, false)
+    assert.equal(h.taskCenter.history.value[0].status, 'success')
+  } finally { pending.resolve(null); h.dispose() }
+})
+await test('影视预览失败可见且可重试，取消选择不误报成功', async () => {
+  const h = harness('video')
+  try {
+    h.setPrepare(async () => { throw new Error('无法读取目录') })
+    await h.state.runScan()
+    assert.match(h.load('src/composables/useVideoImport.ts').useVideoImport().error.value, /无法读取目录/)
+    assert.equal(h.state.busy.value, false)
+    h.setPrepare(async () => null)
+    await h.state.runScan()
+    assert.equal(h.previewCalls.length, 2)
+    assert.equal(h.taskCenter.history.value[0].status, 'cancelled')
+  } finally { h.dispose() }
+})
+
+for (const kind of ['game', 'software'] as const) {
   await test(`${kind} 设置扫描：Proxy 在 renderer 拍平后过桥，完成刷新正确的库`, async () => {
     const h = harness(kind)
     try {
@@ -134,24 +172,14 @@ for (const kind of ['video', 'game', 'software'] as const) {
 await test('缺少扫描目录时给出提示，不调用 IPC', async () => {
   const h = harness()
   try {
-    h.settings.settings.video_scan_dirs = []
+    h.settings.settings.game_scan_dirs = []
     await h.state.runScan()
     assert.equal(h.scanCalls.length, 0)
     assert.match(h.notices.at(-1)?.message ?? '', /目录/)
   } finally { h.dispose() }
 })
 
-await test('视频配置预检失败有提示，并跳到 AI 配置', async () => {
-  const h = harness()
-  try {
-    h.setReadiness(async () => ({ ok: false, message: '先填写 AI Key' }))
-    await h.state.runScan()
-    assert.equal(h.scanCalls.length, 0)
-    assert.match(h.notices.at(-1)?.message ?? '', /AI Key/)
-    assert.equal(h.state.tab.value, 'ai')
-    assert.equal(h.state.busy.value, false)
-  } finally { h.dispose() }
-})
+
 
 await test('游戏未启用 AI 时，不启动一轮注定失败的扫描', async () => {
   const h = harness('game')
@@ -160,31 +188,16 @@ await test('游戏未启用 AI 时，不启动一轮注定失败的扫描', asyn
     await h.state.runScan()
     assert.equal(h.scanCalls.length, 0)
     assert.equal(h.state.tab.value, 'ai')
+    assert.equal((h.routes.at(-1) as any).query.scope, 'global')
     assert.match(h.notices.at(-1)?.message ?? '', /AI/)
   } finally { h.dispose() }
 })
 
-await test('视频降级提醒允许取消，不误扫目录', async () => {
-  const h = harness()
-  try {
-    h.setReadiness(async () => ({ ok: true, message: '未配置 TMDB' }))
-    h.setConfirm(false)
-    await h.state.runScan()
-    assert.equal(h.scanCalls.length, 0)
-    assert.equal(h.state.busy.value, false)
-  } finally { h.dispose() }
-})
 
-await test('同意降级扫描后把预检提醒记入任务日志', async () => {
-  const h = harness()
-  try {
-    h.setReadiness(async () => ({ ok: true, message: '未配置 TMDB，将降级识别' }))
-    await h.state.runScan()
-    assert.ok(h.taskCenter.history.value[0]?.events.some((event: { level: string; message: string }) => event.level === 'warn' && event.message.includes('将降级识别')))
-  } finally { h.dispose() }
-})
 
-await test('预检/扫描中有忙碌状态，重复点击只启动一次，进度来自视频通道', async () => {
+
+
+await test('预检/扫描中有忙碌状态，重复点击只启动一次，进度来自游戏通道', async () => {
   const h = harness()
   const pending = deferred<VideoScanResult>()
   try {
@@ -195,8 +208,8 @@ await test('预检/扫描中有忙碌状态，重复点击只启动一次，进�
     await h.state.runScan()
     await tick()
     assert.equal(h.scanCalls.length, 1)
-    assert.equal(h.listeners.has('video'), true)
-    h.listeners.get('video')!({ phase: 'identifying', current: 'sample.mkv', processed: 1, total: 2, registered: 0, failed: 0, log: '读本地事实' })
+    assert.equal(h.listeners.has('game'), true)
+    h.listeners.get('game')!({ phase: 'identifying', current: 'sample.mkv', processed: 1, total: 2, registered: 0, failed: 0, log: '读本地事实' })
     assert.match(h.state.scanPhaseLabel.value, /读本地事实/)
     assert.equal(h.state.scanPercent.value, 50)
     pending.resolve(result)
@@ -257,29 +270,7 @@ await test('停止扫描只发送一次取消，等旧任务结束才解锁，�
   } finally { pending.resolve(result); h.dispose() }
 })
 
-await test('失败后再次预检不沿用旧进度开放停止入口', async () => {
-  const h = harness()
-  const ready = deferred<{ ok: boolean; message: string }>()
-  const pending = deferred<VideoScanResult>()
-  try {
-    h.setScan(async () => { throw new Error('第一次扫描失败') })
-    await h.state.runScan()
-    h.setReadiness(() => ready.promise)
-    h.setScan(() => pending.promise)
-    const run = h.state.runScan()
-    assert.equal(h.state.canCancelScan.value, false, 'preflight has no active task to cancel')
-    h.state.cancelScan()
-    assert.equal(h.cancellations(), 0)
-    ready.resolve({ ok: true, message: '' })
-    await tick()
-    assert.equal(h.state.canCancelScan.value, true)
-    h.state.cancelScan()
-    assert.equal(h.cancellations(), 1)
-    pending.resolve(result)
-    await run
-    assert.match(h.notices.at(-1)?.message ?? '', /停止/)
-  } finally { ready.resolve({ ok: true, message: '' }); pending.resolve(result); h.dispose() }
-})
+
 
 await test('软件扫描从另一页面停止：设置页同步停止状态且不显示成功', async () => {
   const h = harness('software')
@@ -306,58 +297,20 @@ await test('离开设置页保留任务级订阅，持续更新全局进度，�
   await tick()
   h.dispose()
   assert.equal(h.listeners.size, 1)
-  h.listeners.get('video')!({ phase: 'identifying', current: '后台条目', processed: 1, total: 2, registered: 1, failed: 0, log: '继续识别' })
+  h.listeners.get('game')!({ phase: 'identifying', current: '后台条目', processed: 1, total: 2, registered: 1, failed: 0, log: '继续识别' })
   assert.equal(h.taskCenter.runningTasks.value[0].current, '后台条目')
   pending.resolve(result)
   await run
   assert.equal(h.listeners.size, 0)
   assert.equal(h.taskCenter.history.value[0].status, 'success')
-  assert.deepEqual(h.reloads, ['video'])
+  assert.deepEqual(h.reloads, ['game'])
 })
 
-await test('配置预检等待时锁定扫描，使用点击当时的模块和目录快照', async () => {
-  const h = harness()
-  const ready = deferred<{ ok: boolean; message: string }>()
-  try {
-    h.setReadiness(() => ready.promise)
-    const run = h.state.runScan()
-    void run.catch(() => {})
-    assert.equal(h.state.busy.value, true)
-    await h.state.runScan()
-    h.settings.settings.video_scan_dirs.push('D:\\Library\\Another')
-    h.activeModule.value = 'game'
-    ready.resolve({ ok: true, message: '' })
-    await run
-    assert.equal(h.scanCalls.length, 1)
-    assert.equal(h.scanCalls[0].kind, 'video')
-    assert.deepEqual(h.scanCalls[0].dirs, ['D:\\Library\\Video'])
-    assert.deepEqual(h.reloads, ['video'])
-  } finally { ready.resolve({ ok: true, message: '' }); h.dispose() }
-})
 
-await test('离开页面时若还在预检，不再启动后台扫描', async () => {
-  const h = harness()
-  const ready = deferred<{ ok: boolean; message: string }>()
-  h.setReadiness(() => ready.promise)
-  const run = h.state.runScan()
-  h.dispose()
-  ready.resolve({ ok: true, message: '' })
-  await run
-  assert.equal(h.scanCalls.length, 0)
-  assert.equal(h.listeners.size, 0)
-  assert.equal(h.state.busy.value, false)
-})
 
-await test('配置预检 IPC 报错可见，不锁死按钮', async () => {
-  const h = harness()
-  try {
-    h.setReadiness(async () => { throw new Error('配置读取失败') })
-    await h.state.runScan()
-    assert.equal(h.scanCalls.length, 0)
-    assert.equal(h.state.busy.value, false)
-    assert.match(h.notices.at(-1)?.message ?? '', /配置读取失败/)
-  } finally { h.dispose() }
-})
+
+
+
 
 await test('游戏进度不串到视频，done 后等待收尾但不可再取消已完成任务', async () => {
   const h = harness('game')

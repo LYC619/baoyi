@@ -15,6 +15,12 @@ import { readExternalActiveAt } from './activity.ts'
 import { mapCategory } from './taxonomy.ts'
 import type { Category, TagSource } from '../../src/types'
 import { zhSearchKey } from '../../src/utils/zh.ts'
+import { SKILL_TABLES_SQL } from '../workspace/skill-profiles.ts'
+import { WORKSPACE_TABLES_SQL, migrateProjectContext } from '../workspace/schema.ts'
+import { ensureArchiveSchema } from '../archive/schema.ts'
+import { PROJECT_LAUNCH_SQL } from '../kinds/project/launch-profiles.ts'
+import { DOCUMENT_INSIGHT_SQL } from '../workspace/document-insight-schema.ts'
+import { DOCUMENT_TABLES_SQL, migrateDocumentSchema } from '../kinds/document/index.ts'
 
 /**
  * 库结构 / 内置数据的版本。
@@ -23,7 +29,7 @@ import { zhSearchKey } from '../../src/utils/zh.ts'
  * 0.4 要再换一次分类体系，没有列可以拿来当标记了。于是显式记一个数字，
  * 存在 settings 表里（下划线开头的键不会出现在 AppSettings 里，见 getSettings）。
  */
-export const SCHEMA_VERSION = 15
+export const SCHEMA_VERSION = 30
 export const SCHEMA_KEY = '_schema'
 
 /* --------------------------- 最小 SQL 接口 --------------------------- */
@@ -326,6 +332,13 @@ export function initSchema(d: SqlDb, kinds: KindLike[] = []): void {
   registerSqlFunctions(d)
   d.exec(TABLES_SQL)
   for (const k of kinds) d.exec(k.schema.tables)
+  // These tables also exist in minimal database fixtures and metadata restore.
+  d.exec(DOCUMENT_TABLES_SQL)
+  d.exec(WORKSPACE_TABLES_SQL)
+  d.exec(PROJECT_LAUNCH_SQL)
+  d.exec(DOCUMENT_INSIGHT_SQL)
+  ensureArchiveSchema(d)
+  d.exec(SKILL_TABLES_SQL)
 
   // 版本号必须在建表**之后**读：全新安装时 settings 表还不存在，
   // 先读会直接抛 no such table，首次启动当场崩在建库这一步。
@@ -333,6 +346,8 @@ export function initSchema(d: SqlDb, kinds: KindLike[] = []): void {
   const from = schemaVersion(d)
 
   migrate(d, from)
+  migrateProjectContext(d)
+  migrateDocumentSchema(d, from)
   for (const k of kinds) k.schema.migrate?.(d, from)
 
   for (const k of kinds) if (k.schema.view) d.exec(k.schema.view)
@@ -350,7 +365,8 @@ export function initSchema(d: SqlDb, kinds: KindLike[] = []): void {
 
   // 内置标签只在升级那一次装，正常启动不装 —— 否则用户删掉的内置标签会长回来
   if (from < SCHEMA_VERSION) {
-    for (const k of kinds) seedTags(d, k.defaultTags, k.kind)
+    // 16 只补分类保护字段，不重新添加用户已经删掉的内置标签。
+    if(from<15)for (const k of kinds) seedTags(d, k.defaultTags, k.kind)
     setSchemaVersion(d, SCHEMA_VERSION)
   }
 

@@ -536,6 +536,8 @@ export type TitleLang = 'zh' | 'en'
 
 export interface AppSettings {
   ffmpeg_path?: string
+  video_download_concurrency?: number
+  video_download_connections?: number
   /** 当前生效的那份配置。切换配置就是把某个 profile 铺到这里 */
   ai: AIConfig
   ai_profiles: AIProfile[]
@@ -605,6 +607,8 @@ export interface AppSettings {
    * 它们本来也不在需要代理的名单上（真要加，照 hanime 那个注入点做）。
    */
   proxy: string
+  /** 找视频独立代理；旧配置缺省时沿用系统代理。 */
+  video_online_proxy?: string
   /**
    * Hanime 内置 Hosts：把几个镜像域名固定到 Cloudflare 地址池，绕开被污染的系统 DNS。
    * 关掉后走系统 DNS。Chromium 那层的规则在启动前注入，改动要重启才生效；
@@ -1016,6 +1020,8 @@ export interface AppInfo {
   electron: string
   chrome: string
   node: string
+  /** Actual profile, including portable and explicit test profiles. */
+  dataDirectory?: string
   /**
    * 这次是不是绿色版（数据在 exe 旁边的 `data\` 里，不在 AppData）。
    * 开发时恒为 false —— 判据要求 `app.isPackaged`
@@ -1473,7 +1479,10 @@ export type Unsubscribe = () => void
 /** preload 暴露给渲染进程的完整 API */
 export interface BaoyiApi {
   project: import('./project').ProjectApi
+  workspace: import('./workspace').WorkspaceApi
+  archive: import('./archive').ArchiveApi
   image: import('./image').ImageApi
+  comic: import('./comic-ingest').ComicIngestApi
   hanimeBrowser: {
     open(url?: string): Promise<boolean>
     onDownload(cb: (url: string) => void): Unsubscribe
@@ -1486,6 +1495,7 @@ export interface BaoyiApi {
      * 后者在打包后的 file:// 页面里要看权限处理器的脸色，而这个一定成。
      */
     copyText(text: string): Promise<void>
+    openUrl(url: string): Promise<void>
   }
   win: {
     minimize(): void
@@ -1617,6 +1627,7 @@ export interface BaoyiApi {
     onCoverProgress(cb: (progress: { processed: number; total: number; current: string; message: string }) => void): () => void
   }
   video: {
+    preview:import('./video-preview').VideoPreviewApi
     list(query?: VideoQuery): Promise<VideoItem[]>
     get(id: string): Promise<VideoItem | null>
     update(id: string, patch: Partial<VideoItem>): Promise<VideoItem | null>
@@ -1679,6 +1690,8 @@ export interface BaoyiApi {
     renumberEpisodes(id: string, changes: Array<{ episodeId: string; season: number; number: number }>): Promise<{ ok: boolean; message: string; item: VideoItem | null }>
     previewRemoval(request: import('./video-management').VideoRemovalRequest): Promise<import('./video-management').VideoRemovalPreview>
     applyRemoval(preview: import('./video-management').VideoRemovalPreview): Promise<{ detachedId: string; warnings: string[] }>
+    taxonomy(hentai: boolean): Promise<import('./video-taxonomy').VideoTaxonomy>
+    editTaxonomy(edit: import('./video-taxonomy').VideoTaxonomyEdit): Promise<number>
     bulkUpdate(ids: string[], patch: import('./video-management').VideoBulkPatch): Promise<number>
     importBundle(): Promise<(import('./video-library').VideoRegistrationResult & { scanResult?: VideoScanResult }) | null>
     library(id: string): Promise<import('./video-workflow').VideoWorkLibrary>
@@ -1694,6 +1707,8 @@ export interface BaoyiApi {
     pickDownloadRoot(draftId: string): Promise<import('./video-workflow').VideoDownloadDraft | null>
     enqueueDownload(request: import('./video-workflow').VideoEnqueueRequest): Promise<import('./video-workflow').VideoDownloadJob>
     downloadJobs(): Promise<import('./video-workflow').VideoDownloadJob[]>
+    downloadCaches(): Promise<import('./video-workflow').VideoDownloadCache[]>
+    clearDownloadCache(id: string): Promise<{ cleared: boolean; bytes: number }>
     retryDownloadJob(id: string, stage: import('./video-workflow').VideoJobRetry): Promise<import('./video-workflow').VideoDownloadJob>
     cancelDownloadJob(id: string): Promise<boolean>
     /** 把已结束的下载记录从列表和角标里拿掉；文件和作品不动。运行中 / 排队中的返回 false */
@@ -1821,6 +1836,10 @@ export interface BaoyiApi {
     snapshotInfo(): Promise<import('./library-snapshot').LibrarySafetyInfo>
     createSnapshot(): Promise<import('./library-snapshot').LibrarySnapshotEntry>
     openSnapshotDir(): Promise<void>
+    archiveSnapshots(): Promise<import('./library-snapshot').SnapshotArchiveResult>
+    exportSnapshot(id: string): Promise<{ file: string; size: number; sha256: string } | null>
+    storageUsage(): Promise<import('./storage').StorageUsage>
+    clearBrowserCache(): Promise<import('./storage').BrowserCacheClearResult>
     exportJson(): Promise<string | null>
     /** Validate and preview a full metadata backup, confirm, snapshot and restart. */
     restoreJson(): Promise<{ backupPath: string } | null>

@@ -1,0 +1,106 @@
+/** Run after the unified build. Launches Electron with an isolated profile. */
+import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+import { _electron } from 'playwright'
+import { initSchema } from '../electron/services/schema.ts'
+import { DocumentLibrary } from '../electron/workspace/documents.ts'
+import { KINDS } from '../electron/kinds/index.ts'
+import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
+
+const output = path.resolve('output/unified-settings')
+await fs.mkdir(output, { recursive: true })
+const profile = await fs.mkdtemp(path.join(output, 'profile-'))
+const db = new DatabaseSync(path.join(profile, 'baoyi.db')); initSchema(db, KINDS); db.exec(VIDEO_JOBS_SQL)
+for (const [key, value] of Object.entries({ onboarded: true, theme: 'light', hanime_builtin_hosts: false, ai: { enabled: false, api_url: '', api_key: '', model: '' } })) db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, JSON.stringify(value))
+const fixtureFile = path.join(profile, '标签验收.txt'); await fs.writeFile(fixtureFile, '第一章\n隔离标签测试')
+const fixtureDoc = await new DocumentLibrary(db).register(fixtureFile, 'novel')
+db.close()
+const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
+delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL
+const executable = process.env.BAOYI_TEST_EXE || path.resolve('node_modules/electron/dist/electron.exe')
+const app = await _electron.launch({ executablePath: executable, args: [...(process.env.BAOYI_TEST_EXE ? [] : [path.resolve('.')]), '--user-data-dir=' + profile, '--disable-gpu'], env, timeout: 30000 })
+const page = await app.firstWindow(), errors: string[] = [], checks: string[] = []
+page.setDefaultTimeout(15000); page.on('pageerror', error => errors.push(error.message))
+const navigate = async (route: string) => { await page.evaluate(route => { location.hash = route }, route) }
+try {
+  assert.equal(path.resolve(await app.evaluate(({ app }) => app.getPath('userData'))), profile)
+  await page.waitForFunction(() => !!window.baoyi?.workspace)
+  for (const [module, route] of [['software', '/'], ['game', '/game'], ['video', '/video'], ['image', '/image'], ['document', '/document'], ['project', '/project'], ['personal', '/personal']]) {
+    await navigate(route)
+    await page.locator('.settings').waitFor({ state: 'hidden' })
+    assert.equal(await page.getByRole('button', { name: '设置', exact: true }).count(), 1)
+    await page.locator('.titlebar-settings').click()
+    await page.locator('.settings').waitFor()
+    await page.waitForFunction(module => location.hash.includes('module=' + module), module)
+    assert.equal(await page.locator('.scope-nav button').count(), 8)
+  }
+  checks.push('one-titlebar-entry-and-current-module-default-for-seven-modules')
+  for (const module of ['software', 'game', 'video']) {
+    await navigate('/settings?scope=module&module=' + module + '&tab=categories')
+    await page.locator('.taxonomy-fields').waitFor()
+    assert.equal(await page.locator('.taxonomy-fields').getByRole('heading', { name: '标签', exact: true }).count(), 0)
+    await page.locator('.settings .nav').getByRole('button', { name: '标签', exact: true }).click()
+    await page.getByRole('heading', { name: module === 'video' ? '影视标签' : '标签', exact: true }).waitFor()
+  }
+  const pool = page.locator('.panel').filter({ has: page.getByRole('heading', { name: '识别标签池（影视通用）', exact: true }) })
+  await pool.getByPlaceholder('新标签名').fill('池预设')
+  await pool.getByRole('button', { name: '添加', exact: true }).click()
+  await page.waitForFunction(async () => (await window.baoyi.tags.list('video')).some(tag => tag.name === '池预设' && tag.source === 'user'))
+  checks.push('video-preset-tag-pool-preserved')
+  await navigate('/settings?scope=global&module=video&tab=appearance')
+  await page.getByRole('heading', { name: '主题', exact: true }).waitFor()
+  assert.equal(await page.getByRole('heading', { name: '隐藏里番', exact: true }).count(), 0)
+  await page.locator('.scope-nav').getByRole('button', { name: '影视', exact: true }).click()
+  await page.locator('.settings .nav').getByRole('button', { name: '里番区基础设置', exact: true }).click()
+  await page.getByRole('heading', { name: '隐藏里番', exact: true }).waitFor()
+  assert.equal(await page.locator('.nav__divider').count(), 1)
+  checks.push('independent-category-and-tag-pages-and-hentai-section')
+  for (const module of ['image', 'document']) {
+    await navigate(`/settings?scope=module&module=${module}&tab=organize`)
+    await page.getByRole('heading', { name: module === 'image' ? '目录整理' : '文库归档整理', exact: true }).waitFor()
+    await page.reload()
+    await page.getByRole('heading', { name: module === 'image' ? '目录整理' : '文库归档整理', exact: true }).waitFor()
+    assert.ok((await page.evaluate(() => location.hash)).includes('module=' + module))
+  }
+  await navigate('/settings?module=image&scope=module&tab=reader')
+  await page.getByLabel('阅读方向').selectOption('rtl')
+  await page.getByRole('button', { name: '保存阅读偏好', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '阅读偏好已保存' }).waitFor()
+  assert.equal(await page.evaluate(async () => (await window.baoyi.image.preferences()).direction), 'rtl')
+  await navigate('/settings?module=document&scope=module&tab=reader')
+  await page.getByLabel('阅读字号', { exact: true }).fill('21')
+  await page.getByRole('button', { name: '保存模块偏好', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '已保存' }).waitFor()
+  assert.equal(await page.evaluate(async () => (await window.baoyi.workspace.preferences.get('document')).fontSize), 21)
+  checks.push('image-document-organize-route-reload-and-persisted-reader-preferences')
+  await navigate('/settings?module=document&scope=module&tab=tags')
+  await page.getByLabel('选择分类', { exact: false }).selectOption('novel')
+  await page.locator('.tag-documents').getByText('标签验收', { exact: true }).click()
+  await page.getByPlaceholder('输入新标签（按回车或点击添加）').fill('设置页标签')
+  await page.getByRole('button', { name: '添加', exact: true }).click()
+  await page.getByRole('button', { name: '应用到 1 份资料', exact: true }).click()
+  await page.waitForFunction(async id => (await window.baoyi.workspace.documents.get(id))?.tags.includes('设置页标签'), fixtureDoc.id)
+  await page.getByRole('button', { name: '重命名', exact: true }).first().waitFor()
+  checks.push('embedded-document-tag-selection-and-persisted-batch-update')
+  await navigate('/video'); await page.locator('.sidebar').waitFor()
+  assert.equal(await page.locator('.sidebar').getByText('观看', { exact: true }).count(), 0)
+  assert.equal(await page.locator('.sidebar').getByText('其他分类', { exact: true }).count(), 0)
+  await navigate('/game'); await page.locator('.sidebar').waitFor()
+  assert.equal(await page.locator('.sidebar').getByText('存档', { exact: true }).count(), 0)
+  checks.push('removed-sidebar-sections')
+  for (const width of [960, 1280]) {
+    await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setSize(width, 850), width)
+    await navigate('/settings?module=video&scope=module&tab=online')
+    await page.getByRole('heading', { name: '找视频 · 网站与代理', exact: true }).waitFor()
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+    await page.screenshot({ path: path.join(output, `settings-${width}.png`) })
+  }
+  assert.deepEqual(errors, [])
+  await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify({ status: 'passed', executable, profile, checks, errors }, null, 2))
+  console.log('PASS ' + checks.join(', '))
+} catch (error) {
+  await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {})
+  throw error
+} finally { await app.close().catch(() => {}) }

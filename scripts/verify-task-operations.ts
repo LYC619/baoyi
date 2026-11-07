@@ -55,7 +55,7 @@ function harness() {
   const store = { reload: async () => {}, merge: () => {}, load: async () => {}, counts: { all: 0 }, items: [], selection: {} }
   const load = createRendererLoader({
     vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: (cb: () => void) => unmount.push(cb) },
-    'vue-router': { useRouter: () => ({ push: () => {} }) },
+    'vue-router': { useRouter: () => ({ push: () => {}, replace: () => {}, currentRoute: Vue.ref({ query: {} }) }) },
     '@/composables/useModules': { recallScroll: () => 0, rememberScroll: () => {} },
     '@/composables/useToast': { useToast: () => ({ toast: (m: string) => notices.push(m), error: (m: string) => notices.push(m), success: (m: string) => notices.push(m) }) },
     '@/stores/game': { useGameStore: () => store },
@@ -63,7 +63,7 @@ function harness() {
     '@/stores/settings': { useSettingsStore: () => ({ settings: { ai: { enabled: true, api_key: 'test' } } }) },
     '@/utils': utils
   }, {
-    window: { baoyi, confirm: () => true }, console: { info: () => {}, warn: () => {}, error: () => {} },
+    window: { baoyi, confirm: () => true, addEventListener: () => {}, removeEventListener: () => {} }, console: { info: () => {}, warn: () => {}, error: () => {} },
     document: { hidden: false, addEventListener: () => {}, removeEventListener: () => {} }, setTimeout, clearTimeout
   })
   const center = load('src/composables/useTaskCenter.ts').useTaskCenter()
@@ -212,13 +212,13 @@ await test('video Home: preview import stays shared after route disposal and awa
   const h = harness(), job = deferred<any>()
   h.implementations.preview = () => job.promise
   const setup = h.load('src/pages/video/Home.vue').default.setup
-  const page = setup({}, { expose: () => {} }), run = page.addVideos()
+  const page = setup({}, { expose: () => {} }), run = page.importBundle()
   assert.equal(h.latest()?.kind, 'video-scan')
   assert.match(h.latest().title, /识别预览/)
   h.dispose()
   const remounted = setup({}, { expose: () => {} })
   assert.equal(remounted.videoImport.busy.value, 'scan')
-  await remounted.addVideos()
+  await remounted.importBundle()
   assert.deepEqual(h.calls, ['preview'], 'remount cannot start a duplicate import')
   const batch = { id: 'preview-1', roots: ['D:/library'], revision: 1, createdAt: 1, updatedAt: 1, status: 'ready', entries: [], progress: { current: 'a.mp4', processed: 1, total: 2, log: 'preview progress' } }
   h.emit('preview', batch)

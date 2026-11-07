@@ -16,6 +16,8 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 
 export interface CountOptions {
+  /** 默认仍只统计 EXE；软件扫描和识别可额外包含手机安装包。 */
+  extensions?: readonly string[]
   /** 最深下钻几层。0 = 只数当前这一层 */
   maxDepth: number
   /** 数到这么多个 exe 就停手 */
@@ -50,6 +52,7 @@ export interface CountResult {
 const YIELD_EVERY = 32
 
 export async function countExes(root: string, opts: CountOptions): Promise<CountResult> {
+  const extensions = new Set(opts.extensions ?? ['exe'])
   const maxExes = opts.maxExes ?? Number.POSITIVE_INFINITY
   const maxEntries = opts.maxEntries ?? Number.POSITIVE_INFINITY
 
@@ -86,7 +89,7 @@ export async function countExes(root: string, opts: CountOptions): Promise<Count
         if (depth >= opts.maxDepth) continue
         if (opts.skip?.(entry.name)) continue
         stack.push({ dir: path.join(dir, entry.name), depth: depth + 1 })
-      } else if (entry.isFile() && path.extname(entry.name).toLowerCase() === '.exe') {
+      } else if (entry.isFile() && extensions.has(path.extname(entry.name).slice(1).toLowerCase())) {
         if (++count >= maxExes) {
           truncated = true
           break

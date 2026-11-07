@@ -11,7 +11,7 @@ const keyPath = (value: string) => process.platform === 'win32' ? path.resolve(v
 const visible = "(m.group_id IS NULL OR NOT EXISTS(SELECT 1 FROM image_groups g WHERE g.id=m.group_id AND g.hidden=1))"
 function imageItem(r: Row, chapters: ImageChapter[], count: number, p: Row | undefined, cover: string): ImageItem {
   return { id: r.id, type: r.item_type, path: r.path, sourceDir: r.source_dir || '', name: r.name_zh || r.file_name, description: r.description || '', tags: JSON.parse(r.tags || '[]'),
-    groupId: r.group_id, favorite: !!r.favorite, read: !!r.is_read, publication: r.publication, coverPageId: cover, source: r.source, sourceId: r.source_id,
+    groupId: r.group_id, favorite: !!r.favorite, read: !!r.is_read, publication: r.publication, coverPageId: cover, source: r.source, sourceId: r.source_id,authors:JSON.parse(r.authors||'[]'),
     pageCount: count, chapterCount: chapters.filter(c => c.pageCount).length, chapters, updatedAt: r.updated_at,
     progress: p ? { pageId: p.page_id, chapterId: p.chapter_id, ordinal: p.ordinal, offset: p.scroll_offset, updatedAt: p.updated_at } : null }
 }
@@ -19,15 +19,18 @@ export class ImageLibrary {
   private db: SqlDb
   constructor(db: SqlDb) { this.db = db }
   groups(): ImageGroup[] {
-    return (this.db.prepare('SELECT * FROM image_groups ORDER BY sort_order, name').all() as Row[]).map(r => ({ id: r.id, name: r.name, sortOrder: r.sort_order, hidden: !!r.hidden }))
+    return (this.db.prepare('SELECT * FROM image_groups ORDER BY sort_order, name').all() as Row[]).map(r => ({ id: r.id, name: r.name, type:r.item_type, directory:r.directory, sortOrder: r.sort_order, hidden: !!r.hidden }))
   }
   saveGroup(group: Partial<ImageGroup> & { name: string }): ImageGroup {
     const name = String(group.name).trim().slice(0, 80)
     if (!name) throw new Error('类型名称不能为空')
     const existing = this.groups().find(g => g.id === group.id)
-    const result = { id: existing?.id || randomUUID(), name, sortOrder: group.sortOrder ?? existing?.sortOrder ?? this.groups().length, hidden: group.hidden ?? existing?.hidden ?? false }
+    const type = existing?.type || group.type || 'comic'
+    if (!['comic','photo','misc'].includes(type) || existing && group.type && existing.type !== group.type) throw new Error('分类所属图片类型不可更改')
+    const result = { id: existing?.id || randomUUID(), name, type, directory:group.directory ?? existing?.directory ?? '', sortOrder: group.sortOrder ?? existing?.sortOrder ?? this.groups().filter(g=>g.type===type).length, hidden: group.hidden ?? existing?.hidden ?? false }
+    if (typeof result.directory !== 'string' || result.directory && !path.isAbsolute(result.directory)) throw new Error('分类目录必须是绝对路径')
     if (!Number.isSafeInteger(result.sortOrder)) throw new Error('无效的类型顺序')
-    this.db.prepare('INSERT INTO image_groups(id,name,sort_order,hidden) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,sort_order=excluded.sort_order,hidden=excluded.hidden').run(result.id, name, result.sortOrder, Number(result.hidden))
+    this.db.prepare('INSERT INTO image_groups(id,name,item_type,directory,sort_order,hidden) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,directory=excluded.directory,sort_order=excluded.sort_order,hidden=excluded.hidden').run(result.id, name, type, result.directory, result.sortOrder, Number(result.hidden))
     return result
   }
   removeGroup(id: string): void { this.db.prepare('DELETE FROM image_groups WHERE id=?').run(id) }
@@ -89,7 +92,7 @@ export class ImageLibrary {
       const changes = unique.map(id => {
         const item = lookup.get(id) as Row | undefined
         if (!item) throw new Error('所选资源不可用或已隐藏，请刷新后重试')
-        if (patch.groupId !== undefined && item.item_type !== 'comic') throw new Error('相册不支持漫画分类')
+        if (patch.groupId && !this.groups().some(g=>g.id===patch.groupId && g.type===item.item_type)) throw new Error('分类与图片类型不匹配')
         const old = JSON.parse(item.tags || '[]') as string[]
         const tags = patch.tags?.mode === 'replace' ? values : patch.tags?.mode === 'add' ? [...new Set([...old, ...values])] : old.filter(t => !values.includes(t))
         if (patch.tags && tags.length > 50) throw new Error('每项资源最多保留 50 个标签')
@@ -107,6 +110,14 @@ export class ImageLibrary {
       this.db.exec('RELEASE image_bulk'); return unique.length
     } catch (cause) { this.db.exec('ROLLBACK TO image_bulk; RELEASE image_bulk'); throw cause }
   }
+  gallery(ids:string[],offset=0,limit=120) {
+    if(!Array.isArray(ids)||ids.length>5000||ids.some(id=>typeof id!=='string'||id.length>128)||!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>240)throw new Error('图片浏览范围无效')
+    const selected=JSON.stringify([...new Set(ids)])
+    const from=`FROM json_each(?) chosen JOIN image_pages p ON p.resource_id=chosen.value JOIN resource r ON r.id=p.resource_id JOIN image_meta m ON m.resource_id=r.id WHERE p.missing=0 AND m.item_type IN ('photo','misc') AND ${visible}`
+    const total=(this.db.prepare(`SELECT COUNT(*) n ${from}`).get(selected) as Row).n as number
+    const pages=(this.db.prepare(`SELECT p.*,r.path,r.name_zh,r.file_name ${from} ORDER BY CAST(chosen.key AS INTEGER),p.ordinal,p.id LIMIT ? OFFSET ?`).all(selected,limit,offset) as Row[]).map(p=>({id:p.id,resourceId:p.resource_id,chapterId:p.chapter_id,ordinal:p.ordinal,size:p.size,missing:false,name:path.basename(p.entry||p.file),folder:path.dirname(p.entry||path.relative(p.path,p.file))}))
+    return {pages,total}
+  }
   pages(id: string, chapterId?: string): IndexedImagePage[] {
     if (!this.get(id)) return []
     const rows = this.db.prepare('SELECT * FROM image_pages WHERE resource_id=? AND missing=0' + (chapterId ? ' AND chapter_id=?' : '') + ' ORDER BY ordinal')
@@ -120,12 +131,16 @@ export class ImageLibrary {
     const sourced = scan.sourceId ? this.db.prepare('SELECT resource_id AS id FROM image_meta WHERE source=? AND source_id=?').get(scan.source || '', scan.sourceId) as Row | undefined : undefined
     const id = relocateId || sourced?.id || old?.id || randomUUID()
     if (relocateId && !this.get(relocateId)) throw new Error('资源不可用')
+    if (relocateId && (old && old.id !== relocateId || sourced && sourced.id !== relocateId)) throw new Error('新位置已登记为其他作品，请选择原作品的位置')
     if (sourced && old && sourced.id !== old.id) throw new Error('来源与目录属于不同作品，请选择原下载位置')
+    if ((old || sourced || relocateId) && scan.warnings.some(w => w !== '没有找到可导入的图片')) {
+      throw new Error('扫描不完整，已保留原图片和阅读记录：' + scan.warnings.slice(0, 5).join('；'))
+    }
     this.db.exec('SAVEPOINT image_register')
     try {
       this.db.prepare(`INSERT INTO resource(id,kind,path,created_at,updated_at,file_name,source_dir,name_zh,description,tags,category,ai_status) VALUES(?,'image',?,?,?,?,?,?,?,?,?,'done')
-        ON CONFLICT(id) DO UPDATE SET path=excluded.path,source_dir=excluded.source_dir,file_name=excluded.file_name,updated_at=excluded.updated_at`).run(id, scan.path, Date.now(), Date.now(), path.basename(scan.path), scan.sourceDir, scan.name, scan.description || '', JSON.stringify(scan.tags || []), scan.type === 'comic' ? '漫画' : '照片')
-      this.db.prepare(`INSERT INTO image_meta(resource_id,item_type,source,source_id,publication) VALUES(?,?,?,?,?) ON CONFLICT(resource_id) DO NOTHING`).run(id, scan.type, scan.source || '', scan.sourceId || '', scan.publication || 'unknown')
+        ON CONFLICT(id) DO UPDATE SET path=excluded.path,source_dir=excluded.source_dir,file_name=excluded.file_name,updated_at=excluded.updated_at`).run(id, scan.path, Date.now(), Date.now(), path.basename(scan.path), scan.sourceDir, scan.name, scan.description || '', JSON.stringify(scan.tags || []), scan.type === 'comic' ? '漫画' : scan.type === 'misc' ? '杂图' : '照片')
+      this.db.prepare(`INSERT INTO image_meta(resource_id,item_type,source,source_id,publication,authors) VALUES(?,?,?,?,?,?) ON CONFLICT(resource_id) DO NOTHING`).run(id, scan.type, scan.source || '', scan.sourceId || '', scan.publication || 'unknown',JSON.stringify(scan.authors||[]))
       this.db.prepare('UPDATE image_pages SET missing=1 WHERE resource_id=?').run(id)
       const priorChapters = this.db.prepare('SELECT id,ordinal,customized FROM image_chapters WHERE resource_id=?').all(id) as Row[]
       const customOrder = priorChapters.some(c => c.customized === 1), priorOrder = new Map(priorChapters.map(c => [c.id, c.ordinal as number]))
@@ -153,7 +168,7 @@ export class ImageLibrary {
   update(id: string, patch: ImagePatch): ImageItem {
     const item = this.get(id)
     if (!item) throw new Error('资源不可用')
-    if (patch.groupId !== undefined && item.type !== 'comic') throw new Error('相册不支持漫画分类，请使用来源目录和标签整理')
+    if (patch.groupId && !this.groups().some(g=>g.id===patch.groupId && g.type===item.type && !g.hidden)) throw new Error('分类与图片类型不匹配或已隐藏')
     if (patch.read !== undefined && typeof patch.read !== 'boolean') throw new Error('已读状态无效')
     if (patch.name !== undefined) {
       const name = patch.name.trim().slice(0, 300)

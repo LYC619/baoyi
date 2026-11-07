@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, ArrowRight, X, Maximize, Minimize2, Move, RotateCw, ZoomIn, ZoomOut, RotateCcw, Bookmark, BookMarked, Check, Settings2, Save, Trash2, RectangleVertical, Columns2, Rows3 } from 'lucide-vue-next'
+import {useFloatingDock} from '@/composables/useFloatingDock'
 import Panzoom, { type PanzoomObject } from '@panzoom/panzoom'
 import type { ImageBookmark, ImageItem, ImagePage } from '@/types/image'
 import { DEFAULT_IMAGE_PREFERENCES, normalizeImagePreferences } from '@/utils/image-preferences'
@@ -11,6 +12,7 @@ const props = defineProps<{ item: ImageItem; pages: ImagePage[]; startId?: strin
 const maximized = ref(false), minimized = ref(false), position = ref<{left:number;top:number}|null>(null)
 let windowDrag: {x:number;y:number;left:number;top:number} | undefined
 const root = ref<HTMLElement>(), viewport = ref<HTMLElement>(), canvas = ref<HTMLElement>()
+const dockStyle=useFloatingDock('reader',root,()=>minimized.value,1)
 const index = ref(Math.max(0, props.pages.findIndex(p => p.id === (props.startId || props.item.progress?.pageId))))
 const jumpPage = ref<number|string>(index.value + 1)
 const prefs = ref({ ...DEFAULT_IMAGE_PREFERENCES }), customized = ref(false), rotation = ref(0), error = ref(''), idle = ref(false)
@@ -157,7 +159,7 @@ async function defaults(reset: boolean) {
   try {
     if (prefsTimer) await savePreferences()
     await preferenceWrites
-    if (reset) { const result = await window.baoyi.image.readerPreferences(props.item.id, null); prefs.value = result.preferences; customized.value = result.customized; if (props.item.type === 'photo') prefs.value.mode = 'single'; await go(index.value); setupPan() }
+    if (reset) { const result = await window.baoyi.image.readerPreferences(props.item.id, null); prefs.value = result.preferences; customized.value = result.customized; if (props.item.type !== 'comic') prefs.value.mode = 'single'; await go(index.value); setupPan() }
     else await window.baoyi.image.preferences({ ...prefs.value })
   } catch (cause) { error.value = (cause as Error).message } finally { busy.value = false }
 }
@@ -202,7 +204,7 @@ onMounted(async () => {
   window.addEventListener('keydown', keys); window.addEventListener('resize', constrainWindow)
   try { const state = await window.baoyi.image.readerPreferences(props.item.id); prefs.value = normalizeImagePreferences(state.preferences); customized.value = state.customized; bookmarks.value = await window.baoyi.image.bookmarks(props.item.id) } catch (cause) { error.value = (cause as Error).message }
   if (disposed) return
-  if (props.item.type === 'photo') prefs.value.mode = 'single'
+  if (props.item.type !== 'comic') prefs.value.mode = 'single'
   resize = new ResizeObserver(async () => {
     if (!viewport.value) return
     const at = index.value, previousOffset = offset()
@@ -217,7 +219,7 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('keydown', k
 </script>
 
 <template>
-  <Teleport to="body"><section ref="root" class="image-reader" :class="{ idle: idle && !panel, maximized, minimized }" :style="position&&!maximized&&!minimized?{left:position.left+'px',top:position.top+'px',right:'auto'}:{}" tabindex="-1" role="dialog" aria-modal="false" :aria-label="`阅读 ${item.name}`" @pointermove="wake" @focusin="wake">
+  <Teleport to="body"><section ref="root" class="image-reader" :class="{ idle: idle && !panel, maximized, minimized }" :style="minimized?dockStyle:position&&!maximized&&!minimized?{left:position.left+'px',top:position.top+'px',right:'auto'}:{}" tabindex="-1" role="dialog" aria-modal="false" :aria-label="`阅读 ${item.name}`" @pointermove="wake" @focusin="wake">
     <header class="reader-title" @pointerdown="moveWindow" @pointermove="moveWindowTo" @pointerup="windowDrag=undefined" @lostpointercapture="windowDrag=undefined" @dblclick="maximized=!maximized">
       <Move :size="14"/><strong :title="item.name">{{item.name}}</strong><span v-if="!minimized">拖动标题移动窗口</span>
       <button :aria-label="minimized?'展开阅读器':'收起阅读器'" :title="minimized?'展开':'收起'" @click="minimize"><Minimize2 :size="16"/></button>
@@ -306,6 +308,6 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('keydown', k
 .reader-bottom{overflow-x:hidden}.reader-bottom span{min-width:0;font-size:11px;white-space:nowrap}.reader-bottom input[type=range]{flex:none;min-width:0;width:78px}.reader-jump,.reader-jump label{flex-direction:column;gap:5px}.reader-bottom :deep(.page-metadata){flex:none;min-width:0;width:80px;font-size:10px}
 .reader-error{position:absolute;left:108px;right:100px;top:36px;z-index:5;border-radius:6px;font-size:11px;max-height:70px;overflow:auto}
 .idle .reader-tools:not(:focus-within):not(:hover),.idle .reader-bottom:not(:focus-within):not(:hover){opacity:1}
-.image-reader.minimized{inset:auto 24px 20px auto!important;width:300px!important;height:34px!important;min-height:0;min-width:0;resize:none;display:block}.minimized>:not(.reader-title){display:none}.minimized .reader-title{height:32px}.minimized .reader-title>svg{display:none}
+.image-reader.minimized{inset:auto var(--dock-right,24px) var(--dock-bottom,20px) auto!important;z-index:80;width:300px!important;height:34px!important;min-height:0;min-width:0;resize:none;display:block}.minimized>:not(.reader-title){display:none}.minimized .reader-title{height:32px}.minimized .reader-title>svg{display:none}
 @media(max-height:650px){.reader-tools{gap:3px;padding-block:5px}.reader-bottom{gap:10px}}
 </style>

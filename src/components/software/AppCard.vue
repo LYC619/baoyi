@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onUnmounted, watch } from 'vue'
-import { Leaf, Play } from 'lucide-vue-next'
+import { FolderOpen, Leaf, Play } from 'lucide-vue-next'
 import type { SoftwareItem } from '@/types'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import MasteryDots from '@/components/ui/MasteryDots.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { activityOf, daysSince, displayName, subtitleName } from '@/utils'
+import { isMobilePackage } from '@/utils/software-package'
 
 const props = withDefaults(
   defineProps<{
@@ -33,6 +34,7 @@ const subtitle = computed(() => subtitleName(props.item, lang.value))
 const activity = computed(() => activityOf(props.item))
 const isUnused = computed(() => daysSince(activity.value.at) > props.unusedDays)
 const pending = computed(() => props.item.ai_status !== 'done')
+const mobilePackage = computed(() => isMobilePackage(props.item.exe_path))
 
 /* 单击进详情、双击启动：单击先延后，等确认没有第二下再走 */
 let clickTimer: ReturnType<typeof setTimeout> | null = null
@@ -119,8 +121,9 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
       </footer>
     </div>
 
-    <button v-if="!selectable" class="card__play" title="启动（或双击卡片）" :aria-label="`启动 ${name}`" @click="onLaunchClick">
-      <Play :size="13" fill="currentColor" />
+    <button v-if="!selectable" class="card__play" :title="mobilePackage ? '定位安装包（或双击卡片）' : '启动（或双击卡片）'" :aria-label="`${mobilePackage ? '定位安装包' : '启动'} ${name}`" @click="onLaunchClick">
+      <FolderOpen v-if="mobilePackage" :size="13" />
+      <Play v-else :size="13" fill="currentColor" />
     </button>
 
     <!--

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Download, ExternalLink, FolderOpen, Globe, Link, Loader2, RefreshCw, Settings, X } from 'lucide-vue-next'
+import { Download, ExternalLink, FolderOpen, Globe, Link, Loader2, RefreshCw, X } from 'lucide-vue-next'
 import { errorMessage } from '@/utils'
 import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
 
@@ -45,7 +45,6 @@ async function enqueue(): Promise<void> {
   const job = await flow.enqueue()
   if (job) emit('queued', job.id)
 }
-function openSettings(): void { void router.push({ name: 'settings', query: { tab: 'downloads' } }) }
 function keydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return }
   if (event.key !== 'Tab' || !panel.value) return
@@ -123,7 +122,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
           </div>
         </div>
         <footer class="download-panel__footer">
-          <button type="button" class="btn btn--ghost" @click="openSettings"><Settings :size="14" />下载与存储设置</button>
+          <p class="hint">下载工具与缓存可在右上角设置 → 影视 → 下载与缓存中管理。</p>
           <button v-if="(id || discovery) && !draft" type="button" class="btn btn--ghost" :disabled="busy" @click="flow.prepare"><RefreshCw :size="14" />重新解析</button>
           <button type="button" class="btn btn--primary" :disabled="busy || !draft || draftHidden || needsPrepare || !title.trim() || !selectedVideoCodes.length" @click="enqueue"><Loader2 v-if="enqueuing" :size="14" class="spin" /><Download v-else :size="14" />{{ enqueuing ? '正在加入队列' : `下载所选${selectedVideoCodes.length ? ` ${selectedVideoCodes.length} 项` : ''}` }}</button>
         </footer>

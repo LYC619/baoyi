@@ -22,6 +22,17 @@ export const HANIME_HOSTS = [
   'javchu.com'
 ] as const
 
+/**
+ * Older watch pages use this HLS CDN. Its public name can have poisoned local
+ * DNS while the provider's canonical name still resolves correctly. Map only
+ * DNS to the provider alias, not to an expiring IP; URL, Host and TLS SNI stay
+ * original. This is deliberately separate from the allowed watch-page hosts.
+ */
+const HANIME_CDN_ALIASES: Readonly<Record<string, string>> = {
+  'abre-videos.youjizz.com': 'abre-videos.youjizz.com.lds.rncdn7.com'
+}
+const HANIME_ROUTED_HOSTS = [...HANIME_HOSTS, ...Object.keys(HANIME_CDN_ALIASES)]
+
 export const HANIME_BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 
 /**
@@ -43,7 +54,7 @@ export const HANIME_CLOUDFLARE_IPS = [
  * Chromium 会保留请求里的 Host/SNI，因此 Cloudflare 地址仍能按镜像域名路由。
  */
 export function buildHanimeHostResolverRules(
-  hosts: readonly string[] = HANIME_HOSTS,
+  hosts: readonly string[] = HANIME_ROUTED_HOSTS,
   ip: string = HANIME_CLOUDFLARE_IPS[0]
 ): string {
   const address = String(ip ?? '').trim()
@@ -52,7 +63,7 @@ export function buildHanimeHostResolverRules(
   return hosts
     .map((host) => String(host).trim().toLowerCase())
     .filter(Boolean)
-    .map((host) => `MAP ${host} ${address}`)
+    .map((host) => `MAP ${host} ${HANIME_CDN_ALIASES[host] ?? address}`)
     .join(', ')
 }
 
@@ -117,10 +128,10 @@ export function getHanimeHostsStatus(state: Partial<HanimeHostsState> = {}) {
   const startupIp = pickStartupIp(state.startupIp)
   return {
     enabled,
-    hosts: [...HANIME_HOSTS],
+    hosts: [...HANIME_ROUTED_HOSTS],
     ips: [...HANIME_CLOUDFLARE_IPS],
     startupIp: enabled ? startupIp : '',
     activeIp: enabled ? state.activeIp ?? '' : '',
-    resolverRules: enabled ? buildHanimeHostResolverRules(HANIME_HOSTS, startupIp) : ''
+    resolverRules: enabled ? buildHanimeHostResolverRules(undefined, startupIp) : ''
   } as const
 }
