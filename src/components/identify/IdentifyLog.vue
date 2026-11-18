@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { latestOnly, STALE } from '@/composables/latestOnly'
 /**
  * 识别日志：把 agent 每一轮做了什么原样摊开。
  *
@@ -64,28 +65,27 @@ const spread = ref(new Set<string>())
 
 /** 上次真正发起过查询的关键词。blur 在单纯移开焦点时也会触发，没改动就不该重打 IPC */
 let queriedKeyword = ''
-let loadRound = 0
+const readLogs = latestOnly((options: Parameters<typeof window.baoyi.logs.list>[0]) => window.baoyi.logs.list(options))
 
 async function load(): Promise<void> {
-  const round = ++loadRound
   const kw = keyword.value.trim()
   queriedKeyword = kw
   loading.value = true
   loadError.value = ''
   try {
-    const result = await window.baoyi.logs.list({
+    const result = await readLogs({
       status: filter.value === 'all' ? undefined : filter.value,
       keyword: kw || undefined,
       resource_kind: props.resourceKind,
       ...(taskScoped.value ? { limit: 300 } : {})
     })
-    if (round === loadRound) logs.value = result.filter(log => (props.since === undefined || log.created_at >= props.since)
+    if (result === STALE) return
+    logs.value = result.filter(log => (props.since === undefined || log.created_at >= props.since)
       && (props.until === undefined || log.created_at <= props.until))
   } catch (cause) {
-    if (round === loadRound) { logs.value = []; loadError.value = errorMessage(cause) }
-  } finally {
-    if (round === loadRound) loading.value = false
+    logs.value = []; loadError.value = errorMessage(cause)
   }
+  loading.value = false
 }
 
 function blurSearch(): void {

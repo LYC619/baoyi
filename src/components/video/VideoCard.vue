@@ -15,30 +15,30 @@ import {videoFrameHover} from '@/utils/video-frame-hover'
 import type {VideoPreviewSession} from '@/types/video-preview'
 import type { VideoItem } from '@/types'
 import type { VideoWorkContent } from '@/types/video-workflow'
-import { formatDuration, posterUrl, videoTitle } from '@/utils'
+import { errorMessage, formatDuration, posterUrl, videoTitle } from '@/utils'
 import { videoDateLabel, videoEpisodeLabel } from '@/utils/video-content'
 import { WATCH_STATUS_LABEL } from '@/stores/video'
 
 const props = withDefaults(defineProps<{ item: VideoItem; episode?: VideoWorkContent; status?: string; recent?: string; selectable?: boolean; selected?: boolean; locked?: boolean; showPublished?: boolean }>(), { status: '', recent: '', selectable: false, selected: false, showPublished: false })
 const preview=useVideoPreview()
 const frames=useVideoFrames(),frameSession=ref<VideoPreviewSession|null>(null),frameMessage=ref(''),frameActive=ref(false),frameClosing=ref(false),position=ref(0),anchor=ref<HTMLElement>()
-let frameGeneration=0
+let frameController = new AbortController()
 let leaveTimer:ReturnType<typeof setTimeout>|undefined
 const frameIndex=computed(()=>{const times=frames.state.value?.times||[],target=position.value*(frames.state.value?.duration||0);return Math.max(0,times.reduce((best,time,index)=>Math.abs(time-target)<Math.abs(times[best]-target)?index:best,0))})
-function stopFrames(){frameGeneration++;hover.leave();clearTimeout(leaveTimer);leaveTimer=undefined;frames.stop();const session=frameSession.value;frameSession.value=null;frameActive.value=false;frameClosing.value=false;frameMessage.value='';releaseVideoHover(stopFrames);if(session)void window.baoyi.video.preview.release(session.token).catch(()=>{})}
+function stopFrames(){frameController.abort();hover.leave();clearTimeout(leaveTimer);leaveTimer=undefined;frames.stop();const session=frameSession.value;frameSession.value=null;frameActive.value=false;frameClosing.value=false;frameMessage.value='';releaseVideoHover(stopFrames);if(session)void window.baoyi.video.preview.release(session.token).catch(() => { /* best-effort */ })}
 async function startFrames(){
   if(props.selectable||props.item.media_kind&&props.item.media_kind!=='video')return
   stopFrames()
-  claimVideoHover(stopFrames);const own=++frameGeneration;position.value=0;frameActive.value=true;frameMessage.value='正在查找本地视频…'
+  claimVideoHover(stopFrames);frameController=new AbortController();const {signal}=frameController;position.value=0;frameActive.value=true;frameMessage.value='正在查找本地视频…'
   try{
-    const choices=await window.baoyi.video.preview.choices(props.item.id,props.episode?.id);if(own!==frameGeneration)return
+    const choices=await window.baoyi.video.preview.choices(props.item.id,props.episode?.id);if(signal.aborted)return
     const remembered=recentVideoAsset(props.item.id,props.episode?.id),selected=choices.assets.find(asset=>asset.key===remembered)
     const episode=choices.assets[0]?.episodeId,versions=choices.assets.filter(asset=>asset.episodeId===episode),asset=selected||versions[0]
     if(!asset){frameMessage.value='没有可用的本地视频';return}
     const session=await window.baoyi.video.preview.open(props.item.id,asset.key)
-    if(own!==frameGeneration){await window.baoyi.video.preview.release(session.token);return}
+    if(signal.aborted){await window.baoyi.video.preview.release(session.token);return}
     frameSession.value=session;frameMessage.value='';await frames.start(session.token)
-  }catch(e){if(own===frameGeneration)frameMessage.value=(e as Error).message}
+  }catch(e){if(!signal.aborted)frameMessage.value=errorMessage(e)}
 }
 const hover=videoFrameHover(()=>void startFrames())
 function enter(event:PointerEvent){keepFrames();if(frameActive.value)return;if(!props.selectable&&event.pointerType!=='touch')hover.enter()}

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useToast } from '@/composables/useToast'
+import { errorMessage } from '@/utils'
 import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue'
 import {useRouter} from 'vue-router'
 import {X,Download,FolderOpen,Loader2,BookOpen} from 'lucide-vue-next'
@@ -12,13 +14,13 @@ const recovery=ingest.recovery.value
 const available=computed(()=>preview.value?.catalog.chapters.filter(c=>recovery?recovery.selectedChapters.includes(c.id):!preview.value!.existingChapters.includes(c.id))||[])
 const pages=computed(()=>available.value.filter(c=>selected.value.includes(c.id)).reduce((n,c)=>n+c.pageIds.length,0))
 let generation=0,resolvedProxy='';const previous=document.activeElement as HTMLElement|null
-async function chooseRoot(){try{const value=await window.baoyi.image.chooseDownloadRoot('jm',root.value);if(value)root.value=value}catch(cause){error.value=(cause as Error).message}}
+async function chooseRoot(){try{const value=await window.baoyi.image.chooseDownloadRoot('jm',root.value);if(value)root.value=value}catch(cause){error.value=errorMessage(cause)}}
 const proxy=():ComicProxy=>mode.value==='custom'?{mode:'custom',url:custom.value}:{mode:mode.value}
 async function resolve(){
   if(busy.value||saving.value)return;const stamp=++generation,connection=proxy();busy.value=true;error.value='';preview.value=null
-  try{const value=await window.baoyi.comic.preview(input.value,connection);if(stamp!==generation)return;preview.value=value;resolvedProxy=JSON.stringify(connection);directory.value=recovery?.directory||value.directory;selected.value=available.value.map(c=>c.id);const target=await window.baoyi.image.downloadTarget('jm',value.catalog.workId,group.value||null);if(stamp!==generation)return;root.value=recovery?.root||target.root;targetLocked.value=target.locked&&!recovery;if(target.locked)group.value=target.groupId||''}catch(e){if(stamp===generation)error.value=(e as Error).message}finally{if(stamp===generation)busy.value=false}
+  try{const value=await window.baoyi.comic.preview(input.value,connection);if(stamp!==generation)return;preview.value=value;resolvedProxy=JSON.stringify(connection);directory.value=recovery?.directory||value.directory;selected.value=available.value.map(c=>c.id);const target=await window.baoyi.image.downloadTarget('jm',value.catalog.workId,group.value||null);if(stamp!==generation)return;root.value=recovery?.root||target.root;targetLocked.value=target.locked&&!recovery;if(target.locked)group.value=target.groupId||''}catch(e){if(stamp===generation)error.value=errorMessage(e)}finally{if(stamp===generation)busy.value=false}
 }
-async function close(){if(saving.value)return;generation++;if(props.embedded)emit('close');else ingest.open.value=false;await window.baoyi.comic.cancelPreview().catch(()=>{})}
+async function close(){if(saving.value)return;generation++;if(props.embedded)emit('close');else ingest.open.value=false;await window.baoyi.comic.cancelPreview().catch(() => { /* best-effort */ })}
 async function start(){
   if(!preview.value||saving.value||busy.value)return;if(!root.value){error.value='请先选择漫画存放根目录';return;}saving.value=true;error.value=''
   const stamp=generation
@@ -36,7 +38,7 @@ async function start(){
     }
     const id=recovery?await window.baoyi.comic.revalidate(recovery.id,preview.value.token,root.value):await window.baoyi.comic.start(preview.value.token,[...selected.value],directory.value,group.value||null,root.value)
     if(id){await ingest.refresh();if(stamp!==generation)return;message.value='已加入下载队列，完成后自动出现在漫画书架。';preview.value=null;selected.value=[];if(props.embedded&&props.active)emit('tasks');else if(!props.embedded){ingest.open.value=false;await nextTick();ingest.showRecords.value=true}}
-  }catch(e){if(stamp===generation)error.value=(e as Error).message}finally{saving.value=false}
+  }catch(e){if(stamp===generation)error.value=errorMessage(e)}finally{saving.value=false}
 }
 function keys(event:KeyboardEvent){
   if(event.key==='Escape'){event.stopPropagation();void close()}
@@ -46,9 +48,9 @@ function keys(event:KeyboardEvent){
   }
 }
 watch(input,()=>{generation++;preview.value=null;selected.value=[];error.value='';busy.value=false})
-watch(()=>props.active,active=>{if(!active&&busy.value){generation++;busy.value=false;preview.value=null;void window.baoyi.comic.cancelPreview().catch(()=>{})}})
-onMounted(async()=>{field.value?.focus();const stamp=generation;try{const defaults=props.initialProxy?{proxy:props.initialProxy}:await window.baoyi.comic.defaults();if(stamp===generation&&!busy.value&&!preview.value){mode.value=defaults.proxy.mode;if(defaults.proxy.mode==='custom')custom.value=defaults.proxy.url}}catch{}if(props.embedded&&input.value&&stamp===generation)await resolve()})
-onUnmounted(()=>{generation++;void window.baoyi.comic.cancelPreview().catch(()=>{});previous?.focus()})
+watch(()=>props.active,active=>{if(!active&&busy.value){generation++;busy.value=false;preview.value=null;void window.baoyi.comic.cancelPreview().catch(() => { /* best-effort */ })}})
+onMounted(async()=>{field.value?.focus();const stamp=generation;try{const defaults=props.initialProxy?{proxy:props.initialProxy}:await window.baoyi.comic.defaults();if(stamp===generation&&!busy.value&&!preview.value){mode.value=defaults.proxy.mode;if(defaults.proxy.mode==='custom')custom.value=defaults.proxy.url}}catch (cause) { useToast().error(errorMessage(cause)) }if(props.embedded&&input.value&&stamp===generation)await resolve()})
+onUnmounted(()=>{generation++;void window.baoyi.comic.cancelPreview().catch(() => { /* best-effort */ });previous?.focus()})
 </script>
 <template><Teleport to="body" :disabled="embedded"><div :class="embedded?'comic-embedded':'comic-shade'" @click.self="close"><section ref="dialog" :role="embedded?undefined:'dialog'" :aria-modal="embedded?undefined:true" aria-labelledby="comic-title" class="comic-dialog" @keydown="keys">
   <header><div><p>漫画摄入</p><h2 id="comic-title">{{recovery?'核验并继续原任务':'从 JM 添加作品'}}</h2></div><button class="im-button" :aria-label="embedded?'返回 JM 列表':'关闭漫画摄入'" :disabled="saving" @click="close"><X :size="20"/></button></header>

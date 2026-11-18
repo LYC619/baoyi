@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, computed, watch } from 'vue'
 import { Tag, Trash2, Check } from 'lucide-vue-next'
 import { workspace } from '@/utils/workspace-api'
@@ -75,7 +76,7 @@ async function run(fn: () => Promise<void>) {
   try {
     await fn()
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     busy.value = false
   }
@@ -94,7 +95,7 @@ async function apply() {
         await workspace.documents.update(item.id, patch)
         count++
       } catch (e) {
-        failures.push(`${item.name}：${(e as Error).message}`)
+        failures.push(`${item.name}：${errorMessage(e)}`)
       }
     }
     emit('updated')

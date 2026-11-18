@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { ArrowUpRight, Globe, Pencil, Plus, Trash2, X } from 'lucide-vue-next'
 import type { WebBrowserSource } from '@/types/web-browser'
@@ -11,7 +12,7 @@ const sources = ref<WebBrowserSource[]>([]), input = ref<HTMLInputElement | null
 async function run(action: () => Promise<void>) {
   if (busy.value) return
   busy.value = true; error.value = ''; notice.value = ''
-  try { await action() } catch (cause) { error.value = cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : String(cause) }
+  try { await action() } catch (cause) { error.value = errorMessage(cause).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') }
   finally { busy.value = false }
 }
 async function open(url = address.value) { await run(async () => { address.value = await api.open(url) }) }
@@ -29,7 +30,7 @@ function cancelEdit() { editingId.value = ''; name.value = ''; notice.value = ''
 function remove(source: WebBrowserSource) {
   void run(async () => { await api.remove(source.id); sources.value = await api.list(); if (editingId.value === source.id) cancelEdit(); notice.value = '网页来源已移除' })
 }
-function host(url: string) { try { return new URL(url).host } catch { return url } }
+function host(url: string) { try { return new URL(url).host } catch { return url /* 无效地址使用原文字显示。 */ } }
 async function takePending(value: string | null) {
   if (value === null) return
   address.value = value; editingId.value = ''; name.value = ''; pendingWebAddress.value = null

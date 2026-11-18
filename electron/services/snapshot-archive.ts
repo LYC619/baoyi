@@ -11,7 +11,7 @@ const locks = new Map<string, Promise<unknown>>()
 async function exclusive<T>(directory: string, run: () => Promise<T>): Promise<T> {
   const key = process.platform === 'win32' ? path.resolve(directory).toLowerCase() : path.resolve(directory)
   const previous = locks.get(key) || Promise.resolve()
-  const pending = previous.catch(() => {}).then(run)
+  const pending = previous.catch(() => { /* 原始 Promise 的错误已交给调用方；这里只释放队列或监听。 */ }).then(run)
   locks.set(key, pending)
   try { return await pending } finally { if (locks.get(key) === pending) locks.delete(key) }
 }
@@ -54,7 +54,7 @@ async function publishManifest(file: string, snapshot: LibrarySnapshot) {
   try { await handle.writeFile(JSON.stringify(snapshot, null, 2)); await handle.sync() }
   finally { await handle.close() }
   try { await fs.promises.rename(temporary, file) }
-  finally { await fs.promises.rm(temporary, { force: true }).catch(() => {}) }
+  finally { await fs.promises.rm(temporary, { force: true }).catch(() => { /* best-effort */ }) }
 }
 
 /** Keeps every recovery point. Only verified duplicate raw bytes are removed after publication. */
@@ -103,7 +103,7 @@ export function archiveLibrarySnapshots(directory: string, keepRecent = 3): Prom
         await fs.promises.unlink(original)
         result.archived++; result.reclaimedBytes += snapshot.size - storedSize
       } catch (cause) { result.warnings.push(`${snapshot.id}：${message(cause)}`) }
-      finally { if (temporary) await fs.promises.rm(temporary, { force: true }).catch(() => {}) }
+      finally { if (temporary) await fs.promises.rm(temporary, { force: true }).catch(() => { /* best-effort */ }) }
     }
     return result
   })
@@ -134,6 +134,6 @@ export function exportLibrarySnapshot(directory: string, id: string, destination
       await fs.promises.copyFile(temporary, destination, fs.constants.COPYFILE_EXCL)
       await syncFile(destination)
       return { file: destination, size: snapshot.size, sha256: snapshot.sha256 }
-    } finally { await fs.promises.rm(temporary, { force: true }).catch(() => {}) }
+    } finally { await fs.promises.rm(temporary, { force: true }).catch(() => { /* best-effort */ }) }
   })
 }

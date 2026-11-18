@@ -133,7 +133,7 @@ select optgroup {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 34px;
+  height: 30px;
   padding: 0 14px;
   border-radius: var(--radius-btn);
   font-size: var(--fs-body);
@@ -154,7 +154,7 @@ select optgroup {
 
 .btn--ghost {
   color: var(--text-sub);
-  border: 1px solid var(--divider);
+  box-shadow: inset 0 0 0 1px var(--divider-strong);
 }
 .btn--ghost:hover {
   color: var(--text-main);
@@ -181,6 +181,10 @@ select optgroup {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+.btn--sm{height:26px;padding:0 9px;font-size:var(--fs-tag)}
+.btn--icon{width:30px;padding:0}
+.btn--icon.btn--sm{width:26px}
 
 /* ---------------------------- 表单 ---------------------------- */
 .field {

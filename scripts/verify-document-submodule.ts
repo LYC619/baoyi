@@ -104,6 +104,6 @@ test('document registration, list filtering, and cross-submodule move', async (t
   assert.equal(docs.list({ submodule: 'reading' }).length, 0)
 })
 
-test('schema v25 validation', () => {
-  assert.equal(SCHEMA_VERSION, 25)
+test('current schema validation', () => {
+  assert.equal(SCHEMA_VERSION, 31)
 })

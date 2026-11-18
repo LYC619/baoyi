@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import {ref,onMounted} from 'vue'
 import {useSettingsStore} from '@/stores/settings'
 import {workspace,plain} from '@/utils/workspace-api'
@@ -6,9 +7,9 @@ import {DEFAULT_MODULE_PREFERENCES,type PreferenceModule} from '@/types/workspac
 import {useDocumentsStore} from '@/stores/documents'
 const props=defineProps<{module:PreferenceModule;section?:string}>(),settings=useSettingsStore(),documents=useDocumentsStore()
 const value=ref(structuredClone(DEFAULT_MODULE_PREFERENCES)),directory=ref(''),tags=ref(''),assetCategories=ref(''),experienceCategories=ref(''),busy=ref(false),error=ref(''),saved=ref(false)
-onMounted(async()=>{try{value.value=await workspace.preferences.get(props.module);tags.value=value.value.defaultTags.join('、');assetCategories.value=value.value.assetCategories.join('、');experienceCategories.value=value.value.experienceCategories.join('、');if(props.module==='document'){directory.value=await workspace.preferences.dataDirectory();await documents.refresh()}}catch(e){error.value=(e as Error).message}})
+onMounted(async()=>{try{value.value=await workspace.preferences.get(props.module);tags.value=value.value.defaultTags.join('、');assetCategories.value=value.value.assetCategories.join('、');experienceCategories.value=value.value.experienceCategories.join('、');if(props.module==='document'){directory.value=await workspace.preferences.dataDirectory();await documents.refresh()}}catch(e){error.value=errorMessage(e)}})
 const split=(text:string)=>[...new Set(text.split(/[、,，\n]/).map(x=>x.trim()).filter(Boolean))]
-async function run(fn:()=>Promise<void>){busy.value=true;error.value='';saved.value=false;try{await fn()}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
+async function run(fn:()=>Promise<void>){busy.value=true;error.value='';saved.value=false;try{await fn()}catch(e){error.value=errorMessage(e)}finally{busy.value=false}}
 async function save(){await run(async()=>{value.value=await workspace.preferences.save(props.module,{...plain(value.value),defaultTags:split(tags.value),assetCategories:split(assetCategories.value),experienceCategories:split(experienceCategories.value)});saved.value=true})}
 </script>
 <template><section class="ws ws-card module-preferences"><h3>{{module==='document'?'资料':module==='personal'?'个人':'项目'}}偏好</h3><p class="ws-muted">仅作用于当前模块。模型引用全局已有配置，凭据在全局设置中维护。</p><div class="ws-form">

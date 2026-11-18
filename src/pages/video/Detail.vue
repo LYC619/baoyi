@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { latestOnly, STALE } from '@/composables/latestOnly'
 /**
  * 影视详情页。
  *
@@ -38,12 +39,14 @@ import DownloadPanel from '@/components/video/DownloadPanel.vue'
 import VideoSourceDialog from '@/components/video/VideoSourceDialog.vue'
 import VideoRemovalDialog from '@/components/video/VideoRemovalDialog.vue'
 import VideoItems from '@/components/video/VideoItems.vue'
+import AudioDetail from '@/components/video/AudioDetail.vue'
 import VideoArtwork from '@/components/video/VideoArtwork.vue'
 import VideoScopeSwitch from '@/components/video/VideoScopeSwitch.vue'
 import OrganizePanel from '@/components/video/OrganizePanel.vue'
 import CollectionNameDialog from '@/components/video/CollectionNameDialog.vue'
 import EpisodeArtworkDialog from '@/components/video/EpisodeArtworkDialog.vue'
 import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
+import { useResourceDetail } from '@/composables/useResourceDetail'
 import { useToast } from '@/composables/useToast'
 import { reidentifyVideo, useMediaScan } from '@/composables/useMediaScan'
 import { WATCH_STATUS_LABEL, VIDEO_TYPE_LABEL, useVideoStore } from '@/stores/video'
@@ -143,11 +146,10 @@ async function pickEpisodeImage(role: 'poster' | 'thumbnail'): Promise<void> {
 }
 async function saveEpisode(patch: Partial<Episode>): Promise<void> {
   if (!selectedEpisode.value || busyEpisode.value) return
-  const episodeId = selectedEpisode.value.id, resourceId = props.id
+  const episodeId = selectedEpisode.value.id
   busyEpisode.value = episodeId
   try {
     const result = await window.baoyi.video.updateEpisode(episodeId, patch)
-    if (resourceId !== props.id) return
     if (result.episode && library.value) {
       const index = library.value.contents.findIndex(episode => episode.id === episodeId)
       if (index >= 0) Object.assign(library.value.contents[index], result.episode)
@@ -171,73 +173,70 @@ const organizeReturnFocus = ref<HTMLElement | null>(null)
 watch(itemHidden, hidden => {
   if (hidden) { organizeMode.value = ''; renameOpen.value = false; downloadFlow.value.reset() }
 }, { flush: 'sync' })
-let loadRound = 0
+const readDetail = latestOnly(async (mode: 'load' | 'refresh' | 'check') => {
+  const id = props.id
+  if (mode === 'check') {
+    const sync = await window.baoyi.video.syncFiles(id)
+    return { item: await window.baoyi.video.get(id), library: sync.library, sync }
+  }
+  const initial = mode === 'load' ? await window.baoyi.video.get(id) : null
+  const content = mode === 'refresh' || initial ? await window.baoyi.video.library(id) : null
+  const item = mode === 'refresh' || content?.contents.length ? await window.baoyi.video.get(id) : initial
+  return { item, library: content, sync: null }
+})
 let unlistenLibrary: (() => void) | undefined
 
 /** 「想看」排第一：这一列是从没看过往看完走的顺序，和侧栏那组的排序理由不同 */
 const STATUSES: WatchStatus[] = ['unwatched', 'watching', 'watched', 'dropped']
 
 async function load(): Promise<void> {
-  const id = props.id
-  const round = ++loadRound
   loading.value = true
   checking.value = false
   loadError.value = ''
   library.value = null
   try {
-    const next = await window.baoyi.video.get(id)
-    if (round !== loadRound) return
-    const content = next ? await window.baoyi.video.library(id) : null
-    if (round !== loadRound) return
-    // Library normalization may repair a legacy directory record and episode counts.
-    const normalized = content?.contents.length ? await window.baoyi.video.get(id) : next
-    if (round !== loadRound) return
-    item.value = normalized
-    library.value = content
-    episodes.value = content?.contents ?? []
+    const result = await readDetail('load')
+    if (result === STALE) return
+    item.value = result.item
+    library.value = result.library
+    episodes.value = result.library?.contents ?? []
   } catch (err) {
-    if (round !== loadRound) return
     error(`读取影视条目失败：${errorMessage(err)}`)
     loadError.value = '读取影视条目失败：' + errorMessage(err)
     item.value = null
     episodes.value = []
-  } finally {
-    if (round === loadRound) loading.value = false
   }
+  loading.value = false
 }
 
 async function refreshLibrary(): Promise<void> {
-  const id = props.id
-  const round = ++loadRound
   checking.value = true
   try {
-    const content = await window.baoyi.video.library(id)
-    const next = await window.baoyi.video.get(id)
-    if (id !== props.id || round !== loadRound) return
-    item.value = next
-    library.value = content
-    episodes.value = content.contents
-    store.merge(next)
+    const result = await readDetail('refresh')
+    if (result === STALE) return
+    item.value = result.item
+    library.value = result.library
+    episodes.value = result.library!.contents
+    store.merge(result.item)
     void store.refreshCounts()
-  } catch (err) { if (round === loadRound) error('检查文件失败：' + errorMessage(err)) }
-  finally { if (round === loadRound) { checking.value = false; loading.value = false } }
+  } catch (err) { error('检查文件失败：' + errorMessage(err)) }
+  checking.value = false; loading.value = false
 }
 const lastCheck = ref('')
 async function checkFiles(): Promise<void> {
   if (checking.value) return
   checking.value = true
-  const id = props.id, round = ++loadRound
   try {
-    const result = await window.baoyi.video.syncFiles(id)
-    const next = await window.baoyi.video.get(id)
-    if (id !== props.id || round !== loadRound) return
-    library.value = result.library; episodes.value = result.library.contents; item.value = next
-    lastCheck.value = result.message
-    store.merge(next); void store.reload()
-    if (result.warnings.length) toast(result.message + '；' + result.warnings[0])
-    else success(result.message)
-  } catch (cause) { if (id === props.id) { lastCheck.value = '检查未完成：' + errorMessage(cause); error(lastCheck.value) } }
-  finally { if (id === props.id && round === loadRound) checking.value = false }
+    const result = await readDetail('check')
+    if (result === STALE) return
+    library.value = result.library; episodes.value = result.library!.contents; item.value = result.item
+    const sync = result.sync!
+    lastCheck.value = sync.message
+    store.merge(result.item); void store.reload()
+    if (sync.warnings.length) toast(sync.message + '；' + sync.warnings[0])
+    else success(sync.message)
+  } catch (cause) { lastCheck.value = '检查未完成：' + errorMessage(cause); error(lastCheck.value) }
+  checking.value = false
 }
 function openDownload(): void {
   if (!item.value?.hanime_id) { sourceOpen.value = true; return }
@@ -268,20 +267,8 @@ onMounted(() => {
   void load()
   unlistenLibrary = window.baoyi.video.onLibraryChanged(id => { if (!id || id === props.id) void refreshLibrary() })
 })
-onBeforeUnmount(() => { loadRound++; unlistenLibrary?.(); tagsObserver?.disconnect() })
+onBeforeUnmount(() => { unlistenLibrary?.(); tagsObserver?.disconnect() })
 watch(() => router.currentRoute?.value.query.edit, value => { editing.value = value === '1' })
-watch(() => props.id, () => {
-  organizeMode.value = ''
-  renameOpen.value = false
-  activeTab.value = detailTabs.value.find(t=>t.id===router.currentRoute.value.query.tab)?.id || 'contents'
-  selectedEpisodeId.value = ''
-  readingScopeInitialized = false
-  lastCheck.value = ''
-  tagsExpanded.value = false
-  editing.value = router.currentRoute?.value.query.edit === '1'
-  if (moreMenu.value) moreMenu.value.open = false
-  void load()
-})
 watch(() => library.value?.contents, contents => {
   if (!contents) return
   const registered = contents.filter(registeredVideoContent)
@@ -423,33 +410,11 @@ async function changeType(value: string): Promise<void> {
   else if (value === 'movie' || value === 'series') await save({ video_type: value,media_kind:'video', ...(item.value.category === HENTAI_CATEGORY ? { category: '其他' } : {}) })
 }
 
-async function save(patch: Partial<VideoItem>): Promise<void> {
-  if (!item.value) return
-  try {
-    const updated = await store.update(item.value.id, patch)
-    if (updated) item.value = updated
-  } catch (err) {
-    error(`保存失败：${errorMessage(err)}`)
-  }
-}
-
-function commitTags(raw: string): void {
-  // 中英文逗号、顿号都认，同游戏那边
-  const tags = [
-    ...new Set(
-      raw
-        .split(/[,，、]/)
-        .map((t) => t.trim())
-        .filter(Boolean)
-    )
-  ].slice(0, 8)
-  void save({ tags })
-}
-
-function toggleArchive(): void {
-  if (!item.value) return
-  void save({ is_archived: !item.value.is_archived })
-}
+const { save, commitTags, toggleArchive, reveal, copyPath } = useResourceDetail({
+  item,
+  reveal: id => window.baoyi.video.revealInFolder(id),
+  update: (current, patch) => store.update(current.id, patch)
+})
 
 /* ------------------------- 改过的字段 ------------------------- */
 
@@ -511,10 +476,6 @@ async function setEpisodeStatus(e: Episode, status: WatchStatus): Promise<void> 
 const trackText = (t: MediaTrack): string =>
   [t.label || t.language || '未知', t.codec].filter(Boolean).join(' · ')
 
-async function reveal(): Promise<void> {
-  if (!item.value) return
-  await window.baoyi.video.revealInFolder(item.value.id)
-}
 
 /* ---------------------------- 播放 ---------------------------- */
 
@@ -603,10 +564,6 @@ async function afterRemoval(): Promise<void> {
   await refreshLibrary()
 }
 
-function copyPath(path: string): void {
-  void window.baoyi.app.copyText(path)
-  toast('路径已复制')
-}
 </script>
 
 <template>
@@ -620,6 +577,7 @@ function copyPath(path: string): void {
       </button>
     </div>
 
+    <AudioDetail v-else-if="item.media_kind==='audio'" :key="item.id" :item="item" :library="library" @refresh="refreshLibrary"/>
     <template v-else>
       <header class="head">
         <button class="btn btn--subtle" @click="router.push({ name: 'video-home' })">
@@ -784,7 +742,7 @@ function copyPath(path: string): void {
               />
               </template>
               <template v-else>
-                <div class="hero__title-line"><h1 class="hero__title">{{ title }}</h1><span class="hero__badge"><Clapperboard :size="12" />{{ item.media_kind==='audio'?'音频':item.media_kind==='other'?'其他':item.category === HENTAI_CATEGORY ? '里番' : VIDEO_TYPE_LABEL[item.video_type] }}</span></div>
+                <div class="hero__title-line"><h1 class="hero__title">{{ title }}</h1><span class="hero__badge"><Clapperboard :size="12" />{{ item.media_kind==='other'?'其他':item.category === HENTAI_CATEGORY ? '里番' : VIDEO_TYPE_LABEL[item.video_type] }}</span></div>
                 <p v-if="item.name_en && item.name_en !== title" class="hero__original">{{ item.name_en }}</p>
               </template>
 
@@ -836,7 +794,7 @@ function copyPath(path: string): void {
             </div>
             <aside class="hero__facts" aria-label="作品信息">
               <span v-if="item.category && item.category !== HENTAI_CATEGORY" class="hero__category">{{ item.category }}</span>
-              <label v-if="editing" class="hero__field">类型<select class="input" aria-label="视频类型" :value="item.media_kind==='audio'||item.media_kind==='other'?item.media_kind:item.category === HENTAI_CATEGORY ? 'hentai' : item.video_type" @change="changeType(($event.target as HTMLSelectElement).value)"><option value="movie">电影</option><option value="series">剧集</option><option value="hentai">里番</option><option value="other">其他</option><option value="audio">音频</option></select></label>
+              <label v-if="editing" class="hero__field">类型<select class="input" aria-label="视频类型" :value="item.media_kind==='other'?item.media_kind:item.category === HENTAI_CATEGORY ? 'hentai' : item.video_type" @change="changeType(($event.target as HTMLSelectElement).value)"><option value="movie">电影</option><option value="series">剧集</option><option value="hentai">里番</option><option value="other">其他</option><option value="audio">音频</option></select></label>
               <label v-if="editing && item.category !== HENTAI_CATEGORY" class="hero__field">分类<input class="input" :value="item.category" list="video-category-options" aria-label="视频分类" @change="save({ category: ($event.target as HTMLInputElement).value.trim() })" /></label>
               <datalist id="video-category-options"><option v-for="name in ['华语', '欧美', '日韩', '动画', '纪录片', '综艺', '其他']" :key="name" :value="name" /></datalist>
               <div class="hero__tag-heading">作品标签<span v-if="(library?.contents.length || 0) > 1"> · 各集标签独立保存</span></div>

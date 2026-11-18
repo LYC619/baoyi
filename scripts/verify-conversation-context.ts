@@ -9,32 +9,31 @@ import {initSchema} from '../electron/services/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {ProjectLibrary} from '../electron/kinds/project/library.ts'
 import {createProjectAgent} from '../electron/kinds/project/agent.ts'
-import {createWorkspaceAgent} from '../electron/workspace/agent.ts'
 import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/library-backup.ts'
 import {VIDEO_JOBS_SQL} from '../electron/kinds/video/download/jobs.ts'
 
-for(const module of ['project','personal'] as const)test(`${module} 持久调用接入预算、固定历史快照和检查点，重启后可恢复原文`,async t=>{
+test(`project 持久调用接入预算、固定历史快照和检查点，重启后可恢复原文`,async t=>{
   const db=new DatabaseSync(':memory:');initSchema(db,KINDS);db.exec(VIDEO_JOBS_SQL);t.after(()=>db.close())
   const config=()=>({enabled:true,api_key:'fixture',api_url:'http://fixture.invalid',model:'fixture'})
   let options:any
   const run:typeof runAgent=async o=>{options=o;return {stopReason:'max_turns',error:'已达到本次上下文预算，原始工具结果已保留；可从检查点继续。',turns:1,tokens:0,text:''}}
-  const manager=module==='project'?createProjectAgent({db,config,run}):createWorkspaceAgent({db,config,run})
+  const manager=createProjectAgent({db,config,run})
   const project=new ProjectLibrary(db).register({path:process.cwd(),name:'上下文样本',summary:'',category:'软件项目',source:'self',version:'',entries:[],evidence:'',suggested:true,warnings:[]})
-  const session=module==='project'?(manager as ReturnType<typeof createProjectAgent>).create(project.id):(manager as ReturnType<typeof createWorkspaceAgent>).create('personal')
+  const session=manager.create(project.id)
   session.messages=Array.from({length:40},(_,i)=>message('m'+i,'证据'+i+'"\\'.repeat(15000)))
   const original=JSON.stringify(session.messages[0])
-  const table=module==='project'?'project_sessions':'workspace_sessions'
+  const table='project_sessions'
   db.prepare(`UPDATE ${table} SET payload=? WHERE id=?`).run(JSON.stringify(session),session.id)
   const result=await manager.send(session.id,'继续')
   assert.ok(options.maxContextChars>48000&&options.maxContextChars<=200000,'实际持久调用必须启用上下文预算')
   assert.match(result.error,/上下文.*预算/,'调用方不能把预算暂停误报成轮数上限')
   assert.equal(result.contextCheckpoint?.through,28)
   assert.ok(JSON.stringify(options.history).length<40000)
-  const tool=options.tools.find((x:any)=>x.name===(module==='project'?'read_session_history':'read_conversation_history'))
+  const tool=options.tools.find((x:any)=>x.name==='read_session_history')
   let cursor:any,joined=''
   do {const page=JSON.parse(await tool.execute(cursor?{cursor}:{message:0}));joined+=page.text;assert.equal(page.total,40);cursor=page.next?.message===0?page.next:null}while(cursor)
   assert.equal(joined,original)
-  const reopened=module==='project'?createProjectAgent({db,config,run}):createWorkspaceAgent({db,config,run})
+  const reopened=createProjectAgent({db,config,run})
   assert.deepEqual(reopened.get(session.id)?.contextCheckpoint,result.contextCheckpoint)
   assert.equal(reopened.get(session.id)?.messages[0].text,session.messages[0].text)
   const backup=buildLibraryBackup(db),target=new DatabaseSync(':memory:');initSchema(target,KINDS);target.exec(VIDEO_JOBS_SQL);t.after(()=>target.close())

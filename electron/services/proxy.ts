@@ -218,7 +218,7 @@ async function openHanimeChallenge(url: string): Promise<string | null> {
     })
     const attempt = { window: win, url, result: Promise.resolve<string | null>(null) }
     challenge = attempt
-    attempt.result = waitForHanimePage(win, url).catch(() => null).finally(() => {
+    attempt.result = waitForHanimePage(win, url).catch(() => { return null /* 页面未就绪或已关闭时返回无可用页面。 */ }).finally(() => {
       // An old closed/load/evaluation continuation must only clean up its owner.
       if (challenge === attempt) challenge = null
       if (!win.isDestroyed()) win.close()
@@ -283,7 +283,7 @@ async function waitForHanimePage(win: BrowserWindow, requestedUrl: string): Prom
     contents.setUserAgent(HANIME_BROWSER_UA)
     // A click/reload can reject this initial promise while the window continues
     // navigating. Document events, not the initial load promise, decide readiness.
-    void win.loadURL(requestedUrl).catch(() => {})
+    void win.loadURL(requestedUrl).catch(cause => console.error('[验证页面加载]', cause))
     while (!cancelled && !win.isDestroyed() && !contents.isDestroyed()) {
       const version = navigation
       if (!contents.isLoadingMainFrame() && httpStatus >= 200 && httpStatus < 300) {
@@ -300,7 +300,7 @@ async function waitForHanimePage(win: BrowserWindow, requestedUrl: string): Prom
               )
             })`,
             true
-          ).catch(() => null),
+          ).catch(() => { return null /* 页面未就绪或已关闭时返回无可用页面。 */ }),
           stopped
         ])
         if (cancelled || win.isDestroyed() || contents.isDestroyed()) return null

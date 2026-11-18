@@ -17,7 +17,7 @@ initSchema(db, KINDS)
 for (const [key, value] of Object.entries({ onboarded: true, theme: 'light', hanime_builtin_hosts: false }))
   db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, JSON.stringify(value))
 const docs = new DocumentLibrary(db), ids: string[] = []
-const group = docs.saveCustomGroup({ submodule: 'reading', name: '研究分组' })
+const group = docs.saveCustomGroup({ submodule: 'reading', categoryId: 'book', name: '研究分组' })
 for (let i = 0; i < 8; i++) {
   const file = path.join(profile, `资料${i}.md`)
   await fs.writeFile(file, '# 格式标题\n\n**重点内容**\n\n- 列表条目\n\n第二段正文。')

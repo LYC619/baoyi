@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, computed } from 'vue'
 import { workspace } from '@/utils/workspace-api'
 import type { DocumentCustomGroup, DocumentSubmodule } from '@/types/workspace'
@@ -17,7 +18,7 @@ async function create() {
   try {
     const group = await workspace.documents.saveCustomGroup({submodule:props.submodule,categoryId:props.categoryId,name:name.value.trim()})
     emit('created'); emit('update:modelValue',group.id); creating.value = false; name.value = ''
-  } catch(e) { error.value = (e as Error).message } finally { busy.value = false }
+  } catch(e) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 </script>
 <template>

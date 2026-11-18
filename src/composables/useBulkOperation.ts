@@ -1,3 +1,4 @@
+import { errorMessage } from '../utils/index.ts'
 import { ref } from 'vue'
 
 export interface BulkItem { id: string; name: string }
@@ -14,7 +15,7 @@ export function useBulkOperation() {
     try {
       for (const item of batch) {
         try { await apply(item); succeeded.value++ }
-        catch (cause) { failures.value.push({ id: item.id, name: item.name, message: cause instanceof Error ? cause.message : String(cause) }) }
+        catch (cause) { failures.value.push({ id: item.id, name: item.name, message: errorMessage(cause) }) }
         processed.value++
       }
     } finally { busy.value = false }

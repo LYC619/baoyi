@@ -7,7 +7,6 @@ import { SkillProfiles } from '../electron/workspace/skill-profiles.ts'
 import { PersonalLibrary } from '../electron/workspace/personal.ts'
 import { buildLibraryBackup, restoreLibraryBackup } from '../electron/services/library-backup.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
-import { createWorkspaceAgent } from '../electron/workspace/agent.ts'
 
 test('技能草案必须确认，追加记录幂等且校验指标口径', t => {
   const db = new DatabaseSync(':memory:'); db.exec('PRAGMA foreign_keys=ON');initSchema(db,KINDS);t.after(()=>db.close())
@@ -45,22 +44,6 @@ test('旧技能补建指标保留编号，过期草案不能覆盖人工修改',
   personal.save({id:second.id,kind:'skill',name:second.name,body:'后来人工修订',data:{}})
   assert.throws(()=>skills.confirm(stale.id),/过期/)
   assert.equal(personal.get(second.id)?.body,'后来人工修订')
-})
-
-test('个人 Agent 加载 skill 并生成草案，不能通过通用工具绕过确认', async t=>{
-  const db=new DatabaseSync(':memory:');db.exec('PRAGMA foreign_keys=ON');initSchema(db,KINDS);t.after(()=>db.close())
-  const agent=createWorkspaceAgent({db,config:()=>({enabled:true,api_url:'http://unused',api_key:'unused',model:'test'}),run:async options=>{
-    const tool=(name:string)=>options.tools.find(t=>t.name===name)!
-    assert.match(await tool('load_personal_skill').execute({name:'skill-profile'}),/最多两问/)
-    assert.deepEqual(JSON.parse(await tool('skill_list').execute({})),[])
-    await assert.rejects(()=>tool('save_personal_record').execute({kind:'skill',name:'不应写入',body:'',data:{}}),/不能绕过/)
-    await tool('skill_propose').execute({name:'编程',summary:'完成一个项目',metrics:[{key:'work',label:'代表作',type:'text',unit:''}]})
-    return {stopReason:'done',text:'请确认草案',tokens:0,turns:1,error:''}
-  }})
-  const session=agent.create('personal');await agent.send(session.id,'登记编程技能')
-  assert.equal(new PersonalLibrary(db).list('skill').length,0)
-  assert.equal(new SkillProfiles(db).proposals().length,1)
-  agent.dispose()
 })
 
 test('技能及头像随备份恢复；状态首条记录失败不残留指标', t=>{

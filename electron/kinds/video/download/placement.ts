@@ -80,7 +80,8 @@ export function promoteDownloadDirectory(d: SqlDb, resourceId: string, change: V
     d.exec('RELEASE SAVEPOINT promote_directory')
   } catch (error) {
     d.exec('ROLLBACK TO SAVEPOINT promote_directory'); d.exec('RELEASE SAVEPOINT promote_directory')
-    if (sourceExists && !fs.existsSync(from)) { try { fs.renameSync(to, from) } catch { /* The persisted inode allows a later retry to finish recovery. */ } }
+    if (sourceExists && !fs.existsSync(from)) { try { fs.renameSync(to, from) } catch { // best-effort
+ /* The persisted inode allows a later retry to finish recovery. */ } }
     throw error
   }
   // SQLite has committed. If persisting the completion flag fails, the saved

@@ -5,7 +5,7 @@ import { Download, ExternalLink, FolderOpen, Globe, Link, Loader2, RefreshCw, X 
 import { errorMessage } from '@/utils'
 import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
 
-const props = withDefaults(defineProps<{ id?: string; discovery?: import('@/types/video-discovery').DiscoverySelection }>(), { id: '' })
+const props = withDefaults(defineProps<{ id?: string; updatesOnly?:boolean; discovery?: import('@/types/video-discovery').DiscoverySelection }>(), { id: '' })
 const emit = defineEmits<{ close: []; queued: [id: string] }>()
 const router = useRouter()
 const flow = useVideoWorkflow(props.id, props.discovery)
@@ -14,7 +14,9 @@ const { url, draft, title, selectedVideoCodes, sourceLabel, strictQuality, regis
 const panel = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
 const busy = computed(() => preparing.value || picking.value || enqueuing.value)
-const selectable = computed(() => episodes.value.filter(episode => episode.state !== 'queued' && episode.state !== 'other-work'))
+const selectable = computed(() => episodes.value.filter(episode => episode.state !== 'queued' && episode.state !== 'other-work' && (!props.updatesOnly||episode.state!=='local')))
+const availableCount = computed(() => episodes.value.filter(episode=>episode.state==='available').length)
+const missingCount = computed(() => episodes.value.filter(episode=>episode.state==='missing').length)
 const stateLabels = { local: '本地已有', missing: '文件缺失', available: '可下载', queued: '已在队列', 'other-work': '已在其他作品' }
 const localCount = computed(() => episodes.value.filter(episode => episode.state === 'local').length)
 const location = computed(() => {
@@ -42,6 +44,7 @@ function close(): void {
   emit('close')
 }
 async function enqueue(): Promise<void> {
+  if(props.updatesOnly)selectedVideoCodes.value=selectedVideoCodes.value.filter(code=>selectable.value.some(episode=>episode.videoCode===code))
   const job = await flow.enqueue()
   if (job) emit('queued', job.id)
 }
@@ -70,7 +73,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
     <div class="download-overlay" @click.self="close">
       <section ref="panel" class="download-panel" role="dialog" aria-modal="true" aria-labelledby="download-title">
         <header class="download-panel__head">
-          <div><h2 id="download-title">{{ discovery ? '保存到本地' : id ? '补齐作品内容' : '从 Hanime 添加作品' }}</h2><p>{{ draft?.sourceName ? draft.sourceName + ' · ' : '' }}先确认内容和保存位置，再加入下载队列。</p></div>
+          <div><h2 id="download-title">{{ updatesOnly ? '检查系列更新' : discovery ? '保存到本地' : id ? '补齐作品内容' : '从 Hanime 添加作品' }}</h2><p>{{ draft?.sourceName ? draft.sourceName + ' · ' : '' }}先确认内容和保存位置，再加入下载队列。</p></div>
           <button class="btn btn--subtle" type="button" aria-label="关闭下载面板" :disabled="enqueuing" @click="close"><X :size="18" /></button>
         </header>
         <div class="download-panel__body">
@@ -87,6 +90,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
           <p v-if="preparing" class="download-hint" role="status">正在读取来源内容和核对本地文件…</p>
           <p v-if="draftHidden" class="download-hint">此作品所属分类已隐藏，可在设置中恢复显示。</p>
           <template v-else-if="draft">
+            <p v-if="updatesOnly&&!preparing" class="download-hint" role="status">{{availableCount||missingCount?`发现 ${availableCount} 项未收录内容、${missingCount} 项文件缺失，已选中可补齐项。`:'当前没有待补齐内容；本地已有、队列中和其他作品的集数会跳过。'}}</p>
             <label class="download-field"><span>作品名称</span><input v-model="title" class="input" maxlength="240" :readonly="draft.bound" :disabled="busy" /></label>
             <div class="download-location">
               <div><span class="download-hint">影视库根目录</span><p class="mono">{{ draft.root || '尚未选择' }}</p>
@@ -103,7 +107,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
             </div>
             <ul class="download-contents" aria-label="来源内容与本地状态">
               <li v-for="episode in episodes" :key="episode.videoCode">
-                <label><input v-model="selectedVideoCodes" type="checkbox" :value="episode.videoCode" :disabled="busy || episode.state === 'queued' || episode.state === 'other-work'" /><span><small v-if="!discovery" class="download-episode-number">{{ episode.numbered === false ? '集数待确认' : `第 ${episode.order} 集` }}</small>{{ episode.originalTitle || episode.title || episode.videoCode }}<small v-if="episode.qualities.length">{{ episode.qualities.join(' · ') }}</small></span></label>
+                <label><input v-model="selectedVideoCodes" type="checkbox" :value="episode.videoCode" :disabled="busy || episode.state === 'queued' || episode.state === 'other-work' || updatesOnly&&episode.state==='local'" /><span><small v-if="!discovery" class="download-episode-number">{{ episode.numbered === false ? '集数待确认' : `第 ${episode.order} 集` }}</small>{{ episode.originalTitle || episode.title || episode.videoCode }}<small v-if="episode.qualities.length">{{ episode.qualities.join(' · ') }}</small></span></label>
                 <span :class="['download-state', `download-state--${episode.state}`]">{{ stateLabels[episode.state] }}</span>
               </li>
             </ul>
@@ -123,7 +127,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
         </div>
         <footer class="download-panel__footer">
           <p class="hint">下载工具与缓存可在右上角设置 → 影视 → 下载与缓存中管理。</p>
-          <button v-if="(id || discovery) && !draft" type="button" class="btn btn--ghost" :disabled="busy" @click="flow.prepare"><RefreshCw :size="14" />重新解析</button>
+          <button v-if="(id || discovery) && (!draft||updatesOnly)" type="button" class="btn btn--ghost" :disabled="busy" @click="flow.prepare"><RefreshCw :size="14" />{{updatesOnly?'重新检查':'重新解析'}}</button>
           <button type="button" class="btn btn--primary" :disabled="busy || !draft || draftHidden || needsPrepare || !title.trim() || !selectedVideoCodes.length" @click="enqueue"><Loader2 v-if="enqueuing" :size="14" class="spin" /><Download v-else :size="14" />{{ enqueuing ? '正在加入队列' : `下载所选${selectedVideoCodes.length ? ` ${selectedVideoCodes.length} 项` : ''}` }}</button>
         </footer>
       </section>

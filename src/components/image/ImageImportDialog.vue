@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref } from 'vue'
 import { FolderOpen, X, Archive } from 'lucide-vue-next'
 import type { ImageImportPreview, ImageType } from '@/types/image'
@@ -13,7 +14,7 @@ async function choose() {
   try {
     const result = await window.baoyi.image.prepareImport(props.type,mode.value==='multiple',mode.value==='archive')
     if (result) { preview.value=result; selected.value=result.items.filter(i=>i.pages>0).map(i=>i.index) }
-  } catch(cause) { error.value=(cause as Error).message } finally { busy.value=false }
+  } catch(cause) { error.value=errorMessage(cause) } finally { busy.value=false }
 }
 async function confirm() {
   if (!preview.value) return
@@ -23,7 +24,7 @@ async function confirm() {
     await store.refresh()
     if (result.errors.length) { error.value=`已导入 ${result.imported} 项；${result.errors.join('；')}`; preview.value=null }
     else emit('close')
-  } catch(cause) { error.value=(cause as Error).message } finally { busy.value=false }
+  } catch(cause) { error.value=errorMessage(cause) } finally { busy.value=false }
 }
 </script>
 <template><Teleport to="body"><div class="im-overlay" @click.self="!busy && emit('close')"><section class="im-dialog" role="dialog" aria-modal="true" aria-label="导入图片" @keydown.esc="!busy && emit('close')">

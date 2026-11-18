@@ -1,3 +1,4 @@
+import { parseJsonArray } from '../../services/json.ts'
 import { readVideoLocalMetadata } from './local-metadata.ts'
 import fs from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
@@ -88,12 +89,6 @@ interface Prepared {
 
 function all(d: SqlDb, sql: string, ...args: unknown[]): Row[] { return d.prepare(sql).all(...args) as Row[] }
 function one(d: SqlDb, sql: string, ...args: unknown[]): Row | undefined { return d.prepare(sql).get(...args) as Row | undefined }
-function jsonArray(value: unknown): Row[] {
-  if (!value) return []
-  const parsed = typeof value === 'string' ? JSON.parse(value) : value
-  if (!Array.isArray(parsed)) throw new Error('历史资源列表格式无效，请先修复该条资料')
-  return parsed
-}
 function rowKey(table: Table, row: Row): Row {
   if (table === 'video_meta' || table === 'video_directories') return { resource_id: row.resource_id }
   if (table === 'video_episode_assets') return { episode_id: row.episode_id, asset_id: row.asset_id }
@@ -279,8 +274,8 @@ function prepareOrganize(d: SqlDb, input: VideoOrganizeRequest): Prepared {
     for (const asset of snap.video_assets.filter(a => a.resource_id === r.id)) addFile(asset.path, r.id, asset.role)
     for (const ep of snap.episode.filter(e => e.resource_id === r.id)) if (ep.path) addFile(ep.path, r.id, 'video', ep.id)
     if (meta.video_type === 'movie' && (!fs.existsSync(r.path) || !fs.statSync(r.path).isDirectory())) addFile(r.path, r.id, 'video')
-    for (const part of jsonArray(meta.parts)) if (part.path) addFile(part.path, r.id, 'video')
-    for (const linked of jsonArray(meta.linked_files)) if (linked.path) addFile(linked.path, r.id, /\.(srt|ass|ssa|vtt|sub)$/i.test(linked.path) ? 'subtitle' : 'attachment')
+    for (const part of parseJsonArray<Row>(meta.parts)) if (part.path) addFile(part.path, r.id, 'video')
+    for (const linked of parseJsonArray<Row>(meta.linked_files)) if (linked.path) addFile(linked.path, r.id, /\.(srt|ass|ssa|vtt|sub)$/i.test(linked.path) ? 'subtitle' : 'attachment')
     for (const poster of [meta.poster_path, meta.fanart_path, r.icon_path]) if (poster) addFile(poster, r.id, 'poster')
     for (const link of links) {
       const asset = assets.find(a => a.id === link.asset_id && a.resource_id === r.id)
@@ -289,7 +284,7 @@ function prepareOrganize(d: SqlDb, input: VideoOrganizeRequest): Prepared {
     const owned = [...fileMap.values()].filter(f => f.resourceIds.includes(r.id) && f.assetIds.some(id => assets.some(a => a.id === id && a.resource_id === r.id && a.role === 'video')))
     const hasEpisodes = snap.episode.some(e => e.resource_id === r.id)
     const orphaned = owned.filter(f => !f.episodeIds.length)
-    const parts = jsonArray(meta.parts)
+    const parts = parseJsonArray<Row>(meta.parts)
     const groups = !hasEpisodes && parts.length <= 1 ? (orphaned.length ? [orphaned] : []) : orphaned.map(f => [f])
     for (const [index, group] of groups.entries()) {
       const numbered = request.collectionTitle && groups.length === 1 ? numberedEpisode(r.name_zh || r.file_name) : null
@@ -584,7 +579,7 @@ function applyLogical(d: SqlDb, j: Journal, prepared: Prepared): void {
       patch(d, j, 'resource', { id: targetId }, { name_zh: prepared.preview.request.collectionTitle,
         ...(standalone ? { summary: '', description: '', name_en: '' } : {}) })
       // 只有用户亲手改过合集名才算"手改"；程序按作品名算出来的建议名不算，否则以后再也纠正不了（B7）
-      const edited = prepared.preview.request.titleEdited ? [...new Set([...jsonArray(meta.user_edited) as unknown as string[], 'name_zh'])] : jsonArray(meta.user_edited) as unknown as string[]
+      const edited = prepared.preview.request.titleEdited ? [...new Set([...parseJsonArray<Row>(meta.user_edited) as unknown as string[], 'name_zh'])] : parseJsonArray<Row>(meta.user_edited) as unknown as string[]
       patch(d, j, 'video_meta', { resource_id: targetId }, { user_edited: JSON.stringify(edited), ...(standalone ? { original_description: '' } : {}) })
     }
     j.logicalApplied = true
@@ -612,7 +607,7 @@ async function appendStagedFile(handle: FileHandle, stage: string, start = 0): P
   await handle.sync()
 }
 function pathFields(value: string, from: string, to: string): string {
-  const items = jsonArray(value)
+  const items = parseJsonArray<Row>(value)
   let changed = false
   const next = items.map(item => {
     if (item && typeof item.path === 'string' && samePath(item.path, from)) { changed = true; return { ...item, path: to } }
@@ -826,7 +821,7 @@ async function syncManifest(d: SqlDb, j: Journal): Promise<void> {
     schema_version: 1, bundle_id: j.preview.bundleId, revision: (previous?.revision || 0) + 1, updated_at: Date.now(),
     work: { ...previous?.work, title: (renamed ? '' : previous?.work.title) || r.name_zh || r.file_name, name_en: (renamed ? '' : previous?.work.name_en) || r.name_en || '', description,
       original_description: (renamed ? '' : previous?.work.original_description) || m.original_description || '', category: previous?.work.category || r.category,
-      tags: previous?.work.tags || jsonArray(r.tags) as unknown as string[], sources: mergeEntries(previous?.work.sources || [], sources(d, j.survivorId), sourceKey), poster, thumbnail: m.thumbnail_path && inside(j.targetDirectory, m.thumbnail_path) ? relative(m.thumbnail_path) : '', thumbnail_source: m.thumbnail_source || '', poster_source: m.poster_source || previous?.work.poster_source || '', provenance: { ...(previous?.work.provenance || {}), organization: j.id } },
+      tags: previous?.work.tags || parseJsonArray<Row>(r.tags) as unknown as string[], sources: mergeEntries(previous?.work.sources || [], sources(d, j.survivorId), sourceKey), poster, thumbnail: m.thumbnail_path && inside(j.targetDirectory, m.thumbnail_path) ? relative(m.thumbnail_path) : '', thumbnail_source: m.thumbnail_source || '', poster_source: m.poster_source || previous?.work.poster_source || '', provenance: { ...(previous?.work.provenance || {}), organization: j.id } },
     items: [...mergedItems, ...extraItems].sort((a, b) => (a.season || 0) - (b.season || 0) || a.order - b.order), managed_files: { ...(previous?.managed_files || {}) }, missing: [...missing],
     assets: mergeEntries((previous as (VideoBundle & { assets?: Row[] }) | null)?.assets || [],
       assets.filter(a => inside(j.targetDirectory, a.path) && inspectFile(a.path).state === 'present').map(a => ({ id: a.id, path: relative(a.path), role: a.role, quality: a.quality, size: a.file_size,
@@ -943,7 +938,7 @@ function referencedPaths(snap: Snapshot): string[] {
   return [...new Set([
     ...snap.resource.flatMap(r => [r.path, r.icon_path, r.source_dir]),
     ...snap.episode.flatMap(e => [e.path, e.poster_path]), ...snap.video_assets.map(a => a.path),
-    ...snap.video_meta.flatMap(m => [m.poster_path, m.fanart_path, ...jsonArray(m.parts).map(x => x.path), ...jsonArray(m.linked_files).map(x => x.path)])
+    ...snap.video_meta.flatMap(m => [m.poster_path, m.fanart_path, ...parseJsonArray<Row>(m.parts).map(x => x.path), ...parseJsonArray<Row>(m.linked_files).map(x => x.path)])
   ].filter((p): p is string => typeof p === 'string' && path.isAbsolute(p))) ]
 }
 
@@ -1004,7 +999,7 @@ function pathGraph(snap: Snapshot): string {
     episodes: snap.episode.map(e => [e.id, e.resource_id, e.path, e.poster_path]),
     assets: snap.video_assets.map(a => [a.id, a.resource_id, a.path, a.role]),
     links: snap.video_episode_assets,
-    meta: snap.video_meta.map(m => [m.resource_id, m.poster_path, m.fanart_path, jsonArray(m.parts).map(p => p.path), jsonArray(m.linked_files).map(p => p.path)])
+    meta: snap.video_meta.map(m => [m.resource_id, m.poster_path, m.fanart_path, parseJsonArray<Row>(m.parts).map(p => p.path), parseJsonArray<Row>(m.linked_files).map(p => p.path)])
   })
 }
 

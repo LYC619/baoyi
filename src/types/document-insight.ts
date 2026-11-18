@@ -50,12 +50,9 @@ export interface DocumentInsightDetail {
   active:DocumentInsight|null;history:DocumentInsight[];run:DocumentInsightRun|null
   sourceStatus:'verified'|'stale'|'unchecked'|'offline';sourceMessage:string
 }
-export interface DocumentInsightPolicy {automatic:boolean;categories:string[];maxChars:number;provider:string;authorized:boolean}
 export interface DocumentInsightRange {fromPage?:number;toPage?:number;start?:number}
 export interface DocumentInsightCleanup {token:string;generated:number;edited:number}
 export interface DocumentInsightApi {
-  policy():Promise<DocumentInsightPolicy>
-  savePolicy(policy:DocumentInsightPolicy):Promise<DocumentInsightPolicy>
   onChanged(callback:()=>void):()=>void
   preview(ids:string[],range?:DocumentInsightRange):Promise<DocumentInsightPreview>
   cleanupPreview():Promise<DocumentInsightCleanup>

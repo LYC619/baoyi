@@ -2,6 +2,10 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
 import { trackRoute, activeModule, settingsModule } from '@/composables/useModules'
 
+declare module 'vue-router' {
+  interface RouteMeta { module?: import('@/composables/useModules').ModuleKey; remountOnId?: boolean }
+}
+
 const router = createRouter({
   // 生产环境走 file:// 加载，必须用 hash 路由
   history: createWebHashHistory(),
@@ -19,7 +23,7 @@ const router = createRouter({
       name: 'detail',
       component: () => import('@/pages/software/Detail.vue'),
       props: true,
-      meta: { module: 'software' }
+      meta: { module: 'software', remountOnId: true }
     },
     {
       path: '/settings',
@@ -49,7 +53,7 @@ const router = createRouter({
       name: 'game-detail',
       component: () => import('@/pages/game/Detail.vue'),
       props: true,
-      meta: { module: 'game' }
+      meta: { module: 'game', remountOnId: true }
     },
     {
       path: '/video',
@@ -63,7 +67,7 @@ const router = createRouter({
       name: 'video-detail',
       component: () => import('@/pages/video/Detail.vue'),
       props: true,
-      meta: { module: 'video' }
+      meta: { module: 'video', remountOnId: true }
     },
     {
       path: '/onboarding',
@@ -71,11 +75,11 @@ const router = createRouter({
       component: () => import('@/pages/Onboarding.vue')
     },
     { path: '/image', name: 'image-home', component: () => import('@/pages/image/Home.vue'), meta: { module: 'image' } },
-    { path: '/image/:id', name: 'image-detail', component: () => import('@/pages/image/Detail.vue'), props: true, meta: { module: 'image' } },
+    { path: '/image/:id', name: 'image-detail', component: () => import('@/pages/image/Detail.vue'), props: true, meta: { module: 'image', remountOnId: true } },
     { path: '/project', name: 'project-home', component: () => import('@/pages/project/Home.vue'), meta: { module: 'project' } },
     { path: '/project/:id', name: 'project-detail', component: () => import('@/pages/project/Detail.vue'), props: true, meta: { module: 'project' } },
     { path: '/document', name: 'document-home', component: () => import('@/pages/document/Home.vue'), meta: { module: 'document' } },
-    { path: '/document/:id', name: 'document-reader', component: () => import('@/pages/document/Reader.vue'), props: true, meta: { module: 'document' } },
+    { path: '/document/:id', name: 'document-reader', component: () => import('@/pages/document/Reader.vue'), props: true, meta: { module: 'document', remountOnId: true } },
     { path: '/personal', name: 'personal-home', component: () => import('@/pages/personal/Home.vue'), meta: { module: 'personal' } },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ]

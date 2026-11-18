@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { createWorkflowRendererFixture } from './verify-video-workflow-renderer.ts'
+import { createWorkflowRendererFixture } from './helpers/video-renderer.ts'
 const extra=String.raw`
 import FfmpegPanel from '@/components/settings/FfmpegPanel.vue'
 const settingsHost=document.createElement('div');settingsHost.id='download-settings-test';document.body.append(settingsHost)

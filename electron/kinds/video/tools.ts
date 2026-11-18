@@ -1,3 +1,4 @@
+import { str } from '../../services/agent/values.ts'
 /**
  * 交给视频识别 agent 的工具集。
  *
@@ -114,10 +115,6 @@ export interface VideoToolContext {
    * 比实际扣的钱多，对账就成了制造疑惑。
    */
   onSearch?: () => void
-}
-
-function str(raw: unknown, max: number): string {
-  return typeof raw === 'string' ? raw.trim().slice(0, max) : ''
 }
 
 function int(raw: unknown): number {

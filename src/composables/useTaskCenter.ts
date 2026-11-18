@@ -1,3 +1,5 @@
+import { errorMessage } from '../utils/index.ts'
+import { useToast } from './useToast.ts'
 import { computed, ref } from 'vue'
 import type { ModuleKey } from './useModules'
 import type {
@@ -27,7 +29,7 @@ const videoHidden = ref(false)
 const videoKinds = new Set<TaskKind>(['video-scan', 'video-download', 'video-series-download', 'hanime-verify'])
 const taskModules: Record<TaskKind, ModuleKey> = {
   'software-scan': 'software', 'ai-identify': 'software', organize: 'software',
-  'game-scan': 'game', 'video-scan': 'video', 'video-download': 'video',
+  'game-scan': 'game', 'video-scan': 'video', 'video-download': 'video', 'audio-download': 'video',
   'video-series-download': 'video', 'hanime-verify': 'video'
 }
 
@@ -44,7 +46,7 @@ async function hydrate(): Promise<void> {
       const max = saved.map(task => Number(String(task.id).replace(/^task-/, ''))).filter(Number.isFinite).reduce((a, b) => Math.max(a, b), 0)
       nextId = Math.max(nextId, max + 1)
     }
-  } catch { /* Task history is an aid; a database outage must not block the action. */ }
+  } catch (cause) { useToast().error(errorMessage(cause)) }
   hydrated = true
 }
 
@@ -54,8 +56,8 @@ function persist(task: TaskRecord): void {
     // The context bridge clones arguments before preload runs; nested Vue proxies
     // must be removed here, including the task's event history.
     const snapshot: TaskRecord = JSON.parse(JSON.stringify(task))
-    void window.baoyi.tasks.save(snapshot).catch(() => {})
-  } catch { /* History persistence must not interrupt the action it describes. */ }
+    void window.baoyi.tasks.save(snapshot).catch(cause => useToast().error(errorMessage(cause)))
+  } catch (cause) { useToast().error(errorMessage(cause)) }
 }
 
 function clamp(value: number): number {

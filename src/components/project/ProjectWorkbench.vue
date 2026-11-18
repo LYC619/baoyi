@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { latestOnly, STALE } from '@/composables/latestOnly'
+import { useToast } from '@/composables/useToast'
+import { errorMessage } from '@/utils'
 import {computed,nextTick,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import {useRoute,useRouter} from 'vue-router'
 import {Bot,Check} from 'lucide-vue-next'
@@ -16,12 +19,15 @@ const props=defineProps<{item:ProjectItem}>(),emit=defineEmits<{updated:[]}>(),r
 const tabs=[{id:'timeline',label:'项目日志'},{id:'overview',label:'工作区概览'},{id:'notes',label:'项目便签'},{id:'chat',label:'归档助理'},{id:'entries',label:'项目入口'},{id:'info',label:'项目资料'}]
 const defaultTab=ref('timeline')
 watch(()=>route.query.tab,value=>{tab.value=tabs.some(t=>t.id===value)?String(value):defaultTab.value},{immediate:true})
-void window.baoyi.project.preferences().then(value=>{defaultTab.value=value.defaultTab||'timeline';if(!disposed&&!route.query.tab&&!route.query.session)tab.value=defaultTab.value}).catch(()=>{})
+void window.baoyi.project.preferences().then(value=>{defaultTab.value=value.defaultTab||'timeline';if(!disposed&&!route.query.tab&&!route.query.session)tab.value=defaultTab.value}).catch(cause => useToast().error(errorMessage(cause)))
 const error=ref(''),sessions=ref<ProjectSessionSummary[]>([]),session=ref<ProjectSession|null>(null),selected=ref(''),messages=ref<HTMLElement>()
 const repositoryBusy=ref(false),selecting=ref(false)
 const busy=computed(()=>selecting.value||repositoryBusy.value||session.value?.status==='running')
 let disposed=false
-let sessionsRun=0,selectionRun=0
+let selectionScope=new AbortController()
+function beginSelection(){selectionScope.abort();selectionScope=new AbortController();return selectionScope.signal}
+const readSessions=latestOnly((id:string)=>window.baoyi.project.sessions(id))
+const readSession=latestOnly((id:string)=>window.baoyi.project.session(id))
 async function syncRoute(value:string) {
   if(disposed || route.params.id!==props.item.id)return
   const id=value==='chat'?session.value?.id:undefined
@@ -29,9 +35,9 @@ async function syncRoute(value:string) {
   await router.replace({query:{...route.query,tab:value,session:id}})
 }
 async function changeTab(value:string) {
-  selectionRun++;selecting.value=false;selected.value=session.value?.id||''
+  beginSelection();selecting.value=false;selected.value=session.value?.id||''
   tab.value=value
-  try{await syncRoute(value)}catch(e){if(!disposed)error.value=(e as Error).message}
+  try{await syncRoute(value)}catch(e){if(!disposed)error.value=errorMessage(e)}
 }
 async function acceptSession(value:ProjectSession|null,openChat=false) {
   if(!value || value.projectId!==props.item.id)throw new Error('此对话不存在或不属于当前项目')
@@ -40,45 +46,45 @@ async function acceptSession(value:ProjectSession|null,openChat=false) {
   if(tab.value==='chat')await syncRoute('chat')
 }
 async function loadSessions() {
-  const run=++sessionsRun,result=await window.baoyi.project.sessions(props.item.id)
-  if(disposed||run!==sessionsRun)return
+  const result=await readSessions(props.item.id)
+  if(result===STALE||disposed)return
   sessions.value=result
   if(!session.value&&!selected.value&&!route.query.session&&!selecting.value&&result.length){
-    const target=result[0].id,selection=++selectionRun
+    const target=result[0].id,signal=beginSelection()
     selected.value=target;selecting.value=true
     try{
-      const loaded=await window.baoyi.project.session(target)
-      if(!disposed&&selection===selectionRun&&selected.value===target&&run===sessionsRun)await acceptSession(loaded)
-    }finally{if(!disposed&&selection===selectionRun)selecting.value=false}
+      const loaded=await readSession(target)
+      if(loaded!==STALE&&!disposed&&!signal.aborted)await acceptSession(loaded)
+    }finally{if(!disposed&&!signal.aborted)selecting.value=false}
   }
 }
-watch(()=>props.item.id,async()=>{session.value=null;selected.value='';try{await loadSessions()}catch(e){if(!disposed)error.value=(e as Error).message}},{immediate:true})
+watch(()=>props.item.id,async()=>{beginSelection();session.value=null;selected.value='';try{await loadSessions()}catch(e){if(!disposed)error.value=errorMessage(e)}},{immediate:true})
 async function switchSession() {
-  const run=++selectionRun,target=selected.value;selecting.value=true;error.value=''
+  const signal=beginSelection(),target=selected.value;selecting.value=true;error.value=''
   try{
-    const result=await window.baoyi.project.session(target)
-    if(!disposed&&run===selectionRun&&selected.value===target)await acceptSession(result,true)
-  }catch(e){if(!disposed&&run===selectionRun){selected.value=session.value?.id||'';error.value=(e as Error).message}}
-  finally{if(!disposed&&run===selectionRun)selecting.value=false}
+    const result=await readSession(target)
+    if(result!==STALE&&!disposed&&!signal.aborted)await acceptSession(result,true)
+  }catch(e){if(!disposed&&!signal.aborted){selected.value=session.value?.id||'';error.value=errorMessage(e)}}
+  finally{if(!disposed&&!signal.aborted)selecting.value=false}
 }
 watch(()=>route.query.session,async value=>{
   if(typeof value==='string'&&value&&session.value?.id===value&&selected.value===value){
     tab.value='chat'
-    try{await syncRoute('chat')}catch(e){if(!disposed)error.value=(e as Error).message}
+    try{await syncRoute('chat')}catch(e){if(!disposed)error.value=errorMessage(e)}
     return
   }
-  const run=++selectionRun
+  const signal=beginSelection()
   if(typeof value!=='string'||!value){selecting.value=false;selected.value=session.value?.id||'';return}
   legacy.value=true;selecting.value=true;error.value=''
   try{
-    const target=await window.baoyi.project.session(value)
-    if(disposed||run!==selectionRun||route.query.session!==value)return
+    const target=await readSession(value)
+    if(target===STALE||disposed||signal.aborted)return
     await acceptSession(target,true)
-    if(!disposed&&run===selectionRun)await loadSessions()
-  }catch(e){if(!disposed&&run===selectionRun){selected.value=session.value?.id||'';error.value=(e as Error).message}}
-  finally{if(!disposed&&run===selectionRun)selecting.value=false}
+    if(!disposed&&!signal.aborted)await loadSessions()
+  }catch(e){if(!disposed&&!signal.aborted){selected.value=session.value?.id||'';error.value=errorMessage(e)}}
+  finally{if(!disposed&&!signal.aborted)selecting.value=false}
 },{immediate:true})
-async function apply(message:ProjectMessage){if(!session.value)return;error.value='';try{session.value=await window.baoyi.project.applyProposal(session.value.id,message.id);emit('updated')}catch(e){error.value=(e as Error).message}}
+async function apply(message:ProjectMessage){if(!session.value)return;error.value='';try{session.value=await window.baoyi.project.applyProposal(session.value.id,message.id);emit('updated')}catch(e){error.value=errorMessage(e)}}
 const notes=ref<InstanceType<typeof ProjectNotes>>()
 async function projectKey(event:KeyboardEvent){
   if(event.defaultPrevented||event.isComposing||document.querySelector('dialog[open],[role="dialog"]')||!event.ctrlKey||!event.shiftKey||event.altKey)return
@@ -90,7 +96,7 @@ onBeforeUnmount(()=>document.removeEventListener('keydown',projectKey))
 const labels:Record<string,string>={name:'名称',summary:'简介',category:'分类',source:'来源',state:'状态',group:'分组',tags:'标签',notes:'备注'}
 const display=(value:unknown)=>Array.isArray(value)?value.join('、'):String(value||'（空）')
 const unsubscribe=window.baoyi.project.onSession(value=>{if(value.projectId!==props.item.id||value.id!==selected.value)return;session.value=value;void nextTick(()=>{if(messages.value)messages.value.scrollTop=messages.value.scrollHeight})})
-onBeforeUnmount(()=>{disposed=true;sessionsRun++;selectionRun++;unsubscribe()})
+onBeforeUnmount(()=>{disposed=true;selectionScope.abort();unsubscribe()})
 </script>
 <template><section class="project-workbench"><div class="project-launch-toolbar"><button class="pj-button" @click="launcher.open(item)">启动项目</button><button v-if="launcher.last(item.id)" class="pj-button" @click="launcher.rerun(item)">重跑上次 · {{launcher.last(item.id)?.profileName}}</button></div><DetailTabs :model-value="tab" :tabs="tabs" prefix="project" label="项目详情" @update:model-value="changeTab"/><p v-if="error" class="pj-error" role="alert">{{error}}</p>
 <div v-show="tab==='timeline'" id="project-panel-timeline" role="tabpanel" aria-labelledby="project-tab-timeline"><ProjectTimeline :id="item.id"/></div>

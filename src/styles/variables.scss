@@ -1,100 +1,72 @@
 /* ============================================================
-   抱一 — 设计变量
-   深色为默认主题，浅色通过 <html data-theme="light"> 覆盖。
+   抱一 — 设计变量 v2.1（替换 src/styles/variables.scss）
+   变量名与旧版完全兼容；新增：--accent-ink --divider-strong
+   --fs-micro --fs-h3 --fs-hero。旧的 --fs-title 从 18 调到 20。
+   注意：--sidebar-w 200→212，--titlebar-h 38→40，如影响其他模块可保留旧值。
+   旧文件里的 --tag-alt-bg / --tag-alt-text / --bg-input 语义保留，已补回。
    ============================================================ */
-
 :root {
-  color-scheme: dark;
-  /* ---------------- 配色（深色主题） ---------------- */
-  --bg-main: #1e1e2e;
-  --bg-side: #181825;
-  --bg-card: #2a2a3c;
-  --bg-card-hover: #33334d;
-  --bg-input: #23233408;
-  --bg-elevated: #24243a;
-
-  --text-main: #e0e0f0;
-  --text-sub: #9090a8;
-  --text-faint: #6b6b85;
-
-  --accent: #7c6af6;
-  --accent-2: #5b8def;
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --danger: #f87171;
-
-  --divider: rgba(255, 255, 255, 0.16);
-  --card-border: transparent;
-  --overlay: rgba(10, 10, 18, 0.6);
-
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.35);
-  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45);
-
-  /* ---------------- 派生色 ---------------- */
-  --tag-bg: color-mix(in srgb, var(--accent) 12%, transparent);
-  --tag-text: var(--accent);
   --tag-alt-bg: color-mix(in srgb, var(--accent-2) 12%, transparent);
   --tag-alt-text: var(--accent-2);
-  --warning-bg: color-mix(in srgb, var(--warning) 14%, transparent);
-  --success-bg: color-mix(in srgb, var(--success) 14%, transparent);
-  --danger-bg: color-mix(in srgb, var(--danger) 14%, transparent);
-  --hover-surface: color-mix(in srgb, var(--text-main) 6%, transparent);
-  --active-surface: color-mix(in srgb, var(--accent) 14%, transparent);
-
-  /* ---------------- 字体 ---------------- */
-  --font-ui: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB',
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  /*
-   * 氛围文字用的字体：品牌名、侧边栏那句箴言、空状态标题。
-   * 按用途命名而不是按形态（曾叫 --font-serif）—— 换成非衬线的氛围字体时，
-   * 形态命名就开始骗人，而引用它的十几处 scoped 样式一个都不用改。
-   */
-  --font-display: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', STSong, serif;
-  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace;
-
-  --fs-title: 18px;
-  --fs-card-title: 15px;
-  --fs-body: 13px;
-  --fs-tag: 12px;
-  --fs-mono: 12px;
-
-  /* ---------------- 间距 / 圆角 ---------------- */
-  --gap-card: 16px;
-  --pad-card: 16px;
-  --radius-card: 12px;
-  --radius-input: 8px;
-  --radius-btn: 8px;
-  --radius-tag: 6px;
-
-  --sidebar-w: 200px;
-  --titlebar-h: 38px;
   --topbar-h: 64px;
   --search-h: 40px;
+  --gap-card: 16px;
+  --pad-card: 16px;
+  color-scheme:dark;
+  /* 面：五级明度阶梯，每级只差 3–4%，靠层叠而不是靠描边分区 */
+  --bg-side:#111117;
+  --bg-main:#15151c;
+  --bg-card:#1b1b24;
+  --bg-card-hover:#21212c;
+  --bg-elevated:#1f1f29;
+  --bg-input:#18181f;
+  /* 字：三级，对比度 15.8 / 7.1 / 4.0 */
+  --text-main:#ececf2;
+  --text-sub:#a3a3b4;
+  --text-faint:#6e6e82;
+  /* 品牌紫保留，只在「主操作 / 选中 / 焦点」三处出现 */
+  --accent:#7c6af6;
+  --accent-2:#5b8def;
+  --accent-ink:#b4a9ff;           /* 新：深底上的紫色文字，比 accent 亮一档才过 4.5 */
+  --success:#4ade80;
+  --warning:#f0b542;
+  --danger:#f87171;
+  /* 线：从 16% 降到 7%，分隔靠留白，线只做提示 */
+  --divider:rgba(255,255,255,.07);
+  --divider-strong:rgba(255,255,255,.12);
+  --card-border:rgba(255,255,255,.06);
+  --overlay:rgba(6,6,10,.62);
+  --shadow-card:0 1px 0 rgba(255,255,255,.03) inset,0 1px 2px rgba(0,0,0,.3);
+  --shadow-card-hover:0 10px 30px -8px rgba(0,0,0,.6);
+  --shadow-pop:0 16px 40px -10px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.06);
+  --tag-bg:color-mix(in srgb,var(--accent) 14%,transparent);
+  --tag-text:var(--accent-ink);
+  --warning-bg:color-mix(in srgb,var(--warning) 11%,transparent);
+  --success-bg:color-mix(in srgb,var(--success) 12%,transparent);
+  --danger-bg:color-mix(in srgb,var(--danger) 12%,transparent);
+  --hover-surface:rgba(255,255,255,.045);
+  --active-surface:color-mix(in srgb,var(--accent) 16%,transparent);
 
-  /* ---------------- 动效 ---------------- */
-  --ease: cubic-bezier(0.32, 0.72, 0, 1);
-  --t-fast: 150ms;
-  --t-page: 200ms;
+  --font-ui:'Microsoft YaHei UI','Microsoft YaHei','PingFang SC','Hiragino Sans GB',-apple-system,'Segoe UI',system-ui,sans-serif;
+  --font-display:'Source Han Serif SC','Noto Serif CJK SC','Noto Serif SC','Songti SC',STSong,serif;
+  --font-mono:'JetBrains Mono','Cascadia Mono',Consolas,ui-monospace,monospace;
+  /* 字号阶梯：11 / 12 / 13 / 15 / 20 / 26 —— 每档 ≥1.15 倍，眼睛才分得出 */
+  --fs-micro:11px; --fs-tag:12px; --fs-body:13px; --fs-card-title:13px;
+  --fs-h3:15px; --fs-title:20px; --fs-hero:26px; --fs-mono:12px;
+  --radius-card:10px; --radius-input:7px; --radius-btn:7px; --radius-tag:5px;
+  --sidebar-w:212px; --titlebar-h:40px;
+  --ease:cubic-bezier(.32,.72,0,1); --t-fast:140ms; --t-page:200ms;
 }
 
-:root[data-theme='light'] {
-  color-scheme: light;
-  --bg-main: #f8f9fc;
-  --bg-side: #ffffff;
-  --bg-card: #ffffff;
-  --bg-card-hover: #ffffff;
-  --bg-elevated: #ffffff;
-
-  --text-main: #1a1a2e;
-  --text-sub: #6b7280;
-  --text-faint: #9ca3af;
-
-  --divider: rgba(26, 26, 46, 0.14);
-  --card-border: #e8e8f0;
-  --overlay: rgba(26, 26, 46, 0.35);
-
-  --shadow-card: 0 1px 2px rgba(26, 26, 46, 0.06);
-  --shadow-card-hover: 0 8px 24px rgba(26, 26, 46, 0.1);
-  --shadow-pop: 0 12px 32px rgba(26, 26, 46, 0.14);
+:root[data-theme='light']{
+  color-scheme:light;
+  --bg-side:#f3f3f7; --bg-main:#fbfbfd; --bg-card:#ffffff; --bg-card-hover:#ffffff; --bg-elevated:#ffffff; --bg-input:#ffffff;
+  --text-main:#17171f; --text-sub:#5d5d6e; --text-faint:#8f8fa0;
+  --accent-ink:#5a47e0;
+  --divider:rgba(20,20,40,.08); --divider-strong:rgba(20,20,40,.14); --card-border:rgba(20,20,40,.08);
+  --overlay:rgba(20,20,40,.3);
+  --shadow-card:0 1px 2px rgba(20,20,40,.05); --shadow-card-hover:0 10px 28px -10px rgba(20,20,40,.22);
+  --shadow-pop:0 16px 40px -12px rgba(20,20,40,.25),0 0 0 1px rgba(20,20,40,.06);
+  --hover-surface:rgba(20,20,40,.045);
+  --warning:#c48300;
 }

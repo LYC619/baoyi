@@ -18,7 +18,7 @@ export function createVideoMediaTransfer(deps:Dependencies) {
     let url=options.url,format=options.format
     try{
       if(now()-lastActivity>=5*60_000 && network.active===0 && deps.recoverNetwork){
-        if(!idleRecovery)idleRecovery=deps.recoverNetwork().catch(()=>{})
+        if(!idleRecovery)idleRecovery=deps.recoverNetwork().catch(cause=>console.error('[下载网络恢复]',cause))
         try{await idleRecovery;lastActivity=now()}finally{idleRecovery=null}
       }
       for(let attempt=0;;attempt++){
@@ -39,7 +39,7 @@ export function createVideoMediaTransfer(deps:Dependencies) {
           const expired=error instanceof DownloadHttpError ? [403,410].includes(error.status) : /HTTP (403|410)\b/.test(error instanceof Error?error.message:String(error))
           const retry=retryableDownloadError(error)
           if(attempt>=2 || !retry && !(expired && options.refreshSource))throw new Error(safeDownloadError(error))
-          if(retry && network.active===0){try{await deps.recoverNetwork?.()}catch{/* A failed refresh does not suppress the bounded transfer retry. */}}
+          if(retry && network.active===0){try{await deps.recoverNetwork?.()}catch(cause){console.error('[下载网络恢复]',cause)}}
           await downloadDelay(300*(attempt+1),options.signal)
           if(options.refreshSource){const refreshed=await options.refreshSource();url=refreshed.url;format=refreshed.format}
         }

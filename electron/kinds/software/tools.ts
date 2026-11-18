@@ -1,3 +1,5 @@
+import { getDb } from '../../services/database'
+import { str } from '../../services/agent/values.ts'
 /**
  * 交给识别 agent 的工具集。
  *
@@ -20,16 +22,8 @@ import { APP_CATEGORY, isMobilePackage, isSoftwareFile, SOFTWARE_EXTENSIONS } fr
 // agent 也不该为了数 exe 进去
 import { skippable } from './scanPlan'
 import { formatHits, search } from '../../services/searchService'
-import {
-  getSoftware,
-  isSkipped,
-  listCategories,
-  registerSoftware,
-  stagePending,
-  tagPool,
-  updateSoftware,
-  type RegisterFileFacts
-} from '../../services/database'
+import { getSoftware, isSkipped, registerSoftware, stagePending, updateSoftware, type RegisterFileFacts } from './db.ts'
+import { listCategories, tagPool } from '../../services/taxonomy-store.ts'
 import type { AgentTool } from '../../services/agent/loop'
 import { formatSize, isReadableName, readTextFile } from '../../services/agent/files'
 import { limitTags as limitTagsTo } from './prompts'
@@ -232,10 +226,6 @@ function coerceStringList(raw: unknown, max: number, itemMax: number): string[] 
     .slice(0, max)
 }
 
-function str(raw: unknown, max: number): string {
-  return typeof raw === 'string' ? raw.trim().slice(0, max) : ''
-}
-
 /**
  * is_portable 是三态的，所以不能用 `=== true` 一刀切 —— 那会把「模型没填」
  * 和「模型判断为不是」压成同一个值，而整理时这两者的处理方式相反。
@@ -283,7 +273,7 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
     summary: str(args?.summary, 60) || '未填写说明',
     description: str(args?.description, 400),
     category,
-    tags: limitTags(args?.tags, new Set(tagPool())),
+    tags: limitTags(args?.tags, new Set(tagPool(getDb()))),
     official_url: url,
     launchers,
     source_dir: ctx.unitDir,
@@ -300,24 +290,24 @@ async function register(ctx: ToolContext, args: any): Promise<string> {
   const icon = mobile ? '' : (await extractIcon(primary.path)) ?? ''
 
   if (ctx.direct) {
-    const outcome = timeSync(`registerSoftware ${nameZh}`, () => registerSoftware(payload, facts))
+    const outcome = timeSync(`registerSoftware ${nameZh}`, () => registerSoftware(getDb(), payload, facts))
     if (!outcome) throw new Error('注册失败：没有可用的启动端')
     // 用户亲手换过的图标不许覆盖。「重新识别」是针对**识别结果**的，
     // 不是「把我调过的样子还原」—— 而自动提取的那张覆盖掉无所谓，它本来就是提的
-    const existing = getSoftware(outcome.id)
+    const existing = getSoftware(getDb(), outcome.id)
     const manual = existing ? isManualIcon(outcome.id, existing.icon_path) : false
-    if (icon && !manual) updateSoftware(outcome.id, { icon_path: icon })
+    if (icon && !manual) updateSoftware(getDb(), outcome.id, { icon_path: icon })
     ctx.onRegister?.({ name: nameZh, exe_path: outcome.exe_path, created: outcome.created })
     return registerReply(nameZh, primary, launchers, outcome.created ? '已注册' : '已更新', payload)
   }
 
-  if (isSkipped(primary.path)) {
+  if (isSkipped(getDb(), primary.path)) {
     // 用户之前明确说过不要它。别再塞进确认面板让他否决第二次
     return `「${nameZh}」（${primary.path}）之前已被用户标记为不注册，本次不再收录。继续处理这个目录里的其他程序。`
   }
 
   const outcome = timeSync(`stagePending ${nameZh}`, () =>
-    stagePending(payload, facts, ctx.unitDir, icon)
+    stagePending(getDb(), payload, facts, ctx.unitDir, icon)
   )
   if (!outcome) throw new Error('暂存失败：没有可用的启动端')
   ctx.onRegister?.({ name: nameZh, exe_path: outcome.exe_path, created: outcome.created })
@@ -373,9 +363,9 @@ async function webSearch(ctx: ToolContext, args: any): Promise<string> {
 /* ------------------------------ 工具定义 ------------------------------ */
 
 export function buildTools(ctx: ToolContext, withSearch: boolean): AgentTool[] {
-  const categories = listCategories()
+  const categories = listCategories(getDb())
   const categoryNames = [...new Set([...categories.map((c) => c.name), APP_CATEGORY])]
-  const pool = tagPool()
+  const pool = tagPool(getDb())
 
   const tools: AgentTool[] = [
     {

@@ -1,3 +1,4 @@
+import { errorMessage } from '@/utils'
 import { ref, watch, onMounted, onBeforeUnmount, type Ref } from 'vue'
 import { workspace } from '@/utils/workspace-api'
 import { loadPdfDocument, BaoyiPdfRangeTransport } from '@/utils/pdf-document'
@@ -11,7 +12,7 @@ interface Cover {
 }
 interface Entry {
   id: string
-  generation: number
+  controller: AbortController
   subscribers: Set<(cover: Cover) => void>
   cover: Cover
   bytes: number
@@ -23,7 +24,7 @@ interface Entry {
 }
 const entries = new Map<string, Entry>()
 let active: Entry | undefined,
-  activeGeneration = 0,
+  activeSignal: AbortSignal | undefined,
   paused = false,
   totalBytes = 0
 const blank = (): Cover => ({ url: '', state: 'waiting', reason: '', key: '' })
@@ -50,7 +51,7 @@ function queue(entry: Entry, priority: number) {
   entry.priority = Math.max(entry.priority, priority)
   entry.touched = Date.now()
   if (active === entry) {
-    if (entry.generation !== activeGeneration) entry.queued = true
+    if (activeSignal?.aborted) entry.queued = true
     publish(entry)
     return
   }
@@ -129,13 +130,13 @@ async function drain() {
   if (!entry) return
   entry.queued = false
   active = entry
-  const generation = entry.generation
-  activeGeneration = generation
+  const { signal } = entry.controller
+  activeSignal = signal
   entry.cover.state = 'loading'
   publish(entry)
   try {
     const result = await workspace.documents.covers.get(entry.id)
-    if (generation !== entry.generation || paused || !entry.subscribers.size)
+    if (signal.aborted || paused || !entry.subscribers.size)
       return
     if (result.state === 'unavailable') {
       entry.cover = { ...blank(), state: 'unavailable', reason: result.reason }
@@ -153,13 +154,13 @@ async function drain() {
         entry.id,
         result.token,
       )
-      if (generation !== entry.generation || paused || !entry.subscribers.size)
+      if (signal.aborted || paused || !entry.subscribers.size)
         return
       const data = source.format === 'pdf'
         ? new BaoyiPdfRangeTransport(entry.id, source.size, undefined, (offset, length) => workspace.documents.covers.range(entry.id, result.token, offset, length))
         : source.data!
       png = await render(entry, source.format, data)
-      if (generation !== entry.generation || paused || !entry.subscribers.size)
+      if (signal.aborted || paused || !entry.subscribers.size)
         return
       const stored = await workspace.documents.covers.put(
         entry.id,
@@ -175,7 +176,7 @@ async function drain() {
         return
       }
     }
-    if (generation !== entry.generation || paused || !entry.subscribers.size)
+    if (signal.aborted || paused || !entry.subscribers.size)
       return
     release(entry)
     entry.failure = undefined
@@ -190,11 +191,11 @@ async function drain() {
       key: result.key,
     }
   } catch (e) {
-    if (generation === entry.generation && !paused && entry.subscribers.size) {
+    if (!signal.aborted && !paused && entry.subscribers.size) {
       entry.cover = {
         ...entry.cover,
         state: 'failed',
-        reason: '封面暂不可用：' + (e as Error).message,
+        reason: '封面暂不可用：' + errorMessage(e),
       }
       if (entry.cover.key)
         entry.failure = { key: entry.cover.key, reason: entry.cover.reason }
@@ -213,16 +214,14 @@ export async function pauseDocumentCovers() {
   paused = true
   for (const entry of entries.values()) {
     entry.queued = false
-    entry.generation++
+    entry.controller.abort(); entry.controller = new AbortController()
   }
   await cancel(active)
 }
 async function cancel(entry?: Entry) {
   try {
     await entry?.cancel?.()
-  } catch {
-    /* Cancellation must not reject navigation or an invalidation callback. */
-  }
+  } catch { /* best-effort */ }
 }
 export function resumeDocumentCovers() {
   paused = false
@@ -232,7 +231,7 @@ export function resumeDocumentCovers() {
 }
 export function invalidateDocumentCovers() {
   for (const entry of entries.values()) {
-    entry.generation++
+    entry.controller.abort(); entry.controller = new AbortController()
     void cancel(entry)
     release(entry)
     if (entry.subscribers.size) {
@@ -259,7 +258,7 @@ export function useDocumentCovers(
     if (!subscribed.subscribers.size) {
       subscribed.queued = false
       if (active === subscribed) {
-        subscribed.generation++
+        subscribed.controller.abort(); subscribed.controller = new AbortController()
         void cancel(subscribed)
       }
     }
@@ -278,7 +277,7 @@ export function useDocumentCovers(
     if (!entry) {
       entry = {
         id: item.value.id,
-        generation: 0,
+        controller: new AbortController(),
         subscribers: new Set(),
         cover: blank(),
         bytes: 0,
@@ -311,7 +310,7 @@ export function useDocumentCovers(
   })
   function retry() {
     if (subscribed) {
-      subscribed.generation++
+      subscribed.controller.abort(); subscribed.controller = new AbortController()
       subscribed.failure = undefined
       release(subscribed)
       queue(subscribed, priority)

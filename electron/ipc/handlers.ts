@@ -1,4 +1,7 @@
 import { assertProjectRunsStopped } from '../kinds/project/activity.ts'
+import { registerGameWorkspaceIpc } from './game-workspace.ts'
+import { registerGameProjectIpc } from './game-project.ts'
+import { registerAudioIpc } from './audio.ts'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -21,46 +24,20 @@ import type {
   VideoQuery
 } from '../../src/types'
 import { cancelAi, completeWithAi, listModels, testConnection } from '../kinds/software/aiService'
-import {
-  clearIdentifyLogs,
-  clearSkipped,
-  confirmPending,
-  countPending,
-  countSkipped,
-  counts,
-  createTag,
-  dataStats,
-  exportSoftwareList,
-  getSettings,
-  getSoftware,
-  listCategories,
-  listIdentifyLogs,
-  listIdentifyReports,
-  listOrganizePlans,
-  listPending,
-  listScanUnits,
-  listSoftware,
-  listTags,
-  mergeTags,
-  moveCategory,
-  patchSettings,
-  removeCategory,
-  removeTag,
-  renameTag,
-  resetData,
-  resetScanUnit,
-  resetScanUnits,
-  saveBackupRoot,
-  skipPending,
-  updatePending,
-  updateSoftware,
-  upsertCategory
-} from '../services/database'
-import { getDb, listTaskRecords, saveTaskRecord, clearTaskRecords } from '../services/database'
+import { clearIdentifyLogs, listIdentifyLogs, listIdentifyReports } from '../services/identify-records.ts'
+import { clearSkipped, confirmPending, countPending, countSkipped, counts, exportSoftwareList, getSoftware, listPending, listSoftware, skipPending, updatePending, updateSoftware } from '../kinds/software/db.ts'
+import { createTag, listCategories, listTags, mergeTags, moveCategory, removeCategory, removeTag, renameTag, upsertCategory } from '../services/taxonomy-store.ts'
+import { dataStats, resetData, saveBackupRoot } from '../services/database'
+import { getSettings, patchSettings } from '../services/settings-store.ts'
+import { listOrganizePlans } from '../services/organize-plans.ts'
+import { listScanUnits, resetScanUnit, resetScanUnits } from '../services/scan-units.ts'
+import { getDb } from '../services/database'
+import { listTaskRecords, saveTaskRecord, clearTaskRecords } from '../services/task-records.ts'
 import { launchSoftware, revealInFolder } from '../kinds/software/launcher'
 import {
   addGameLinks,
   backupSavePath,
+  previewSaveBackup,
   cancelGameScan,
   checkAllSavePaths,
   checkSavePath,
@@ -78,6 +55,7 @@ import {
   removeGame,
   registerManualGame,
   restoreSaveBackup,
+  previewSaveRestore,
   rebuildMissingGameCovers,
   reverifySavePath,
   scanGames,
@@ -157,17 +135,18 @@ import { parseProxyInput } from '../services/proxy-rules.ts'
 import { registerImageIpc } from './image.ts'
 import { registerProjectIpc } from './project.ts'
 import { registerWorkspaceIpc } from './workspace.ts'
+import {registerMusicIpc} from './music.ts'
 import { registerArchiveIpc,closeArchiveAssistant } from './archive.ts'
 import {registerVideoPreviewIpc,closeVideoPreview} from './video-preview.ts'
 import { registerImageSourceIpc } from './image-source.ts'
 import {registerComicIngestIpc,stopComicIngest,reopenComicIngest} from './comic-ingest.ts'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
-  const hanimeBrowser = createHanimeBrowser({ getSession:getHanimeSession,getMainWindow:getWindow,isHidden:()=>getSettings().hide_hentai === true })
+  const hanimeBrowser = createHanimeBrowser({ getSession:getHanimeSession,getMainWindow:getWindow,isHidden:()=>getSettings(getDb()).hide_hentai === true })
   ipcMain.handle('hanime-browser:open', async (event, url?: string) => {
     const main = getWindow()
     if (!main || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) throw new Error('只能从主窗口打开 Hanime')
-    await reapplyProxy(getSettings().proxy)
+    await reapplyProxy(getSettings(getDb()).proxy)
     return hanimeBrowser.open(url)
   })
   const videoWorkflow = registerVideoWorkflowIpc(getWindow, ipcMain)
@@ -182,6 +161,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   const projectAgent = registerProjectIpc(getWindow, ipcMain)
   registerWorkspaceIpc(getWindow, ipcMain, projectAgent)
   registerArchiveIpc(getWindow, ipcMain)
+  registerMusicIpc(getWindow,ipcMain)
+  registerGameProjectIpc(getWindow)
+  registerGameWorkspaceIpc(getWindow)
+  registerAudioIpc(getWindow)
   registerImageSourceIpc(getWindow, ipcMain)
   registerComicIngestIpc(getWindow,ipcMain)
   const send = (channel: string, payload: unknown) => {
@@ -230,14 +213,14 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('win:is-maximized', () => getWindow()?.isMaximized() ?? false)
 
   /* ------------------------------ 软件 ------------------------------ */
-  ipcMain.handle('software:list', (_e, query: SoftwareQuery = {}) => listSoftware(query))
-  ipcMain.handle('software:get', (_e, id: string) => getSoftware(id))
+  ipcMain.handle('software:list', (_e, query: SoftwareQuery = {}) => listSoftware(getDb(), query))
+  ipcMain.handle('software:get', (_e, id: string) => getSoftware(getDb(), id))
   ipcMain.handle('software:update', (_e, id: string, patch: Partial<SoftwareItem>) =>
-    updateSoftware(id, patch)
+    updateSoftware(getDb(), id, patch)
   )
   // 走整理模块：条目是整理目录里的链接时，链接要一并删掉（见 deleteSoftwareRecord）
   ipcMain.handle('software:remove', (_e, id: string) => withOrganizeMutation(() => deleteSoftwareRecord(id)))
-  ipcMain.handle('software:counts', (_e, unusedDays: number) => counts(unusedDays))
+  ipcMain.handle('software:counts', (_e, unusedDays: number) => counts(getDb(), unusedDays))
   ipcMain.handle('software:launch', (_e, id: string, launcherPath?: string) =>
     launchSoftware(id, launcherPath)
   )
@@ -260,7 +243,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const outcome = setSoftwareIcon(id, result.filePaths[0])
-    return { ...outcome, item: outcome.ok ? getSoftware(id) : null }
+    return { ...outcome, item: outcome.ok ? getSoftware(getDb(), id) : null }
   })
   ipcMain.handle('software:clear-icon', (_e, id: string) => clearSoftwareIcon(id))
   ipcMain.handle('software:refresh-icons', () => refreshSoftwareIcons())
@@ -295,7 +278,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       directory = file
       const relative = path.relative(game.source_dir || path.dirname(game.path), game.path)
       file = path.join(directory, relative)
-      if (relative.startsWith('..') || !(await fs.stat(file).catch(() => null))?.isFile()) {
+      if (relative.startsWith('..') || !(await fs.stat(file).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause }))?.isFile()) {
         const picked = await dialog.showOpenDialog(win, { title: '目录内未找到原入口，请选择主程序', defaultPath: directory, properties: ['openFile'], filters: [{ name: '游戏入口', extensions: ['exe','lnk','bat','cmd'] }] })
         if (picked.canceled || !picked.filePaths[0]) return null
         file = picked.filePaths[0]
@@ -365,15 +348,17 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   )
   ipcMain.handle('game:check-save-paths', () => checkAllSavePaths())
 
-  ipcMain.handle('game:launch', (_e, id: string) => launchGame(id))
+  ipcMain.handle('game:launch', (_e, id: string, options?:import('../../src/types/game-workspace').GameLaunchOptions) => launchGame(id,options))
   ipcMain.handle('game:running', (_e, id: string) => isGameRunning(id))
   // 一段游玩结束时主动推给界面：退出时刻由游戏进程决定，渲染进程没法自己等
   onGameSession((id, outcome) => send('game:session', { id, ...outcome }))
+  ipcMain.handle('game:preview-backup',(_e,id:string,target:string)=>previewSaveBackup(id,target))
   ipcMain.handle('game:backup-save', (_e, id: string, savePath: string) =>
     backupSavePath(id, savePath)
   )
   ipcMain.handle('game:backups', (_e, id: string) => listSaveBackups(id))
-  ipcMain.handle('game:restore-backup', (_e, backupId: string) => restoreSaveBackup(backupId))
+  ipcMain.handle('game:preview-restore', (_e, id: string, target?: string) => previewSaveRestore(id,target))
+  ipcMain.handle('game:restore-backup', (_e, id: string, target?: string, expected?: string) => restoreSaveBackup(id,target,expected))
   ipcMain.handle('game:delete-backup', (_e, backupId: string) => deleteSaveBackup(backupId))
 
   ipcMain.handle('game:open-backup', async (_e, backupId: string) => {
@@ -390,7 +375,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
    * 只有前者生效），所以这里按调用方要的那种开，界面上是两个按钮。
    * MOD 通常是一个目录，攻略和修改器通常是单个文件，两种都要能加。
    */
-  ipcMain.handle('game:pick-links', async (_e, id: string, kind: 'file' | 'dir' = 'file') => {
+  ipcMain.handle('game:pick-links', async (_e, id: string, kind: 'file' | 'dir' = 'file', type?: import('../../src/types').LinkedFile['type']) => {
     const win = getWindow()
     if (!win) return null
     const result = await dialog.showOpenDialog(win, {
@@ -399,7 +384,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         kind === 'dir' ? ['openDirectory', 'multiSelections'] : ['openFile', 'multiSelections']
     })
     if (result.canceled || result.filePaths.length === 0) return null
-    return addGameLinks(id, result.filePaths)
+    assertLibraryIdle()
+    return addGameLinks(id, result.filePaths, type)
   })
 
   ipcMain.handle('game:open-link', (_e, id: string, target: string) => openGameLink(id, target))
@@ -528,9 +514,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return { resourceId: scanResult.entries?.find(e => e.resourceId)?.resourceId || '', bundleId: '', created: false, itemsAdded: scanResult.episodes, filesAdded: 0, scanResult }
   })
 
-  ipcMain.handle('tasks:list', () => listTaskRecords())
-  ipcMain.handle('tasks:save', (_e, task: import('../../src/types').TaskRecord) => { saveTaskRecord(task); return true })
-  ipcMain.handle('tasks:clear', (_e, ids?: string[]) => { clearTaskRecords(ids); return true })
+  ipcMain.handle('tasks:list', () => listTaskRecords(getDb()))
+  ipcMain.handle('tasks:save', (_e, task: import('../../src/types').TaskRecord) => { saveTaskRecord(getDb(), task); return true })
+  ipcMain.handle('tasks:clear', (_e, ids?: string[]) => { clearTaskRecords(getDb(), ids); return true })
 
   /**
    * 改一集，顺带把整部剧的条目取回来。
@@ -557,7 +543,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const win = getWindow()
     if (!win) return null
     const result = await dialog.showOpenDialog(win, {
-      title: '选择海报图（竖版 2:3 效果最好）',
+      title: getVideoItem(id)?.media_kind==='audio' ? '选择音频封面（方形效果最好）' : '选择海报图（竖版 2:3 效果最好）',
       properties: ['openFile'],
       // 名单来自 posters.ts，和真正执行校验的那份是同一个来源 ——
       // 对话框过滤器和校验规则分开写，迟早出现「选得进来但存不下去」
@@ -571,35 +557,35 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('video:clear-poster', (_e, id: string) => clearVideoPoster(id))
 
   /* ------------------------------ 分类 ------------------------------ */
-  ipcMain.handle('categories:list', (_e, kind?: string) => listCategories(kind))
-  ipcMain.handle('categories:upsert', (_e, category: Category, kind?: string) => upsertCategory(category, kind))
-  ipcMain.handle('categories:remove', (_e, id: string) => removeCategory(id))
-  ipcMain.handle('categories:move', (_e, id: string, delta: number) => moveCategory(id, delta))
+  ipcMain.handle('categories:list', (_e, kind?: string) => listCategories(getDb(), kind))
+  ipcMain.handle('categories:upsert', (_e, category: Category, kind?: string) => upsertCategory(getDb(), category, kind))
+  ipcMain.handle('categories:remove', (_e, id: string) => removeCategory(getDb(), id))
+  ipcMain.handle('categories:move', (_e, id: string, delta: number) => moveCategory(getDb(), id, delta))
 
   /* ------------------------------ 标签 ------------------------------ */
-  ipcMain.handle('tags:list', (_e, kind?: string) => listTags(kind))
-  ipcMain.handle('tags:create', (_e, name: string, kind?: string) => createTag(name, kind))
-  ipcMain.handle('tags:rename', (_e, id: number, name: string) => renameTag(id, name))
-  ipcMain.handle('tags:merge', (_e, fromIds: number[], intoId: number) => mergeTags(fromIds, intoId))
-  ipcMain.handle('tags:remove', (_e, id: number) => removeTag(id))
+  ipcMain.handle('tags:list', (_e, kind?: string) => listTags(getDb(), kind))
+  ipcMain.handle('tags:create', (_e, name: string, kind?: string) => createTag(getDb(), name, kind))
+  ipcMain.handle('tags:rename', (_e, id: number, name: string) => renameTag(getDb(), id, name))
+  ipcMain.handle('tags:merge', (_e, fromIds: number[], intoId: number) => mergeTags(getDb(), fromIds, intoId))
+  ipcMain.handle('tags:remove', (_e, id: number) => removeTag(getDb(), id))
 
   /* ---------------------------- 待确认条目 ---------------------------- */
-  ipcMain.handle('pending:list', () => listPending())
-  ipcMain.handle('pending:count', () => countPending())
+  ipcMain.handle('pending:list', () => listPending(getDb()))
+  ipcMain.handle('pending:count', () => countPending(getDb()))
   ipcMain.handle('pending:update', (_e, id: string, patch: Partial<PendingItem>) =>
-    updatePending(id, patch)
+    updatePending(getDb(), id, patch)
   )
-  ipcMain.handle('pending:confirm', (_e, ids: string[]) => confirmPending(ids))
-  ipcMain.handle('pending:skip', (_e, ids: string[]) => skipPending(ids))
-  ipcMain.handle('pending:skipped-count', () => countSkipped())
-  ipcMain.handle('pending:clear-skipped', () => clearSkipped())
+  ipcMain.handle('pending:confirm', (_e, ids: string[]) => confirmPending(getDb(), ids))
+  ipcMain.handle('pending:skip', (_e, ids: string[]) => skipPending(getDb(), ids))
+  ipcMain.handle('pending:skipped-count', () => countSkipped(getDb()))
+  ipcMain.handle('pending:clear-skipped', () => clearSkipped(getDb()))
 
   /* ------------------------------ 设置 ------------------------------ */
-  ipcMain.handle('settings:get', () => getSettings())
+  ipcMain.handle('settings:get', () => getSettings(getDb()))
   ipcMain.handle('settings:patch', async (_e, patch: Partial<AppSettings>) => {
     if ('video_online_proxy' in patch) parseProxyInput(patch.video_online_proxy ?? 'system://')
-    const previousPrivacy=getSettings().hide_hentai
-    const next = patchSettings(patch)
+    const previousPrivacy=getSettings(getDb()).hide_hentai
+    const next = patchSettings(getDb(), patch)
     if(previousPrivacy!==next.hide_hentai){await Promise.all([closeVideoPreview(),closeArchiveAssistant(),stopComicIngest()]);if(!next.hide_hentai)reopenComicIngest()}
     if (next.hide_hentai) hanimeBrowser.close()
     // 代理改了就当场铺下去，不用重启。只在这个键真出现在 patch 里时动 ——
@@ -614,7 +600,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   // 「看着保存了但没生效」，而这一条能当场分辨是规则没铺上还是目标本身不通
   ipcMain.handle('settings:proxy-status', async (_e, url?: string) => ({
     ...getHanimeNetworkStatus(String(url || 'https://hanime1.me/')),
-    rules: normalizeProxyRules(getSettings().proxy),
+    rules: normalizeProxyRules(getSettings(getDb()).proxy),
     resolved: await resolveProxyFor(String(url || 'https://hanime1.me/'))
   }))
   ipcMain.handle('settings:hanime-verify', async (_e, url?: string) =>
@@ -636,9 +622,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     scanDirectories(dirs, (p) => send('scan:progress', p))
   )
   ipcMain.on('scan:cancel', () => cancelScan())
-  ipcMain.handle('scan:units', () => listScanUnits())
-  ipcMain.handle('scan:reset', () => resetScanUnits())
-  ipcMain.handle('scan:reset-one', (_e, dir: string) => resetScanUnit(dir))
+  ipcMain.handle('scan:units', () => listScanUnits(getDb()))
+  ipcMain.handle('scan:reset', () => resetScanUnits(getDb()))
+  ipcMain.handle('scan:reset-one', (_e, dir: string) => resetScanUnit(getDb(), dir))
 
   /* ------------------------------- AI ------------------------------- */
   ipcMain.handle('ai:complete', async (_e, ids?: string[]) =>
@@ -651,9 +637,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('ai:test-tmdb', (_e, config: TmdbConfig) => testTmdb(config))
 
   /* ---------------------------- 识别日志 ---------------------------- */
-  ipcMain.handle('logs:list', (_e, query: IdentifyLogQuery = {}) => listIdentifyLogs(query))
-  ipcMain.handle('logs:clear', (_e, resourceKind?: string) => clearIdentifyLogs(resourceKind))
-  ipcMain.handle('logs:reports', (_e, resourceKind?: string) => listIdentifyReports(resourceKind))
+  ipcMain.handle('logs:list', (_e, query: IdentifyLogQuery = {}) => listIdentifyLogs(getDb(), query))
+  ipcMain.handle('logs:clear', (_e, resourceKind?: string) => clearIdentifyLogs(getDb(), resourceKind))
+  ipcMain.handle('logs:reports', (_e, resourceKind?: string) => listIdentifyReports(getDb(), resourceKind))
 
   /* ---------------------------- 目录整理 ---------------------------- */
   ipcMain.handle('organize:pick-root', async () => {
@@ -670,7 +656,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('organize:run', (_e, commands: OrganizeCommand[]) =>
     withOrganizeMutation(() => runOrganize(commands, (p) => send('organize:progress', p)))
   )
-  ipcMain.handle('organize:plans', () => listOrganizePlans())
+  ipcMain.handle('organize:plans', () => listOrganizePlans(getDb()))
   ipcMain.handle('organize:undo', (_e, planId: string) => withOrganizeMutation(() => undoOrganize(planId)))
   ipcMain.handle('organize:materialize', (_e, id: string) => withOrganizeMutation(() => materialize(id)))
   ipcMain.handle('organize:unlink', (_e, id: string) => withOrganizeMutation(() => unlink(id)))
@@ -710,7 +696,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     assertLibraryIdle()
     const summary = resetData(mode === 'all' ? 'all' : 'library')
     videoWorkflow.resetHistory()
-    return { summary, settings: getSettings() }
+    return { summary, settings: getSettings(getDb()) }
   })
 
   ipcMain.handle('data:export-markdown', async () => {
@@ -722,7 +708,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       filters: [{ name: 'Markdown', extensions: ['md'] }]
     })
     if (result.canceled || !result.filePath) return null
-    await fs.writeFile(result.filePath, toMarkdown(exportSoftwareList()), 'utf-8')
+    await fs.writeFile(result.filePath, toMarkdown(exportSoftwareList(getDb())), 'utf-8')
     return result.filePath
   })
 }

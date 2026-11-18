@@ -58,11 +58,9 @@ function harness() {
       } }) },
       shell: {}
     },
-    '../../services/database': {
-      getDb: () => db, coversDir: () => covers,
-      getSettings: () => ({ ai: { enabled: false, api_key: '' }, search: {} }),
-      listCategories: () => [], tagPool: () => []
-    },
+    '../../services/database': { getDb: () => db, coversDir: () => covers },
+    '../../services/settings-store.ts': { getSettings: () => ({ ai: { enabled: false, api_key: '' }, search: {} }) },
+    '../../services/taxonomy-store.ts': { listCategories: () => [], tagPool: () => [] },
     '../../services/searchService': { imageSearchAvailable: () => false, imageSearchWhyNot: () => '', searchAvailable: () => false },
     '../../services/agent/loop': {}, './backup': {}, './savedb': {}, './session': {}, './tools': {}, './prompts': {},
     './db': games

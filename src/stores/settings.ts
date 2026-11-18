@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { plain } from '@/utils'
-import type { AppSettings } from '@/types'
+import type { AppSettings, ScanUnit } from '@/types'
+import type { ModuleKey } from '@/composables/useModules'
+import { useScan } from '@/composables/useScan'
+import { useAI } from '@/composables/useAI'
+import { useMediaScan } from '@/composables/useMediaScan'
+import { useToast } from '@/composables/useToast'
+import { useSoftwareStore } from './software'
 
 const FALLBACK: AppSettings = {
   ai: { api_url: 'https://api.deepseek.com/v1', api_key: '', model: 'deepseek-chat', enabled: true },
@@ -40,6 +46,20 @@ const FALLBACK: AppSettings = {
 export const useSettingsStore = defineStore('settings', () => {
   const settings = ref<AppSettings>({ ...FALLBACK })
   const loaded = ref(false)
+  const scanUnits = ref<ScanUnit[]>([])
+  const scanningKind = ref<ModuleKey | null>(null)
+  const scanBusy = computed(() => scanningKind.value !== null || useScan().running.value || useAI().running.value || useMediaScan('game').running.value || useMediaScan('video').running.value)
+
+  async function loadScanUnits(): Promise<void> {
+    scanUnits.value = await window.baoyi.scan.units()
+  }
+
+  async function retryScanUnit(dir: string): Promise<void> {
+    const ok = await window.baoyi.scan.retry(dir)
+    if (!ok) { useToast().toast('这个目录已经不在扫描列表里了'); return }
+    await Promise.all([loadScanUnits(), useSoftwareStore().refreshCounts()])
+    useToast().success('已退回待识别，点「开始识别」重跑')
+  }
 
   function applyTheme(): void {
     document.documentElement.dataset.theme = settings.value.theme
@@ -62,5 +82,5 @@ export const useSettingsStore = defineStore('settings', () => {
     await patch({ theme: settings.value.theme === 'dark' ? 'light' : 'dark' })
   }
 
-  return { settings, loaded, load, patch, applyTheme, toggleTheme }
+  return { settings, loaded, load, patch, applyTheme, toggleTheme, scanUnits, scanningKind, scanBusy, loadScanUnits, retryScanUnit }
 })

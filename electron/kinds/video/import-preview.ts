@@ -46,7 +46,7 @@ export function createVideoImportManager(options: Options) {
     draft.batch.updatedAt = Date.now(); draft.batch.revision++
     d.prepare('INSERT INTO video_import_drafts (id,updated_at,payload) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,payload=excluded.payload')
       .run(draft.batch.id, draft.batch.updatedAt, JSON.stringify(draft))
-    const result = copy(draft.batch); if (publish) { try { options.changed?.(result) } catch { /* The saved draft remains recoverable if the window closes. */ } }; return result
+    const result = copy(draft.batch); if (publish) { try { options.changed?.(result) } catch (cause) { console.error('[后台通知或记录]', cause) } }; return result
   }
   // A terminated process cannot leave a draft permanently disabled.
   for (const row of d.prepare('SELECT id FROM video_import_drafts').all() as { id: string }[]) {
@@ -240,7 +240,7 @@ export function createVideoImportManager(options: Options) {
       // Store row outcomes in the same transaction: a repeated confirmation cannot duplicate writes.
       const result = save(draft, false)
       d.exec('RELEASE SAVEPOINT video_import_confirm')
-      try { options.changed?.(result) } catch { /* Registration has committed; delivery can be recovered by reloading the draft. */ }
+      try { options.changed?.(result) } catch (cause) { console.error('[后台通知或记录]', cause) }
       return result
     } catch (error) { d.exec('ROLLBACK TO SAVEPOINT video_import_confirm'); d.exec('RELEASE SAVEPOINT video_import_confirm'); throw error }
   }

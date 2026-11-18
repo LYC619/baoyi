@@ -12,9 +12,24 @@ import { pendingDiscoveryDownload, pendingWebAddress } from './composables/useVi
 import { useToast } from './composables/useToast'
 import './styles/global.scss'
 
+const recentErrors = new Map<string, number>()
+function reportError(err: unknown): void {
+  console.error(err)
+  const message = errorMessage(err)
+  const now = Date.now()
+  for (const [text, time] of recentErrors) {
+    if (now - time >= 3000) recentErrors.delete(text)
+  }
+  if (recentErrors.has(message)) return
+  recentErrors.set(message, now)
+  useToast().error(message)
+}
+
 async function boot(): Promise<void> {
   try {
     const app = createApp(App)
+    app.config.errorHandler = reportError
+    window.addEventListener('unhandledrejection', event => reportError(event.reason))
     app.use(createPinia())
 
     // 先把设置和分类读出来，路由守卫要靠 onboarded 判断首启

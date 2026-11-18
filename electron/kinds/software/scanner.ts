@@ -1,7 +1,10 @@
+import { getDb } from '../../services/database'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ScanProgress, ScanResult, SoftwareItem } from '../../../src/types'
-import { insertScanned, listCategories, updateSoftware, upsertCategory, upsertScanUnits } from '../../services/database'
+import { insertScanned, updateSoftware } from './db.ts'
+import { listCategories, upsertCategory } from '../../services/taxonomy-store.ts'
+import { upsertScanUnits } from '../../services/scan-units.ts'
 import { extractIcon } from '../../services/iconExtractor'
 import { readPeInfo } from './peReader'
 import { planRoot, type PlannedUnit } from './scanPlan'
@@ -45,7 +48,7 @@ export async function scanDirectories(
   }
 
   const found = planned.reduce((n, u) => n + u.exe_count, 0)
-  const { added, pending, settled } = upsertScanUnits(planned)
+  const { added, pending, settled } = upsertScanUnits(getDb(), planned)
 
   onProgress({ phase: 'done', current: '', found, processed: planned.length, total: planned.length })
   return { found, added, pending, settled, loose_files: loose }
@@ -64,7 +67,7 @@ export async function addSingleExe(exePath: string): Promise<SoftwareItem[]> {
     return []
   }
   const pe = mobile ? { file_description: '', product_name: '', company: '', version: '' } : readPeInfo(exePath, size)
-  const inserted = insertScanned([
+  const inserted = insertScanned(getDb(), [
     {
       exe_path: exePath,
       file_name: path.basename(exePath),
@@ -76,15 +79,15 @@ export async function addSingleExe(exePath: string): Promise<SoftwareItem[]> {
   ])
   for (const item of inserted) {
     if (mobile) {
-      const categories = listCategories()
+      const categories = listCategories(getDb())
       if (!categories.some(c => c.name === APP_CATEGORY)) {
-        upsertCategory({ id: '', name: APP_CATEGORY, description: 'Android、iOS、鸿蒙等手机 APP 安装包', icon: 'box', sort_order: Math.max(0, ...categories.map(c => c.sort_order)) + 1 })
+        upsertCategory(getDb(), { id: '', name: APP_CATEGORY, description: 'Android、iOS、鸿蒙等手机 APP 安装包', icon: 'box', sort_order: Math.max(0, ...categories.map(c => c.sort_order)) + 1 })
       }
-      Object.assign(item, updateSoftware(item.id, { category: APP_CATEGORY, is_portable: false, move_risk: 'unknown' }))
+      Object.assign(item, updateSoftware(getDb(), item.id, { category: APP_CATEGORY, is_portable: false, move_risk: 'unknown' }))
       continue
     }
     const iconPath = await extractIcon(item.exe_path)
-    if (iconPath) updateSoftware(item.id, { icon_path: iconPath })
+    if (iconPath) updateSoftware(getDb(), item.id, { icon_path: iconPath })
   }
   return inserted
 }

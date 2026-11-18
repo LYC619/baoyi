@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_VERSION } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { APP_VERSION_KEY } from '../electron/services/library-snapshots.ts'
 
@@ -50,9 +50,9 @@ try {
   await page.locator('.titlebar').waitFor()
   assert.ok(page.url().startsWith('file://'))
   const snapshot = await page.evaluate(() => (window as any).baoyi.data.snapshotInfo())
-  assert.equal(snapshot.schema, 16)
+  assert.equal(snapshot.schema, SCHEMA_VERSION)
   assert.ok(snapshot.inventory.total >= 1)
-  checks.push('schema-15-to-16-upgrade-and-snapshot')
+  checks.push('schema-15-to-current-upgrade-and-snapshot')
   // A category changed after identification must win over the staged result.
   await page.evaluate(() => (window as any).baoyi.software.update('classified', { category: '用户最新分类' }))
   const confirmed = await page.evaluate(() => (window as any).baoyi.pending.confirm(['classified-pending', 'other-pending', 'fresh-pending']))
@@ -67,11 +67,11 @@ try {
   const videos = page.getByLabel('同时下载视频数'), connections = page.getByLabel('每个视频连接数')
   await videos.waitFor()
   assert.equal(await videos.inputValue(), '2'); assert.equal(await connections.inputValue(), '4')
-  await videos.fill('3'); await videos.dispatchEvent('change')
+  await videos.fill('3'); await videos.press('Tab')
   await page.waitForFunction(async () => (await (window as any).baoyi.settings.getAll()).video_download_concurrency === 3)
-  await connections.fill('8'); await connections.dispatchEvent('change')
+  await connections.fill('8'); await connections.press('Tab')
   await page.waitForFunction(async () => (await (window as any).baoyi.settings.getAll()).video_download_connections === 8)
-  await connections.fill('9'); await connections.dispatchEvent('change')
+  await connections.fill('9'); await connections.press('Tab')
   await page.getByRole('status').filter({ hasText: '整数' }).waitFor()
   assert.equal(await connections.inputValue(), '8')
   checks.push('download-settings-defaults-save-and-invalid-rollback')

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref,computed,onBeforeUnmount,watch,nextTick } from 'vue'
 import { useRoute,useRouter } from 'vue-router'
 import { Plus,Pencil,Star,Download,RefreshCw,Sparkles,Square } from 'lucide-vue-next'
@@ -26,17 +27,17 @@ const workflowDetail=computed(()=>{
   if(label.startsWith('read_project_events'))return '正在核对已有日志，避免重复记录。'
   return session.messages.at(-1)?.text||'整理任务已创建，等待模型处理。'
 })
-watch(()=>props.id,async id=>{try{const value=await window.baoyi.project.automation(id);if(props.id===id)automatic.value=value.enabled}catch(e){error.value=(e as Error).message}},{immediate:true})
+watch(()=>props.id,async id=>{try{const value=await window.baoyi.project.automation(id);if(props.id===id)automatic.value=value.enabled}catch(e){error.value=errorMessage(e)}},{immediate:true})
 async function toggleAutomatic(){await action(async()=>{automatic.value=(await window.baoyi.project.automation(props.id,!automatic.value)).enabled})}
 let revision=0
 const published=computed(()=>events.value.filter(e=>e.status==='published')),drafts=computed(()=>events.value.filter(e=>e.status==='draft'))
 const groups=computed(()=>{const map=new Map<string,TimelineEvent[]>();for(const e of published.value){let label='';const date=new Date(e.occurredAt);if(mode.value==='day')label=localDate(date);if(mode.value==='week'){date.setDate(date.getDate()-(date.getDay()+6)%7);label=localDate(date)+' 起的一周'}if(mode.value==='version')label=e.version||'未标记版本 / 阶段';const key=mode.value==='session'?e.id:label;map.set(key,[...(map.get(key)||[]),e])}return [...map].map(([key,items])=>({key,label:mode.value==='session'?'':key,items}))})
-async function load(){const run=++revision;try{const rows=await workspace.timeline.events(props.id);if(run===revision){events.value=rows}}catch(e){if(run===revision)error.value=(e as Error).message}}
-watch(()=>props.id,async id=>{events.value=[];error.value='';evidence.value=null;workflowSession.value=null;void load();try{const sessions=await window.baoyi.project.sessions(id),latest=sessions.find(s=>s.workflow);if(latest){const value=await window.baoyi.project.session(latest.id);if(props.id===id)workflowSession.value=value}}catch(e){error.value=(e as Error).message}},{immediate:true})
+async function load(){const run=++revision;try{const rows=await workspace.timeline.events(props.id);if(run===revision){events.value=rows}}catch(e){if(run===revision)error.value=errorMessage(e)}}
+watch(()=>props.id,async id=>{events.value=[];error.value='';evidence.value=null;workflowSession.value=null;void load();try{const sessions=await window.baoyi.project.sessions(id),latest=sessions.find(s=>s.workflow);if(latest){const value=await window.baoyi.project.session(latest.id);if(props.id===id)workflowSession.value=value}}catch(e){error.value=errorMessage(e)}},{immediate:true})
 const unsubscribe=workspace.onChanged(()=>void load())
-const unsubscribeSession=window.baoyi.project.onSession(session=>{if(session.projectId===props.id&&session.workflow){workflowSession.value=session;if(session.workflow.state!=='running'){void load();const id=props.id;void window.baoyi.project.automation(id).then(value=>{if(props.id===id)automatic.value=value.enabled}).catch(e=>{if(props.id===id)error.value=(e as Error).message})}}})
+const unsubscribeSession=window.baoyi.project.onSession(session=>{if(session.projectId===props.id&&session.workflow){workflowSession.value=session;if(session.workflow.state!=='running'){void load();const id=props.id;void window.baoyi.project.automation(id).then(value=>{if(props.id===id)automatic.value=value.enabled}).catch(e=>{if(props.id===id)error.value=errorMessage(e)})}}})
 onBeforeUnmount(()=>{revision++;unsubscribe();unsubscribeSession()})
-async function action(fn:()=>Promise<unknown>){if(busy.value)return;busy.value=true;error.value='';try{await fn();await load()}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
+async function action(fn:()=>Promise<unknown>){if(busy.value)return;busy.value=true;error.value='';try{await fn();await load()}catch(e){error.value=errorMessage(e)}finally{busy.value=false}}
 function edit(event?:TimelineEvent){editing.value=event;editor.value=true}
 async function check(){await action(async()=>{evidence.value=await workspace.timeline.check(props.id);message.value=evidence.value.message})}
 async function generate(ai:boolean){await action(async()=>{if(ai){workflowSession.value=await window.baoyi.project.organize(props.id);message.value='已创建整理会话，日志会自动保存。'}else{const value=await workspace.timeline.generate(props.id,false);message.value=value?'已生成事实草稿，可编辑后发布。':'没有新的记录依据。';showDrafts.value=true}evidence.value=null})}

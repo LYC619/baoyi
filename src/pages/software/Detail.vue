@@ -22,6 +22,7 @@ import EditableField from '@/components/ui/EditableField.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import SoftwareTypeSelect from '@/components/software/SoftwareTypeSelect.vue'
 import { useAI } from '@/composables/useAI'
+import { useResourceDetail } from '@/composables/useResourceDetail'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSoftwareStore } from '@/stores/software'
@@ -46,7 +47,6 @@ const detailTabs = [{"id":"overview","label":"简介"},{"id":"notes","label":"�
 const activeTab = ref(detailTabs.some(tab=>tab.id===route.query.tab) ? String(route.query.tab) : 'overview')
 watch(activeTab, tab=>{ void router.replace({query:{...route.query,tab}}) })
 watch(()=>route.query.tab,tab=>{activeTab.value=detailTabs.some(t=>t.id===tab)?String(tab):'overview'})
-watch(()=>props.id,()=>{activeTab.value='overview'})
 const store = useSoftwareStore()
 const categories = useCategoriesStore()
 const { success, error, toast } = useToast()
@@ -68,7 +68,6 @@ async function load(): Promise<void> {
 }
 
 onMounted(load)
-watch(() => props.id, load)
 
 const name = computed(() => (item.value ? displayName(item.value) : ''))
 
@@ -96,41 +95,39 @@ const typeBusy = ref(false)
 function typeUpdated(updated: SoftwareItem): void {
   if (item.value?.id === updated.id) item.value = updated
 }
-async function save(patch: Partial<SoftwareItem>): Promise<SoftwareItem | null> {
-  if (!item.value) return null
-  const id = item.value.id
-  let holdsCategoryLock = false
-  try {
-    if (patch.category !== undefined && patch.category !== item.value.category) {
-      if (categoryBusy.value) return null
-      categoryBusy.value = true
-      holdsCategoryLock = true
-      const moves = await previewSoftwareCategoryChanges([id], patch.category)
-      if (moves.length) {
-        if (!window.confirm(categoryMoveConfirmation(moves))) return null
-        const p = moves[0].preview
-        const result = await window.baoyi.organize.relocate(id, p.category, p.folder, p.from)
-        if (!result.ok) throw new Error(result.message)
-        patch = { ...patch, category: p.category }
-      }
-    }
-    const updated = await store.update(id, patch)
-    if (updated && item.value?.id === id) item.value = updated
-    return updated
-  } catch (err) {
-    error(`保存失败：${errorMessage(err)}`)
-    return null
-  } finally {
-    if (holdsCategoryLock) categoryBusy.value = false
-  }
+function parseList(raw: string): string[] {
+  return raw.split(/[,，、\n]/).map(value => value.trim()).filter(Boolean)
 }
-
+const { save, commitTags, toggleArchive, reveal, copyPath } = useResourceDetail({
+  item,
+  reveal: id => window.baoyi.software.revealInFolder(id),
+  parseTags: parseList,
+  archivedMessage: archived => archived ? '已归档，卡片墙不再显示' : '已取消归档',
+  async update(current, patch) {
+    let holdsCategoryLock = false
+    try {
+      if (patch.category !== undefined && patch.category !== current.category) {
+        if (categoryBusy.value) return null
+        categoryBusy.value = true
+        holdsCategoryLock = true
+        const moves = await previewSoftwareCategoryChanges([current.id], patch.category)
+        if (moves.length) {
+          if (!window.confirm(categoryMoveConfirmation(moves))) return null
+          const p = moves[0].preview
+          const result = await window.baoyi.organize.relocate(current.id, p.category, p.folder, p.from)
+          if (!result.ok) throw new Error(result.message)
+          patch = { ...patch, category: p.category }
+        }
+      }
+      return await store.update(current.id, patch)
+    } finally {
+      if (holdsCategoryLock) categoryBusy.value = false
+    }
+  }
+})
 function commitList(field: 'tags' | 'alternatives', raw: string): void {
-  const list = raw
-    .split(/[,，、\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  void save(field === 'tags' ? { tags: list } : { alternatives: list })
+  if (field === 'tags') commitTags(raw)
+  else void save({ alternatives: parseList(raw) })
 }
 
 /** 从启动端列表里点某一个启动，不改默认端 */
@@ -174,13 +171,6 @@ async function setDefaultLauncher(launcherPath: string): Promise<void> {
   }
 }
 
-async function toggleArchive(): Promise<void> {
-  if (!item.value) return
-  const next = !item.value.is_archived
-  const updated = await save({ is_archived: next })
-  // 保存失败时 save 已经报过错，这里不能再喊「已归档」
-  if (updated) success(next ? '已归档，卡片墙不再显示' : '已取消归档')
-}
 
 async function removeItem(): Promise<void> {
   if (!item.value) return
@@ -222,9 +212,6 @@ function openOfficial(): void {
   if (item.value?.official_url) window.open(item.value.official_url, '_blank')
 }
 
-function reveal(): void {
-  if (item.value) void window.baoyi.software.revealInFolder(item.value.id)
-}
 
 function setMastery(level: MasteryLevel): void {
   void save({ mastery_level: level })
@@ -236,16 +223,6 @@ async function setCategory(e: Event): Promise<void> {
   select.value = item.value?.category ?? ''
 }
 
-async function copyPath(target: string): Promise<void> {
-  // navigator.clipboard 在打包后的 file:// 页面里不可靠（见 types 的 app.copyText 注释）
-  try {
-    await window.baoyi.app.copyText(target)
-    toast('路径已复制')
-  } catch (err) {
-    // 不接错的话失败也会弹「已复制」，用户拿着空剪贴板去粘贴才发现
-    error(`复制失败：${errorMessage(err)}`)
-  }
-}
 
 /* -------------------------------- 图标 -------------------------------- */
 

@@ -10,8 +10,6 @@ import {initSchema} from '../electron/services/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {ProjectLibrary} from '../electron/kinds/project/library.ts'
 import {createProjectAgent} from '../electron/kinds/project/agent.ts'
-import {createWorkspaceAgent} from '../electron/workspace/agent.ts'
-import {DocumentLibrary} from '../electron/workspace/documents.ts'
 import {VIDEO_JOBS_SQL} from '../electron/kinds/video/download/jobs.ts'
 
 const output=path.resolve('output/review-2026-10-28');await fs.mkdir(output,{recursive:true})
@@ -21,7 +19,7 @@ for(const name of ['first','second']){
   const directory=path.join(root,name);await fs.mkdir(directory)
   for(const args of [['init','-q'],['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false','commit','--allow-empty','-qm','界面续接样本']])execFileSync('git',['-C',directory,...args])
 }
-let cursor:any,modelCalls=0,docCalls=0
+let modelCalls=0
 const requests:Array<{url:string;range?:string}>=[],serverErrors:string[]=[]
 const server=createServer(async(req,res)=>{
   try{
@@ -35,15 +33,10 @@ const server=createServer(async(req,res)=>{
     const body=JSON.parse(raw),last=body.messages.at(-1);modelCalls++
     const tool=(name:string,args:object)=>({role:'assistant',content:null,tool_calls:[{id:'local-'+modelCalls,type:'function',function:{name,arguments:JSON.stringify(args)}}]})
     let message:any
-    if(body.tools.some((tool:any)=>tool.function.name==='read_project_history')){
-      if(last.role!=='tool')message=tool('read_project_history',{})
+    if(last.role!=='tool')message=tool('read_project_history',{})
       else if(last.content.includes('"commits"')){const page=JSON.parse(last.content);message=tool('record_project_event',{title:'选定仓库后继续整理',body:'已按用户选择读取 second 仓库并保存日志。',commits:page.commits.map((c:any)=>c.sha)})}
       else message={role:'assistant',content:'所选仓库日志已保存。'}
-    }else{
-      docCalls++
-      if(last.role!=='tool')message=tool('read_document_metadata',{cursor})
-      else {const page=JSON.parse(last.content);message=page.nextCursor?tool('read_document_metadata',{cursor:page.nextCursor}):{role:'assistant',content:'列表已从断点读完，尚未修改分组。'}}
-    }
+
     res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message}],usage:{total_tokens:1}}))
   }catch(error){serverErrors.push(String(error));res.writeHead(400);res.end(String(error))}
 })
@@ -57,10 +50,7 @@ const project=new ProjectLibrary(db).register({path:root,name:'10.28 仓库选�
 let paused!:()=>void;const pause=new Promise<void>(resolve=>{paused=resolve})
 const projectAgent=createProjectAgent({db,config:()=>config,run:async options=>{await options.tools.find(tool=>tool.name==='read_project_history')!.execute({});return {stopReason:'done',turns:1,tokens:0,error:'',text:'等待选择'}},paused:()=>paused()})
 const projectSession=projectAgent.organize(project.id);await pause;projectAgent.dispose()
-const docs=new DocumentLibrary(db)
-for(let index=0;index<75;index++){const file=path.join(profile,`样本${index}.txt`);await fs.writeFile(file,'第一章\n隔离界面样本。');await docs.register(file,'novel')}
-const documentAgent=createWorkspaceAgent({db,config:()=>config,run:async options=>{const page=JSON.parse(await options.tools.find(tool=>tool.name==='read_document_metadata')!.execute({compact:true}));cursor=page.nextCursor;return {stopReason:'max_turns',turns:14,tokens:0,error:'本机模拟预算暂停，进度已保存',text:'已读取第一批资料。'}}})
-const documentSession=documentAgent.create('document');assert.equal((await documentAgent.send(documentSession.id,'按书名整理分组')).status,'interrupted');documentAgent.dispose();db.close()
+db.close()
 const env=Object.fromEntries(Object.entries(process.env).filter((entry):entry is [string,string]=>entry[1]!==undefined));delete env.ELECTRON_RUN_AS_NODE;delete env.VITE_DEV_SERVER_URL
 const launch=()=>_electron.launch({executablePath:path.resolve('node_modules/electron/dist/electron.exe'),args:[path.resolve('.'),'--user-data-dir='+profile,'--disable-gpu'],env,timeout:30000})
 let app=await launch(),page=await app.firstWindow()
@@ -87,17 +77,6 @@ try{
   assert.equal((await page.evaluate(id=>window.baoyi.project.sessions(id),project.id)).length,1)
   checks.push('native-repository-selection-resumes-same-session-and-saves-log')
   await page.screenshot({path:path.join(output,'fix-project.png')})
-  await page.evaluate(()=>{location.hash='/document'})
-  await page.getByRole('button',{name:'资料助手',exact:true}).click()
-  await page.getByRole('region',{name:'资料整理进度'}).waitFor()
-  assert.match(await page.locator('.assistant-progress').innerText(),/60\s*\/\s*75/)
-  await page.getByLabel('给资料助手的消息',{exact:true}).fill('保留这条尚未发送的补充')
-  await page.getByRole('button',{name:'继续整理',exact:true}).click()
-  await page.waitForFunction(()=>document.querySelector('.assistant-progress')?.textContent?.includes('75 / 75'))
-  assert.equal(await page.getByLabel('给资料助手的消息',{exact:true}).inputValue(),'保留这条尚未发送的补充')
-  assert.equal((await page.evaluate(()=>window.baoyi.workspace.agent.sessions('document'))).length,1)
-  checks.push('native-document-progress-and-resume-preserve-session-and-draft')
-  await page.screenshot({path:path.join(output,'fix-document.png')})
   await page.evaluate(()=>{location.hash='/settings?module=video&tab=online'})
   await page.getByLabel('代理规则',{exact:true}).fill('http://127.0.0.1:1')
   assert.equal(await page.getByRole('button',{name:'检查网页响应',exact:true}).isDisabled(),true)
@@ -119,10 +98,9 @@ try{
   await app.close();app=await launch();page=await app.firstWindow();page.on('pageerror',error=>errors.push(error.message));await page.waitForFunction(()=>!!window.baoyi?.project)
   const restored=await page.evaluate(id=>window.baoyi.project.session(id),projectSession.id)
   assert.equal(restored?.repository?.repoPath,'second');assert.equal(restored?.workflow?.state,'complete')
-  const progress=await page.evaluate(id=>window.baoyi.workspace.agent.session(id),documentSession.id)
-  assert.equal(progress?.documentProgress?.position,75);assert.equal(modelCalls,before)
-  checks.push('native-restart-restores-selected-repository-and-document-checkpoint-without-regeneration')
-  assert.deepEqual(errors,[]);assert.deepEqual(serverErrors,[]);assert.ok(docCalls>=2)
+  assert.equal(modelCalls,before)
+  checks.push('native-restart-restores-selected-repository-without-regeneration')
+  assert.deepEqual(errors,[]);assert.deepEqual(serverErrors,[])
   await fs.writeFile(path.join(output,'fix-ui.json'),JSON.stringify({status:'passed',checks,errors,serverErrors,profile,modelCalls,requests},null,2))
   console.log('PASS '+checks.join(', '))
 }catch(error){await page.screenshot({path:path.join(output,'fix-ui-failure.png')}).catch(()=>{});await fs.writeFile(path.join(output,'fix-ui.json'),JSON.stringify({status:'failed',error:String(error),errors,serverErrors,profile,modelCalls,requests},null,2));throw error}

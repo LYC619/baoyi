@@ -1,3 +1,5 @@
+import { useToast } from '@/composables/useToast'
+import { errorMessage } from '@/utils'
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { workspace } from '@/utils/workspace-api'
@@ -63,9 +65,9 @@ export const useDocumentsStore = defineStore('documents', () => {
       }
       if (saved.submodule === 'archive') submodule.value = 'archive'
     }
-  } catch { /* a missing/corrupt preference must not block the library */ }
+  } catch { /* 偏好缺失或无法解析时使用当前默认视图。 */ }
   function persist() {
-    try { localStorage.setItem(memoryKey, JSON.stringify({ submodule: submodule.value, memory })) } catch { /* local storage may be unavailable */ }
+    try { localStorage.setItem(memoryKey, JSON.stringify({ submodule: submodule.value, memory })) } catch (cause) { useToast().error(errorMessage(cause)) }
   }
 
   const currentCategories = computed(() =>
@@ -184,7 +186,7 @@ export const useDocumentsStore = defineStore('documents', () => {
         error.value = ''
       }
     } catch (e) {
-      if (run === revision) error.value = (e as Error).message
+      if (run === revision) error.value = errorMessage(e)
     }
   }
 

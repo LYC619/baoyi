@@ -11,9 +11,9 @@ function deferred() {
   return { promise, resolve }
 }
 const document = (id: string) => ({ id, name: id, format: 'txt', available: true, position: { page: 1, offset: id === 'A' ? 0.7 : 0.2 }, pageCount: 3 })
-function fixture(overrides: Record<string, any> = {}, query: Record<string, string> = {}) {
+function fixture(overrides: Record<string, any> = {}, query: Record<string, string> = {}, id = 'A') {
   const scope = Vue.effectScope(), unmount: (() => void)[] = [], guards: (() => Promise<unknown>)[] = []
-  const props = Vue.reactive({ id: 'A' }), route = Vue.reactive({ query }), reads: string[] = []
+  const props = Vue.reactive({ id }), route = Vue.reactive({ query }), reads: string[] = []
   const api = {
     get: async (id: string) => document(id),
     annotations: async (id: string) => [{ id: id + '-note' }],
@@ -29,15 +29,18 @@ function fixture(overrides: Record<string, any> = {}, query: Record<string, stri
   return { props, state, guards, reads, dispose() { unmount.forEach(fn => fn()); scope.stop() } }
 }
 
-test('late annotations cannot replace a different document or start another content load', async () => {
-  const slow = deferred(), f = fixture({ annotations: (id: string) => id === 'A' ? slow.promise : Promise.resolve([{ id: 'B-note' }]) })
+test('重建阅读页后，旧标注响应不进入新资料，也不继续读取旧正文', async () => {
+  const slow = deferred(), old = fixture({ annotations: () => slow.promise })
+  await settle(); old.dispose()
+  const f = fixture({}, {}, 'B')
   try {
-    await settle(); f.props.id = 'B'; await settle()
+    await settle()
     slow.resolve([{ id: 'A-note' }]); await settle()
     assert.equal(f.state.item.value.id, 'B')
     assert.equal(f.state.annotations.value[0].id, 'B-note')
     assert.equal(f.state.position.value.offset, 0.2)
     assert.deepEqual(f.reads, ['B'])
+    assert.deepEqual(old.reads, [])
   } finally { f.dispose() }
 })
 

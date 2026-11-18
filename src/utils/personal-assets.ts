@@ -1,6 +1,26 @@
 import type { PersonalRecord } from "../types/workspace.ts";
 import { daysUntil } from './personal-view.ts'
 
+export function renewalDate(record: PersonalRecord): string {
+  const { expiresOn, cycle } = record.data
+  if (!expiresOn || !['monthly', 'yearly'].includes(String(cycle))) return ''
+  const date = new Date(String(expiresOn) + 'T00:00:00Z'), day = date.getUTCDate()
+  date.setUTCDate(1)
+  date.setUTCMonth(date.getUTCMonth() + (cycle === 'monthly' ? 1 : 12))
+  const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate()
+  date.setUTCDate(Math.min(day, end))
+  return date.toISOString().slice(0, 10)
+}
+
+export function isSnoozed(record: PersonalRecord, today: string): boolean {
+  return typeof record.data.snoozedUntil === 'string' && record.data.snoozedUntil > today
+}
+
+export function isReminding(record: PersonalRecord, remindDays: number, today: string): boolean {
+  const days = daysUntil(record.data.expiresOn, today)
+  return days !== null && days <= remindDays && !isSnoozed(record, today)
+}
+
 export function annualCost(record: PersonalRecord): number | null {
   const {cost,cycle}=record.data
   return typeof cost === 'number' && Number.isFinite(cost) && ['monthly','yearly'].includes(String(cycle)) ? cost * (cycle === 'monthly' ? 12 : 1) : null
@@ -8,7 +28,7 @@ export function annualCost(record: PersonalRecord): number | null {
 
 export function matchesExpiry(record: PersonalRecord, status: string, today: string, remindDays: number) {
   const days=daysUntil(record.data.expiresOn,today)
-  return status === 'overdue' ? days !== null && days < 0 : status === 'soon' ? days !== null && days >= 0 && days <= remindDays : status === 'undated' ? days === null : true
+  return status === 'overdue' ? isReminding(record, remindDays, today) && days! < 0 : status === 'soon' ? isReminding(record, remindDays, today) && days! >= 0 : status === 'undated' ? days === null : true
 }
 
 export function assetAnnualCosts(records: PersonalRecord[]) {

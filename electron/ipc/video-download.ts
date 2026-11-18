@@ -13,7 +13,8 @@ import type {
 } from '../../src/types/video-download.ts'
 import { writeBundleFiles } from '../kinds/video/bundle.ts'
 import { registerVideoContent } from '../kinds/video/registration.ts'
-import { getDb, getSettings } from '../services/database.ts'
+import { getDb } from '../services/database.ts'
+import { getSettings } from '../services/settings-store.ts'
 
 function isMainFrame(event: IpcMainInvokeEvent, getWindow: () => BrowserWindow | null): boolean {
   const win = getWindow()
@@ -29,11 +30,11 @@ export function registerVideoDownloadIpc(
   ipcMain: Pick<Electron.IpcMain, 'handle'>
 ): void {
   const service = createVideoDownloadService({
-    concurrency:()=>videoTransferOptions(getSettings()).concurrency,
+    concurrency:()=>videoTransferOptions(getSettings(getDb())).concurrency,
     getItem: id => getVideoItem(id),
     resolveSources: (videoCode, options) => loadVideoSources(videoCode, undefined, options),
     resolveSeries: (videoCode, options) => loadVideoSeries(videoCode, undefined, options),
-    downloadsDirectory: () => getSettings().video_scan_dirs[0] || app.getPath('videos'),
+    downloadsDirectory: () => getSettings(getDb()).video_scan_dirs[0] || app.getPath('videos'),
     chooseFile: async ({ defaultPath, extension }) => {
       const parent = getWindow()
       if (!parent || parent.isDestroyed()) return null

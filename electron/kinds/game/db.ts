@@ -1,3 +1,4 @@
+import { parseJsonArray } from '../../services/json.ts'
 /**
  * 游戏条目的落库出口。
  *
@@ -135,22 +136,6 @@ export const PLAY_STATUSES: PlayStatus[] = ['unplayed', 'playing', 'completed', 
 /** 从「最该被注意」排到「已经妥了」，侧栏按这个顺序显示 */
 export const SAVE_STATUSES: SaveStatus[] = ['unbacked', 'backed', 'none']
 
-/**
- * 库里的 JSON 列坏掉时退回空数组，而不是让整个列表页炸掉。
- *
- * 这不是防御性编程的洁癖：save_paths / linked_files / tags 都是模型写进去的，
- * 而 0.5 之前手工改过库的用户也真实存在。一行坏数据不该让整个游戏库打不开。
- */
-function jsonArray<T>(raw: unknown): T[] {
-  if (typeof raw !== 'string' || raw.trim() === '') return []
-  try {
-    const v = JSON.parse(raw)
-    return Array.isArray(v) ? (v as T[]) : []
-  } catch {
-    return []
-  }
-}
-
 function rowToGame(row: Row): GameItem {
   return {
     id: String(row.id),
@@ -165,8 +150,10 @@ function rowToGame(row: Row): GameItem {
     summary: String(row.summary ?? ''),
     description: String(row.description ?? ''),
     category: String(row.category ?? ''),
-    tags: jsonArray<string>(row.tags),
+    tags: parseJsonArray<string>(row.tags),
     official_url: String(row.official_url ?? ''),
+    use_count:Number(row.use_count)||0,
+    cover_focus:String(row.cover_focus||''),
     notes: String(row.notes ?? ''),
     is_archived: Number(row.is_archived) === 1,
     cover_path: String(row.cover_path ?? ''),
@@ -186,8 +173,8 @@ function rowToGame(row: Row): GameItem {
     play_status: PLAY_STATUSES.includes(row.play_status) ? row.play_status : 'unplayed',
     total_playtime_sec: Number(row.total_playtime_sec) || 0,
     last_played_at: Number(row.last_played_at) || 0,
-    save_paths: jsonArray<SavePath>(row.save_paths),
-    linked_files: jsonArray<LinkedFile>(row.linked_files)
+    save_paths: parseJsonArray<SavePath>(row.save_paths),
+    linked_files: parseJsonArray<LinkedFile>(row.linked_files)
   }
 }
 
@@ -290,7 +277,7 @@ export function gameCounts(d: SqlDb): GameCounts {
   // 标签在 JSON 数组里，直接在 JS 里聚合。游戏数量比软件还少，够用
   const tagMap = new Map<string, number>()
   for (const r of d.prepare('SELECT tags FROM game WHERE is_archived = 0').all() as Row[]) {
-    for (const t of jsonArray<string>(r.tags)) tagMap.set(t, (tagMap.get(t) ?? 0) + 1)
+    for (const t of parseJsonArray<string>(r.tags)) tagMap.set(t, (tagMap.get(t) ?? 0) + 1)
   }
 
   return {
@@ -319,7 +306,7 @@ const GAME_RESOURCE_COLUMNS = new Set([
   'official_url', 'notes', 'is_archived'
 ])
 const GAME_META_COLUMNS = new Set([
-  'cover_path', 'background_path', 'play_status', 'total_playtime_sec',
+  'cover_focus', 'cover_path', 'background_path', 'play_status', 'total_playtime_sec',
   'last_played_at', 'save_paths', 'linked_files', 'cover_source', 'cover_source_url',
   'cover_status', 'cover_detail', 'identity_name', 'identity_query', 'identity_confirmed'
 ])
@@ -338,6 +325,8 @@ export function updateGame(d: SqlDb, id: string, patch: Partial<GameItem>): Game
     patch = { ...patch, category: patch.category.trim() }
     ensureResourceCategory(d,'game',patch.category!)
   }
+  if(patch.cover_focus!==undefined&&patch.cover_focus!==''&&!/^\d{1,3},\d{1,3}$/.test(patch.cover_focus))throw Error('封面焦点格式不正确')
+  if(patch.cover_focus?.split(',').some(v=>Number(v)>100))throw Error('封面焦点超出图片范围')
   const entries = Object.entries(patch).filter(([, v]) => v !== undefined)
 
   for (const [table, cols, key] of [

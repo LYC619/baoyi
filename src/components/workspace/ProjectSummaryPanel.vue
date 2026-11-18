@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import {ref,computed,watch,onBeforeUnmount} from 'vue'
 import {useRoute,useRouter} from 'vue-router'
 import {Sparkles} from 'lucide-vue-next'
@@ -10,12 +11,12 @@ const props=defineProps<{projectId:string;kind:SummaryKind;groupKey:string}>(),r
 const summary=ref<ProjectSummary>(),session=ref<ProjectSession|null>(null),editing=ref<{title:string;body:string}|null>(null),busy=ref(false),error=ref(''),notice=ref('')
 const running=computed(()=>session.value?.status==='running')
 let revision=0
-async function load(){const run=++revision;try{const rows=await window.baoyi.project.summaries(props.projectId);if(run===revision)summary.value=rows.find(s=>s.kind===props.kind&&s.key===props.groupKey)}catch(e){if(run===revision)error.value=(e as Error).message}}
-async function restoreSession(){const projectId=props.projectId,kind=props.kind,key=props.groupKey;try{await load();const run=revision,rows=await window.baoyi.project.sessions(projectId),latest=rows.find(s=>s.summary?.kind===kind&&s.summary.key===key);if(!latest)return;const saved=await window.baoyi.project.session(latest.id);if(run===revision&&props.projectId===projectId&&props.kind===kind&&props.groupKey===key)session.value=saved}catch(e){if(props.projectId===projectId&&props.kind===kind&&props.groupKey===key)error.value=(e as Error).message}}
+async function load(){const run=++revision;try{const rows=await window.baoyi.project.summaries(props.projectId);if(run===revision)summary.value=rows.find(s=>s.kind===props.kind&&s.key===props.groupKey)}catch(e){if(run===revision)error.value=errorMessage(e)}}
+async function restoreSession(){const projectId=props.projectId,kind=props.kind,key=props.groupKey;try{await load();const run=revision,rows=await window.baoyi.project.sessions(projectId),latest=rows.find(s=>s.summary?.kind===kind&&s.summary.key===key);if(!latest)return;const saved=await window.baoyi.project.session(latest.id);if(run===revision&&props.projectId===projectId&&props.kind===kind&&props.groupKey===key)session.value=saved}catch(e){if(props.projectId===projectId&&props.kind===kind&&props.groupKey===key)error.value=errorMessage(e)}}
 watch(()=>[props.projectId,props.kind,props.groupKey],()=>{summary.value=undefined;session.value=null;error.value='';void restoreSession()},{immediate:true})
 const off=workspace.onChanged(()=>void load()),offSession=window.baoyi.project.onSession(value=>{if(value.id===session.value?.id){session.value=value;if(value.status!=='running')void load()}})
 onBeforeUnmount(()=>{revision++;off();offSession()})
-async function action(fn:()=>Promise<unknown>){if(busy.value)return;busy.value=true;error.value='';try{await fn();await load()}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
+async function action(fn:()=>Promise<unknown>){if(busy.value)return;busy.value=true;error.value='';try{await fn();await load()}catch(e){error.value=errorMessage(e)}finally{busy.value=false}}
 async function generate(){await action(async()=>{session.value=await window.baoyi.project.summarize(props.projectId,props.kind,props.groupKey)})}
 function openSession(){const id=session.value?.id||summary.value?.sessionId;if(id)void router.replace({query:{...route.query,tab:'chat',session:id}})}
 async function save(){if(summary.value&&editing.value)await action(async()=>{await window.baoyi.project.editSummary(props.projectId,summary.value!.id,plain(editing.value!));editing.value=null})}

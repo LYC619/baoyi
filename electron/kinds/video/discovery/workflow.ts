@@ -45,7 +45,7 @@ export function createDiscoveryWorkflow(deps: Dependencies) {
   let pumping: Promise<void> | null = null
   function changed(job: VideoDownloadJob) {
     job.updatedAt = Date.now(); store.save(job)
-    try { deps.onChange?.(structuredClone(job)) } catch { /* UI does not own a transfer. */ }
+    try { deps.onChange?.(structuredClone(job)) } catch (cause) { console.error('[后台通知或记录]', cause) }
   }
   function list(): VideoDownloadJob[] {
     for (const job of store.list()) if (!busy(jobs.get(job.id) || job)) jobs.set(job.id, job)
@@ -163,7 +163,7 @@ export function createDiscoveryWorkflow(deps: Dependencies) {
             posterPath: job.posterPath, posterSource: entry.coverUrl, sourceUrl: entry.pageUrl,
             files: [{ path: item.path, quality: item.sourceLabel, size: item.receivedBytes }] }] })
         job.resourceId = result.resourceId; job.bundleId = result.bundleId; item.registration = 'complete'
-        try { deps.onLibraryChange?.(job.resourceId) } catch { /* Registration is already persisted. */ }
+        try { deps.onLibraryChange?.(job.resourceId) } catch (cause) { console.error('[后台通知或记录]', cause) }
       } else if (!job.register) item.registration = 'skipped'
       job.status = item.metadata === 'failed' ? 'partial' : 'success'
       job.message = item.metadata === 'failed' ? '视频已保存，部分资料待补全' : job.register ? '视频已保存并加入本地库' : '视频已保存'

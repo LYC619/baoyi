@@ -39,8 +39,10 @@ function fixture() {
   const load = createRendererLoader({
     'node:fs': { ...fs, default: fs }, 'node:path': { ...path, default: path },
     electron: { app: { getPath: () => root }, net: {}, shell: {} },
-    '../../services/database.ts': { getDb: () => db, getSettings: () => ({ ai: { enabled: true, api_key: 'synthetic' }, search: {}, tmdb: {} }),
-      listCategories: () => VIDEO_CATEGORIES, tagPool: () => [], saveIdentifyLog: () => { logWrites++; throw new Error('Preview wrote a live identification log') }, postersDir: () => root },
+    '../../services/database.ts': { getDb: () => db, postersDir: () => root },
+    '../../services/settings-store.ts': { getSettings: () => ({ ai: { enabled: true, api_key: 'synthetic' }, search: {}, tmdb: {} }) },
+    '../../services/taxonomy-store.ts': { listCategories: () => VIDEO_CATEGORIES, tagPool: () => [] },
+    '../../services/identify-records.ts': { saveIdentifyLog: () => { logWrites++; throw new Error('Preview wrote a live identification log') } },
     '../../services/searchService.ts': { searchAvailable: () => false }, './tmdb.ts': { tmdbAvailable: () => false },
     './hentai/hanime.ts': { newBudget: () => ({}) }, './mediainfo.ts': { readContainerInfo: async () => null }, './db.ts': videoDb,
     '../../services/agent/loop.ts': { runAgent: async (options: any) => {

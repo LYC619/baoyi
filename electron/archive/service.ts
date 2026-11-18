@@ -16,6 +16,7 @@ import {SkillProfiles} from '../workspace/skill-profiles.ts'
 import * as v from '../workspace/validation.ts'
 import {jsonTextPage} from '../services/agent/context.ts'
 import {projectWorkbenchSnapshot} from '../kinds/project/handoff.ts'
+import {archiveTurnMode,CHAT_SYSTEM} from './turn-policy.ts'
 
 interface Options {
   db:SqlDb;runtime:string;bridge:string;home:string;assets:string;hideHentai:()=>boolean
@@ -35,6 +36,7 @@ export class ArchiveAssistant {
   private controller:AbortController|null=null
   private active:ArchiveRun|null=null
   private disposed=false
+  private chatSessions=new Set<string>()
   private toolCalls=new Set<Promise<string>>()
   private previews=new Map<string,{options:any;stamp:string}>()
   private resultPages=new Map<string,{sessionId:string;tool:string;raw:string;changed?:number}>()
@@ -62,18 +64,22 @@ export class ArchiveAssistant {
     const stored=this.options.db.prepare('SELECT scope FROM archive_runs WHERE session_id=?').get(sessionId) as any
     if(stored&&stored.scope!==this.library.scope)throw new Error('这段对话在当前范围不可用，请新建对话')
     const previous=this.lastRun(sessionId),recover=previous&&['failed','interrupted','starting'].includes(previous.status)?previous:null
+    const existingTask=!!input.sessionId&&!this.chatSessions.has(sessionId)
+    const mode=recover?'archive':archiveTurnMode(text,context.length>0,existingTask)
+    if(mode==='archive')this.chatSessions.delete(sessionId)
+    else if(!existingTask)this.chatSessions.add(sessionId)
     this.controller=new AbortController()
     // Until Hermes is ready, preserve both requests in the durable fallback.
     const run:ArchiveRun={sessionId,status:'starting',text:recover?recover.text+'\n\n用户后续要求：'+text:text,error:'',startedAt,updatedAt:startedAt};this.active=run;this.save(run)
-    void this.perform(run,config,context,text,recover,this.controller);return {...run}
+    void this.perform(run,config,context,text,recover,this.controller,mode);return {...run}
   }
-  private async perform(run:ArchiveRun,config:AIConfig,context:any[],text:string,previous:ArchiveRun|null,controller:AbortController){
+  private async perform(run:ArchiveRun,config:AIConfig,context:any[],text:string,previous:ArchiveRun|null,controller:AbortController,mode:'chat'|'archive'){
     try{
       await this.runtime.start();controller.signal.throwIfAborted()
       if(previous)await this.runtime.request('ensure_session',{id:previous.sessionId,title:previous.text.slice(0,45),text:previous.text,timestamp:previous.startedAt/1000})
       controller.signal.throwIfAborted()
       run.text=text;run.status='running';run.updatedAt=Date.now();this.save(run)
-      const result=await this.runtime.run({sessionId:run.sessionId,text,config,tools:ARCHIVE_TOOLS,system:ARCHIVE_SYSTEM+(context.length?'\n本次用户附带的资源（按需查详情）：'+JSON.stringify(context):'')},{signal:controller.signal})
+      const result=await this.runtime.run({sessionId:run.sessionId,text,config,mode,tools:mode==='chat'?[]:ARCHIVE_TOOLS,system:mode==='chat'?CHAT_SYSTEM:ARCHIVE_SYSTEM+(context.length?'\n本次用户附带的资源（按需查详情）：'+JSON.stringify(context):'')},{signal:controller.signal})
       await Promise.allSettled(this.toolCalls)
       if(!this.current())return
       const original=run.sessionId
@@ -142,7 +148,7 @@ export class ArchiveAssistant {
   }
   private execute(sessionId:string,name:string,args:Record<string,any>):Promise<string>{
     const task=this.performTool(sessionId,name,args);this.toolCalls.add(task)
-    void task.finally(()=>this.toolCalls.delete(task)).catch(()=>{})
+    void task.finally(()=>this.toolCalls.delete(task)).catch(() => { /* 原始 Promise 的错误已交给调用方；这里只释放队列或监听。 */ })
     return task
   }
   private resultPage(sessionId:string,cursor:{token:string;offset:number}):string{

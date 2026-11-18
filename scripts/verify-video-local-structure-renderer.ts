@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createWorkflowRendererFixture } from './verify-video-workflow-renderer.ts'
+import { createWorkflowRendererFixture } from './helpers/video-renderer.ts'
 
 const extension = String.raw`
 work.name_zh = '影像课堂 0-4'; work.category = '动画'; work.path = 'D:/Fixture/影像课堂 4'

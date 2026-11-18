@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
+import { useToast } from '@/composables/useToast'
+import { errorMessage } from '@/utils'
+import {computed,nextTick,onBeforeUnmount,onMounted,ref,watch,type Directive} from 'vue'
 import {useComicIngest} from '@/composables/useComicIngest'
 import type {ComicBrowseQuery,ComicBrowseWork,ComicProxy} from '@/types/comic-ingest'
 import ComicIngestDialog from './ComicIngestDialog.vue'
@@ -8,19 +10,41 @@ const mode=ref<'ranking'|'search'|'direct'>('ranking'),period=ref<NonNullable<Co
 const ready=ref(false)
 let generation=0,disposed=false
 const proxy=computed<ComicProxy>(()=>proxyMode.value==='custom'?{mode:'custom',url:custom.value}:{mode:proxyMode.value})
-async function loadCovers(own:number){let index=0;await Promise.all(Array.from({length:3},async()=>{while(own===generation&&!disposed&&props.active&&index<results.value.length){const item=results.value[index++];try{const cover=await window.baoyi.comic.cover(item.id,proxy.value);if(own===generation&&cover)covers.value[item.id]=cover}catch{}}}))}
-async function browse(at=1){
-  const own=++generation;busy.value=true;error.value='';results.value=[];covers.value={};pages.value=0
-  try{await window.baoyi.comic.cancelBrowse();if(own!==generation||disposed)return;const response=await window.baoyi.comic.browse({mode:mode.value==='search'?'search':'ranking',page:at,period:period.value,scope:scope.value,query:query.value.trim()},proxy.value);if(own!==generation||disposed||!props.active)return;results.value=response.items;page.value=response.page;pages.value=response.pages;void loadCovers(own)}catch(cause){if(own===generation&&!disposed)error.value=(cause as Error).message}finally{if(own===generation)busy.value=false}
+// Observe the cards inside their scroll container; only prefetch a nearby row.
+const visibleCovers=new Set<string>(),attempted=new Set<string>(),coverQueue=new Set<string>()
+let loadingCovers=0
+const observer=new IntersectionObserver(entries=>{
+  for(const entry of entries){const id=(entry.target as HTMLElement).dataset.coverId!;if(entry.isIntersecting)visibleCovers.add(id);else {visibleCovers.delete(id);coverQueue.delete(id)}}
+  queueVisibleCovers()
+},{rootMargin:'180px 0px'})
+const vCover:Directive<HTMLElement,string>={
+  mounted(element,{value}){element.dataset.coverId=value;observer.observe(element)},
+  unmounted(element){const id=element.dataset.coverId!;visibleCovers.delete(id);coverQueue.delete(id);observer.unobserve(element)}
 }
-function open(id:string){generation++;busy.value=false;void window.baoyi.comic.cancelBrowse();detail.value=id;parsed.value=true}
-async function back(){parsed.value=false;detail.value='';ingest.request.value='';ingest.recovery.value=null;await nextBrowse()}
-function switchMode(next:typeof mode.value){generation++;busy.value=false;void window.baoyi.comic.cancelBrowse();mode.value=next;results.value=[];covers.value={};pages.value=0;page.value=1;error.value='';if(next==='ranking')void browse()}
-async function nextBrowse(){if(ready.value&&props.active&&mode.value!=='direct'&&(!results.value.length||mode.value==='ranking'))await browse(page.value)}
+function queueVisibleCovers(){
+  if(!props.active||parsed.value||disposed)return
+  for(const id of visibleCovers)if(!covers.value[id]&&!attempted.has(id))coverQueue.add(id)
+  pumpCovers()
+}
+function pumpCovers(){
+  while(loadingCovers<3&&coverQueue.size&&props.active&&!parsed.value&&!disposed){
+    const id=coverQueue.values().next().value!,own=generation;coverQueue.delete(id);attempted.add(id);loadingCovers++
+    void window.baoyi.comic.cover(id,proxy.value).then(cover=>{if(own===generation&&!disposed&&props.active&&cover)covers.value[id]=cover}).catch(cause => useToast().error(errorMessage(cause))).finally(()=>{loadingCovers--;pumpCovers()})
+  }
+}
+function cancelCovers(){generation++;coverQueue.clear();attempted.clear();busy.value=false;void window.baoyi.comic.cancelBrowse()}
+async function browse(at=1){
+  cancelCovers();const own=generation;busy.value=true;error.value='';results.value=[];covers.value={};pages.value=0
+  try{await window.baoyi.comic.cancelBrowse();if(own!==generation||disposed)return;const response=await window.baoyi.comic.browse({mode:mode.value==='search'?'search':'ranking',page:at,period:period.value,scope:scope.value,query:query.value.trim()},proxy.value);if(own!==generation||disposed||!props.active)return;results.value=response.items;page.value=response.page;pages.value=response.pages;await nextTick();queueVisibleCovers()}catch(cause){if(own===generation&&!disposed)error.value=errorMessage(cause)}finally{if(own===generation)busy.value=false}
+}
+function open(id:string){cancelCovers();detail.value=id;parsed.value=true}
+async function back(){parsed.value=false;detail.value='';ingest.request.value='';ingest.recovery.value=null;await nextBrowse();await nextTick();queueVisibleCovers()}
+function switchMode(next:typeof mode.value){cancelCovers();mode.value=next;results.value=[];covers.value={};pages.value=0;page.value=1;error.value='';if(next==='ranking')void browse()}
+async function nextBrowse(){if(ready.value&&props.active&&mode.value!=='direct'&&!results.value.length)await browse(page.value)}
 watch([ingest.request,ingest.recovery],([value,recovery])=>{if(value||recovery){detail.value=value;parsed.value=true}})
-watch(()=>props.active,active=>{if(!active){generation++;busy.value=false;void window.baoyi.comic.cancelBrowse()}else if(!parsed.value&&!results.value.length)void nextBrowse()})
-onMounted(async()=>{try{const defaults=await window.baoyi.comic.defaults();proxyMode.value=defaults.proxy.mode;if(defaults.proxy.mode==='custom')custom.value=defaults.proxy.url}catch{}ready.value=true;if(!disposed&&!parsed.value)await nextBrowse()})
-onBeforeUnmount(()=>{disposed=true;generation++;void window.baoyi.comic.cancelBrowse()})
+watch(()=>props.active,async active=>{if(!active)cancelCovers();else {if(!parsed.value&&!results.value.length)await nextBrowse();await nextTick();queueVisibleCovers()}})
+onMounted(async()=>{try{const defaults=await window.baoyi.comic.defaults();proxyMode.value=defaults.proxy.mode;if(defaults.proxy.mode==='custom')custom.value=defaults.proxy.url}catch (cause) { useToast().error(errorMessage(cause)) }ready.value=true;if(!disposed&&!parsed.value)await nextBrowse()})
+onBeforeUnmount(()=>{disposed=true;cancelCovers();observer.disconnect()})
 </script>
 <template><section class="jm-browser">
   <p v-if="!ready" role="status">正在载入连接设置…</p><ComicIngestDialog v-else-if="parsed" :key="detail+':'+(ingest.recovery.value?.id||'')" embedded :active="active" :request="detail" :initial-proxy="proxy" @close="back" @tasks="emit('tasks')"/>
@@ -31,7 +55,7 @@ onBeforeUnmount(()=>{disposed=true;generation++;void window.baoyi.comic.cancelBr
     <form v-else-if="mode==='direct'" class="jm-search" @submit.prevent="open(query)"><input v-model="query" aria-label="JM 编号或链接" placeholder="作品编号或链接"/><button class="im-button im-primary" :disabled="!query.trim()">打开作品</button></form>
     <label v-else class="jm-period">榜单周期<select v-model="period" aria-label="JM 榜单周期" @change="browse()"><option value="day">日榜</option><option value="week">周榜</option><option value="month">月榜</option><option value="all">总榜</option></select></label>
     <p v-if="busy" role="status">正在连接 JM…</p><p v-if="error" class="im-error" role="alert">{{error}} <button class="im-button" @click="browse(page)">重试</button></p>
-    <template v-if="mode!=='direct'"><div class="jm-results"><button v-for="work in results" :key="work.id" class="jm-work" @click="open(work.id)"><div class="jm-cover"><img v-if="covers[work.id]" :src="covers[work.id]" :alt="work.title+'封面'"/><span v-else>{{work.title.charAt(0)}}</span></div><strong>{{work.title}}</strong><small>JM {{work.id}}</small><span>{{work.tags.slice(0,3).join(' · ')}}</span></button></div><p v-if="!busy&&!error&&!results.length" class="jm-empty">{{mode==='search'?'输入关键词后搜索作品。':'当前榜单暂无作品。'}}</p><footer v-if="pages"><button class="im-button" :disabled="busy||page<=1" @click="browse(page-1)">上一页</button><span>{{page}} / {{pages}}</span><button class="im-button" :disabled="busy||page>=pages" @click="browse(page+1)">下一页</button></footer></template>
+    <template v-if="mode!=='direct'"><div class="jm-results"><button v-for="work in results" :key="work.id" v-cover="work.id" class="jm-work" @click="open(work.id)"><div class="jm-cover"><img v-if="covers[work.id]" :src="covers[work.id]" decoding="async" :alt="work.title+'封面'"/><span v-else>{{work.title.charAt(0)}}</span></div><strong>{{work.title}}</strong><small>JM {{work.id}}</small><span>{{work.tags.slice(0,3).join(' · ')}}</span></button></div><p v-if="!busy&&!error&&!results.length" class="jm-empty">{{mode==='search'?'输入关键词后搜索作品。':'当前榜单暂无作品。'}}</p><footer v-if="pages"><button class="im-button" :disabled="busy||page<=1" @click="browse(page-1)">上一页</button><span>{{page}} / {{pages}}</span><button class="im-button" :disabled="busy||page>=pages" @click="browse(page+1)">下一页</button></footer></template>
   </template>
 </section></template>
 <style scoped>.jm-connection{font-size:12px;color:var(--text-sub);margin-bottom:16px}.jm-connection summary{cursor:pointer}.jm-connection label{display:inline-flex;gap:10px;align-items:center;margin:12px 16px 0 0}.source-tabs,.jm-search{display:flex;gap:10px;margin-bottom:18px;align-items:center}.jm-search input{flex:1;min-width:0}.jm-period{display:flex;gap:12px;align-items:center;margin-bottom:20px;font-size:12px}.jm-browser input,.jm-browser select{padding:9px;border:1px solid var(--divider);border-radius:6px;color:var(--text-main);background:var(--bg-card)}.jm-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:22px 18px}.jm-work{display:flex;flex-direction:column;gap:6px;text-align:left;min-width:0}.jm-cover{width:100%;aspect-ratio:3/4;display:grid;place-items:center;background:var(--hover-surface);border-radius:7px;overflow:hidden;font-size:30px;color:var(--text-sub)}.jm-cover img{width:100%;height:100%;object-fit:cover}.jm-work strong{font-size:13px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.jm-work small,.jm-work>span{font-size:11px;color:var(--text-sub)}.jm-browser footer{display:flex;justify-content:center;align-items:center;gap:18px;margin-top:24px;font-size:12px}.jm-empty{padding:35px;color:var(--text-sub);text-align:center;font-size:13px}</style>

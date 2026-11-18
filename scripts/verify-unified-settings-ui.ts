@@ -31,12 +31,47 @@ try {
     await navigate(route)
     await page.locator('.settings').waitFor({ state: 'hidden' })
     assert.equal(await page.getByRole('button', { name: '设置', exact: true }).count(), 1)
-    await page.locator('.titlebar-settings').click()
+    await page.getByRole('button', { name: '设置', exact: true }).click()
     await page.locator('.settings').waitFor()
     await page.waitForFunction(module => location.hash.includes('module=' + module), module)
     assert.equal(await page.locator('.scope-nav button').count(), 8)
+    const tabs = await page.locator('.settings .nav__item').allTextContents()
+    for (const label of tabs) {
+      await page.locator('.settings .nav').getByRole('button', { name: label.trim(), exact: true }).click()
+      await page.waitForFunction(label => document.querySelector('.settings .nav__item.on')?.textContent?.trim() === label, label.trim())
+      await page.waitForFunction(() => !document.querySelector('.page-enter-active,.page-leave-active'))
+      if (['software', 'game', 'video'].includes(module)) {
+        const heading = ({ '扫描与识别': '扫描目录', '目录整理': module === 'video' ? '影视整理目录' : '整理目标目录', '分类': '分类', '标签': module === 'video' ? '影视标签' : '标签', '存档与备份': '存档备份目录', '影视刮削': 'TMDB 刮削（影视）', '里番区基础设置': '隐藏里番', '网络与出站代理': '通用在线来源', '下载与缓存': '视频更新检查' } as Record<string, string>)[label.trim()]
+        if (heading) await page.getByRole('heading', { name: heading, exact: true }).waitFor()
+      }
+      assert.ok((await page.locator('.settings .body').innerText()).trim(), module + ': ' + label)
+    }
   }
   checks.push('one-titlebar-entry-and-current-module-default-for-seven-modules')
+  await navigate('/settings?scope=global&module=software&tab=ai')
+  await page.getByRole('heading', { name: 'AI 模型配置', exact: true }).waitFor()
+  await page.locator('.profiles__name').fill('local-fixture-profile')
+  await page.getByTitle('把当前填的存成一套', { exact: true }).click()
+  const modelInput = page.locator('input[list="ai-models"]')
+  await modelInput.fill('saved-fixture-model')
+  await page.getByRole('button', { name: '保存配置', exact: true }).click()
+  await page.waitForFunction(async () => (await window.baoyi.settings.getAll()).ai.model === 'saved-fixture-model')
+  await modelInput.fill('unsaved-fixture-model')
+  await page.locator('.dirty').filter({ hasText: '有未保存的改动' }).waitFor()
+  for (const label of ['外观', '联网搜索', '数据管理', '关于', 'AI 配置']) {
+    await page.locator('.settings .nav').getByRole('button', { name: label, exact: true }).click()
+    assert.ok((await page.locator('.settings .body').innerText()).trim())
+  }
+  assert.equal(await modelInput.inputValue(), 'unsaved-fixture-model')
+  await page.locator('.dirty').filter({ hasText: '有未保存的改动' }).waitFor()
+  await page.locator('.scope-nav').getByRole('button', { name: '图片', exact: true }).click()
+  await page.locator('.settings .head__module').filter({ hasText: '图片' }).waitFor()
+  await navigate('/settings?scope=global&module=software&tab=ai')
+  await modelInput.waitFor(); assert.equal(await modelInput.inputValue(), 'unsaved-fixture-model')
+  await navigate('/'); await page.locator('.settings').waitFor({ state: 'hidden' })
+  await navigate('/settings?scope=global&module=software&tab=ai')
+  await modelInput.waitFor(); assert.equal(await modelInput.inputValue(), 'saved-fixture-model')
+  checks.push('all-visible-tabs-save-reopen-and-unsaved-ai-draft')
   for (const module of ['software', 'game', 'video']) {
     await navigate('/settings?scope=module&module=' + module + '&tab=categories')
     await page.locator('.taxonomy-fields').waitFor()
@@ -101,6 +136,7 @@ try {
   await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify({ status: 'passed', executable, profile, checks, errors }, null, 2))
   console.log('PASS ' + checks.join(', '))
 } catch (error) {
+  await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify({ status: 'failed', profile, checks, errors, failure: String(error), route: await page.evaluate(() => location.hash) }, null, 2))
   await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {})
   throw error
 } finally { await app.close().catch(() => {}) }

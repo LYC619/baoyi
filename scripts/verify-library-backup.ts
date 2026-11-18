@@ -25,7 +25,7 @@ const expectedTables = [
   'workspace_sessions','workspace_changes','skill_card','skill_metric','skill_record','skill_proposal',
   'project_summaries','project_launch_profiles',
   'project_meta', 'project_sessions', 'document_meta', 'document_annotations', 'project_context', 'project_event_generation', 'project_automation', 'project_events', 'personal_records', 'resource_links', 'image_groups', 'image_meta', 'image_chapters', 'image_pages', 'image_progress', 'image_reader_state', 'image_bookmarks', 'image_download_jobs',
-  'resource', 'software_meta', 'game_meta', 'video_meta', 'episode', 'video_sources',
+  'resource', 'software_meta', 'game_meta', 'game_notes', 'video_meta', 'episode', 'video_sources',
   'video_directories', 'video_assets', 'video_episode_assets', 'video_download_jobs',
   'video_discovery_sources', 'video_discovery_marks',
   'task_records', 'video_organize_journal', 'video_scan_state', 'video_scan_ignores', 'video_detached_owners', 'categories', 'tags', 'organize_plans',

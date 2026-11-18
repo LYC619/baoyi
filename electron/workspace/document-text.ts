@@ -9,6 +9,12 @@ import {extractDocument} from './document-extraction.ts'
 export type DocumentReadCursor={kind:'text';offset:number;line:number;version:string}|{kind:'pdf';page:number;start:number;version:string}
 export interface DocumentTextPage {text:string;source:{documentId:string;name:string;format:string;page?:number;start?:number;startLine?:number};next:DocumentReadCursor|null;totalPages?:number}
 export async function readDocumentText(db:SqlDb,id:string,options:{page?:number;start?:number;line?:number;cursor?:DocumentReadCursor}={},assets=path.resolve('dist/pdfjs')):Promise<DocumentTextPage> {
+  try{return await readAvailableDocumentText(db,id,options,assets)}catch(error){
+    if((error as NodeJS.ErrnoException).code==='ENOENT')throw new Error('未在本地找到该文件，请核对路径，或在资料详情中重新定位')
+    throw error
+  }
+}
+async function readAvailableDocumentText(db:SqlDb,id:string,options:{page?:number;start?:number;line?:number;cursor?:DocumentReadCursor},assets:string):Promise<DocumentTextPage> {
   const docs=new DocumentLibrary(db),item=docs.require(id),stat=await docs.inspect(item.path)
   const source={documentId:id,name:item.name,format:item.format}
   if(['md','markdown','txt'].includes(item.format)){

@@ -12,6 +12,7 @@
  */
 
 import path from 'node:path'
+import {linkExtras} from './workspace.ts'
 import type { LinkedFile } from '../../../src/types'
 
 /** 闭集，库里存的是字符串，读回来要按这个名单兜一次 */
@@ -80,9 +81,14 @@ export function addLinks(list: LinkedFile[], incoming: LinkedFile[]): LinkedFile
     if (!item.path.trim()) continue
     if (hasLink(out, item.path)) continue
     out.push({
+      ...(item.project ? {project:item.project} : {}),
+      ...(item.catalog ? {catalog:item.catalog} : {}),
+      ...linkExtras(item),
       path: path.resolve(item.path),
       label: (item.label || '').trim().slice(0, MAX_LABEL) || path.basename(item.path),
-      type: LINK_TYPES.includes(item.type) ? item.type : 'other'
+      type: LINK_TYPES.includes(item.type) ? item.type : 'other',
+      ...(['launcher','usage','report','source'].includes(item.role || '') ? { role: item.role } : {}),
+      ...(typeof item.note === 'string' && item.note.trim() ? { note: item.note.trim().slice(0,4000) } : {})
     })
   }
   return out

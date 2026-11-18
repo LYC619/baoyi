@@ -4,18 +4,27 @@ import type { SqlDb } from '../../services/schema.ts'
 import { isAudioFile } from '../../../src/utils/audio.ts'
 import { getVideo, listEpisodes } from './db.ts'
 import { readContainerInfo } from './mediainfo.ts'
+import { readTrackLyrics } from './lyrics.ts'
 
 export function audioFile(db:SqlDb,resourceId:string,episodeId=''):string {
   const item=getVideo(db,resourceId)
   if(!item || item.media_kind!=='audio')throw new Error('音频不可用')
+  const privacy=db.prepare("SELECT value FROM settings WHERE key='hide_hentai'").get() as {value:string}|undefined
+  if(item.category==='里番' && privacy?.value==='true')throw new Error('音频不可用')
   const file=episodeId?listEpisodes(db,resourceId).find(e=>e.id===episodeId)?.path:item.parts[0]?.path||item.path
   if(!file || !isAudioFile(file))throw new Error('曲目不可用')
   return file
+}
+export async function audioLyrics(db:SqlDb,id:string,episode=''){
+  const file=audioFile(db,id,episode)
+  try{if(!fs.statSync(file).isFile())throw Error()}catch{throw Error('曲目文件不可用，无法读取歌词')}
+  return readTrackLyrics(db,id,episode,file)
 }
 export async function audioResponse(db:SqlDb,request:Request):Promise<Response> {
   try {
     const url=new URL(request.url),[id,episode]=url.pathname.slice(1).split('/')
     const file=audioFile(db,id,episode),size=fs.statSync(file).size
+    if(url.searchParams.has('lyrics'))return Response.json(await audioLyrics(db,id,episode||''),{headers:{'Cache-Control':'no-store'}})
     if(url.searchParams.has('info'))return Response.json(await readContainerInfo(file))
     const types:Record<string,string>={mp3:'audio/mpeg',m4a:'audio/mp4',flac:'audio/flac',wav:'audio/wav',ogg:'audio/ogg',opus:'audio/ogg',aac:'audio/aac'}
     const headers:Record<string,string>={'Content-Type':types[file.split('.').pop()!.toLowerCase()]||'application/octet-stream','Accept-Ranges':'bytes','Cache-Control':'no-store'}

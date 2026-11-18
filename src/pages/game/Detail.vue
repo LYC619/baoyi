@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { latestOnly, STALE } from '@/composables/latestOnly'
 /**
  * 游戏详情页。
  *
@@ -8,33 +9,40 @@
  * 识别时模型漏了或者认错了，用户得有地方纠正，而不是等备份备了个空目录。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter, useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
+import {isWindowsGameEntry} from '@/utils/game-entry'
+import GameProjectRecord from '@/components/game/GameProjectRecord.vue'
+import {projectOf} from '@/utils/game-project'
+import GameCover from '@/components/game/GameCover.vue'
+import GameNotes from '@/components/game/GameNotes.vue'
+import GameTools from '@/components/game/GameTools.vue'
+import GameDocs from '@/components/game/GameDocs.vue'
+import Sidebar from '@/components/game/Sidebar.vue'
+import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
+import type {GameNote,GameLaunchOptions} from '@/types/game-workspace'
+import {BookOpen,Wrench,FileText,StickyNote} from 'lucide-vue-next'
 import DetailTabs from '@/components/ui/DetailTabs.vue'
+import GameResources from '@/components/game/GameResources.vue'
 import {
-  Archive,
-  ArchiveRestore,
   ArrowLeft,
   BadgeCheck,
   ExternalLink,
-  FilePlus,
   FolderOpen,
   FolderPlus,
   HardDriveDownload,
   History,
   Image,
   ImageOff,
-  Link2,
   Loader2,
   Play,
   RotateCcw,
   Save,
-  Search,
   Trash2,
   Unlink,
   X
 } from 'lucide-vue-next'
 import EditableField from '@/components/ui/EditableField.vue'
-import TagBadge from '@/components/ui/TagBadge.vue'
+import { useResourceDetail } from '@/composables/useResourceDetail'
 import { useToast } from '@/composables/useToast'
 import { useTaskCenter } from '@/composables/useTaskCenter'
 import { PLAY_STATUS_LABEL, useGameStore } from '@/stores/game'
@@ -43,8 +51,6 @@ import type {
   CoverCandidate,
   GameCoverDiagnostic,
   GameItem,
-  LinkedFile,
-  PlayStatus,
   SaveBackup,
   SavePath
 } from '@/types'
@@ -56,25 +62,43 @@ import {
   formatDateTime,
   formatPlaytime,
   formatRelative,
-  gameTitle,
-  LINK_TYPE_LABEL
+  gameTitle
 } from '@/utils'
 
 const props = defineProps<{ id: string }>()
+const item = ref<GameItem | null>(null)
 
 const router = useRouter()
 const route = useRoute()
-const detailTabs = [{"id":"overview","label":"简介"},{"id":"saves","label":"存档与备份"},{"id":"files","label":"文件与封面"},{"id":"notes","label":"笔记"}]
-const activeTab = ref(detailTabs.some(tab=>tab.id===route.query.tab) ? String(route.query.tab) : 'overview')
-watch(activeTab, tab=>{ void router.replace({query:{...route.query,tab}}) })
-watch(()=>route.query.tab,tab=>{activeTab.value=detailTabs.some(t=>t.id===tab)?String(tab):'overview'})
-watch(()=>props.id,()=>{activeTab.value='overview'})
+const tabIds=['overview','trainer','guide','saves','files','notes']
+const activeTab=ref(tabIds.includes(String(route.query.tab))?String(route.query.tab):'overview')
+const scrollRoot=ref<HTMLElement>(),tabRoot=ref<HTMLElement>(),scrolled=ref(false),notesPanel=ref<InstanceType<typeof GameNotes>>()
+const gameNotes=ref<GameNote[]>([]),categories=ref<string[]>([])
+const trainers=computed(()=>item.value?.linked_files.filter(f=>f.type==='trainer')||[])
+const guides=computed(()=>item.value?.linked_files.filter(f=>f.type==='guide')||[])
+const report = computed(()=>guides.value.find(f=>f.project)||guides.value.find(f=>f.role==='report'))
+const reportPath=ref(''),restoreTargets=ref<Record<string,string>>({})
+const projectSections=computed(()=>(report.value?.note||'').split('\n\n').filter(Boolean))
+function readReport(){reportPath.value=report.value?.path||'';activeTab.value='guide'}
+const entries=computed(()=>item.value?[{path:item.value.path,label:item.value.file_name},...item.value.linked_files.filter(f=>f.role==='launcher'&&f.type!=='trainer'&&f.path!==item.value?.path)]:[])
+const detailTabs=computed(()=>[{id:'overview',label:'简介',icon:FileText},{id:'trainer',label:'工具与修改器',icon:Wrench,count:trainers.value.length},{id:'guide',label:'攻略与说明',icon:BookOpen,count:guides.value.length},{id:'saves',label:'存档与备份',icon:Save,dot:!!item.value?.save_paths.length&&!backups.value.length},{id:'files',label:'文件与封面',icon:Image,count:entries.value.length},{id:'notes',label:'笔记',icon:StickyNote,count:gameNotes.value.length}])
+async function leaveNotes(){return await notesPanel.value?.flush()??true}
+onBeforeRouteLeave(leaveNotes);onBeforeRouteUpdate(leaveNotes)
+watch(activeTab,(tab)=>{if(scrollRoot.value&&tabRoot.value){const top=tabRoot.value.offsetTop-52;if(scrollRoot.value.scrollTop>top)scrollRoot.value.scrollTop=top}void router.replace({query:{...route.query,tab}})})
+watch(()=>route.query.tab,tab=>{activeTab.value=tabIds.includes(String(tab))?String(tab):'overview'})
+const heroWide=computed(()=>!item.value?.cover_path&&!!item.value?.background_path)
+const heroBackground=computed(()=>item.value?coverUrl(item.value.background_path||item.value.cover_path,item.value.updated_at):'')
+const coverInfo=ref<Record<string,string>>({}),coverBroken=ref(false)
+watch(()=>[item.value?.id,item.value?.cover_path,item.value?.background_path],()=>{coverBroken.value=false})
+function focusCover(event:MouseEvent){const r=(event.currentTarget as HTMLElement).getBoundingClientRect();void save({cover_focus:Math.round(100*(event.clientX-r.left)/r.width)+','+Math.round(100*(event.clientY-r.top)/r.height)})}
+async function defaultEntry(target:string){try{const result=await window.baoyi.game.defaultEntry(props.id,target);if(result)resourcesUpdated(result)}catch(e){error(errorMessage(e))}}
+async function recheck(){await store.reload();const result=await window.baoyi.game.get(props.id);if(result)item.value=result}
 const store = useGameStore()
 const settings = useSettingsStore()
 const { success, error, toast } = useToast()
 const tasks = useTaskCenter()
 
-const item = ref<GameItem | null>(null)
+
 const loading = ref(true)
 const relocating = ref(false)
 async function relocate(mode: 'directory' | 'file' = 'directory') {
@@ -83,62 +107,41 @@ async function relocate(mode: 'directory' | 'file' = 'directory') {
   catch (cause) {error(errorMessage(cause))}
   finally {relocating.value = false}
 }
-let loadSequence = 0
-let coverSearchSequence = 0
-let coverChoiceSequence = 0
+const readGame = latestOnly(() => window.baoyi.game.get(props.id))
+type CoverResult = { ok: boolean; message: string; item: GameItem | null }
+const chooseCover = latestOnly((action: () => Promise<CoverResult | null>) => action())
+const findCovers = latestOnly((action: () => ReturnType<typeof window.baoyi.game.searchCovers> | Promise<null>) => action())
 
-const STATUSES: PlayStatus[] = ['unplayed', 'playing', 'completed', 'shelved']
 
 async function load(): Promise<void> {
-  const sequence = ++loadSequence
-  const selectedId = props.id
   closeCoverHits()
-  coverChoiceSequence++
+  void chooseCover(async () => null)
   coverPicking.value = ''
   loading.value = true
   try {
-    const result = await window.baoyi.game.get(selectedId)
-    if (sequence === loadSequence) item.value = result
+    const result = await readGame()
+    if (result === STALE) return
+    item.value = result
   } catch (err) {
-    if (sequence !== loadSequence) return
     error(`读取游戏失败：${errorMessage(err)}`)
     item.value = null
-  } finally {
-    if (sequence === loadSequence) loading.value = false
   }
+  loading.value = false
 }
 
 async function loadAll(): Promise<void> {
   await load()
   await loadBackups()
+  try {
+    gameNotes.value = await window.baoyi.game.notes.list(props.id)
+    categories.value = (await window.baoyi.categories.list('game')).map(c => c.name)
+  } catch (e) { error(errorMessage(e)) }
+  await refreshRunning()
 }
 
-onMounted(loadAll)
-watch(() => props.id, loadAll)
+onMounted(()=>{void loadAll();void store.refreshCounts()})
 
 const title = computed(() => (item.value ? gameTitle(item.value) : ''))
-const initial = computed(() => title.value.trim().charAt(0).toUpperCase() || '?')
-
-const hue = computed(() => {
-  let h = 0
-  for (const ch of title.value) h = (h * 31 + ch.charCodeAt(0)) % 360
-  return h
-})
-
-/* ---------------------------- 封面 ---------------------------- */
-
-/** 同 GameCard：走 baoyi://cover/，updated_at 当版本号破缓存 */
-const cover = computed(() =>
-  item.value ? coverUrl(item.value.cover_path, item.value.updated_at) : ''
-)
-const brokenCover = ref(false)
-const landscapeCover = ref(false)
-watch(cover, () => { brokenCover.value = false; landscapeCover.value = false })
-function coverLoaded(event: Event): void {
-  const image = event.target as HTMLImageElement
-  landscapeCover.value = image.naturalWidth > image.naturalHeight
-}
-
 /**
  * 换封面。主进程把图拷进 userData 再落库，所以这里拿回来的条目是最终形态，
  * 不用自己再 load 一次。
@@ -146,43 +149,41 @@ function coverLoaded(event: Event): void {
  * 和「搜封面」并列：搜不到、连不上、或者搜出来的都不满意时，这条路一定走得通。
  * 所以搜索失败的提示里总是指回这里，不让用户卡在一个只会失败的按钮上。
  */
+async function background(clear=false){const id=props.id;try{const r=await(clear?window.baoyi.game.clearBackground:window.baoyi.game.pickBackground)(id);if(r)resourcesUpdated(r)}catch(e){error(errorMessage(e))}}
+
 async function pickCover(): Promise<void> {
   if (!item.value) return
-  const selectedId = item.value.id
-  const sequence = ++coverChoiceSequence
   closeCoverHits()
   coverPicking.value = ''
   try {
-    const r = await window.baoyi.game.pickCover(selectedId)
-    if (r?.ok) void store.load()
-    if (!r || item.value?.id !== selectedId || sequence !== coverChoiceSequence) return
+    const r = await chooseCover(async () => {
+      const result = await window.baoyi.game.pickCover(props.id)
+      if (result?.ok) void store.load()
+      return result
+    })
+    if (r === STALE || !r) return
     if (!r.ok) { coverMiss.value = r.message; error(r.message); return }
     if (r.item) item.value = r.item
     success(r.message)
   } catch (err) {
-    if (sequence === coverChoiceSequence && item.value?.id === selectedId) {
-      coverMiss.value = `更换封面失败：${errorMessage(err)}`
-      error(coverMiss.value)
-    }
+    coverMiss.value = `更换封面失败：${errorMessage(err)}`
+    error(coverMiss.value)
   }
 }
 
 async function clearCover(): Promise<void> {
   if (!item.value?.cover_path) return
-  if (!window.confirm('撤掉这张封面？\n\n会退回首字占位。你原来那张图不受影响，删掉的是抱一自己存的那份拷贝。')) {
-    return
-  }
-  const selectedId = item.value.id
-  const sequence = ++coverChoiceSequence
+  if (!window.confirm('撤掉这张封面？\n\n会退回自动构图或程序化封面。你原来那张图不受影响，删掉的是抱一自己存的那份拷贝。')) return
   closeCoverHits()
   coverPicking.value = ''
   try {
-    const updated = await window.baoyi.game.clearCover(selectedId)
-    if (updated && item.value?.id === selectedId && sequence === coverChoiceSequence) item.value = updated
-    void store.load()
-  } catch (err) {
-    if (sequence === coverChoiceSequence) error(`移除封面失败：${errorMessage(err)}`)
-  }
+    const result = await chooseCover(async () => {
+      const updated = await window.baoyi.game.clearCover(props.id)
+      void store.load()
+      return { item: updated, ok: true, message: '' }
+    })
+    if (result !== STALE && result?.item) item.value = result.item
+  } catch (err) { error(`移除封面失败：${errorMessage(err)}`) }
 }
 
 /* ---------------------------- 搜封面 ---------------------------- */
@@ -201,8 +202,6 @@ const coverMiss = ref('')
 async function searchCovers(): Promise<void> {
   activeTab.value = 'files'
   if (!item.value || coverSearching.value) return
-  const selectedId = item.value.id
-  const sequence = ++coverSearchSequence
   coverSearching.value = true
   coverMiss.value = ''
   coverHits.value = []
@@ -210,85 +209,76 @@ async function searchCovers(): Promise<void> {
   brokenPreviews.value = new Set()
   const taskId = tasks.start('game-scan', `查找游戏封面：${title.value}`, { total: 1, current: title.value })
   try {
-    const r = await window.baoyi.game.searchCovers(selectedId)
-    for (const diagnostic of r.diagnostics || []) tasks.log(taskId, diagnostic.status === 'failed' ? 'warn' : 'info', `${COVER_SOURCE_LABEL[diagnostic.source]} · ${COVER_STAGE_LABEL[diagnostic.stage]}：${diagnostic.message}`)
-    tasks.update(taskId, { processed: 1, percent: 100 })
-    tasks.finish(taskId, r.ok ? 'success' : 'failed', r.ok ? `找到 ${r.candidates.filter(candidate => candidate.status === 'ready').length} 张可用封面` : r.message)
-    if (item.value?.id !== selectedId || sequence !== coverSearchSequence) return
+    const r = await findCovers(async () => {
+      try {
+        const result = await window.baoyi.game.searchCovers(props.id)
+        for (const diagnostic of result.diagnostics || []) tasks.log(taskId, diagnostic.status === 'failed' ? 'warn' : 'info', `${COVER_SOURCE_LABEL[diagnostic.source]} · ${COVER_STAGE_LABEL[diagnostic.stage]}：${diagnostic.message}`)
+        tasks.update(taskId, { processed: 1, percent: 100 })
+        tasks.finish(taskId, result.ok ? 'success' : 'failed', result.ok ? `找到 ${result.candidates.filter(candidate => candidate.status === 'ready').length} 张可用封面` : result.message)
+        return result
+      } catch (err) { tasks.finish(taskId, 'failed', `搜索出错：${errorMessage(err)}`); throw err }
+    })
+    if (r === STALE || !r) return
     coverQuery.value = r.query
     coverHits.value = r.candidates
     coverDiagnostics.value = r.diagnostics || []
-    if (!r.ok) {
-      // 搜不到不是异常，是一个要说清原因的正常结果 —— 面板里留着，
-      // 用户才看得到「改个名字再搜」或者「手动选一张」这两条下一步
-      coverMiss.value = r.message
-      return
-    }
-    if (r.message) toast(r.message)
-  } catch (err: any) {
-    tasks.finish(taskId, 'failed', `搜索出错：${err?.message ?? '未知错误'}`)
-    if (sequence === coverSearchSequence && item.value?.id === selectedId) coverMiss.value = `搜索出错：${err?.message ?? '未知错误'}`
-  } finally {
-    if (sequence === coverSearchSequence) coverSearching.value = false
-  }
+    if (!r.ok) coverMiss.value = r.message
+    else if (r.message) toast(r.message)
+  } catch (err) { coverMiss.value = `搜索出错：${errorMessage(err)}` }
+  coverSearching.value = false
 }
 
 async function useCover(url: string): Promise<void> {
   if (!item.value || coverPicking.value || brokenPreviews.value.has(url) || coverHits.value.find(c => c.url === url)?.status === 'failed') return
-  const selectedId = item.value.id
-  const sequence = ++coverChoiceSequence
   coverPicking.value = url
   const taskId = tasks.start('game-scan', `设置游戏封面：${title.value}`, { total: 1, current: title.value })
   try {
-    const r = await window.baoyi.game.setCoverFromUrl(selectedId, url)
-    tasks.update(taskId, { processed: 1, percent: 100 })
-    tasks.finish(taskId, r.ok ? 'success' : 'failed', r.message || (r.ok ? '封面已设置' : '设置封面失败'))
-    if (r.ok) void store.load()
-    if (item.value?.id !== selectedId || sequence !== coverChoiceSequence) return
-    if (!r.ok) {
-      coverMiss.value = r.message
-      error(r.message)
-      return
+    const r = await chooseCover(async () => {
+      try {
+        const result = await window.baoyi.game.setCoverFromUrl(props.id, url)
+        tasks.update(taskId, { processed: 1, percent: 100 })
+        tasks.finish(taskId, result.ok ? 'success' : 'failed', result.message || (result.ok ? '封面已设置' : '设置封面失败'))
+        if (result.ok) void store.load()
+        return result
+      } catch (err) { tasks.finish(taskId, 'failed', `设置封面失败：${errorMessage(err)}`); throw err }
+    })
+    if (r === STALE || !r) return
+    if (!r.ok) { coverMiss.value = r.message; error(r.message) }
+    else {
+      if (r.item) item.value = r.item
+      closeCoverHits()
+      success(r.message)
     }
-    if (r.item) item.value = r.item
-    closeCoverHits()
-    success(r.message)
   } catch (err) {
-    tasks.finish(taskId, 'failed', `设置封面失败：${errorMessage(err)}`)
-    if (sequence === coverChoiceSequence && item.value?.id === selectedId) {
-      coverMiss.value = `设置封面失败：${errorMessage(err)}`
-      error(coverMiss.value)
-    }
-  } finally {
-    if (sequence === coverChoiceSequence) coverPicking.value = ''
+    coverMiss.value = `设置封面失败：${errorMessage(err)}`
+    error(coverMiss.value)
   }
+  coverPicking.value = ''
 }
 
 async function recoverCover(): Promise<void> {
   if (!item.value || coverPicking.value) return
-  const selectedId = item.value.id
-  const sequence = ++coverChoiceSequence
   closeCoverHits()
   coverPicking.value = 'recover'
   const taskId = tasks.start('game-scan', `恢复游戏封面：${title.value}`, { total: 1, current: title.value })
   try {
-    const result = await window.baoyi.game.rebuildCovers([selectedId])
-    const message = result.failed ? '封面恢复失败，可重试搜索或选择本地图' : result.updated ? '封面已恢复' : '封面未更改，已保留当前选择'
-    tasks.update(taskId, { processed: result.processed, total: result.processed, percent: 100 })
-    tasks.finish(taskId, result.failed ? 'failed' : 'success', message)
-    const updated = await window.baoyi.game.get(selectedId)
-    void store.load()
-    if (sequence !== coverChoiceSequence || item.value?.id !== selectedId) return
-    if (updated) item.value = updated
-    coverMiss.value = result.failed ? (updated?.cover_detail || message) : ''
-    if (result.updated) { brokenCover.value = false; success(message) }
-  } catch (err) {
-    const message = `恢复封面失败：${errorMessage(err)}`
-    tasks.finish(taskId, 'failed', message)
-    if (sequence === coverChoiceSequence && item.value?.id === selectedId) coverMiss.value = message
-  } finally {
-    if (sequence === coverChoiceSequence) coverPicking.value = ''
-  }
+    const result = await chooseCover(async () => {
+      try {
+        const rebuilt = await window.baoyi.game.rebuildCovers([props.id])
+        const message = rebuilt.failed ? '封面恢复失败，可重试搜索或选择本地图' : rebuilt.updated ? '封面已恢复' : '封面未更改，已保留当前选择'
+        tasks.update(taskId, { processed: rebuilt.processed, total: rebuilt.processed, percent: 100 })
+        tasks.finish(taskId, rebuilt.failed ? 'failed' : 'success', message)
+        const updated = await window.baoyi.game.get(props.id)
+        void store.load()
+        return { item: updated, ok: !rebuilt.failed, message: rebuilt.failed ? updated?.cover_detail || message : rebuilt.updated ? message : '' }
+      } catch (err) { tasks.finish(taskId, 'failed', `恢复封面失败：${errorMessage(err)}`); throw err }
+    })
+    if (result === STALE || !result) return
+    if (result.item) item.value = result.item
+    coverMiss.value = result.ok ? '' : result.message
+    if (result.ok && result.message) success(result.message)
+  } catch (err) { coverMiss.value = `恢复封面失败：${errorMessage(err)}` }
+  coverPicking.value = ''
 }
 
 function previewFailed(candidate: CoverCandidate): void {
@@ -299,7 +289,7 @@ function previewFailed(candidate: CoverCandidate): void {
 }
 
 function closeCoverHits(): void {
-  coverSearchSequence++
+  void findCovers(async () => null)
   coverSearching.value = false
   coverHits.value = []
   coverMiss.value = ''
@@ -307,30 +297,21 @@ function closeCoverHits(): void {
   coverDiagnostics.value = []
 }
 
-onBeforeUnmount(() => { loadSequence++; coverChoiceSequence++; closeCoverHits() })
+onBeforeUnmount(() => { void chooseCover(async () => null); closeCoverHits() })
 
 /** 走 store 而不是直接调 IPC：卡片墙和侧边栏计数要跟着一起更新 */
-async function save(patch: Partial<GameItem>): Promise<void> {
-  if (!item.value) return
-  const selectedId = item.value.id
-  if (Object.keys(patch).some(key => key.startsWith('identity_') || key === 'name_zh' || key === 'name_en')) {
-    closeCoverHits()
-    coverChoiceSequence++
-    coverPicking.value = ''
+const { save, commitTags, toggleArchive, reveal, copyPath } = useResourceDetail({
+  item,
+  reveal: id => window.baoyi.game.revealInFolder(id),
+  async update(current, patch) {
+    if (Object.keys(patch).some(key => key.startsWith('identity_') || key === 'name_zh' || key === 'name_en')) {
+      closeCoverHits()
+      void chooseCover(async () => null)
+      coverPicking.value = ''
+    }
+    return store.update(current.id, patch)
   }
-  try {
-    const updated = await store.update(selectedId, patch)
-    if (updated && item.value?.id === selectedId) item.value = updated
-  } catch (err) {
-    error(`保存失败：${errorMessage(err)}`)
-  }
-}
-
-function commitTags(raw: string): void {
-  // 中英文逗号、顿号都认 —— 用户不该为了分隔符去猜我们想要哪一个
-  const tags = [...new Set(raw.split(/[,，、]/).map((t) => t.trim()).filter(Boolean))].slice(0, 8)
-  void save({ tags })
-}
+})
 
 /* ---------------------------- 存档路径 ---------------------------- */
 
@@ -420,20 +401,30 @@ async function verifySavePath(target: string): Promise<void> {
 /* ---------------------------- 存档备份 ---------------------------- */
 
 const backups = ref<SaveBackup[]>([])
+const readBackups = latestOnly(() => window.baoyi.game.backups(props.id))
 /** 正在备份的那条存档路径，同时用来禁按钮 */
 const backingUp = ref('')
 const restoring = ref('')
+let saveAction: AbortController | undefined
+function beginSaveAction(): AbortSignal {
+  saveAction?.abort()
+  saveAction = new AbortController()
+  backingUp.value = ''
+  restoring.value = ''
+  return saveAction.signal
+}
+onBeforeUnmount(() => saveAction?.abort())
 
 async function loadBackups(): Promise<void> {
-  if (!item.value) {
-    backups.value = []
-    return
-  }
+  if (!item.value) { backups.value = []; return }
   try {
-    backups.value = await window.baoyi.game.backups(item.value.id)
-  } catch (err) {
-    error(`读取备份列表失败：${errorMessage(err)}`)
-  }
+    const rows = await readBackups()
+    if (rows !== STALE) backups.value = rows
+  } catch (err) { error(`读取备份列表失败：${errorMessage(err)}`) }
+}
+
+async function refreshBackups(): Promise<void> {
+  await Promise.all([loadBackups(), store.refreshCounts()])
 }
 
 /**
@@ -445,20 +436,26 @@ async function loadBackups(): Promise<void> {
  */
 async function backupSave(target: string): Promise<void> {
   if (!item.value) return
+  const id=item.value.id,signal=beginSaveAction()
   backingUp.value = target
   try {
-    const r = await window.baoyi.game.backupSave(item.value.id, target)
+    const scope = await window.baoyi.game.previewBackup(id,target)
+    if(signal.aborted)return
+    if(!window.confirm(`备份范围：${target}\n${scope.files} 个文件，${formatBytes(scope.bytes)}\n只包含这条已登记路径；其他目录及安卓设备内部存档需分别备份。`))return
+    const r = await window.baoyi.game.backupSave(id, target)
+    if(signal.aborted)return
     if (!r.ok) {
       error(r.message)
       return
     }
-    await loadBackups()
+    await refreshBackups()
+    if(signal.aborted)return
     success(`${r.message}，共 ${formatBytes(r.backup?.size_bytes ?? 0)}`)
     await pruneOver(r.over)
   } catch (err) {
-    error(`备份没能跑起来：${errorMessage(err)}`)
+    if(!signal.aborted)error(`备份没能跑起来：${errorMessage(err)}`)
   } finally {
-    backingUp.value = ''
+    if(!signal.aborted)backingUp.value = ''
   }
 }
 
@@ -494,7 +491,7 @@ async function pruneOver(over: SaveBackup[]): Promise<void> {
       failed.push(errorMessage(err))
     }
   }
-  await loadBackups()
+  await refreshBackups()
   if (done > 0) success(`已清理 ${done} 份旧备份`)
   // 一条条报会刷屏，但也不能只说「部分失败」——第一条原因通常就是全部原因
   if (failed.length > 0) error(`${failed.length} 份没删掉：${failed[0]}`)
@@ -507,26 +504,24 @@ async function pruneOver(over: SaveBackup[]): Promise<void> {
  * 用户看到它才知道点下去不是一条单行道。
  */
 async function restore(b: SaveBackup): Promise<void> {
-  const when = formatDateTime(b.created_at)
-  const ok = window.confirm(
-    `用「${when}」这份备份覆盖当前存档？\n\n` +
-      `目标：${b.save_path}\n` +
-      `这份备份：${b.file_count} 个文件，${formatBytes(b.size_bytes)}\n\n` +
-      `当前存档会先自动备份一份，还原错了可以再还原回来。\n` +
-      `游戏正在运行时请先关掉它，否则文件会被占用。`
-  )
-  if (!ok) return
-
+  const signal=beginSaveAction()
   restoring.value = b.id
   try {
-    const r = await window.baoyi.game.restoreBackup(b.id)
-    await loadBackups()
+    const p=await window.baoyi.game.previewRestore(b.id,restoreTargets.value[b.id]||b.save_path)
+    if(signal.aborted)return
+    const lines=[['新增',p.added],['替换',p.changed],['移出当前目录',p.removed]] as const
+    const detail=lines.map(([label,files])=>`${label} ${files.length}：${files.slice(0,8).join('、')}${files.length>8?'…':''}`).join('\n')
+    if(!window.confirm(`还原「${formatDateTime(b.created_at)}」\n目标：${p.target}\n${detail}\n保持相同 ${p.unchanged} 个文件\n\n当前存档先自动备份；确认时会再次核对内容。请关闭游戏后继续。`))return
+    const r = await window.baoyi.game.restoreBackup(b.id,p.target,p.expected)
+    if(signal.aborted)return
+    await refreshBackups()
+    if(signal.aborted)return
     if (r.ok) success(r.message)
     else error(r.message)
   } catch (err) {
-    error(`还原没能跑起来：${errorMessage(err)}`)
+    if(!signal.aborted)error(`还原没能跑起来：${errorMessage(err)}`)
   } finally {
-    restoring.value = ''
+    if(!signal.aborted)restoring.value = ''
   }
 }
 
@@ -538,7 +533,7 @@ async function dropBackup(b: SaveBackup): Promise<void> {
   if (!ok) return
   try {
     const r = await window.baoyi.game.deleteBackup(b.id)
-    await loadBackups()
+    await refreshBackups()
     if (r.ok) success(r.message)
     else error(r.message)
   } catch (err) {
@@ -548,72 +543,11 @@ async function dropBackup(b: SaveBackup): Promise<void> {
 
 const openBackup = (b: SaveBackup): Promise<void> => window.baoyi.game.openBackup(b.id)
 
-/* ---------------------------- 关联文件 ---------------------------- */
-
-/**
- * 关联文件：攻略、修改器、MOD 目录、模拟器。
- *
- * 识别时 agent 会往里填游戏目录内的那些，这里补的是用户自己管的那一半 ——
- * 而用户的攻略十有八九**不在**游戏目录里（`D:\资料\攻略`），所以加的时候走的是
- * 另一道边界（见 service.ts 的 addGameLinks），不受识别沙箱约束。
- */
-const LINK_TYPES: Array<LinkedFile['type']> = ['guide', 'trainer', 'mod', 'emulator', 'other']
-
-async function addLinks(kind: 'file' | 'dir'): Promise<void> {
-  if (!item.value) return
-  try {
-    const updated = await window.baoyi.game.pickLinks(item.value.id, kind)
-    if (!updated) return
-    const before = item.value.linked_files.length
-    item.value = updated
-    const added = updated.linked_files.length - before
-    // 一条没加上通常是「选中的这些已经在名单里了」，说清楚比静默好
-    if (added > 0) success(`已关联 ${added} 个${kind === 'dir' ? '文件夹' : '文件'}`)
-    else toast('这些已经在关联列表里了')
-  } catch (err) {
-    error(`关联失败：${errorMessage(err)}`)
-  }
+function resourcesUpdated(updated: GameItem): void {
+  if (item.value?.id === updated.id) item.value = updated
+  void store.load()
 }
 
-/** 打开一条。打不开的类型（没有关联程序）由主进程把系统那句话原样带回来 */
-async function openLink(f: LinkedFile): Promise<void> {
-  if (!item.value) return
-  const r = await window.baoyi.game.openLink(item.value.id, f.path)
-  if (!r.ok) error(r.message)
-}
-
-async function revealLink(f: LinkedFile): Promise<void> {
-  if (!item.value) return
-  const r = await window.baoyi.game.revealLink(item.value.id, f.path)
-  if (!r.ok) error(r.message)
-}
-
-/** 只解除关联，不动磁盘上的文件 —— 那是用户自己的东西，我们没有删它的道理 */
-function removeLink(f: LinkedFile): void {
-  if (!item.value) return
-  void save({ linked_files: item.value.linked_files.filter((x) => x.path !== f.path) })
-}
-
-function relabelLink(f: LinkedFile, raw: string): void {
-  if (!item.value) return
-  const label = raw.trim().slice(0, 20) || f.path.split(/[\\/]/).pop() || f.label
-  if (label === f.label) return
-  void save({
-    linked_files: item.value.linked_files.map((x) => (x.path === f.path ? { ...x, label } : x))
-  })
-}
-
-function retypeLink(f: LinkedFile, type: LinkedFile['type']): void {
-  if (!item.value) return
-  void save({
-    linked_files: item.value.linked_files.map((x) => (x.path === f.path ? { ...x, type } : x))
-  })
-}
-
-function toggleArchive(): void {
-  if (!item.value) return
-  void save({ is_archived: !item.value.is_archived })
-}
 
 /* ---------------------------- 启动与时长 ---------------------------- */
 
@@ -622,21 +556,27 @@ function toggleArchive(): void {
  * 从详情页退出去再进来，页面状态没了，但游戏还在跑。
  */
 const running = ref(false)
+const pathUnavailable = computed(() => !!item.value?.path_state && item.value.path_state !== 'present')
+function launchDisabled(entry = item.value?.path): boolean {
+  return !entry || !isWindowsGameEntry(entry) || running.value || (entry === item.value?.path && pathUnavailable.value)
+}
 
 async function refreshRunning(): Promise<void> {
   if (!item.value) return
   running.value = await window.baoyi.game.running(item.value.id)
 }
 
-async function launch(): Promise<void> {
+async function launch(options:GameLaunchOptions={}): Promise<void> {
   if (!item.value) return
-  const r = await window.baoyi.game.launch(item.value.id)
+  try {
+  const r = await window.baoyi.game.launch(item.value.id, options)
   if (!r.ok) {
     error(r.message)
     return
   }
   toast(r.message)
   await refreshRunning()
+  } catch(e){error(errorMessage(e))}
 }
 
 /**
@@ -665,10 +605,6 @@ onMounted(() => {
 })
 onBeforeUnmount(() => offSession?.())
 
-async function reveal(): Promise<void> {
-  if (!item.value) return
-  await window.baoyi.game.revealInFolder(item.value.id)
-}
 
 function openOfficial(): void {
   if (item.value?.official_url) window.open(item.value.official_url, '_blank')
@@ -684,14 +620,10 @@ async function removeItem(): Promise<void> {
   void router.push({ name: 'game-home' })
 }
 
-function copyPath(path: string): void {
-  void window.baoyi.app.copyText(path)
-  toast('路径已复制')
-}
 </script>
 
 <template>
-  <div class="detail">
+  <div class="detail-shell"><Sidebar @selected="router.push({name:'game-home'})"/><div ref="scrollRoot" class="detail" @scroll="scrolled=($event.target as HTMLElement).scrollTop>140">
     <div v-if="loading" class="detail__state">载入中…</div>
     <div v-else-if="!item" class="detail__state">
       <p>这条记录不存在或已被移除。</p>
@@ -699,191 +631,32 @@ function copyPath(path: string): void {
     </div>
 
     <template v-else>
-      <header class="head">
-        <button class="btn btn--subtle" @click="router.back()">
-          <ArrowLeft :size="16" />
-          返回
-        </button>
-
-        <div class="head__actions">
-          <!-- 启动放在第一个、用主色：详情页上其他都是管理动作，只有这个是「去玩」 -->
-          <button class="btn btn--primary" :disabled="running" @click="launch">
-            <component :is="running ? Loader2 : Play" :size="14" :class="{ spin: running }" />
-            {{ running ? '正在运行' : '启动' }}
-          </button>
-          <button class="btn btn--ghost" @click="reveal">
-            <FolderOpen :size="14" />
-            打开所在文件夹
-          </button>
-          <button
-            class="btn btn--ghost"
-            :disabled="!item.official_url"
-            :title="item.official_url || '暂无官网'"
-            @click="openOfficial"
-          >
-            <ExternalLink :size="14" />
-            官网
-          </button>
-          <button class="btn btn--ghost" @click="toggleArchive">
-            <component :is="item.is_archived ? ArchiveRestore : Archive" :size="14" />
-            {{ item.is_archived ? '取消归档' : '归档' }}
-          </button>
-          <button class="btn btn--danger" @click="removeItem">
-            <Trash2 :size="14" />
-            移除
-          </button>
-        </div>
+      <header class="head" :class="{'head--scrolled':scrolled}">
+        <button class="btn btn--subtle" @click="router.push({name:'game-home'})"><ArrowLeft :size="14"/>游戏库</button><span class="breadcrumb-sep" :class="{visible:scrolled}">/</span><span class="breadcrumb-title" :class="{visible:scrolled}">{{title}}</span>
+        <div class="head__actions"><button class="btn btn--ghost" @click="reveal"><FolderOpen :size="14"/>打开文件夹</button><button class="btn btn--ghost btn--icon" :disabled="!item.official_url" aria-label="官网" @click="openOfficial"><ExternalLink :size="14"/></button><LibraryToolbarMenu icon="more" label="游戏操作"><button @click="toggleArchive">{{item.is_archived?'取消归档':'归档'}}</button><button @click="copyPath(item.path)">复制路径</button><button @click="removeItem">从库里移除</button></LibraryToolbarMenu><div class="split-launch"><button class="btn btn--primary" :disabled="launchDisabled()" :title="!isWindowsGameEntry(item.path)?'安装包请在对应设备使用':pathUnavailable?'请先重新定位游戏程序':'启动游戏'" @click="launch()"><Play :size="14"/>{{!isWindowsGameEntry(item.path)?'安卓资料':running?'正在运行':'启动'}}</button><LibraryToolbarMenu icon="chevron" label="选择启动方式"><button v-for="entry in entries" :key="entry.path" :disabled="launchDisabled(entry.path)" @click="launch({entry:entry.path})">{{entry.path===item.path?'★ ':''}}{{entry.label}}</button><button v-for="tool in trainers.filter(f=>f.role!=='usage'&&/\.(exe|cmd|bat|lnk)$/i.test(f.path))" :key="tool.path" :disabled="launchDisabled()" @click="launch({trainers:[tool.path]})">连同 {{tool.label}} 启动</button></LibraryToolbarMenu></div></div>
       </header>
-
-      <div v-if="item.path_state && item.path_state !== 'present'" class="path-warning" role="alert">{{item.path_state==='offline'?'游戏所在磁盘离线，请先连接磁盘。':'主程序已找不到，可能是文件夹改名或移动。'}}<button class="btn btn--primary" :disabled="relocating" @click="relocate()">重新定位文件夹</button></div>
-
       <div class="body detail-body">
-<section class="hero panel">
-            <!--
-              封面本身就是那几个按钮的入口，藏在别处等于没有。
-              悬停才显形，不占静态视觉重量。「搜封面」排在最前 —— 它是不用离开
-              应用就能完成的那条路，手动选图要开系统对话框
-            -->
-            <div class="hero__cover" :class="{ 'hero__cover--landscape': landscapeCover }" :style="{ '--hue': hue }">
-              <img v-if="cover && !brokenCover" :src="cover" :alt="title" class="hero__img" @load="coverLoaded" @error="brokenCover = true" />
-              <span v-else class="hero__initial">{{ initial }}</span>
-
-              <div class="hero__coverActs">
-                <button
-                  class="hero__coverBtn"
-                  :disabled="coverSearching"
-                  title="先检查本地图片，再按封面关键词搜索"
-                  @click="searchCovers"
-                >
-                  <Loader2 v-if="coverSearching" :size="13" class="spin" />
-                  <Search v-else :size="13" />
-                  {{ coverSearching ? '搜索中' : '搜封面' }}
-                </button>
-                <button class="hero__coverBtn" :title="item.cover_path ? '换一张封面' : '选一张封面图'" @click="pickCover">
-                  <Image :size="13" />
-                  {{ item.cover_path ? '换封面' : '加封面' }}
-                </button>
-                <button v-if="item.cover_path" class="hero__coverBtn" title="撤掉封面，退回首字占位" @click="clearCover">
-                  <ImageOff :size="13" />
-                </button>
-              </div>
-            </div>
-
-            <div class="hero__text">
-              <input
-                class="hero__name"
-                :value="item.name_zh"
-                placeholder="游戏名"
-                @change="save({ name_zh: ($event.target as HTMLInputElement).value.trim() })"
-              />
-              <input
-                class="hero__en"
-                :value="item.name_en"
-                placeholder="原名 / 英文名"
-                @change="save({ name_en: ($event.target as HTMLInputElement).value.trim() })"
-              />
-              <input
-                class="hero__summary"
-                :value="item.summary"
-                placeholder="一句话说明"
-                @change="save({ summary: ($event.target as HTMLInputElement).value.trim() })"
-              />
-
-              <div class="identity-row">
-                <label class="identity-row__label" for="game-identity">游戏身份</label>
-                <input
-                  id="game-identity"
-                  class="identity-row__input"
-                  :value="item.identity_name || item.name_en || item.name_zh"
-                  placeholder="确认游戏身份"
-                  @change="save({ identity_name: ($event.target as HTMLInputElement).value.trim() })"
-                />
-                <label class="identity-row__confirm">
-                  <input
-                    type="checkbox"
-                    :checked="item.identity_confirmed"
-                    @change="save({ identity_confirmed: ($event.target as HTMLInputElement).checked })"
-                  />
-                  已确认
-                </label>
-              </div>
-              <div class="identity-row">
-                <label class="identity-row__label" for="game-cover-query">封面关键词</label>
-                <input
-                  id="game-cover-query"
-                  class="identity-row__query"
-                  :value="item.identity_query"
-                  :placeholder="item.identity_name || item.name_en || item.name_zh || '填写实际游戏名称'"
-                  title="单独用于查找封面；留空时使用游戏身份和名称"
-                  @change="save({ identity_query: ($event.target as HTMLInputElement).value.trim() })"
-                />
-              </div>
-              <p class="identity-row__hint">封面关键词可单独调整。启动入口：{{ item.file_name }}。</p>
-              <p v-if="!item.identity_confirmed" class="identity-row__hint">请确认实际游戏身份，通用启动器名称需要补充游戏信息。</p>
-              <div v-if="brokenCover || (!item.cover_path && item.cover_source_url)" class="cover-recovery">
-                <span>封面缓存不可用，可从上次来源恢复。</span>
-                <button class="btn btn--ghost" :disabled="!!coverPicking" @click="recoverCover">{{ coverPicking === 'recover' ? '恢复中' : '恢复封面' }}</button>
-              </div>
-
-              <div class="statuses">
-                <button
-                  v-for="s in STATUSES"
-                  :key="s"
-                  class="chip"
-                  :class="{ on: item.play_status === s }"
-                  @click="save({ play_status: s })"
-                >
-                  {{ PLAY_STATUS_LABEL[s] }}
-                </button>
-              </div>
-            </div>
-          </section>
-<DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="game" label="游戏详情"/>
-<div id="game-panel-overview" v-show="activeTab === 'overview'" role="tabpanel" aria-labelledby="game-tab-overview" tabindex="0" class="detail-panel detail-panel--overview">
-<section class="panel">
-            <h2 class="sec-title">简介</h2>
-            <EditableField
-              :model-value="item.description"
-              multiline
-              placeholder="讲的是什么、玩法是什么样的"
-              @commit="save({ description: $event })"
-            />
-          </section>
-<section class="panel">
-            <h2 class="sec-title">分类</h2>
-            <input
-              class="input"
-              :value="item.category"
-              placeholder="RPG / 动作 / 策略…"
-              @change="save({ category: ($event.target as HTMLInputElement).value.trim() })"
-            />
-          </section>
-<section class="panel">
-            <h2 class="sec-title">标签</h2>
-            <div v-if="item.tags.length > 0" class="tags">
-              <TagBadge v-for="t in item.tags" :key="t" :label="t" />
-            </div>
-            <EditableField
-              :model-value="item.tags.join('、')"
-              placeholder="用「、」隔开，最多 8 个"
-              @commit="commitTags"
-            />
-          </section>
-<section class="panel">
-            <h2 class="sec-title">游玩</h2>
-            <dl class="facts">
-              <dt>时长</dt>
-              <dd>{{ formatPlaytime(item.total_playtime_sec) }}</dd>
-              <dt>上次游玩</dt>
-              <dd>{{ item.last_played_at ? formatRelative(item.last_played_at) : '未玩过' }}</dd>
-              <dt>加入</dt>
-              <dd>{{ formatDate(item.created_at) }}</dd>
-            </dl>
-          </section>
-</div>
+        <section class="hero"><div v-if="heroBackground" class="hero-backdrop" :style="{backgroundImage:'url('+JSON.stringify(heroBackground)+')'}"/>
+          <div class="hero-cover" :class="{'hero-cover--wide':heroWide}"><GameCover :item="item" :shape="heroWide?'wide':'vert'" @failed="coverBroken=true"/><button class="manage-cover btn btn--ghost" @click="activeTab='files'">管理封面</button></div>
+          <div class="hero__text"><input class="hero__name" :value="item.name_zh" placeholder="游戏名" aria-label="游戏名" @change="save({name_zh:($event.target as HTMLInputElement).value.trim()})"/><input class="hero__en" :value="item.name_en" placeholder="原名 / 英文名" aria-label="原名" @change="save({name_en:($event.target as HTMLInputElement).value.trim()})"/><input class="hero__summary" :value="item.summary" placeholder="一句话说明" aria-label="一句话说明" @change="save({summary:($event.target as HTMLInputElement).value.trim()})"/>
+            <div class="hero-status"><div class="statuses"><button v-for="status in (['playing','unplayed','completed','shelved'] as const)" :key="status" :class="['chip','status-'+status,{on:item.play_status===status}]" :aria-pressed="item.play_status===status" @click="save({play_status:status})"><i/>{{PLAY_STATUS_LABEL[status]}}</button></div><button class="identity-pill" :class="{'identity-pill--pending':!item.identity_confirmed}" @click="save({identity_confirmed:!item.identity_confirmed})"><BadgeCheck :size="13"/>{{item.identity_confirmed?(item.identity_name||item.name_en||title):'身份待确认 · 确认'}}</button></div>
+            <div class="hero-stats"><div><small>游玩时长</small><b>{{formatPlaytime(item.total_playtime_sec)}}</b></div><div><small>上次游玩</small><b>{{item.last_played_at?formatRelative(item.last_played_at):'未玩过'}}</b></div><div><small>启动次数</small><b>{{item.use_count||'未启动'}}</b></div><div><small>存档备份</small><b>{{backups.length}} 份</b></div></div>
+          </div>
+          <aside class="hero-meta"><h3>归类</h3><label>分类<input :value="item.category" list="game-categories" aria-label="游戏分类" @change="save({category:($event.target as HTMLInputElement).value.trim()})"/><datalist id="game-categories"><option v-for="c in categories" :key="c" :value="c"/></datalist></label><div class="hero-tags"><span>标签</span><div><button v-for="t in item.tags" :key="t" :aria-label="'删除标签 '+t" @click="save({tags:item.tags.filter(v=>v!==t)})">{{t}} ×</button><input aria-label="添加游戏标签" placeholder="+ 添加" @keydown.enter="!$event.isComposing&&commitTags([...item.tags,($event.target as HTMLInputElement).value].join('、'));!$event.isComposing&&(($event.target as HTMLInputElement).value='')"/></div></div><h3>记录</h3><dl class="facts"><dt>加入</dt><dd>{{formatDate(item.created_at)}}</dd><dt>目录</dt><dd class="truncate" :title="item.source_dir">{{item.source_dir.split(/[\\/]/).pop()}}</dd><dt>入口</dt><dd class="truncate" :title="item.path">{{item.file_name}}</dd></dl></aside>
+        </section>
+        <div v-if="item.path_state&&item.path_state!=='present'" class="path-warning" role="alert"><Unlink :size="16"/><span>{{item.path_state==='offline'?'游戏所在磁盘离线，请先连接磁盘。':'程序路径不可用，可能已被移动或改名。'}}</span><button class="btn btn--ghost" @click="recheck">重新检查</button><button class="btn btn--primary" :disabled="relocating" @click="relocate()">重新定位</button></div>
+        <div ref="tabRoot" class="game-tabs"><DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="game" label="游戏详情"/></div>
+        <div id="game-panel-overview" v-show="activeTab==='overview'" role="tabpanel" aria-labelledby="game-tab-overview" tabindex="0" class="detail-panel detail-panel--overview">
+          <div class="quick-cards"><button @click="activeTab='trainer'"><span><Wrench :size="14"/>修改器</span><b>{{trainers.length}} 个</b><small>{{trainers.flatMap(t=>t.features||[]).slice(0,3).map(f=>f.label).join(' · ')||'功能与用法'}}</small></button><button @click="activeTab='guide'"><span><BookOpen :size="14"/>攻略与说明</span><b>{{guides.length}} 份</b><small>{{guides.find(f=>f.read_progress)?.label||'本地攻略与资料'}}{{guides.some(f=>f.read_progress)?' · 读到 '+Math.round((guides.find(f=>f.read_progress)?.read_progress||0)*100)+'%':''}}</small></button><button @click="activeTab='saves'"><span><Save :size="14"/>存档备份</span><b>{{backups.length}} 份</b><small>{{backups[0]?'最新 '+formatDateTime(backups[0].created_at):item.save_paths.length?'有存档，尚未备份':'尚未指定存档'}}</small></button><button @click="activeTab='notes'"><span><StickyNote :size="14"/>笔记</span><b>{{gameNotes.length}} 条</b><small>{{gameNotes.slice().sort((a,b)=>b.updated_at-a.updated_at)[0]?.title||'记下你的游玩进度'}}</small></button></div>
+          <GameProjectRecord :key="item.id" :game="item" @read="reportPath=$event;activeTab='guide'"/>
+          <section class="panel description-panel"><h2 class="sec-title">我的简介与补充 <small>失焦自动保存</small></h2><p v-if="report" class="description-hint">这里保留你的编辑和早期介绍；最新修复情况见上方状态及使用导航。</p><EditableField :model-value="item.description" multiline placeholder="讲的是什么、玩法是什么样的" @commit="save({description:$event})"/></section>
+          <section v-if="report" class="panel project-record" aria-label="精修工作记录"><div class="project-record__head"><h2 class="sec-title">精修工作记录</h2><button class="btn btn--ghost" @click="readReport">阅读完整精修记录</button></div><details class="project-record__details"><summary>展开工作摘要与历史说明</summary><div class="project-record__sections"><p v-for="(section,i) in projectSections" :key="i">{{section}}</p><p v-if="!projectSections.length">完整工作内容与验证范围见精修记录。</p></div></details></section>
+        </div>
+        <div id="game-panel-trainer" v-show="activeTab==='trainer'" class="detail-resources" role="tabpanel" aria-labelledby="game-tab-trainer" tabindex="0"><GameTools v-if="activeTab==='trainer'" :key="item.id" :game="item" @updated="resourcesUpdated"/></div>
+        <div id="game-panel-guide" v-show="activeTab==='guide'" class="detail-resources" role="tabpanel" aria-labelledby="game-tab-guide" tabindex="0"><GameDocs v-if="activeTab==='guide'" :key="item.id" :game="item" :initial-path="reportPath" @updated="resourcesUpdated"/></div>
 <div id="game-panel-saves" v-show="activeTab === 'saves'" role="tabpanel" aria-labelledby="game-tab-saves" tabindex="0" class="detail-panel detail-panel--saves">
 <section class="panel">
-            <h2 class="sec-title">
+            <p v-if="projectOf(item)?.saveScope" class="save-scope">{{projectOf(item)?.saveScope}}</p><p class="save-scope">下方仅列你已指定的活跃存档位置；随附预设、测试档和安卓包中的文件不自动作为玩家存档。多目录、注册表或浏览器存储需按单作工具说明备份。</p><h2 class="sec-title">
               <HardDriveDownload :size="14" />
               存档位置
               <button class="sec-title__act" @click="addSavePath">
@@ -907,21 +680,21 @@ function copyPath(path: string): void {
                   {{ s.verified_at ? `${formatDate(s.verified_at)} 验证过` : '未验证' }}
                 </span>
                 <button
-                  class="path__act"
+                  class="btn btn--ghost btn--sm"
                   title="重新看一眼它还在不在"
                   :disabled="verifying === s.path"
                   @click="verifySavePath(s.path)"
                 >
-                  <component :is="verifying === s.path ? Loader2 : BadgeCheck" :size="13" :class="{ spin: verifying === s.path }" />
+                  <component :is="verifying === s.path ? Loader2 : BadgeCheck" :size="13" :class="{ spin: verifying === s.path }" />重新验证
                 </button>
                 <!-- 一条存档路径可能是目录也可能是单个 .sav，文案不能替它认定形状 -->
                 <button
-                  class="path__act"
+                  class="btn btn--primary btn--sm"
                   title="现在备份这份存档"
-                  :disabled="backingUp === s.path"
+                  :disabled="!!backingUp||!!restoring"
                   @click="backupSave(s.path)"
                 >
-                  <component :is="backingUp === s.path ? Loader2 : Save" :size="13" :class="{ spin: backingUp === s.path }" />
+                  <component :is="backingUp === s.path ? Loader2 : Save" :size="13" :class="{ spin: backingUp === s.path }" />立即备份
                 </button>
                 <button class="path__del" title="这条不对，删掉" @click="removeSavePath(s.path)">
                   <Trash2 :size="13" />
@@ -959,15 +732,16 @@ function copyPath(path: string): void {
                   <span class="backup__from mono truncate" :title="b.save_path">{{ b.save_path }}</span>
                 </div>
                 <div class="backup__acts">
+                  <label>还原到<select aria-label="还原目标" v-model="restoreTargets[b.id]" :disabled="!!backingUp||!!restoring"><option :value="undefined">原位置：{{b.save_path}}</option><option v-for="s in item.save_paths.filter(s=>s.path!==b.save_path)" :key="s.path" :value="s.path">{{s.path}}</option></select></label>
                   <button
                     class="btn btn--ghost btn--tiny"
-                    :disabled="restoring === b.id"
+                    :disabled="!!backingUp||!!restoring"
                     @click="restore(b)"
                   >
                     <component :is="restoring === b.id ? Loader2 : RotateCcw" :size="13" :class="{ spin: restoring === b.id }" />
                     还原
                   </button>
-                  <button class="path__del" title="删掉这份备份" @click="dropBackup(b)">
+                  <button class="path__del" :disabled="!!backingUp||!!restoring" title="删掉这份备份" @click="dropBackup(b)">
                     <Trash2 :size="13" />
                   </button>
                 </div>
@@ -976,6 +750,8 @@ function copyPath(path: string): void {
           </section>
 </div>
 <div id="game-panel-files" v-show="activeTab === 'files'" role="tabpanel" aria-labelledby="game-tab-files" tabindex="0" class="detail-panel detail-panel--files">
+<section class="panel entry-panel"><h2 class="sec-title">{{isWindowsGameEntry(item.path)?'启动入口':'安装包与资源'}}</h2><p v-if="!isWindowsGameEntry(item.path)">打开顶部文件夹取用安装包；设备安装、导出与恢复范围见精修记录。</p><div v-for="entry in entries" :key="entry.path" class="entry-row"><div><b>{{entry.label}}</b><small class="mono" :title="entry.path">{{entry.path}}</small></div><span v-if="entry.path===item.path" class="default-badge">★ 默认</span><button v-else class="btn btn--subtle" @click="defaultEntry(entry.path)">设为默认</button><button class="btn btn--ghost btn--sm" :disabled="launchDisabled(entry.path)" @click="launch({entry:entry.path})">启动</button></div></section>
+<section class="panel cover-panel"><h2 class="sec-title">封面 <small>点击图片设置裁切焦点</small></h2><div class="cover-pair"><div v-for="shape in (['vert','wide'] as const)" :key="shape"><button class="cover-preview" :class="'cover-preview--'+shape" :aria-label="'设置'+(shape==='vert'?'竖版':'横版')+'封面焦点'" @click="focusCover"><GameCover :item="item" :shape="shape" @loaded="coverInfo[shape]=$event.composed?'保留全图自动构图':$event.width+' × '+$event.height"/></button><small>{{shape==='vert'?'竖版':'横版'}} · {{item.cover_path||item.background_path?coverInfo[shape]||'加载中':'程序化占位'}}</small></div></div><div class="cover-provenance"><p>竖图来源：{{item.cover_source==='manual'?'手动选择的本地图片':item.cover_source?COVER_SOURCE_LABEL[item.cover_source]:'未记录'}}<span v-if="item.cover_source_url"> · {{item.cover_source_url}}</span></p><p>横图：{{item.background_path?'已保存的本地图片 · '+item.background_path:'未单独设置；可由竖图自动构图'}}</p><p v-if="item.cover_detail">{{item.cover_detail}}</p><p>来源标签记录获取方式，不代表已核实为游戏内截图。</p></div><label class="focus-control">横向焦点<input type="range" min="0" max="100" :value="(item.cover_focus||'50,35').split(',')[0]" @change="save({cover_focus:($event.target as HTMLInputElement).value+','+(item.cover_focus||'50,35').split(',')[1]})"/></label><label class="focus-control">纵向焦点<input type="range" min="0" max="100" :value="(item.cover_focus||'50,35').split(',')[1]" @change="save({cover_focus:(item.cover_focus||'50,35').split(',')[0]+','+($event.target as HTMLInputElement).value})"/></label><label class="cover-field">游戏身份<input :value="item.identity_name" placeholder="实际游戏名称" @change="save({identity_name:($event.target as HTMLInputElement).value.trim()})"/></label><label class="cover-field">封面关键词<input :value="item.identity_query" :placeholder="item.identity_name||title" @change="save({identity_query:($event.target as HTMLInputElement).value.trim()})"/></label><div class="cover-buttons"><button class="btn btn--ghost" :disabled="coverSearching" @click="searchCovers">{{coverSearching?'搜索中':'搜封面'}}</button><button class="btn btn--ghost" @click="pickCover">竖版图片</button><button class="btn btn--ghost" @click="background()">横版图片</button><button v-if="item.background_path" class="btn btn--subtle" @click="background(true)">清除横图</button><button class="btn btn--subtle" :disabled="!item.cover_path" @click="clearCover">恢复占位</button><button v-if="item.cover_source_url&&(coverBroken||!item.cover_path)" class="btn btn--subtle" @click="recoverCover">恢复缓存</button></div></section>
 <section v-if="coverHits.length > 0 || coverMiss || coverDiagnostics.length" class="panel">
             <h2 class="sec-title">
               <Image :size="14" />
@@ -1033,67 +809,7 @@ function copyPath(path: string): void {
               </ul>
             </details>
           </section>
-<section class="panel">
-            <h2 class="sec-title">
-              <Link2 :size="14" />
-              关联文件
-              <span v-if="item.linked_files.length > 0" class="sec-title__count">
-                {{ item.linked_files.length }}
-              </span>
-              <button class="sec-title__act" title="关联一个文件：攻略、修改器、存档修改工具…" @click="addLinks('file')">
-                <FilePlus :size="13" />
-                加文件
-              </button>
-              <button class="sec-title__act sec-title__act--tight" title="关联一个文件夹：MOD、整合包…" @click="addLinks('dir')">
-                <FolderPlus :size="13" />
-                加文件夹
-              </button>
-            </h2>
-
-            <ul v-if="item.linked_files.length > 0" class="links">
-              <li v-for="f in item.linked_files" :key="f.path" class="link-row">
-                <div class="link-row__main">
-                  <input
-                    class="link-row__label"
-                    :value="f.label"
-                    placeholder="给它起个名字"
-                    title="改个好认的名字"
-                    @change="relabelLink(f, ($event.target as HTMLInputElement).value)"
-                  />
-                  <select
-                    class="link-row__type"
-                    :value="f.type"
-                    title="类型只影响这里显示的词，不影响打开方式"
-                    @change="retypeLink(f, ($event.target as HTMLSelectElement).value as LinkedFile['type'])"
-                  >
-                    <option v-for="t in LINK_TYPES" :key="t" :value="t">{{ LINK_TYPE_LABEL[t] }}</option>
-                  </select>
-                  <button
-                    class="link-row__path mono truncate"
-                    :title="`${f.path}（点击复制）`"
-                    @click="copyPath(f.path)"
-                  >
-                    {{ f.path }}
-                  </button>
-                </div>
-                <div class="link-row__acts">
-                  <button class="path__act" title="打开它" @click="openLink(f)">
-                    <ExternalLink :size="13" />
-                  </button>
-                  <button class="path__act" title="在资源管理器里选中它" @click="revealLink(f)">
-                    <FolderOpen :size="13" />
-                  </button>
-                  <button class="path__del" title="解除关联（不会删磁盘上的文件）" @click="removeLink(f)">
-                    <Trash2 :size="13" />
-                  </button>
-                </div>
-              </li>
-            </ul>
-            <p v-else class="hint">
-              把攻略、修改器、MOD 目录挂在这儿，下次找它们不用再翻硬盘。
-              解除关联只是把这条记录去掉，不会删你的文件。
-            </p>
-          </section>
+<section class="panel"><GameResources v-if="activeTab === 'files'" :game="item" kind="other" @updated="resourcesUpdated"/></section>
 <section class="panel">
             <h2 class="sec-title">文件</h2>
             <div class="row"><button class="btn btn--ghost" :disabled="relocating" @click="relocate()">重新定位文件夹</button><button class="btn btn--subtle" :disabled="relocating" @click="relocate('file')">更换主程序</button></div>
@@ -1115,20 +831,11 @@ function copyPath(path: string): void {
             </dl>
           </section>
 </div>
-<div id="game-panel-notes" v-show="activeTab === 'notes'" role="tabpanel" aria-labelledby="game-tab-notes" tabindex="0" class="detail-panel detail-panel--notes">
-<section class="panel">
-            <h2 class="sec-title">个人笔记</h2>
-            <EditableField
-              :model-value="item.notes"
-              multiline
-              placeholder="进度、卡在哪、装了哪些 MOD…"
-              @commit="save({ notes: $event })"
-            />
-          </section>
+<div id="game-panel-notes" v-show="activeTab==='notes'" role="tabpanel" aria-labelledby="game-tab-notes" tabindex="0" class="detail-panel detail-panel--notes"><GameNotes :key="item.id" ref="notesPanel" :game-id="item.id" @changed="gameNotes=$event"/>
 </div>
 </div>
     </template>
-  </div>
+  </div></div>
 </template>
 
 <style scoped>
@@ -1730,6 +1437,12 @@ function copyPath(path: string): void {
 }
 </style>
 
+<style scoped src="./detail-v21.css"/>
+
 <style scoped>
-.detail-body{display:flex;flex-direction:column;gap:18px;max-width:1280px;width:100%;margin:0 auto}.detail-body>.hero{width:100%}.detail-body>.detail-tabs{width:100%}.detail-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;width:100%;align-items:start}.detail-panel--overview>.panel:first-child{grid-column:1/-1}.detail-panel--saves,.detail-panel--files{grid-template-columns:minmax(0,1fr)}@media(max-width:800px){.detail-panel{grid-template-columns:minmax(0,1fr)}}
+.project-record{grid-column:1/-1}.project-record__head{display:flex;align-items:center;justify-content:space-between;gap:12px}.project-record__sections{display:grid;grid-template-columns:1fr 1fr;gap:12px 24px}.project-record__sections p{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.9;margin:0;padding:12px 0;border-top:1px solid var(--divider);color:var(--text-sub)}.project-record__sections p:first-child{grid-column:1/-1;color:var(--accent-ink)}@media(max-width:1000px){.project-record__sections{grid-template-columns:1fr}}
 </style>
+
+<style scoped>.backup__acts{flex-wrap:wrap}.backup__acts label{display:flex;flex-direction:column;gap:4px;font-size:11px;max-width:240px}.backup__acts select{max-width:100%;background:var(--bg-main);color:var(--text-sub);border:1px solid var(--divider-strong);border-radius:4px;padding:4px}</style>
+
+<style scoped>.cover-provenance{font-size:11px;line-height:1.8;color:var(--text-faint);overflow-wrap:anywhere}</style>

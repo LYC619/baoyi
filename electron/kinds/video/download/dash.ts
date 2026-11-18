@@ -117,7 +117,7 @@ export async function downloadDash(options: HlsDownloadOptions) {
     const emit=(phase:'downloading'|'finalizing',force=false)=>{
       if(!force && Date.now()-lastTick<300)return;lastTick=Date.now()
       const bytes=receivedBytes+[...receiving.values()].reduce((sum,n)=>sum+n,0)
-      try { options.onProgress?.({phase,checkingCache,receivedBytes:bytes,totalBytes:phase==='finalizing'?bytes:0,bytesPerSecond:checkingCache ? 0 : Math.round(Math.max(0,bytes-cachedBytes)*1000/Math.max(1,Date.now()-started)),message}) } catch { /* Observers do not own files. */ }
+      try { options.onProgress?.({phase,checkingCache,receivedBytes:bytes,totalBytes:phase==='finalizing'?bytes:0,bytesPerSecond:checkingCache ? 0 : Math.round(Math.max(0,bytes-cachedBytes)*1000/Math.max(1,Date.now()-started)),message}) } catch (cause) { console.error('[后台通知或记录]', cause) }
     }
     emit('downloading',true)
     const manifest=await readDownloadResource({...options,onProgress:undefined,maxBytes:4*1024*1024,onRetry:()=>{message='DASH 清单连接暂时失败，正在重试';emit('downloading',true)}})

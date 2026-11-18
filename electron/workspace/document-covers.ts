@@ -227,14 +227,14 @@ export class DocumentCovers {
       if (!(await this.current(documentId, token))) return { stored: false }
       await fs.rename(temporary, destination)
       if (!(await this.current(documentId, token))) {
-        await fs.unlink(destination).catch(() => {})
+        await fs.unlink(destination).catch(() => { /* best-effort */ })
         return { stored: false }
       }
       this.tokens.delete(token)
       await this.trim()
       return { stored: true }
     } finally {
-      await fs.unlink(temporary).catch(() => {})
+      await fs.unlink(temporary).catch(() => { /* best-effort */ })
     }
   }
   private async trim() {

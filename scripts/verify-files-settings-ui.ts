@@ -32,7 +32,7 @@ const selectDoc=async()=>{await navigate('/document');await page.locator('.docum
 try{
  await page.waitForFunction(()=>!!window.baoyi?.workspace);assert.equal(path.resolve(await app.evaluate(({app})=>app.getPath('userData'))),profile)
  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1200,850))
- await page.locator('.titlebar-settings').click();await page.locator('.scope-nav').getByRole('button',{name:'全局',exact:true}).click();await page.getByRole('heading',{name:'全局设置',exact:true}).waitFor()
+ await page.getByRole('button',{name:'设置',exact:true}).click();await page.locator('.scope-nav').getByRole('button',{name:'全局',exact:true}).click();await page.getByRole('heading',{name:'全局设置',exact:true}).waitFor()
  await page.getByRole('button',{name:'AI 配置',exact:true}).click();assert.ok((await page.locator('h1').innerText()).includes('全局'))
  await navigate('/settings?module=document&tab=reader');await page.getByLabel('阅读字号',{exact:true}).fill('21');await page.getByRole('button',{name:'保存模块偏好'}).click();await page.getByRole('status').filter({hasText:'已保存'}).waitFor();await navigate('/settings?module=document&tab=scan');await page.getByLabel('在全部分类导入时默认归入').selectOption('certificate');await page.getByLabel('新导入资料的默认标签').fill('样本、默认标签');await page.getByRole('button',{name:'保存模块偏好'}).click();await page.getByRole('status').filter({hasText:'已保存'}).waitFor()
  await pick(imported);await navigate('/document');await page.getByRole('button',{name:'导入资料',exact:true}).click();await page.getByRole('button',{name:'选择文件',exact:true}).click();assert.equal(await page.getByLabel('批量导入分类',{exact:true}).inputValue(),'certificate');await page.getByRole('button',{name:/导入所选 1 份资料/}).click()
@@ -62,7 +62,7 @@ try{
   await navigate('/settings?scope=global&tab=appearance');await page.getByRole('button',{name:theme==='dark'?'深色':'浅色',exact:true}).click();await page.waitForFunction(theme=>document.documentElement.dataset.theme===theme,theme)
   for(const url of ['/personal','/project','/','/game','/video','/image','/document']){
    await navigate(url);await page.locator('.settings').waitFor({state:'hidden'});await page.waitForFunction(()=>!!document.querySelector('.app__view')&&!document.querySelector('.page-enter-active,.page-leave-active'))
-   assert.ok(await page.locator('.titlebar-settings').isVisible())
+   assert.ok(await page.getByRole('button',{name:'设置',exact:true}).isVisible())
    await page.screenshot({path:path.join(output,`layout-${theme}-${width}-${url.slice(1)||'software'}.png`)})
    const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1);assert.equal(overflow,false,`${theme}/${width}/${url}: horizontal overflow`)
   }

@@ -14,11 +14,11 @@ function within(root: string, target: string): boolean {
   return !relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative)
 }
 /** User-selected replacement; the original resource ID and all gameplay history survive. */
-export function relocateGame(db: SqlDb, id: string, entry: string, directory?: string): GameItem {
+export function relocateGame(db: SqlDb, id: string, entry: string, directory?: string, platform: 'Windows'|'Android' = 'Windows'): GameItem {
   const game = getGame(db, id)
   if (!game) throw new Error('游戏已不存在')
   const file = path.resolve(entry), stat = fs.statSync(file)
-  if (!stat.isFile() || !/\.(exe|lnk|bat|cmd)$/i.test(file)) throw new Error('请选择游戏程序、快捷方式或启动脚本')
+  if (!stat.isFile() || !(platform==='Android'?/\.apk$/i:/\.(exe|lnk|bat|cmd)$/i).test(file)) throw new Error('请选择对应平台的游戏入口或安装包')
   const conflict = db.prepare('SELECT id FROM resource WHERE path = ? COLLATE NOCASE AND id <> ?').get(file, id)
   if (conflict) throw new Error('所选程序已经属于另一个条目，请先处理重复记录')
   const oldRoot = path.resolve(game.source_dir || path.dirname(game.path))

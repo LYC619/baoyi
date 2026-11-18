@@ -37,12 +37,12 @@ try{
   const deadline=Date.now()+20000
   while(jobs[0]?.status!=='success'&&Date.now()<deadline){await page.waitForTimeout(100);jobs=await page.evaluate(()=>window.baoyi.comic.jobs());if(jobs[0]?.status==='failed')throw new Error(jobs[0].error)}
   assert.equal(jobs[0]?.status,'success',JSON.stringify(jobs));assert.equal(jobs[0].processed,2)
-  await page.locator('.comic-jobs').getByRole('button',{name:'打开作品'}).waitFor();await page.screenshot({path:path.join(output,'download-record.png')})
-  await page.locator('.comic-jobs').getByRole('button',{name:'查看过程'}).click()
+  await page.locator('.comic-downloads').getByRole('button',{name:'打开作品'}).waitFor();await page.screenshot({path:path.join(output,'download-record.png')})
+  await page.locator('.comic-downloads').getByRole('button',{name:'查看过程'}).click()
   await page.locator('.comic-log').getByText(/已入库/).first().waitFor()
   assert.ok(!(await page.locator('.comic-log').innerText()).includes('127.0.0.1'))
   checks.push('完成任务可展开本机过程记录，日志不暴露连接地址')
-  await page.locator('.comic-jobs').getByRole('button',{name:'打开作品'}).click();await page.keyboard.press('Escape')
+  await page.locator('.comic-downloads').getByRole('button',{name:'打开作品'}).click();await page.keyboard.press('Escape')
   const item=await page.evaluate(id=>window.baoyi.image.get(id),jobs[0].resourceId);assert.equal(item?.pageCount,2);assert.deepEqual(item?.authors,['合成作者'])
   checks.push('真实子进程协议、独立解码worker、同卷落盘、登记与统一下载记录')
   await page.getByRole('button',{name:'开始阅读',exact:true}).click();await page.screenshot({path:path.join(output,'reader.png')});await page.keyboard.press('Escape')

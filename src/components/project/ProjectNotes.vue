@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useToast } from '@/composables/useToast'
+import { errorMessage } from '@/utils'
 import { computed,onBeforeUnmount,ref,shallowRef,shallowReactive,watch } from 'vue'
 import { onBeforeRouteLeave,onBeforeRouteUpdate,useRoute,useRouter } from 'vue-router'
 import { Copy,FileText,Plus,RefreshCw,Save,X } from 'lucide-vue-next'
@@ -21,10 +23,10 @@ watch(()=>props.item.id,id=>{
 },{immediate:true})
 watch(()=>[props.item.id,state.value.saved.revision],async()=>{
   const run=++ruleRequest,id=props.item.id;ruleStates.value=[]
-  try{const value=await window.baoyi.project.rules(id);if(run===ruleRequest)ruleStates.value=value}catch{ /* Individual links remain usable while availability is unavailable. */ }
+  try{const value=await window.baoyi.project.rules(id);if(run===ruleRequest)ruleStates.value=value}catch (cause) { useToast().error(errorMessage(cause)) }
 },{immediate:true})
 function ruleState(rule:ProjectRule){return ruleStates.value.find(value=>value.key===rule.type+':'+rule.value)}
-async function copyPrompt(){try{await window.baoyi.app.copyText(state.value.value.prompt);copied.value=true}catch(e){localError.value=(e as Error).message}}
+async function copyPrompt(){try{await window.baoyi.app.copyText(state.value.value.prompt);copied.value=true}catch(e){localError.value=errorMessage(e)}}
 function focusNext(){nextInput.value?.focus()}
 function edit(field:'current'|'next'|'prompt',event:Event){state.value.edit({[field]:(event.target as HTMLTextAreaElement).value})}
 function addRule(){
@@ -38,7 +40,7 @@ function addRule(){
 function removeRule(index:number){state.value.edit({rules:state.value.value.rules.filter((_,i)=>i!==index)})}
 async function openRule(rule:ProjectRule){
   try{if(rule.type==='path')await window.baoyi.project.openFile(props.item.id,rule.value);else await window.baoyi.project.open(props.item.id,rule.value)}
-  catch(error){localError.value=(error as Error).message}
+  catch(error){localError.value=errorMessage(error)}
 }
 const flush=()=>state.value.flush()
 async function openHandoff(){if(await flush())handoff.value=true}

@@ -2,7 +2,8 @@ import { app, dialog, nativeImage, shell, type BrowserWindow, type IpcMainInvoke
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { getDb, getSettings, patchSettings, postersDir } from '../services/database.ts'
+import { getDb, postersDir } from '../services/database.ts'
+import { getSettings, patchSettings } from '../services/settings-store.ts'
 import { createVideoWorkflow } from '../kinds/video/download/workflow.ts'
 import { loadVideoSources, loadVideoWork } from '../kinds/video/download/sources.ts'
 import { transferHanimeMedia } from '../services/hanime-download.ts'
@@ -25,6 +26,8 @@ import { locateFfmpeg, validateFfmpeg } from '../kinds/video/download/ffmpeg.ts'
 import { registerDiscoveryIpc } from './video-discovery.ts'
 import { onlineFetch } from '../services/online-network.ts'
 import { inspectDownloadCaches, clearDownloadCaches } from '../kinds/video/download/cache-management.ts'
+import {createVideoUpdateCheck} from '../kinds/video/update-check.ts'
+import {libraryRestoreInProgress} from './library-backup.ts'
 
 /** 装成一个普通 Chrome。图床常带 Cloudflare 防盗链：缺 UA / Referer 直接 403。 */
 const POSTER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
@@ -44,7 +47,7 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   const send = (channel: string, value: unknown) => { const win = getWindow(); if (win && !win.isDestroyed()) win.webContents.send(channel, value) }
   ipcMain.handle('settings:ffmpeg-detect', event => {
     assertMain(event)
-    const settings = getSettings()
+    const settings = getSettings(getDb())
     return locateFfmpeg('', settings.software_scan_dirs)
   })
   ipcMain.handle('settings:ffmpeg-pick', async event => {
@@ -53,17 +56,17 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     if (result.canceled || !result.filePaths[0]) return null
     const file = result.filePaths[0]
     if (!validateFfmpeg(file)) throw new Error('该程序不是可运行的 FFmpeg，请选择 ffmpeg.exe')
-    patchSettings({ ffmpeg_path: file })
+    patchSettings(getDb(), { ffmpeg_path: file })
     return file
   })
-  const visible = (job: VideoDownloadJob) => !getSettings().hide_hentai || job.category !== '里番'
+  const visible = (job: VideoDownloadJob) => !getSettings(getDb()).hide_hentai || job.category !== '里番'
   const workflowOptions: Parameters<typeof createVideoWorkflow>[0] = {
     artworkSize: file => nativeImage.createFromPath(file).getSize(),
-    db: getDb(), downloadsDirectory: () => getSettings().video_scan_dirs[0] || app.getPath('videos'),
-    libraryRoots: () => getSettings().video_scan_dirs,
+    db: getDb(), downloadsDirectory: () => getSettings(getDb()).video_scan_dirs[0] || app.getPath('videos'),
+    libraryRoots: () => getSettings(getDb()).video_scan_dirs,
     resolveWork: (code, options) => loadVideoWork(code, options), resolveSources: (code, options) => loadVideoSources(code, undefined, options),
     transfer: transferHanimeMedia,
-    concurrency:()=>videoTransferOptions(getSettings()).concurrency,
+    concurrency:()=>videoTransferOptions(getSettings(getDb())).concurrency,
     // 下载时作品目录已经定下来了，封面直接写进 <目录>/.baoyi/artwork（和清单同一套约定）；
     // 只有还没目录的极少情况才暂放缓存目录（A2）
     savePoster: async (url, directory, signal, referer) => {
@@ -77,7 +80,7 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
       const reader = response.body.getReader()
       try {
         for (;;) { const value = await reader.read(); if (value.done) break; size += value.value.length; if (size > 15 * 1024 * 1024) throw new Error('封面超过 15 MB'); chunks.push(value.value) }
-      } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
+      } finally { await reader.cancel().catch(() => { /* best-effort */ }); reader.releaseLock() }
       const bytes = Buffer.concat(chunks)
       const decoded = nativeImage.createFromBuffer(bytes)
       if (decoded.isEmpty() || decoded.getSize().width < 64 || decoded.getSize().height < 64) throw new Error('封面无法解码或尺寸过小')
@@ -97,13 +100,20 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     transfer: options => transferVideo({ ...options, fetch: discoveryFetch }),
     resolvePlayback: (code, signal) => resolveMissav(code, discoveryFetch, signal),
     hlsTransfer: ({ url, destination, headers, signal, onProgress }) => {
-      const ffmpeg = locateFfmpeg(getSettings().ffmpeg_path, getSettings().software_scan_dirs)
+      const ffmpeg = locateFfmpeg(getSettings(getDb()).ffmpeg_path, getSettings(getDb()).software_scan_dirs)
       if (!ffmpeg) throw new Error('没有找到 FFmpeg。请到设置 → 下载与缓存重新检测或选择 ffmpeg.exe。PotPlayer 可播放 m3u8，但下载为 MP4 仍需要 FFmpeg。')
       return downloadHls({ url, destination, headers, signal, fetch: discoveryFetch, ffmpeg, onProgress })
     } })
   registerDiscoveryIpc(getWindow, ipcMain, catalogue, getDb(), workflowOptions.savePoster!)
   const workerFor = (id: string) => typeof id === 'string' && id.startsWith('discovery-') ? discovery : workflow
   const allJobs = () => [...workflow.list(), ...discovery.list()].sort((a, b) => b.updatedAt - a.updatedAt)
+  const updates=createVideoUpdateCheck({db:getDb(),hidden:()=>getSettings(getDb()).hide_hentai,ready:()=>!libraryRestoreInProgress(),
+    resolve:(code,signal)=>loadVideoWork(code,{signal}),jobs:allJobs,
+    weekly:()=>({enabled:getSettings(getDb()).video_updates_weekly===true,last:getSettings(getDb()).video_updates_last_checked||0}),
+    completed:time=>{patchSettings(getDb(), {video_updates_last_checked:time})},changed:()=>send('video-updates:changed',null)})
+  ipcMain.handle('video-updates:start',(event,ids,startup)=>{assertMain(event);return updates.start(ids,startup===true)})
+  ipcMain.handle('video-updates:status',event=>{assertMain(event);return updates.status()})
+  ipcMain.handle('video-updates:cancel',event=>{assertMain(event);return updates.cancel()})
   ipcMain.handle('video-workflow:prepare', (event, input) => { assertMain(event); return input?.discovery ? discovery.prepare(input.discovery) : workflow.prepare(input || {}) })
   ipcMain.handle('video-workflow:pick-root', async (event, id: string) => {
     assertMain(event)
@@ -146,15 +156,15 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   ipcMain.handle('video:library', (event, id: string) => { assertMain(event); return getVideoLibrary(id) })
   ipcMain.handle('video:sync-files', (event, id: string) => {
     assertMain(event)
-    const result = syncVideoWorkFiles(getDb(), id, { roots: getSettings().video_scan_dirs })
+    const result = syncVideoWorkFiles(getDb(), id, { roots: getSettings(getDb()).video_scan_dirs })
     return { ...result, library: getVideoLibrary(result.library.resourceId) }
   })
   ipcMain.handle('video:preview-collection-name', (event, id: string, title: string) => {
-    assertMain(event); return previewVideoCollectionName(getDb(), id, title, getSettings().video_scan_dirs)
+    assertMain(event); return previewVideoCollectionName(getDb(), id, title, getSettings(getDb()).video_scan_dirs)
   })
   ipcMain.handle('video:rename-collection', (event, id: string, title: string) => {
     assertMain(event)
-    const result = renameVideoCollection(getDb(), id, title, getSettings().video_scan_dirs)
+    const result = renameVideoCollection(getDb(), id, title, getSettings(getDb()).video_scan_dirs)
     send('video:library-changed', id)
     return result
   })

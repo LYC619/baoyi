@@ -45,7 +45,7 @@ export function rememberedImageDirectory(db:SqlDb,groupId:string|null):string {
 }
 async function checkDestinationParent(parent:string) {
   let ancestor=parent
-  while (!await fs.lstat(ancestor).catch(()=>null)) {
+  while (!await fs.lstat(ancestor).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause })) {
     const next=path.dirname(ancestor); if (next===ancestor) throw new Error('目标目录不可用')
     ancestor=next
   }
@@ -66,7 +66,7 @@ export async function planImageMove(db:SqlDb,ids:string[],root:string,byCategory
     const destination=path.join(parent,path.basename(source))
     if(same(source,destination))continue
     if(inside(source,destination))throw new Error('不能把作品移动到自己的子目录')
-    if(await fs.lstat(destination).catch(()=>null)||plan.some(row=>same(row.destination,destination)))throw new Error('目标存在同名文件或目录：'+destination)
+    if(await fs.lstat(destination).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause })||plan.some(row=>same(row.destination,destination)))throw new Error('目标存在同名文件或目录：'+destination)
     plan.push({id,source,destination,...(byCategory&&group?{groupId:group.id,directory:parent}:{})})
   }
   return plan
@@ -78,14 +78,14 @@ async function fingerprint(file:string):Promise<string[]>{
   await visit(file);return result
 }
 export async function moveImageItems(db:SqlDb,plan:Move[],trash:(file:string)=>Promise<void>,protectedPaths:string[]=[]):Promise<ImageMoveResult>{
-  for(const row of plan){if(!same(await imageFileTarget(db,row.id,protectedPaths),row.source))throw new Error('作品位置已改变，请重新预览');if(await fs.lstat(row.destination).catch(()=>null))throw new Error('目标已经存在，请重新预览')}
+  for(const row of plan){if(!same(await imageFileTarget(db,row.id,protectedPaths),row.source))throw new Error('作品位置已改变，请重新预览');if(await fs.lstat(row.destination).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause }))throw new Error('目标已经存在，请重新预览')}
   for(const row of plan)checkIdle(db,row.id)
   for(const row of plan)locks.add(row.id)
   const completed:Array<Move&{copied:boolean}>=[],warnings:string[]=[]
   try{
     for(const row of plan){
       await checkDestinationParent(path.dirname(row.destination))
-      if(await fs.lstat(row.destination).catch(()=>null))throw new Error('目标已经存在，请重新预览')
+      if(await fs.lstat(row.destination).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause }))throw new Error('目标已经存在，请重新预览')
       await fs.mkdir(path.dirname(row.destination),{recursive:true})
       let copied=false
       try{await fs.rename(row.source,row.destination)}catch(error){

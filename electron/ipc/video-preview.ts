@@ -3,7 +3,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import {spawn} from 'node:child_process'
 import Database from 'better-sqlite3'
-import {getDb,getSettings} from '../services/database.ts'
+import { getDb } from '../services/database.ts'
+import { getSettings } from '../services/settings-store.ts'
 import {libraryRestoreInProgress} from './library-backup.ts'
 import {VideoPreviewService} from '../kinds/video/preview.ts'
 import {VideoFrameCache} from '../kinds/video/frame-cache.ts'
@@ -20,7 +21,7 @@ export async function videoFrameResponse(request:Request){
 }
 export function registerVideoPreviewIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<IpcMain,'handle'>){
   closed=()=>{const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('video-preview:closed')}
-  service=new VideoPreviewService({db:getDb,hidden:()=>getSettings().hide_hentai,blocked:libraryRestoreInProgress})
+  service=new VideoPreviewService({db:getDb,hidden:()=>getSettings(getDb()).hide_hentai,blocked:libraryRestoreInProgress})
   const frameService=async()=>{
     const generation=frameGeneration
     await closing;if(libraryRestoreInProgress())throw new Error('资料库正在恢复')
@@ -31,7 +32,7 @@ export function registerVideoPreviewIpc(getWindow:()=>BrowserWindow|null,ipc:Pic
       // Another request may have initialized the cache while mkdir yielded.
       if(frames)return frames
       const db=openFrameIndex(root,file=>new Database(file));frameDb=db
-      frames=new VideoFrameCache({db,root,file:token=>service!.file(token),ffmpeg:()=>({file:getSettings().ffmpeg_path||'',roots:getSettings().software_scan_dirs}),changed:state=>{const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('video-preview:frames',state)}})
+      frames=new VideoFrameCache({db,root,file:token=>service!.file(token),ffmpeg:()=>({file:getSettings(getDb()).ffmpeg_path||'',roots:getSettings(getDb()).software_scan_dirs}),changed:state=>{const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('video-preview:frames',state)}})
     }
     return frames
   }

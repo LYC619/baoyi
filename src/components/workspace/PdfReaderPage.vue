@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import {computed,nextTick,onMounted,onBeforeUnmount,ref,watch} from 'vue'
 import {TextLayer,type PDFDocumentProxy,type RenderTask} from 'pdfjs-dist'
 const props=defineProps<{pdf:PDFDocumentProxy;page:number;width:number;zoom:number}>()
@@ -22,7 +23,7 @@ async function ensure(){
     const content=await page.getTextContent();if(disposed||run!==revision)return
     text=new TextLayer({textContentSource:content,container:layer.value,viewport:view});await text.render()
     if(!disposed&&run===revision){rendered.value=true;emit('rendered')}
-  }catch(error){if(!disposed&&run===revision&&(error as Error).name!=='RenderingCancelledException'){key='';emit('error',(error as Error).message)}}finally{if(run===revision)pending=undefined}}
+  }catch(error){if(!disposed&&run===revision&&(error as Error).name!=='RenderingCancelledException'){key='';emit('error',errorMessage(error))}}finally{if(run===revision)pending=undefined}}
   pending=work();return pending
 }
 defineExpose({ensure})

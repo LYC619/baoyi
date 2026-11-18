@@ -7,7 +7,7 @@ let passed = 0, failed = 0
 async function test(name: string, save: (task: TaskRecord) => Promise<boolean>) {
   const load = createRendererLoader({ vue: Vue }, {
     window: { baoyi: { tasks: { list: async () => [], save } } },
-    console: { ...console, info: () => {} }
+    console: { ...console, info: () => {} }, setTimeout, clearTimeout
   })
   try {
     const center = load('src/composables/useTaskCenter.ts').useTaskCenter()

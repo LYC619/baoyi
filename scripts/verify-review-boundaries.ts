@@ -10,9 +10,9 @@ const deferred = () => {
   return { promise, resolve, reject }
 }
 const make = (id: string) => ({ id, name: `相册 ${id}`, type: 'photo', tags: [], chapters: [], favorite: false })
-function fixture(overrides: Record<string, any> = {}, read = false) {
+function fixture(overrides: Record<string, any> = {}, read = false, id = 'A') {
   const scope = Vue.effectScope(), unmount: (() => void)[] = [], writes: any[] = [], opens: any[] = [], navigations: any[] = []
-  const props = Vue.reactive({ id: 'A' }), route = Vue.reactive({ query: read ? { read: '1' } : {} })
+  const props = Vue.reactive({ id }), route = Vue.reactive({ query: read ? { read: '1' } : {} })
   const api = {
     get: async (id: string) => make(id), pages: async (id: string) => [{ id: `${id}-page` }],
     update: async (id: string, value: any) => { writes.push({ id, value }); return { ...make(id), ...value } },
@@ -22,7 +22,7 @@ function fixture(overrides: Record<string, any> = {}, read = false) {
     ...overrides
   }
   const loader = createRendererLoader({
-    vue: { ...Vue, onUnmounted: (fn: () => void) => unmount.push(fn) },
+    vue: { ...Vue, onMounted: (fn: () => void) => fn(), onUnmounted: (fn: () => void) => unmount.push(fn) },
     'vue-router': { useRoute: () => route, useRouter: () => ({ replace: async () => {}, push: async (to: string) => { navigations.push(to) } }) },
     '@/stores/image': { useImageStore: () => ({ refresh: async () => {}, groups: [] }) },
     '@/composables/useImageReader': { useImageReader: () => ({ session: Vue.ref(null), open: (...args: any[]) => opens.push(args) }) },
@@ -33,12 +33,13 @@ function fixture(overrides: Record<string, any> = {}, read = false) {
 }
 
 for (const failure of [false, true]) {
-  const slow = deferred(), f = fixture({ get: (id: string) => id === 'A' ? slow.promise : Promise.resolve(make(id)) }, true)
-  f.props.id = 'B'; await settle()
+  const slow = deferred(), old = fixture({ get: () => slow.promise }, true)
+  old.dispose(); const f = fixture({}, true, 'B'); await settle()
   failure ? slow.reject(new Error('old failure')) : slow.resolve(make('A')); await settle()
   assert.equal(f.state.item.value.id, 'B', 'old response must not replace current item')
   assert.equal(f.state.pages.value[0].id, 'B-page')
   assert.equal(f.state.error.value, '')
+  assert.equal(old.opens.length, 0, 'unmounted page must not open the shared reader')
   assert.equal(f.opens.length, 1, 'only current successful read=1 request opens reader')
   assert.equal(f.opens[0][0].id, 'B')
   await f.state.patch({ name: 'B edited' }); assert.equal(f.writes[0].id, 'B')
@@ -47,9 +48,10 @@ for (const failure of [false, true]) {
 {
   const first = deferred(), second = deferred(); let count = 0
   const f = fixture({ get: (id: string) => id === 'A' ? (++count === 1 ? first.promise : second.promise) : Promise.resolve(make(id)) })
-  f.props.id = 'B'; await settle(); f.props.id = 'A'; await settle()
+  const pending = f.state.load(); await settle()
   second.resolve({ ...make('A'), name: 'latest A' }); await settle(); first.resolve(make('A')); await settle()
-  assert.equal(f.state.item.value.name, 'latest A', 'A/B/A must use request epoch')
+  await pending
+  assert.equal(f.state.item.value.name, 'latest A', 'repeated reads of one mounted page accept only the latest result')
   f.dispose()
 }
 {
@@ -76,12 +78,12 @@ for (const operation of ['patch', 'move', 'remove', 'rescan', 'relocate']) {
   })
   await settle()
   const pending = operation === 'patch' ? f.state.patch({ name: 'old edit' }) : operation === 'relocate' ? f.state.rescan(true) : f.state[operation]()
-  f.props.id = 'B'; await settle(); f.state.choosingCover.value = true
+  f.dispose(); const next = fixture({}, false, 'B'); await settle(); next.state.choosingCover.value = true
   slow.resolve(operation === 'patch' ? make('A') : { warnings: ['old warning'] }); await pending; await settle()
   assert.equal(JSON.stringify(targets[0]), JSON.stringify(operation === 'move' ? ['A'] : 'A'))
-  assert.equal(f.state.item.value.id, 'B', `${operation} must not overwrite new route`)
-  assert.equal(f.state.error.value, ''); assert.equal(f.state.busy.value, false)
-  assert.equal(f.navigations.length, 0, `${operation} must not navigate new route`); f.dispose()
+  assert.equal(next.state.item.value.id, 'B', `${operation} must not overwrite new route`)
+  assert.equal(next.state.error.value, ''); assert.equal(next.state.busy.value, false)
+  assert.equal(f.navigations.length, 0, `${operation} must not navigate new route`); next.dispose()
 }
 console.log('PASS image detail: stale success/error, A/B/A, unmount, loading, missing/recovery, retry, pinned writes and read=1')
 

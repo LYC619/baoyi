@@ -1,3 +1,4 @@
+import {isWindowsGameEntry} from '../../../src/utils/game-entry.ts'
 /**
  * 游戏模块的编排层：把 Step 3 的扫描器、提示词、工具接到真实的库和界面上。
  *
@@ -28,15 +29,10 @@ import type {
 } from '../../../src/types'
 import { app, net, nativeImage, session, shell } from 'electron'
 import { runAgent, type AgentEvent } from '../../services/agent/loop'
-import {
-  coversDir,
-  getDb,
-  getSettings,
-  listCategories,
-  saveBackupRoot,
-  saveIdentifyLog,
-  tagPool
-} from '../../services/database'
+import { coversDir, getDb, saveBackupRoot } from '../../services/database'
+import { getSettings } from '../../services/settings-store.ts'
+import { listCategories, tagPool } from '../../services/taxonomy-store.ts'
+import { saveIdentifyLog } from '../../services/identify-records.ts'
 import {
   imageSearchAvailable,
   imageSearchWhyNot,
@@ -64,11 +60,13 @@ import {
 } from './covers'
 import {
   createBackup,
+  backupScope,
   deleteBackup,
   getBackup,
   listBackups,
   overRetention,
   restoreBackup,
+  previewRestore,
   type GameLike
 } from './backup'
 import {
@@ -209,7 +207,7 @@ export function removeGame(id: string): void {
  * `D:\资料\攻略` 是完全正常的事，锁在游戏目录里等于这个功能一半用不了。
  * 判断规则本身（去重、封顶、类型猜测）两边共用 links.ts，不各写一份。
  */
-export function addGameLinks(id: string, targets: string[]): GameItem | null {
+export function addGameLinks(id: string, targets: string[], type?: LinkedFile['type']): GameItem | null {
   const game = getGame(getDb(), id)
   if (!game) return null
 
@@ -225,7 +223,7 @@ export function addGameLinks(id: string, targets: string[]): GameItem | null {
     incoming.push({
       path: target,
       label: path.basename(target),
-      type: guessLinkType(target, isDir)
+      type: type && ['guide','trainer','mod','emulator','other'].includes(type) ? type : guessLinkType(target, isDir)
     })
   }
   if (incoming.length === 0) return game
@@ -268,6 +266,7 @@ export async function openGameLink(
 // A slow search/download may finish after the user picked or cleared another image.
 const coverRevisions = new Map<string, number>()
 const coverRevision = (id: string): number => coverRevisions.get(id) ?? 0
+export function invalidateGameCoverRequests(id: string): void { advanceCoverRevision(id) }
 function advanceCoverRevision(id: string): number {
   const next = coverRevision(id) + 1
   coverRevisions.set(id, next)
@@ -328,7 +327,7 @@ function dropCoverFiles(id: string, keep = ''): void {
     if (name.toLowerCase() === keep.toLowerCase()) continue
     try {
       fs.rmSync(path.join(dir, name), { force: true })
-    } catch {
+    } catch { // best-effort
       /* 正被渲染进程占用之类，删不掉就留着，下次换封面会覆盖 */
     }
   }
@@ -374,10 +373,12 @@ export function replaceCoverFile(
     dropCoverFiles(id, path.basename(destination))
     return { ok: true, message: '', path: destination }
   } catch (err: any) {
-    try { if (installed) fs.rmSync(destination, { force: true }) } catch { /* unreferenced new file; old cover is intact */ }
+    try { if (installed) fs.rmSync(destination, { force: true }) } catch { // best-effort
+ /* unreferenced new file; old cover is intact */ }
     return { ok: false, message: `写入封面失败：${err?.message ?? '未知错误'}` }
   } finally {
-    try { if (existsSync(staging)) fs.rmSync(staging, { force: true }) } catch { /* best effort */ }
+    try { if (existsSync(staging)) fs.rmSync(staging, { force: true }) } catch { // best-effort
+ /* best effort */ }
   }
 }
 
@@ -404,7 +405,7 @@ function recordCoverFailure(id: string, revision: number, message: string): void
       cover_status: game.cover_path && validateCoverFile(game.cover_path).ok ? 'ready' : 'failed',
       cover_detail: message
     })
-  } catch { /* Reporting a DB write failure must not hide the original error. */ }
+  } catch (cause) { console.error('[后台通知或记录]', cause) }
 }
 
 /**
@@ -479,7 +480,7 @@ async function netFetch(url: string, imageOnly = false): Promise<Response> {
     const response = await net.fetch(current, { redirect: 'manual', signal })
     if (![301, 302, 303, 307, 308].includes(response.status)) return response
     const next = response.headers.get('location')
-    await response.body?.cancel().catch(() => undefined)
+    await response.body?.cancel().catch(() => { /* best-effort */ })
     if (!next) throw new Error('跳转缺少目标地址')
     current = new URL(next, current).href
   }
@@ -493,7 +494,7 @@ async function networkRoute(url: string): Promise<string> {
 
 async function readCoverBytes(response: Response, limit = MAX_COVER_BYTES): Promise<Buffer> {
   if (Number(response.headers.get('content-length') ?? 0) > limit) {
-    await response.body?.cancel().catch(() => undefined)
+    await response.body?.cancel().catch(() => { /* best-effort */ })
     throw new Error('响应内容超出大小限制')
   }
   if (!response.body) throw new Error('来源没有返回内容')
@@ -512,7 +513,7 @@ async function readCoverBytes(response: Response, limit = MAX_COVER_BYTES): Prom
     if (!total) throw new Error('来源返回了空内容')
     return Buffer.concat(chunks)
   } finally {
-    await reader.cancel().catch(() => undefined)
+    await reader.cancel().catch(() => { /* best-effort */ })
   }
 }
 
@@ -544,18 +545,18 @@ async function cacheCandidatePreview(candidate: CoverCandidate): Promise<CoverCa
     route = await networkRoute(candidate.url)
     const res = await netFetch(candidate.url, true)
     if (!res.ok) {
-      await res.body?.cancel().catch(() => undefined)
+      await res.body?.cancel().catch(() => { /* best-effort */ })
       throw new Error(`HTTP ${res.status}`)
     }
     stage = 'decode'
     const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
     if (contentType === 'text/html' || contentType === 'application/xhtml+xml') {
-      await res.body?.cancel().catch(() => undefined)
+      await res.body?.cancel().catch(() => { /* best-effort */ })
       throw new Error('来源返回 HTML 网页，可能需要验证或登录，没有收到图片')
     }
     const ext = extFromContentType(contentType)
     if (!ext) {
-      await res.body?.cancel().catch(() => undefined)
+      await res.body?.cancel().catch(() => { /* best-effort */ })
       throw new Error('来源返回的不是受支持的图片')
     }
     stage = 'network'
@@ -580,7 +581,8 @@ async function cacheCandidatePreview(candidate: CoverCandidate): Promise<CoverCa
     return { ...candidate, title: candidate.title || candidate.label, status: 'failed', stage, message: err?.message || '候选图不可用', route, preview_url: undefined }
   } finally {
     if (tmp) {
-      try { fs.rmSync(tmp, { force: true }) } catch { /* best effort */ }
+      try { fs.rmSync(tmp, { force: true }) } catch { // best-effort
+ /* best effort */ }
     }
   }
 }
@@ -615,7 +617,8 @@ function localCoverCandidates(game: GameItem): CoverCandidate[] {
       } catch (err: any) {
         out.push({ ...candidate, status: 'failed', stage, message: err?.message || '本地图片不可用' })
       } finally {
-        if (tmp) { try { fs.rmSync(tmp, { force: true }) } catch { /* best effort */ } }
+        if (tmp) { try { fs.rmSync(tmp, { force: true }) } catch { // best-effort
+ /* best effort */ } }
       }
     }
   }
@@ -776,7 +779,7 @@ export async function searchGameCovers(id: string, recoverStored = false): Promi
     }
   }
 
-  const cfg = getSettings().search
+  const cfg = getSettings(getDb()).search
   if (!found.some(c => c.status === 'ready') && imageSearchAvailable(cfg)) {
     try { await cache(candidatesFromSearch(await searchImages(`${usedQuery} game cover art`, cfg))) }
     catch (err: any) { diagnostics.push({ source: 'search', stage: 'lookup', status: 'failed', message: `图片搜索失败：${err?.message || '未知错误'}`, route: '已配置的图片搜索服务' }) }
@@ -814,7 +817,7 @@ export async function rebuildMissingGameCovers(
   let skipped = 0
   const report = (processed: number, current: string, message: string): void => {
     // A closed renderer cannot turn a completed file write into a failed operation.
-    try { onProgress?.({ processed, total: pending.length, current, message }) } catch { /* progress sink gone */ }
+    try { onProgress?.({ processed, total: pending.length, current, message }) } catch (cause) { console.error('[后台通知或记录]', cause) }
   }
   report(0, '', `当前范围 ${all.length} 个游戏，待补齐 ${pending.length} 个`)
   for (let i = 0; i < pending.length; i++) {
@@ -967,6 +970,7 @@ export async function backupSavePath(id: string, savePath: string): Promise<Save
     return { ok: false, message: '这条存档路径不在这个游戏名下，已拒绝', backup: null, over: [] }
   }
 
+  return mutateSaveFiles(id,async()=>{
   const made = await createBackup(
     getDb(),
     { id: game.id, name_zh: game.name_zh, name_en: game.name_en, file_name: game.file_name },
@@ -978,8 +982,9 @@ export async function backupSavePath(id: string, savePath: string): Promise<Save
   if (!made.ok || !made.backup) return made
   return {
     ...made,
-    over: overRetention(getDb(), game.id, made.backup.save_path, getSettings().save_backup_keep)
+    over: overRetention(getDb(), game.id, made.backup.save_path, getSettings(getDb()).save_backup_keep)
   }
+  })
 }
 
 export const listSaveBackups = (id: string): SaveBackup[] => listBackups(getDb(), id)
@@ -991,16 +996,44 @@ export const getSaveBackup = (backupId: string): SaveBackup | null => getBackup(
  * 游戏条目可能已经被移除了（save_backups 刻意没有外键，见 schema.ts），
  * 那种情况下还原依然要能走通 —— 用户要的是他的存档，不是库里那一行。
  */
-export async function restoreSaveBackup(backupId: string): Promise<SaveRestoreResult> {
-  const backup = getBackup(getDb(), backupId)
-  if (!backup) return { ok: false, message: '找不到这条备份记录', safety: null }
-  return restoreBackup(getDb(), backupId, gameLike(backup.resource_id), {
-    backupRoot: saveBackupRoot()
-  })
+const mutatingSaves=new Set<string>()
+async function mutateSaveFiles<T>(id:string,operation:()=>Promise<T>):Promise<T>{
+  if(mutatingSaves.size)throw new Error('这个游戏的存档操作正在进行，请等待完成')
+  mutatingSaves.add(id)
+  try{return await operation()}finally{mutatingSaves.delete(id)}
+}
+export async function previewSaveBackup(id:string,target:string){
+  const game=getGame(getDb(),id)
+  if(!game?.save_paths.some(s=>path.resolve(s.path).toLowerCase()===path.resolve(target).toLowerCase()))throw new Error('存档路径未登记到这个游戏')
+  return backupScope(target)
+}
+function restoreOptions(backupId:string,target?:string) {
+  const backup=getBackup(getDb(),backupId)
+  if(!backup)throw new Error('找不到这条备份记录')
+  if(mutatingSaves.size)throw new Error('这个游戏的存档操作正在进行，请等待完成')
+  if(launchingGames.has(backup.resource_id))throw new Error('游戏正在启动，请等待后关闭游戏再还原')
+  if(isGameRunning(backup.resource_id))throw new Error('游戏仍在运行，请结束游玩后还原')
+  if(target&&path.resolve(target).toLowerCase()!==path.resolve(backup.save_path).toLowerCase()){
+    const game=getGame(getDb(),backup.resource_id)
+    if(!game?.save_paths.some(s=>path.resolve(s.path).toLowerCase()===path.resolve(target).toLowerCase()))throw new Error('迁移目标须为这个游戏已登记的存档路径')
+  }
+  return {backup,options:{backupRoot:saveBackupRoot(),target}}
+}
+export async function previewSaveRestore(backupId:string,target?:string) {
+  const {options}=restoreOptions(backupId,target)
+  return previewRestore(getDb(),backupId,options)
+}
+export async function restoreSaveBackup(backupId:string,target?:string,expected?:string):Promise<SaveRestoreResult> {
+  if(!expected)throw new Error('请先预览还原差异')
+  const {backup,options}=restoreOptions(backupId,target)
+  return mutateSaveFiles(backup.resource_id,()=>restoreBackup(getDb(),backupId,gameLike(backup.resource_id),{...options,expected}))
 }
 
-export const deleteSaveBackup = (backupId: string): Promise<{ ok: boolean; message: string }> =>
-  deleteBackup(getDb(), backupId)
+export async function deleteSaveBackup(backupId:string):Promise<{ok:boolean;message:string}>{
+  const backup=getBackup(getDb(),backupId)
+  if(!backup)return {ok:false,message:'找不到这条备份记录'}
+  return mutateSaveFiles(backup.resource_id,()=>deleteBackup(getDb(),backupId))
+}
 
 /**
  * 重新验一条已记下的存档路径，验过了就把 verified_at 往前推。
@@ -1067,13 +1100,42 @@ function closeSession(id: string): void {
  * unref 之后 exit 事件仍然会到（它只是不再替这个句柄吊着事件循环），
  * 而抱一自己的事件循环由应用本身撑着 —— 所以这两件事不冲突。
  */
-export function launchGame(id: string): { ok: boolean; message: string } {
-  const game = getGame(getDb(), id)
+const launchingGames=new Set<string>()
+export async function launchGame(id:string,options:import('../../../src/types/game-workspace').GameLaunchOptions={}){
+ if(mutatingSaves.size)return {ok:false,message:'存档操作正在进行，请完成后再启动'}
+ if(launchingGames.has(id))return {ok:false,message:'正在启动，请稍候'}
+ if(!options||typeof options!=='object')return {ok:false,message:'启动选项无效'}
+ launchingGames.add(id)
+ try{return await launchGameWithOptions(id,options)}catch(e){return {ok:false,message:e instanceof Error?e.message:String(e)}}finally{launchingGames.delete(id)}
+}
+function recordGameLaunch(id:string){getDb().prepare('UPDATE resource SET use_count=COALESCE(use_count,0)+1,last_used_at=?,updated_at=? WHERE id=?').run(Date.now(),Date.now(),id)}
+async function launchGameWithOptions(id: string, options:import('../../../src/types/game-workspace').GameLaunchOptions={}): Promise<{ ok: boolean; message: string }> {
+  let game = getGame(getDb(), id)
   if (!game) return { ok: false, message: '找不到这个游戏' }
+  if(options.entry&&options.entry!==game.path){if(!game.linked_files.some(f=>f.path===options.entry&&f.role==='launcher')||!/\.(exe|bat|cmd|lnk)$/i.test(options.entry))return {ok:false,message:'启动入口未关联到当前游戏'};game={...game,path:options.entry}}
+  if (!isWindowsGameEntry(game.path)) return {ok:false,message:'此条目是安装包或资料，请打开文件夹，在对应设备使用；不会记录游玩时长'}
   if (!existsSync(game.path)) {
     return { ok: false, message: `主程序不在了：${game.path}` }
   }
   if (playing.has(id)) return { ok: true, message: '这个游戏已经在运行了' }
+  const selected=options.trainers??game.linked_files.filter(f=>f.launch_with_game===true).map(f=>f.path)
+  if(!Array.isArray(selected)||selected.length>20)return {ok:false,message:'修改器列表无效'}
+  for(const target of new Set(selected)){
+    const trainer=game.linked_files.find(f=>f.path===target&&f.type==='trainer'&&f.role!=='usage')
+    if(!trainer||!/\.(exe|bat|cmd|lnk)$/i.test(trainer.path)||!existsSync(trainer.path))return {ok:false,message:'修改器不可用，游戏未启动'}
+  }
+  for(const target of new Set(selected)){const result=await openGameLink(id,target);if(!result.ok)return {ok:false,message:'修改器打开失败，游戏未启动：'+result.message}}
+
+
+  // Project wrappers establish their own cwd and may detach the real game. Do not
+  // spawn a .bat/.lnk as an executable or pretend its lifetime is playtime.
+  if (/\.(bat|cmd|lnk)$/i.test(game.path)) {
+    try {
+      const failure = await shell.openPath(game.path)
+      if (!failure) recordGameLaunch(id)
+      return failure ? { ok:false, message:failure } : { ok:true, message:'已打开游戏入口；脚本或快捷方式不记录游玩时长' }
+    } catch (cause) { return { ok:false, message:cause instanceof Error ? cause.message : String(cause) } }
+  }
 
   playing.set(id, Date.now())
   try {
@@ -1089,6 +1151,7 @@ export function launchGame(id: string): { ok: boolean; message: string } {
       playing.delete(id)
       void shell.openPath(game.path)
     })
+    child.once('spawn',()=>recordGameLaunch(id))
     child.on('exit', () => closeSession(id))
     child.unref()
   } catch {
@@ -1219,11 +1282,11 @@ export async function scanGames(
   }
 
   /* -------- 第二截：逐个识别 -------- */
-  const settings = getSettings()
+  const settings = getSettings(getDb())
   const withSearch = searchAvailable(settings.search)
   // 分类和标签池现读现填，且都按 kind='game' 取 —— 软件的「开发工具」不能进这个 prompt
-  const pool = tagPool('game')
-  const categories = listCategories('game')
+  const pool = tagPool(getDb(), 'game')
+  const categories = listCategories(getDb(), 'game')
   const categoryNames = categories.map((c) => c.name)
   const system = fillGameSystem(categories, pool, withSearch)
   const db = getDb()
@@ -1277,8 +1340,8 @@ export async function scanGames(
       const note = registered ? '已注册' : run.stopReason === 'error' ? `识别失败：${run.error}` :
                    run.stopReason === 'max_turns' ? '达到识别预算，未登记；可手动选择主程序后补充资料' : failed ? '未完成登记，可手动添加主程序' : '已明确跳过'
 
-      try {
-        saveIdentifyLog({
+      {
+        saveIdentifyLog(getDb(), {
           dir: c.dir,
           label: path.basename(c.dir),
           kind: 'unit',
@@ -1292,8 +1355,6 @@ export async function scanGames(
           stop_reason: run.stopReason,
           events: trail
         })
-      } catch {
-        /* 日志写不进去不该让识别结果跟着失败 */
       }
     }
 

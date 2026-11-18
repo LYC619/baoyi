@@ -3,7 +3,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { spawn,execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { getDb, getSettings } from '../services/database.ts'
+import { getDb } from '../services/database.ts'
+import { getSettings } from '../services/settings-store.ts'
 import { assertLibraryIdle } from './library-backup.ts'
 import { HENTAI_CATEGORY } from '../kinds/video/taxonomy.ts'
 import { restoreWindowFocus } from '../services/window-focus.ts'
@@ -39,15 +40,15 @@ export function registerProjectIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
   const assistant=()=>{
     if(!agent || agentDb!==getDb()){
       agent?.dispose();automation?.stop()
-      agentDb=getDb();agent=createProjectAgent({db:agentDb,config:()=>new ModulePreferences(getDb(),getSettings).config('project'),updated:()=>{changed();const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('workspace:changed')},execute:action=>projectOperation(action),
+      agentDb=getDb();agent=createProjectAgent({db:agentDb,config:()=>new ModulePreferences(getDb(),() => getSettings(getDb())).config('project'),updated:()=>{changed();const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('workspace:changed')},execute:action=>projectOperation(action),
         completed:session=>{automation?.completed(session.projectId,session.workflow!.head);changed()},paused:session=>automation?.failed(session.projectId,session.error),
         changed:session=>{const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('project:session',session)}})
-      automation=new ProjectAutomation(agentDb,{busy:()=>!!agent?.busy()||projectLibraryBusy()||workspaceBusy()||!new ModulePreferences(getDb(),getSettings).config('project').enabled,
+      automation=new ProjectAutomation(agentDb,{busy:()=>!!agent?.busy()||projectLibraryBusy()||workspaceBusy()||!new ModulePreferences(getDb(),() => getSettings(getDb())).config('project').enabled,
         start:async(id,after)=>agent!.organize(id,after||undefined).id})
     }
     return agent
   }
-  const monitor=setInterval(()=>{try{assistant();void automation?.tick().catch(()=>{})}catch{/* Database replacement/startup will retry on the next tick. */}},20000)
+  const monitor=setInterval(()=>{try{assistant();void automation?.tick().catch(cause=>console.error('[项目后台检查]',cause))}catch(cause){console.error('[项目后台检查]',cause)}},20000)
   monitor.unref?.()
   app.on('will-quit',()=>{clearInterval(monitor);automation?.stop();agent?.dispose()})
   const handle=(name:string,action:(...args:any[])=>unknown)=>ipc.handle('project:'+name,(event:IpcMainInvokeEvent,...args:any[])=>{
@@ -94,7 +95,8 @@ export function registerProjectIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
     checkGitDb()
     if(options.repoPath!==undefined&&typeof options.repoPath!=='string')throw new Error('仓库相对目录无效')
     let selected=''
-    try{const saved=JSON.parse((getDb().prepare('SELECT value FROM settings WHERE key=?').get('project_repository:'+id) as {value:string})?.value||'null');if(saved?.root===root)selected=saved.repoPath||''}catch{}
+    const repositoryJson=(getDb().prepare('SELECT value FROM settings WHERE key=?').get('project_repository:'+id) as {value:string})?.value||'null'
+    try{const saved=JSON.parse(repositoryJson);if(saved?.root===root)selected=saved.repoPath||''}catch{ /* 无效仓库偏好使用项目根目录。 */ }
     return {...options,repoPath:options.repoPath??selected}
   }
   const rememberGit=(id:string,root:string,git:import('../../src/types/project.ts').ProjectGitStatus)=>{
@@ -157,7 +159,7 @@ export function registerProjectIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
     WHERE r.kind!='project'
     AND NOT EXISTS(SELECT 1 FROM image_meta m JOIN image_groups g ON g.id=m.group_id WHERE m.resource_id=r.id AND g.hidden=1)
     AND NOT(r.kind='video' AND COALESCE(r.category,'')=? AND ?=1)`
-  const availableResources=()=>getDb().prepare(resourceSelect+' ORDER BY r.name_zh LIMIT 5000').all(HENTAI_CATEGORY,Number(getSettings().hide_hentai))
+  const availableResources=()=>getDb().prepare(resourceSelect+' ORDER BY r.name_zh LIMIT 5000').all(HENTAI_CATEGORY,Number(getSettings(getDb()).hide_hentai))
   handle('resources',availableResources)
   handle('prepare-import',async mode=>{
     if(!['single','discover','file'].includes(mode))throw new Error('导入方式无效')
@@ -196,14 +198,14 @@ export function registerProjectIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
   handle('open',async(id:string,entryId?:string)=>{
     assertProjectIdle();const item=library().get(id);if(!item)throw new Error('项目不存在')
     const entry=item.entries.find(e=>e.id===(entryId||item.defaultEntryId));if(!entry)throw new Error('请先设置打开入口')
-    if(entry.resourceId){const linked=getDb().prepare(resourceSelect+' AND r.id=?').get(HENTAI_CATEGORY,Number(getSettings().hide_hentai),entry.resourceId) as {path:string}|undefined;if(!linked)throw new Error('关联资源已移除或隐藏，请重新选择入口');entry.path=linked.path}
+    if(entry.resourceId){const linked=getDb().prepare(resourceSelect+' AND r.id=?').get(HENTAI_CATEGORY,Number(getSettings(getDb()).hide_hentai),entry.resourceId) as {path:string}|undefined;if(!linked)throw new Error('关联资源已移除或隐藏，请重新选择入口');entry.path=linked.path}
     if(entry.type==='url')await shell.openExternal(entry.path)
     else {
       await fs.access(entry.path)
       if(entry.type==='obsidian')await shell.openExternal('obsidian://open?path='+encodeURIComponent(entry.path))
       else if(entry.type==='command'){
         if(!/\.exe$/i.test(entry.path))throw new Error('外部工具请选择 EXE 程序；脚本可使用文件入口')
-        const root=await fs.stat(item.path).catch(()=>null)
+        const root=await fs.stat(item.path).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause })
         await new Promise<void>((resolve,reject)=>{const child=spawn(entry.path,entry.args,{cwd:entry.cwd||(root?.isDirectory()?item.path:path.dirname(item.path)),shell:false,detached:true,stdio:'ignore',windowsHide:true});child.once('error',reject);child.once('spawn',()=>{child.unref();resolve()})})
       }else{
         if(/\.(bat|cmd|ps1|vbs|js|mjs|py|sh|lnk)$/i.test(entry.path)){
@@ -217,12 +219,12 @@ export function registerProjectIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
   handle('reveal',(id:string)=>{const item=library().get(id);if(item)shell.showItemInFolder(item.path)})
   handle('relocate',async(id:string)=>{
     assertProjectRunsStopped(id);assertLibraryIdle();const item=library().get(id);if(!item)throw new Error('项目不存在')
-    const oldExists=await fs.lstat(item.path).catch(()=>null);if(oldExists)throw new Error('原位置仍存在；需要改变位置请使用移动项目')
+    const oldExists=await fs.lstat(item.path).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause });if(oldExists)throw new Error('原位置仍存在；需要改变位置请使用移动项目')
     const kind=await dialog.showMessageBox(getWindow()!,{type:'question',title:'重新定位项目',message:'项目的新主位置是文件夹还是文件？',detail:item.path,buttons:['文件夹','文件','取消'],defaultId:0,cancelId:2,noLink:true})
     restoreWindowFocus(getWindow());if(kind.response===2)return null
     const target=await pick(kind.response===0);if(!target)return null
     return projectOperation(async()=>{
-      const current=library().get(id);if(!current||current.path!==item.path||await fs.lstat(item.path).catch(()=>null))throw new Error('项目位置已变化，请重新操作')
+      const current=library().get(id);if(!current||current.path!==item.path||await fs.lstat(item.path).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause }))throw new Error('项目位置已变化，请重新操作')
       const stat=await fs.lstat(target);if(stat.isSymbolicLink()||(!stat.isDirectory()&&!stat.isFile()))throw new Error('请选择实际项目文件或目录')
       getDb().exec('SAVEPOINT project_relocate')
       try{rebaseLibraryPaths(getDb(),item.path,target);getDb().prepare('UPDATE resource SET file_name=?,source_dir=?,updated_at=? WHERE id=?').run(path.basename(target),path.dirname(target),Date.now(),id);getDb().exec('RELEASE project_relocate')}

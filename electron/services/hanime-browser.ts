@@ -16,7 +16,7 @@ export function createHanimeBrowser(deps: { getSession: () => Session; getMainWi
     if (deps.isHidden()) throw new Error('里番内容已隐藏，请先在设置中恢复显示')
     if (input !== undefined && !allowedPage(input)) throw new Error('只能在此窗口打开 Hanime 站点')
     if (window && !window.isDestroyed()) {
-      if (input) void window.loadURL(input).catch(() => {})
+      if (input) void window.loadURL(input).catch(cause => { console.error(cause); if (window && !window.isDestroyed()) window.setTitle('加载失败，可刷新重试 · Hanime') })
       if (window.isMinimized()) window.restore()
       window.show(); window.focus(); return true
     }

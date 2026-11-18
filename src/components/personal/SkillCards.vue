@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, computed, watch, nextTick, onBeforeUnmount } from "vue";
 import { workspace, plain } from "@/utils/workspace-api";
 import type { SkillCard, SkillProposal } from "@/types/skill-profile";
@@ -35,7 +36,7 @@ async function load() {
       error.value = "";
     }
   } catch (e) {
-    if (run === revision) error.value = (e as Error).message;
+    if (run === revision) error.value = errorMessage(e);
   }
 }
 void load();
@@ -52,7 +53,7 @@ async function act(fn: () => Promise<unknown>) {
     await fn();
     await load();
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = errorMessage(e);
   } finally {
     busy.value = false;
   }

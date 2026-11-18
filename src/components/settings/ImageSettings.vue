@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { computed, onMounted, ref, watch } from 'vue'
 import PhotoViewControls from '@/components/image/PhotoViewControls.vue'
 import { usePhotoView } from '@/composables/usePhotoView'
@@ -22,7 +23,7 @@ async function load() { await store.refresh(); tags.value = await api.tagCounts(
 async function run(action: () => Promise<void>) {
   if (busy.value) return
   busy.value = true; error.value = ''; message.value = ''
-  try { await action(); await load() } catch (cause) { error.value = (cause as Error).message } finally { busy.value = false }
+  try { await action(); await load() } catch (cause) { error.value = errorMessage(cause) } finally { busy.value = false }
 }
 onMounted(() => void run(async () => { preferences.value = await api.preferences() }))
 async function saveGroup(group?: ImageGroup, name?: string) {
@@ -49,7 +50,7 @@ async function rescan() {
   const ids = [...selected.value]
   await run(async () => {
     let updated = 0; const failures: string[] = []
-    for (const id of ids) { try { await api.rescan(id); updated++ } catch (cause) { failures.push((store.items.find(item => item.id === id)?.name || id) + '：' + (cause as Error).message) } }
+    for (const id of ids) { try { await api.rescan(id); updated++ } catch (cause) { failures.push((store.items.find(item => item.id === id)?.name || id) + '：' + errorMessage(cause)) } }
     message.value = `已重扫 ${updated} 个作品`; error.value = failures.join('；')
   })
 }

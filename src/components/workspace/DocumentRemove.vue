@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import {ref,watch,onMounted} from 'vue'
 import {workspace} from '@/utils/workspace-api'
 import ProjectDialog from '@/components/project/ProjectDialog.vue'
@@ -6,8 +7,8 @@ const props=defineProps<{id:string}>(),emit=defineEmits<{close:[];removed:[]}>()
 const files=ref<Awaited<ReturnType<typeof workspace.recycle.locations>>>([]),selected=ref<string[]>([]),withFiles=ref(false),busy=ref(false),error=ref('')
 const preview=ref<Awaited<ReturnType<typeof workspace.recycle.preview>>|null>(null)
 watch([selected,withFiles],()=>preview.value=null,{deep:true})
-onMounted(async()=>{try{files.value=await workspace.recycle.locations(props.id)}catch(e){error.value=(e as Error).message}})
-async function run(fn:()=>Promise<void>){busy.value=true;error.value='';try{await fn()}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
+onMounted(async()=>{try{files.value=await workspace.recycle.locations(props.id)}catch(e){error.value=errorMessage(e)}})
+async function run(fn:()=>Promise<void>){busy.value=true;error.value='';try{await fn()}catch(e){error.value=errorMessage(e)}finally{busy.value=false}}
 async function check(){await run(async()=>{preview.value=await workspace.recycle.preview(props.id,withFiles.value?[...selected.value]:[])})}
 async function remove(){await run(async()=>{if(!preview.value)return;await workspace.recycle.confirm(preview.value.token);emit('removed');emit('close')})}
 </script>

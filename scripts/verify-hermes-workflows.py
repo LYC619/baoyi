@@ -1,6 +1,7 @@
 """Real bundled Hermes, isolated local model endpoint; no external requests."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import threading
 import uuid
@@ -9,7 +10,7 @@ from http.server import ThreadingHTTPServer
 spec = importlib.util.spec_from_file_location('protocol', Path(__file__).with_name('verify-hermes-runtime.py'))
 p = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
-p.OUT = p.ROOT / 'output/p1-p2-project-2026-11-06/hermes-workflows'
+p.OUT = Path(os.environ.get('BAOYI_HERMES_TEST_OUTPUT', str(p.ROOT / 'output/p1-p2-project-2026-11-06/hermes-workflows')))
 p.OUT.mkdir(parents=True, exist_ok=True)
 p.PROFILE = p.OUT / ('profile-' + uuid.uuid4().hex[:10])
 

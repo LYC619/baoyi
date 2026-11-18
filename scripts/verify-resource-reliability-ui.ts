@@ -57,7 +57,7 @@ try {
   await open()
   await check('schema-25 upgrade creates verified pre-upgrade snapshot and retains records', async () => {
     const safety = await page.evaluate(() => (window as any).baoyi.data.snapshotInfo())
-    assert.equal(safety.schema, SCHEMA_VERSION); assert.equal(safety.version, '0.17.9')
+    assert.equal(safety.schema, SCHEMA_VERSION); assert.equal(safety.version, JSON.parse(fs.readFileSync('package.json', 'utf8')).version)
     const snapshot = safety.inventory.snapshots.find((s: any) => s.fromSchema === 25)
     assert.ok(snapshot)
     const old = new DatabaseSync(path.join(safety.inventory.directory, snapshot.file), { readOnly: true })

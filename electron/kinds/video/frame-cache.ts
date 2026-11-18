@@ -107,9 +107,9 @@ export class VideoFrameCache {
       db.prepare("UPDATE video_frame_cache SET state='ready',bytes=?,accessed=?,manifest=?,error='' WHERE id=?").run(result.bytes,Date.now(),JSON.stringify(result),job.hash)
       await fs.unlink(path.join(this.directory(job.hash),'preview.jpg')).catch(error=>{if(error.code!=='ENOENT')throw error})
     }catch(error){
-      if(job.controller.signal.aborted){await fs.rm(this.directory(job.hash),{recursive:true,force:true}).catch(()=>{});db.prepare('DELETE FROM video_frame_cache WHERE id=?').run(job.hash)}
+      if(job.controller.signal.aborted){await fs.rm(this.directory(job.hash),{recursive:true,force:true}).catch(() => { /* best-effort */ });db.prepare('DELETE FROM video_frame_cache WHERE id=?').run(job.hash)}
       else{db.prepare("UPDATE video_frame_cache SET state='failed',error=?,retry_at=? WHERE id=?").run((error as Error).message,Date.now()+600000,job.hash)}
-    }finally{await fs.rm(stage,{recursive:true,force:true}).catch(()=>{});this.jobs.delete(job.hash);this.active=null;completed();this.notify(job.hash);void this.pump()}
+    }finally{await fs.rm(stage,{recursive:true,force:true}).catch(() => { /* best-effort */ });this.jobs.delete(job.hash);this.active=null;completed();this.notify(job.hash);void this.pump()}
   }
   async clear(){
     if(this.clearing)throw new Error('正在清理预览缓存')

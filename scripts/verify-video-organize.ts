@@ -725,7 +725,7 @@ await test('exclusive publication without hard links verifies every copied file'
 })
 
 await test('a real cross-volume copy verifies bytes and retains original source files', async f => {
-  const otherVolume = path.parse(process.cwd()).root
+  const otherVolume = path.resolve('output')
   // Node reports dev=0 on this Windows host; distinct resolved drive roots are the available evidence.
   const differentVolume = process.platform === 'win32'
     ? path.parse(fs.realpathSync(otherVolume)).root.toLowerCase() !== path.parse(fs.realpathSync(f.root)).root.toLowerCase()

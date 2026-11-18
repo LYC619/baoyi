@@ -70,7 +70,7 @@ try {
 
 // Rebuild the pre-26 schema with a real indexed work, then run the actual migration twice.
 const old=new DatabaseSync(':memory:');old.exec('PRAGMA foreign_keys=ON')
-const oldTables=imageSchema.tables.replace("name TEXT NOT NULL, sort_order", "name TEXT NOT NULL UNIQUE, sort_order").replace(/,\s*item_type TEXT NOT NULL DEFAULT 'comic' CHECK\(item_type IN \('photo','comic','misc'\)\),\s*directory TEXT NOT NULL DEFAULT '', UNIQUE\(item_type,name\)/,'').replace("CHECK(item_type IN ('photo','comic','misc'))","CHECK(item_type IN ('photo','comic'))")
+const oldTables=imageSchema.tables.replace(", authors TEXT NOT NULL DEFAULT '[]'",'').replace("name TEXT NOT NULL, sort_order", "name TEXT NOT NULL UNIQUE, sort_order").replace(/,\s*item_type TEXT NOT NULL DEFAULT 'comic' CHECK\(item_type IN \('photo','comic','misc'\)\),\s*directory TEXT NOT NULL DEFAULT '', UNIQUE\(item_type,name\)/,'').replace("CHECK(item_type IN ('photo','comic','misc'))","CHECK(item_type IN ('photo','comic'))")
 initSchema(old,KINDS.map(k=>k.kind==='image'?{...k,schema:{tables:oldTables}}:k))
 old.prepare("INSERT INTO image_groups(id,name) VALUES('old-group','旧分类')").run()
 old.prepare("INSERT INTO resource(id,kind,path,file_name,created_at,updated_at) VALUES('old','image','D:/old','old',1,1)").run()

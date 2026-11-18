@@ -1,3 +1,4 @@
+import { useToast } from '@/composables/useToast'
 import { computed, ref } from 'vue'
 import type { VideoImportBatch, VideoImportEdits, VideoImportSummary } from '@/types/video-import'
 import { errorMessage, plain } from '@/utils'
@@ -25,8 +26,8 @@ async function perform<T>(name: string, action: () => Promise<T>): Promise<T | n
 export function useVideoImport() {
   if (!initialized && typeof window !== 'undefined' && window.baoyi?.videoImport) {
     initialized = true; window.baoyi.videoImport.onChanged(merge)
-    void refreshList().catch(() => {})
-    void window.baoyi.settings.getAll().then(settings => { useAgent.value = settings.video_import_agent === true }).catch(() => {})
+    void refreshList().catch(cause => useToast().error(errorMessage(cause)))
+    void window.baoyi.settings.getAll().then(settings => { useAgent.value = settings.video_import_agent === true }).catch(cause => useToast().error(errorMessage(cause)))
   }
   async function review(ids: string[]) {
     if (!batch.value || !ids.length) return

@@ -21,7 +21,8 @@ export function projectPreferences(db:SqlDb,value?:ProjectPreferences):ProjectPr
     if(!Number.isInteger(value.maxTurns)||value.maxTurns<2||value.maxTurns>20||!Number.isInteger(value.contextMessages)||value.contextMessages<2||value.contextMessages>30||!PROJECT_SOURCES.includes(value.defaultSource)||!PROJECT_STATES.includes(value.defaultState))throw new Error('项目偏好无效')
     db.prepare("INSERT INTO settings(key,value) VALUES('project_preferences',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(value))
   }
-  try{const result={...DEFAULT_PROJECT_PREFERENCES,...JSON.parse((db.prepare("SELECT value FROM settings WHERE key='project_preferences'").get() as {value:string})?.value||'{}')};if(!PROJECT_TABS.includes(result.defaultTab))result.defaultTab='timeline';return result}catch{return {...DEFAULT_PROJECT_PREFERENCES}}
+  const stored=(db.prepare("SELECT value FROM settings WHERE key='project_preferences'").get() as {value:string})?.value||'{}'
+  try{const result={...DEFAULT_PROJECT_PREFERENCES,...JSON.parse(stored)};if(!PROJECT_TABS.includes(result.defaultTab))result.defaultTab='timeline';return result}catch{return {...DEFAULT_PROJECT_PREFERENCES} /* 无效 JSON 使用默认偏好。 */ }
 }
 const stamp=(item:ProjectItem)=>createHash('sha256').update(JSON.stringify(item)).digest('hex')
 const fields:Record<string,number>={name:160,summary:4000,category:80,source:40,state:40,group:100,notes:20000}

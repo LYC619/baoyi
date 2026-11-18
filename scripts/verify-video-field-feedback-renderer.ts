@@ -1,7 +1,7 @@
 /** Field feedback against real Vue routes; only isolated browser/IPC fixtures. */
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { createWorkflowRendererFixture } from './verify-video-workflow-renderer.ts'
+import { createWorkflowRendererFixture } from './helpers/video-renderer.ts'
 
 const extension = String.raw`
 work.tags = ['摄影', '课程']; work.category = '纪录片'; work.notes = '整部课程的笔记'

@@ -247,19 +247,26 @@ def preview_cover(jm, postman, work_id):
     import base64
     from io import BytesIO
     from PIL import Image
-    try:
-        url = jm.JmcomicText.get_album_cover_url(work_id, IMAGE_HOSTS[0], '_3x4')
-        response = postman.fetch(url, image=True, max_bytes=2*1024**2, headers=jm.JmModuleConfig.new_html_headers())
-        with Image.open(BytesIO(response.content)) as original:
-            if original.width*original.height > 40_000_000:
+    for host in IMAGE_HOSTS:
+        check_cancel()
+        try:
+            url = jm.JmcomicText.get_album_cover_url(work_id, host, '_3x4')
+            response = postman.fetch(url, image=True, max_bytes=2*1024**2, headers=jm.JmModuleConfig.new_html_headers())
+            with Image.open(BytesIO(response.content)) as original:
+                if original.width*original.height > 40_000_000:
+                    return
+                original.thumbnail((180, 240))
+                output = BytesIO()
+                original.convert('RGB').save(output, format='JPEG', quality=70)
+            if output.tell() <= 40000:
+                check_cancel()
+                emit('cover', value='data:image/jpeg;base64,'+base64.b64encode(output.getvalue()).decode('ascii'))
                 return
-            original.thumbnail((180, 240))
-            output = BytesIO()
-            original.convert('RGB').save(output, format='JPEG', quality=70)
-        if output.tell() <= 40000:
-            emit('cover', value='data:image/jpeg;base64,'+base64.b64encode(output.getvalue()).decode('ascii'))
-    except Exception:
-        check_cancel()  # A missing cover must not prevent choosing chapters.
+        except AdapterError as cause:
+            if cause.code in ('access_required', 'rate_limited', 'source_url', 'source_address', 'proxy', 'cancelled', 'size'):
+                raise
+        except Exception:
+            check_cancel()  # Missing covers can try another approved image host.
 
 
 def decode_page(jm, source: Path, destination: Path, image):
@@ -298,6 +305,8 @@ def download(jm, client, postman, request):
             if page_id not in skip:
                 tasks.append((folder, selected['id'], index, page_id, photos[selected['id']][index]))
 
+    decode_slots = threading.BoundedSemaphore(2)
+
     def one(task):
         folder, chapter_id, index, page_id, image = task
         final = folder / f'{index+1:05d}.png'
@@ -312,7 +321,9 @@ def download(jm, client, postman, request):
                 for file in (raw, decoded):
                     file.unlink(missing_ok=True)
                 postman.fetch(image.img_url, output=raw, headers=jm.JmModuleConfig.new_html_headers())
-                value = decode_page(jm, raw, decoded, image)
+                with decode_slots:
+                    check_cancel()
+                    value = decode_page(jm, raw, decoded, image)
                 check_cancel()
                 # Windows rename does not overwrite an existing destination.
                 decoded.rename(final)
@@ -331,8 +342,8 @@ def download(jm, client, postman, request):
             finally:
                 raw.unlink(missing_ok=True)
                 decoded.unlink(missing_ok=True)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        for _ in pool.map(one, tasks, buffersize=2):
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        for _ in pool.map(one, tasks, buffersize=5):
             pass
 
 

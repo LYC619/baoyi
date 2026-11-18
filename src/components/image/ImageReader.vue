@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, ArrowRight, X, Maximize, Minimize2, Move, RotateCw, ZoomIn, ZoomOut, RotateCcw, Bookmark, BookMarked, Check, Settings2, Save, Trash2, RectangleVertical, Columns2, Rows3 } from 'lucide-vue-next'
 import {useFloatingDock} from '@/composables/useFloatingDock'
@@ -40,7 +41,7 @@ function wake() { idle.value = false; clearTimeout(hideTimer); hideTimer = setTi
 function offset() { return prefs.value.mode === 'scroll' && viewport.value ? Math.max(0, Math.min(1, (viewport.value.scrollTop - starts.value[index.value]) / sizes.value[index.value])) : 0 }
 async function persist() {
   if (props.item.type !== 'comic' || !page.value || restoring) return
-  try { await window.baoyi.image.saveProgress(props.item.id, page.value.id, offset()) } catch (cause) { error.value = (cause as Error).message }
+  try { await window.baoyi.image.saveProgress(props.item.id, page.value.id, offset()) } catch (cause) { error.value = errorMessage(cause) }
 }
 function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { void persist() }, 350) }
 function savePreferences() {
@@ -144,7 +145,7 @@ async function loaded(event: Event, id: string) {
 }
 async function bookmarkAction(action: () => Promise<unknown>) {
   busy.value = true
-  try { await action(); bookmarks.value = await window.baoyi.image.bookmarks(props.item.id) } catch (cause) { error.value = (cause as Error).message } finally { busy.value = false }
+  try { await action(); bookmarks.value = await window.baoyi.image.bookmarks(props.item.id) } catch (cause) { error.value = errorMessage(cause) } finally { busy.value = false }
 }
 function toggleBookmark() {
   const existing = currentBookmark.value, current = page.value
@@ -153,7 +154,7 @@ function toggleBookmark() {
 function jumpBookmark(bookmark: ImageBookmark) { const at = props.pages.findIndex(p => p.id === bookmark.pageId); if (at >= 0) void go(at, bookmark.offset) }
 function renameBookmark(bookmark: ImageBookmark, event: Event) { const label = (event.target as HTMLInputElement).value; void bookmarkAction(() => window.baoyi.image.saveBookmark(props.item.id, bookmark.pageId, bookmark.offset, label)) }
 function removeBookmark(bookmark: ImageBookmark) { void bookmarkAction(() => window.baoyi.image.removeBookmark(props.item.id, bookmark.id)) }
-async function toggleRead() { try { read.value = (await window.baoyi.image.update(props.item.id, { read: !read.value })).read } catch (cause) { error.value = (cause as Error).message } }
+async function toggleRead() { try { read.value = (await window.baoyi.image.update(props.item.id, { read: !read.value })).read } catch (cause) { error.value = errorMessage(cause) } }
 async function defaults(reset: boolean) {
   busy.value = true
   try {
@@ -161,7 +162,7 @@ async function defaults(reset: boolean) {
     await preferenceWrites
     if (reset) { const result = await window.baoyi.image.readerPreferences(props.item.id, null); prefs.value = result.preferences; customized.value = result.customized; if (props.item.type !== 'comic') prefs.value.mode = 'single'; await go(index.value); setupPan() }
     else await window.baoyi.image.preferences({ ...prefs.value })
-  } catch (cause) { error.value = (cause as Error).message } finally { busy.value = false }
+  } catch (cause) { error.value = errorMessage(cause) } finally { busy.value = false }
 }
 function keys(event: KeyboardEvent) {
   if (!root.value?.contains(document.activeElement) || minimized.value) return
@@ -202,7 +203,7 @@ watch([index, () => prefs.value.mode], () => {
 }, { immediate: true })
 onMounted(async () => {
   window.addEventListener('keydown', keys); window.addEventListener('resize', constrainWindow)
-  try { const state = await window.baoyi.image.readerPreferences(props.item.id); prefs.value = normalizeImagePreferences(state.preferences); customized.value = state.customized; bookmarks.value = await window.baoyi.image.bookmarks(props.item.id) } catch (cause) { error.value = (cause as Error).message }
+  try { const state = await window.baoyi.image.readerPreferences(props.item.id); prefs.value = normalizeImagePreferences(state.preferences); customized.value = state.customized; bookmarks.value = await window.baoyi.image.bookmarks(props.item.id) } catch (cause) { error.value = errorMessage(cause) }
   if (disposed) return
   if (props.item.type !== 'comic') prefs.value.mode = 'single'
   resize = new ResizeObserver(async () => {

@@ -1,3 +1,4 @@
+import { errorMessage } from '@/utils'
 /** Render without Vue so a failed bootstrap still has a usable recovery action. */
 export function showBootError(error: unknown): void {
   const root = document.getElementById('app')
@@ -7,7 +8,7 @@ export function showBootError(error: unknown): void {
     <pre style="max-width:640px;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left"></pre>
     <p data-directory>正在读取数据目录…</p><p>可以重试；仍失败时，请保留资料库并查看启动日志。</p>
     <button type="button" class="btn btn--primary">重试</button></div>`
-  root.querySelector('pre')!.textContent = error instanceof Error ? error.message : String(error)
+  root.querySelector('pre')!.textContent = errorMessage(error)
   const directory = root.querySelector('[data-directory]')!
   const retry = root.querySelector('button')!
   retry.addEventListener('click', () => { retry.disabled = true; retry.textContent = '正在重试…'; window.location.reload() })

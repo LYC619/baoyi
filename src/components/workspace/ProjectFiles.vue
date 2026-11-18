@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import {ref,watch,onBeforeUnmount} from 'vue'
 import {workspace} from '@/utils/workspace-api'
 import ProjectDialog from '@/components/project/ProjectDialog.vue'
@@ -7,11 +8,11 @@ const choice=ref<Awaited<ReturnType<typeof workspace.files.choose>>>(null),previ
 const mode=ref<'link'|'copy'|'move'>('link'),target=ref<'project'|'library'>('project'),name=ref(''),busy=ref(false),error=ref('')
 const pending=ref<Awaited<ReturnType<typeof workspace.files.operations>>>([])
 let revision=0
-async function refresh(){const run=++revision;try{const value=await workspace.files.operations(props.projectId);if(run===revision)pending.value=value}catch(e){if(run===revision)error.value=(e as Error).message}}
+async function refresh(){const run=++revision;try{const value=await workspace.files.operations(props.projectId);if(run===revision)pending.value=value}catch(e){if(run===revision)error.value=errorMessage(e)}}
 watch(()=>props.projectId,()=>{choice.value=null;void refresh()},{immediate:true})
 const unsubscribe=workspace.onChanged(()=>void refresh());onBeforeUnmount(()=>{revision++;unsubscribe()})
 watch([mode,target,name],()=>preview.value=null)
-async function run(action:()=>Promise<void>){if(busy.value)return;busy.value=true;error.value='';try{await action()}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
+async function run(action:()=>Promise<void>){if(busy.value)return;busy.value=true;error.value='';try{await action()}catch(e){error.value=errorMessage(e)}finally{busy.value=false}}
 async function choose(){await run(async()=>{choice.value=await workspace.files.choose(props.projectId);preview.value=null;mode.value='link';target.value='project';name.value=choice.value?.source.split(/[\\/]/).pop()||''})}
 async function check(){await run(async()=>{if(choice.value)preview.value=await workspace.files.preview(choice.value.token,mode.value,target.value,name.value)})}
 async function confirm(){await run(async()=>{if(preview.value){await workspace.files.confirm(preview.value.token);choice.value=null;preview.value=null;await refresh()}})}

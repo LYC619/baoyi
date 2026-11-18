@@ -58,7 +58,7 @@ async function extractIconInner(exePath: string): Promise<string> {
 
   try {
     fs.rmSync(path.join(iconsDir(), legacyName(exePath)), { force: true })
-  } catch {
+  } catch { // best-effort
     /* 删不掉只是留个孤儿，不影响新图标已经写好这件事 */
   }
   return target

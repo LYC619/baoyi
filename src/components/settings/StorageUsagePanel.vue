@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { HardDrive, RefreshCw } from 'lucide-vue-next'
-import { formatBytes } from '@/utils'
+import { errorMessage, formatBytes } from '@/utils'
 import type { StorageUsage } from '@/types/storage'
 
 const props = defineProps<{ refreshKey: number }>()
@@ -11,7 +11,7 @@ async function refresh() {
   if (clearing.value) return
   const token = ++revision; loading.value = true; error.value = ''
   try { const value = await window.baoyi.data.storageUsage(); if (token === revision) usage.value = value }
-  catch (cause) { if (token === revision) error.value = (cause as Error).message }
+  catch (cause) { if (token === revision) error.value = errorMessage(cause) }
   finally { if (token === revision) loading.value = false }
 }
 async function clear() {
@@ -22,7 +22,7 @@ async function clear() {
       usage.value = result.usage; error.value = result.warnings.join('；')
       notice.value = `已清理 ${formatBytes(result.reclaimedBytes)} 浏览缓存，登录状态和资料文件保留`
     }
-  } catch (cause) { if (token === revision) error.value = (cause as Error).message }
+  } catch (cause) { if (token === revision) error.value = errorMessage(cause) }
   finally { if (token === revision) clearing.value = false }
 }
 watch(() => props.refreshKey, refresh)

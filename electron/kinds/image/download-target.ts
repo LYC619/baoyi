@@ -10,7 +10,7 @@ export function comicProvider(value:unknown):ComicProvider{if(value!=='pica'&&va
 async function preferences(profile:string):Promise<Partial<Record<ComicProvider,string>>>{try{return JSON.parse(await fs.readFile(path.join(profile,'comic-download-targets.json'),'utf8'))}catch{return {}}}
 let writing=Promise.resolve()
 export function rememberDownloadRoot(profile:string,provider:ComicProvider,root:string){
-  const operation=writing.catch(()=>{}).then(async()=>{const saved=await preferences(profile);saved[provider]=root;await writeComicJson(path.join(profile,'comic-download-targets.json'),saved)})
+  const operation=writing.catch(() => { /* 原始 Promise 的错误已交给调用方；这里只释放队列或监听。 */ }).then(async()=>{const saved=await preferences(profile);saved[provider]=root;await writeComicJson(path.join(profile,'comic-download-targets.json'),saved)})
   writing=operation;return operation
 }
 export async function validateDownloadRoot(value:unknown){
@@ -27,6 +27,6 @@ export async function downloadTarget(db:SqlDb,profile:string,provider:ComicProvi
   }
   const saved=await preferences(profile),group=library.groups().find(g=>g.id===groupId&&g.type==='comic'&&!g.hidden)
   let root=saved[provider]||group?.directory||''
-  if(!root&&provider==='jm'){try{root=JSON.parse(await fs.readFile(path.join(profile,'comic-preferences.json'),'utf8')).root||''}catch{}}
+  if(!root&&provider==='jm'){try{root=JSON.parse(await fs.readFile(path.join(profile,'comic-preferences.json'),'utf8')).root||''}catch{ /* 旧目录偏好不可读时继续使用当前下载目录默认值。 */ }}
   return {root,directory:'',groupId:group?.id||null,locked:false}
 }

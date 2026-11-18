@@ -203,7 +203,7 @@ async function confirm(ids: string[]): Promise<void> {
     success(`已收录 ${r.registered} 个软件${extra.length ? `，${extra.join('，')}` : ''}`)
     if (items.value.length === 0) void router.push({ name: 'home' })
   } catch (err) {
-    error(`写入失败：${err instanceof Error ? err.message : String(err)}`)
+    error(`写入失败：${errorMessage(err)}`)
   } finally {
     busy.value = false
   }

@@ -1,3 +1,4 @@
+import { getDb } from '../../services/database'
 /**
  * 软件模块与 Electron / 真实库之间的接缝。
  *
@@ -8,7 +9,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SoftwareItem } from '../../../src/types'
-import { getSoftware, iconsDir, listSoftware, updateSoftware } from '../../services/database'
+import { getSoftware, listSoftware, updateSoftware } from './db.ts'
+import { iconsDir } from '../../services/database'
 import { extractIcon } from '../../services/iconExtractor'
 import { ICON_EXTS, iconFileName, iconSiblings, isIconExt, isManualIcon } from './icons.ts'
 
@@ -18,7 +20,7 @@ function dropManualIcons(id: string): void {
   for (const name of iconSiblings(id)) {
     try {
       fs.rmSync(path.join(dir, name), { force: true })
-    } catch {
+    } catch { // best-effort
       /* 正被渲染进程占用之类，删不掉就留着，下次换图标会覆盖 */
     }
   }
@@ -36,7 +38,7 @@ export function setSoftwareIcon(
   id: string,
   source: string
 ): { ok: boolean; message: string } {
-  if (!getSoftware(id)) return { ok: false, message: '找不到这个条目' }
+  if (!getSoftware(getDb(), id)) return { ok: false, message: '找不到这个条目' }
 
   const from = path.resolve(source)
   if (!isIconExt(from)) {
@@ -55,7 +57,7 @@ export function setSoftwareIcon(
     return { ok: false, message: `拷贝失败：${err?.message ?? '未知错误'}` }
   }
 
-  updateSoftware(id, { icon_path: path.join(iconsDir(), name) })
+  updateSoftware(getDb(), id, { icon_path: path.join(iconsDir(), name) })
   return { ok: true, message: '图标已更换' }
 }
 
@@ -69,13 +71,13 @@ export function setSoftwareIcon(
  * 磁盘上那份拷贝一起删，留着只是占地方。
  */
 export async function clearSoftwareIcon(id: string): Promise<SoftwareItem | null> {
-  const item = getSoftware(id)
+  const item = getSoftware(getDb(), id)
   if (!item) return null
 
   dropManualIcons(id)
 
   const auto = await extractIcon(item.exe_path)
-  return updateSoftware(id, { icon_path: auto })
+  return updateSoftware(getDb(), id, { icon_path: auto })
 }
 
 /**
@@ -104,7 +106,7 @@ export async function refreshSoftwareIcons(): Promise<{
   // 归档的也要一起提：`listSoftware({})` 默认只回 `is_archived = 0`，
   // 只查一次的话归档条目永远刷不到，而界面照样报「换了 N 张」——
   // 那一条静静地留着空白图，用户没有任何线索知道为什么
-  const items = [...listSoftware({}), ...listSoftware({ group: 'archived' })]
+  const items = [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })]
   const out = { total: items.length, changed: 0, manual: 0, failed: 0 }
 
   for (const item of items) {
@@ -118,7 +120,7 @@ export async function refreshSoftwareIcons(): Promise<{
       continue
     }
     if (icon !== item.icon_path) {
-      updateSoftware(item.id, { icon_path: icon })
+      updateSoftware(getDb(), item.id, { icon_path: icon })
       out.changed++
     }
   }

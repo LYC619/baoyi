@@ -60,7 +60,7 @@ export function createVideoWorkflow(deps: Dependencies) {
   let pumping: Promise<void> | null = null
   const changed = (job: VideoDownloadJob) => {
     job.updatedAt = Date.now(); store.save(job)
-    try { deps.onChange?.(structuredClone(job)) } catch { /* Renderer lifetime does not own the job. */ }
+    try { deps.onChange?.(structuredClone(job)) } catch (cause) { console.error('[后台通知或记录]', cause) }
   }
   const local = (resourceId: string, code: string) => deps.db.prepare(`SELECT DISTINCT a.path, a.quality FROM video_sources s
     JOIN video_episode_assets ea ON ea.episode_id = s.episode_id JOIN video_assets a ON a.id = ea.asset_id
@@ -72,7 +72,7 @@ export function createVideoWorkflow(deps: Dependencies) {
       syncVideoWorkFiles(deps.db, existing.id, { roots: deps.libraryRoots?.() || [], persist: false })
       existing = getVideo(deps.db, existing.id)
     }
-    let videoCode = existing?.hanime_id || ''
+    let videoCode = existing?.hanime_id || (existing ? (deps.db.prepare("SELECT external_id FROM video_sources WHERE resource_id=? AND provider='hanime' AND scope='work' LIMIT 1").get(existing.id) as {external_id:string}|undefined)?.external_id : '') || ''
     if (input.url) {
       if (!/^https?:\/\//i.test(input.url)) throw new Error('请输入支持站点的完整视频链接')
       videoCode = toVideoCode(input.url)
@@ -238,14 +238,14 @@ export function createVideoWorkflow(deps: Dependencies) {
       for (const row of linked) fillEpisodeDetails(deps.db, row.episode_id, { ...sourceEpisodeFacts(item), tags: item.tags, thumbnailPath: item.thumbnailPath, thumbnailSource: item.thumbnailUrl, posterSource: item.posterUrl, originalTitle: item.originalTitle, description: item.description, posterPath: item.posterPath, sourceUrl: watchUrl(item.videoCode) })
       if (job.posterPath) deps.db.prepare("UPDATE video_meta SET poster_path = ?, poster_source = ? WHERE resource_id = ? AND poster_path = ''").run(job.posterPath, job.posterUrl, job.resourceId)
       deps.db.prepare('UPDATE video_directories SET metadata_state = ?, missing = ? WHERE resource_id = ?').run(item.metadata === 'complete' ? 'complete' : 'pending', JSON.stringify(item.metadata === 'complete' ? [] : item.missing || []), job.resourceId)
-      try { deps.onLibraryChange?.(job.resourceId) } catch { /* The writes are complete. */ }
+      try { deps.onLibraryChange?.(job.resourceId) } catch (cause) { console.error('[后台通知或记录]', cause) }
       return
     }
     if (item.registration !== 'complete') {
       item.registration = 'running'; changed(job)
       try {
         deps.beforeRegister?.()
-        for (const released of releasePlaceholderClaims(deps.db, item.videoCode, job.resourceId)) { try { deps.onLibraryChange?.(released) } catch { /* 让出占位的作品刷新失败不影响登记 */ } }
+        for (const released of releasePlaceholderClaims(deps.db, item.videoCode, job.resourceId)) { try { deps.onLibraryChange?.(released) } catch (cause) { console.error('[后台通知或记录]', cause) } }
         const registered = registerVideoContent(deps.db, { restoreRemoved: true, resourceId: job.resourceId || undefined, bundleId: job.bundleId, directory: job.directory, root: job.root,
           title: job.title, description: job.description, category: job.category, posterPath: job.posterPath, posterSource: job.posterUrl, thumbnailPath: item.thumbnailPath, thumbnailSource: item.thumbnailUrl, sources: job.sources,
           metadataState: item.metadata === 'complete' ? 'complete' : 'pending', missing: item.metadata === 'complete' ? [] : item.missing || [],
@@ -259,7 +259,7 @@ export function createVideoWorkflow(deps: Dependencies) {
           try { item.warnings.push(...persistVideoWorkBundle(deps.db, job.resourceId, job.directory).warnings) }
           catch (error) { item.metadata = 'failed'; item.warnings.push('资料待保存：' + safeDownloadError(error)) }
         }
-        try { deps.onLibraryChange?.(job.resourceId) } catch { /* Registration is already committed. */ }
+        try { deps.onLibraryChange?.(job.resourceId) } catch (cause) { console.error('[后台通知或记录]', cause) }
       } catch (error) { item.registration = 'failed'; item.error = '入库待重试：' + safeDownloadError(error) }
       changed(job)
     }
@@ -373,7 +373,7 @@ export function createVideoWorkflow(deps: Dependencies) {
           }
           // A cancellation after file publication must preserve and register the finished file.
           const finished=finishing.then(()=>finishFile(job,item,signal))
-          finishing=finished.catch(()=>{})
+          finishing=finished.catch(() => { /* 原始 Promise 的错误已交给调用方；这里只释放队列或监听。 */ })
           await finished
         } catch (error) {
           if (item.transfer !== 'complete') item.transfer = 'failed'

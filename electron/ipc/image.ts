@@ -2,7 +2,8 @@ import { app, dialog, shell, type BrowserWindow, type IpcMain, type IpcMainInvok
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { existsSync, statSync } from 'node:fs'
-import { getDb, getSettings } from '../services/database.ts'
+import { getDb } from '../services/database.ts'
+import { getSettings } from '../services/settings-store.ts'
 import { imageCollections,saveImageCollection,removeImageCollection } from '../kinds/image/collections.ts'
 import { assertImageFilesIdle,imageFileTarget,planImageMove,moveImageItems,removeImageFiles,rememberedImageDirectory } from '../kinds/image/management.ts'
 import { ImageLibrary } from '../kinds/image/library.ts'
@@ -45,7 +46,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
   handle('rename-tag', (from: string, to: string | null) => { const count = renameImageTag(getDb(), from, to); changed(); return count })
   handle('update', (id, patch) => { const item = library().update(id, patch); changed(); return item })
   handle('bulk-update', (ids, patch) => { const count = library().bulkUpdate(ids, patch); changed(); return count })
-  const protectedPaths=()=>[app.getPath('home'),app.getPath('userData'),app.getPath('documents'),app.getPath('pictures'),app.getPath('videos'),...getSettings().software_scan_dirs,...getSettings().game_scan_dirs,...getSettings().video_scan_dirs]
+  const protectedPaths=()=>[app.getPath('home'),app.getPath('userData'),app.getPath('documents'),app.getPath('pictures'),app.getPath('videos'),...getSettings(getDb()).software_scan_dirs,...getSettings(getDb()).game_scan_dirs,...getSettings(getDb()).video_scan_dirs]
   handle('collections',()=>imageCollections(getDb()))
   handle('save-collection',(name,members,id)=>{const result=saveImageCollection(getDb(),name,members,id);changed();return result})
   handle('remove-collection',id=>{removeImageCollection(getDb(),id);changed()})

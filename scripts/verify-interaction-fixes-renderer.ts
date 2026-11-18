@@ -1,3 +1,4 @@
+import { latestOnly, STALE } from '../src/composables/latestOnly.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as Vue from 'vue'
@@ -41,20 +42,20 @@ test('漫画代理刷新失败保留输入且不创建任务，重试可成功',
 })
 test('清理暂存拒绝确认不调用 clean，确认后才删除并刷新',async()=>{
   let accepted=false,cleaned=0,refreshed=0,prompt=''
-  const ingest={jobs:Vue.ref([]),refresh:async()=>{refreshed++}}
-  const f=setup('src/components/image/ComicIngestList.vue',{comic:{clean:async()=>{cleaned++}}},{'@/composables/useComicIngest':{useComicIngest:()=>ingest}},{confirm:(text:string)=>{prompt=text;return accepted},window:{baoyi:{comic:{clean:async()=>{cleaned++}}},confirm:(text:string)=>{prompt=text;return accepted}}})
-  try{await f.state.action({id:'j',name:'合成任务'},'clean');assert.equal(cleaned,0);assert.equal(refreshed,0);assert.match(prompt,/将删除已下载的临时图片文件.*不可撤销/)
-    accepted=true;await f.state.action({id:'j',name:'合成任务'},'clean');assert.equal(cleaned,1);assert.equal(refreshed,1)
+  const f=setup('src/components/image/ComicTaskRow.vue',{}, {}, {window:{confirm:(text:string)=>{prompt=text;return accepted}}}, {
+    row:{id:'j',title:'合成任务',provider:'jm'}, run:async()=>{cleaned++;refreshed++}, logs:async()=>[]
+  })
+  try{await f.state.action('clean');assert.equal(cleaned,0);assert.equal(refreshed,0);assert.match(prompt,/将删除已下载的临时图片文件.*不可撤销/)
+    accepted=true;await f.state.action('clean');assert.equal(cleaned,1);assert.equal(refreshed,1)
   }finally{f.dispose()}
+
 })
-test('自动精读空分类阻止保存；选分类与手动模式允许保存',async()=>{
-  const saved:any[]=[],policy={automatic:false,categories:[],provider:'合成模型',maxChars:12000}
-  const f=setup('src/components/workspace/DocumentInsightSettings.vue',{archive:{insights:{policy:async()=>policy,savePolicy:async(value:any)=>{saved.push(value);return value}}}},{'@/stores/documents':{useDocumentsStore:()=>({categories:[{id:'c',name:'分类'}]})}})
-  try{await f.mount();const s=f.state;s.value.value.automatic=true;await s.save();assert.equal(saved.length,0);assert.match(s.error.value,/至少.*分类/);assert.equal(s.message.value,'');assert.equal(s.busy.value,false)
-    s.value.value.categories=['c'];await s.save();assert.equal(saved.length,1);assert.equal(s.error.value,'')
-    s.value.value.automatic=false;s.value.value.categories=[];await s.save();assert.equal(saved.length,2)
-  }finally{f.dispose()}
+test('精读设置只保留历史维护，不再读取或保存自动生成策略',async()=>{
+  let previews=0
+  const f=setup('src/components/workspace/DocumentInsightSettings.vue',{archive:{insights:{cleanupPreview:async()=>{previews++;return {token:'c',generated:1,edited:2}}}}},{'@/composables/useArchiveAssistant':{useArchiveAssistant:()=>({loadMethod:async()=>{}})}})
+  try{await f.mount();await f.state.maintain('preview');assert.equal(previews,1);assert.equal(f.state.cleanup.value.edited,2)}finally{f.dispose()}
 })
+
 function handoffFixture(){
   let seq=0;const tokens=new Set<string>(),generated:string[]=[],scopes:boolean[]=[],adoptions:string[]=[]
   const api={projectHandoffPreview:async(_id:string,rules=false)=>{scopes.push(rules);const token='p'+(++seq);tokens.add(token);return {token,stamp:token,includeRules:rules,remembered:false,configured:true,snapshot:{rules:[],warnings:[]}}},projectHandoffGenerate:async({token}:any)=>{assert.ok(tokens.delete(token),'服务只接受一次性令牌');generated.push(token);return {prompt:'结果'+token,contextRevision:seq}},projectHandoffAdopt:async(_id:string,_rev:number,prompt:string)=>{adoptions.push(prompt)}}
@@ -83,4 +84,56 @@ test('视频多版本默认首个、记忆版本优先、空列表提示；离�
   try{await f.state.startFrames();assert.deepEqual(opened,['1080p']);assert.deepEqual(started,['1080p']);f.state.stopFrames();assert.deepEqual(released,['1080p'])
     remembered='4k';await f.state.startFrames();assert.equal(opened.at(-1),'4k');f.state.stopFrames();assets=[];await f.state.startFrames();assert.match(f.state.frameMessage.value,/没有可用/);assert.equal(opened.length,2)
   }finally{f.state.stopFrames();f.dispose()}
+})
+
+
+test('重复读取只接受最后一次结果，旧失败作废，当前失败仍抛出',async()=>{
+  const pending:Array<{resolve:(value:string)=>void;reject:(reason:Error)=>void}>=[]
+  const read=latestOnly(()=>new Promise<string>((resolve,reject)=>pending.push({resolve,reject})))
+  const first=read(),second=read()
+  pending[1].resolve('new');assert.equal(await second,'new')
+  pending[0].resolve('old');assert.equal(await first,STALE)
+  const failedOld=read(),current=read()
+  pending[2].reject(new Error('old failure'));assert.equal(await failedOld,STALE)
+  pending[3].reject(new Error('current failure'));await assert.rejects(current,/current failure/)
+})
+
+test('公共详情复制等待原生完成，保存或打开位置失败不会假报成功', async () => {
+  const messages: string[] = []
+  let finish!: () => void, failCopy = false, failSave = false
+  const load = createRendererLoader({ vue: Vue, '@/composables/useToast': { useToast: () => ({
+    toast: (message: string) => messages.push(message), success: (message: string) => messages.push(message), error: (message: string) => messages.push(message)
+  }) } }, { window: { baoyi: { app: { copyText: async () => {
+    if (failCopy) throw new Error('剪贴板被占用')
+    await new Promise<void>(resolve => { finish = resolve })
+  } } } } })
+  const item = Vue.ref({ id: 'test', tags: [] as string[], is_archived: false })
+  const actions = load('src/composables/useResourceDetail.ts').useResourceDetail({
+    item, reveal: async () => false,
+    update: async (current: any, patch: any) => { if (failSave) throw new Error('写入失败'); return { ...current, ...patch } },
+    archivedMessage: (value: boolean) => value ? '归档完成' : '取消完成'
+  })
+  const copying = actions.copyPath('test-path')
+  assert.equal(messages.length, 0)
+  finish(); await copying; assert.deepEqual(messages, ['路径已复制'])
+  failCopy = true; await actions.copyPath('test-path'); assert.equal(messages.at(-1), '复制失败：剪贴板被占用')
+  failSave = true; await actions.toggleArchive(); assert.equal(item.value.is_archived, false)
+  assert.equal(messages.at(-1), '保存失败：写入失败'); assert.ok(!messages.includes('归档完成'))
+  failSave = false; await actions.toggleArchive(); assert.equal(item.value.is_archived, true)
+  assert.equal(messages.at(-1), '归档完成')
+  actions.commitTags('甲，甲、乙, 丙,丁,戊,己,庚,辛,壬'); await tick()
+  assert.deepEqual([...item.value.tags], ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛'])
+  await actions.reveal(); assert.equal(messages.at(-1), '文件位置不可用，请检查磁盘是否在线')
+})
+
+test('公共侧栏默认显示八个标签，展开后保留全部计数', async () => {
+  const tags = Array.from({ length: 10 }, (_, i) => ({ name: '标签' + i, count: i + 1 }))
+  const fixture = setup('src/components/library/LibrarySidebar.vue', {}, {}, {}, { tags })
+  try {
+    assert.equal(fixture.state.visibleTags.value.length, 8)
+    fixture.state.tagsOpen.value = true
+    assert.deepEqual([...fixture.state.visibleTags.value], tags)
+    fixture.state.tagsOpen.value = false
+    assert.equal(fixture.state.visibleTags.value.length, 8)
+  } finally { fixture.dispose() }
 })

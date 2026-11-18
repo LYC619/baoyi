@@ -173,7 +173,7 @@ async function execute(): Promise<void> {
 
   // 就算 run 抛了错也要刷新：主进程可能已经执行完前几条命令，
   // 让预览和卡片墙停在过期状态比弹一次错更糟。store.reload 自己接错，不会再抛
-  await Promise.all([load().catch(() => {}), store.reload()])
+  await Promise.all([load().catch(cause => useToast().error(errorMessage(cause))), store.reload()])
   if (!result) return
   completed.value = result
 

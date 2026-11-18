@@ -18,7 +18,7 @@ export function projectAgentTools(db: SqlDb, item: ProjectItem, session: Project
   const timeline = new TimelineLibrary(db), journal = new AgentJournal(db)
   const summaries=new ProjectSummaries(db),summaryReads=new Map<string,{stamp:string;end:number;complete:boolean}>(),summaryArgs={kind:{type:'string',enum:['day','week','version']},key:string}
   const remember=(page:any)=>{const key=JSON.stringify([page.kind,page.key]),prior=summaryReads.get(key);if(page.start===0||prior&&prior.stamp===page.stamp&&prior.end===page.start)summaryReads.set(key,{stamp:page.stamp,end:page.end,complete:page.next===null})}
-  for(const message of session.messages)for(const event of message.events)if(event.label==='read_project_summary_sources 结果'&&!event.error)try{remember(JSON.parse(event.detail))}catch{}
+  for(const message of session.messages)for(const event of message.events)if(event.label==='read_project_summary_sources 结果'&&!event.error)try{remember(JSON.parse(event.detail))}catch{ /* 历史工具结果无效时不恢复观测记录，后续可重新读取。 */ }
   const observed = new Map<string, string>()
   const observedRoots = new Map<string, string>()
   const commitSources = new Map<string, {sha:string;at:string;subject:string;repoPath:string}>()

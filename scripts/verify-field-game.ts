@@ -7,6 +7,14 @@ import { initSchema } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { insertGame, getGame, listGames } from '../electron/kinds/game/db.ts'
 import { inspectDir } from '../electron/kinds/game/scanner.ts'
+import { parseJsonArray } from '../electron/services/json.ts'
+import { str } from '../electron/services/agent/values.ts'
+const fallback = ['default']
+for (const invalid of [undefined, '', '{', 'null', '{}', '1']) assert.equal(parseJsonArray(invalid, fallback), fallback)
+assert.deepEqual(parseJsonArray('["tag",1,{"path":"save"}]'), ['tag', 1, { path: 'save' }])
+assert.deepEqual(parseJsonArray('[]', fallback), [])
+assert.equal(str('  中文内容  ', 2), '中文')
+assert.equal(str(123, 10), '')
 const grouping: any = await import('../src/utils/library-grouping.ts').catch(() => ({}))
 assert.equal(typeof grouping.libraryDirectoryGroup, 'function', 'directory grouping must be implemented')
 assert.equal(grouping.libraryDirectoryGroup('E:\\Games\\1.SLG\\常识改变模拟器', ['E:\\Games']).name, '1.SLG')

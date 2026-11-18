@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { computed, ref, watch } from 'vue'
 import { ChevronDown, Download, Loader2, RefreshCw } from 'lucide-vue-next'
 import { useImageDownloads } from '@/composables/useImageDownloads'
@@ -16,14 +17,14 @@ async function check() {
   expanded.value = true
   busy.value = true; error.value = ''; message.value = ''; result.value = null; selected.value = []
   try { result.value = await window.baoyi.image.checkUpdates(props.resourceId); selected.value = newChapters.value.map(c => c.id) }
-  catch (cause) { error.value = (cause as Error).message }
+  catch (cause) { error.value = errorMessage(cause) }
   finally { busy.value = false }
 }
 async function download() {
   if (!selected.value.length || busy.value || active.value) return
   busy.value = true; error.value = ''; message.value = ''
   try { const queued = await window.baoyi.image.downloadUpdates(props.resourceId, [...selected.value]); pending.value = queued.id; message.value = '新章节已加入下载队列'; await downloads.refresh() }
-  catch (cause) { error.value = (cause as Error).message }
+  catch (cause) { error.value = errorMessage(cause) }
   finally { busy.value = false }
 }
 watch([() => job.value?.status, busy], ([status, working]) => {

@@ -1,3 +1,4 @@
+import { useToast } from '@/composables/useToast'
 import { computed, ref, watch } from 'vue'
 import type { VideoItem } from '@/types'
 import type {
@@ -28,7 +29,7 @@ export async function filterVisibleJournals(saved: VideoOrganizeJournal[], priva
   const ids = [...new Set(saved.flatMap(journal => [journal.survivorId, ...journal.sourceIds, ...journal.files.flatMap(file => file.resourceIds)]))]
   const checked = await Promise.all(ids.map(async id => {
     try { const work = await window.baoyi.video.get(id); return work && work.category !== '里番' ? id : null }
-    catch { return null }
+    catch (cause) { useToast().error(errorMessage(cause)); return null }
   }))
   const allowed = new Set(checked.filter((id): id is string => id !== null))
   return saved.filter(journal => [journal.survivorId, ...journal.sourceIds, ...journal.files.flatMap(file => file.resourceIds)].every(id => allowed.has(id)))
@@ -62,7 +63,7 @@ export function useOrganizeSession(options: SessionOptions) {
   let autoTimer: ReturnType<typeof setTimeout> | undefined
   if (options.kind !== 'relocate') void window.baoyi.settings?.getAll?.().then(settings => {
     if (!disposed && !targetDirectory.value) targetDirectory.value = settings.video_organize_root || ''
-  }).catch(() => {})
+  }).catch(cause => useToast().error(errorMessage(cause)))
   const stopSuggestedName = watch(() => [works.value.map(videoTitle), episodeNumbers.value, preview.value?.kind === 'organize' ? preview.value.episodes.map(episode => episode.episode) : []], () => {
     const numbers = preview.value?.kind === 'organize' ? preview.value.episodes.map(episode => episodeNumbers.value[episode.id]?.episode ?? episode.episode) : []
     const next = collectionName(works.value.map(videoTitle), numbers)

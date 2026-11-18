@@ -1,3 +1,5 @@
+import { latestOnly, STALE } from './latestOnly'
+import { errorMessage } from '@/utils'
 import { computed, reactive, ref, toRefs } from 'vue'
 import type { AppSettings } from '@/types'
 import type { VideoDownloadDraft, VideoDownloadJob, VideoJobRetry } from '@/types/video-workflow'
@@ -17,7 +19,7 @@ interface DraftState {
   error: string
   lastJobId: string
   preparedUrl: string
-  revision: number
+  scope: AbortController
 }
 
 // A preview belongs to the work (or the URL entry), never to a mounted route.
@@ -32,10 +34,16 @@ const submittingCodes = ref(new Set<string>())
 const preferences = reactive({ quality: '', strictQuality: false, register: true })
 let subscribed = false
 let initialLoad: Promise<void> | null = null
-let refreshRound = 0
-let preferencesRevision = 0
+const readWorkflow = latestOnly(async () => {
+  const result = await Promise.allSettled([
+    window.baoyi.video?.downloadJobs?.() ?? Promise.resolve([]),
+    window.baoyi.settings?.getAll?.() ?? Promise.resolve(null)
+  ])
+  if (result[0].status === 'fulfilled') result[0].value.forEach(mergeJob)
+  return result
+})
+let preferencesScope = new AbortController()
 
-const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
 const visible = (category: string): boolean => category !== '里番' || (privacyReady.value && !hideHentai.value)
 const active = (job: VideoDownloadJob): boolean => job.status === 'queued' || job.status === 'running'
 const codeBusy = (code: string, except = ''): boolean => submittingCodes.value.has(code)
@@ -58,7 +66,7 @@ function mergeJob(job: VideoDownloadJob): void {
 }
 
 function applyPreferences(settings: Pick<AppSettings, 'hide_hentai' | 'video_download_quality' | 'video_download_strict_quality' | 'video_download_register'>): void {
-  preferencesRevision++
+  preferencesScope.abort(); preferencesScope = new AbortController()
   hideHentai.value = settings.hide_hentai === true
   privacyReady.value = true
   if (hideHentai.value) jobsError.value = ''
@@ -69,17 +77,13 @@ function applyPreferences(settings: Pick<AppSettings, 'hide_hentai' | 'video_dow
 
 async function refresh(): Promise<void> {
   if (typeof window === 'undefined' || !window.baoyi) return
-  const round = ++refreshRound
-  const preferencesAtStart = preferencesRevision
-  const [saved, settings] = await Promise.allSettled([
-    window.baoyi.video?.downloadJobs?.() ?? Promise.resolve([]),
-    window.baoyi.settings?.getAll?.() ?? Promise.resolve(null)
-  ])
-  if (saved.status === 'fulfilled') {
-    saved.value.forEach(mergeJob)
-    if (round === refreshRound) jobsError.value = ''
-  } else if (round === refreshRound) jobsError.value = '读取下载任务失败：' + message(saved.reason)
-  if (settings.status === 'fulfilled' && settings.value && round === refreshRound && preferencesAtStart === preferencesRevision) applyPreferences(settings.value)
+  const { signal } = preferencesScope
+  const result = await readWorkflow()
+  if (result === STALE) return
+  const [saved, settings] = result
+  if (saved.status === 'fulfilled') jobsError.value = ''
+  else jobsError.value = '读取下载任务失败：' + errorMessage(saved.reason)
+  if (settings.status === 'fulfilled' && settings.value && !signal.aborted) applyPreferences(settings.value)
 }
 
 function initialize(): void {
@@ -99,7 +103,7 @@ export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/vi
     state = reactive<DraftState>({
       url: '', open: false, draft: null, title: '', selectedVideoCodes: [],
       sourceLabel: '', strictQuality: false, register: true, preparing: false,
-      picking: false, enqueuing: false, error: '', lastJobId: '', preparedUrl: '', revision: 0
+      picking: false, enqueuing: false, error: '', lastJobId: '', preparedUrl: '', scope: new AbortController()
     })
     drafts.set(key, state)
   }
@@ -122,7 +126,8 @@ export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/vi
   async function prepare(): Promise<VideoDownloadDraft | null> {
     if (current.preparing || current.picking || current.enqueuing) return current.draft
     if (!discovery && !resourceId && !current.url.trim()) { current.error = '先粘贴来源页面链接'; return null }
-    const revision = ++current.revision
+    current.scope.abort(); current.scope = new AbortController()
+    const { signal } = current.scope
     current.preparing = true
     current.open = true
     current.error = ''
@@ -133,7 +138,7 @@ export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/vi
         window.baoyi.video.prepareDownload({ ...(discovery ? { discovery: { sourceId: discovery.sourceId, entryId: discovery.entryId } } : {}), ...(resourceId ? { resourceId } : {}), ...(inputUrl ? { url: inputUrl } : {}) }),
         refresh()
       ])
-      if (revision !== current.revision) return null
+      if (signal.aborted) return null
       current.draft = draft
       current.preparedUrl = inputUrl
       current.title = draft.title
@@ -143,23 +148,23 @@ export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/vi
       current.register = preferences.register
       return draft
     } catch (error) {
-      if (revision === current.revision) { current.draft = null; current.error = message(error) }
+      if (!signal.aborted) { current.draft = null; current.error = errorMessage(error) }
       return null
     } finally {
-      if (revision === current.revision) current.preparing = false
+      if (!signal.aborted) current.preparing = false
     }
   }
 
   async function pickRoot(): Promise<void> {
     if (!current.draft || current.draft.bound || current.preparing || current.picking || current.enqueuing) return
-    const revision = current.revision
+    const { signal } = current.scope
     current.picking = true
     current.error = ''
     try {
       const next = await window.baoyi.video.pickDownloadRoot(current.draft.id)
-      if (next && revision === current.revision) current.draft = next
-    } catch (error) { if (revision === current.revision) current.error = message(error) }
-    finally { if (revision === current.revision) current.picking = false }
+      if (next && !signal.aborted) current.draft = next
+    } catch (error) { if (!signal.aborted) current.error = errorMessage(error) }
+    finally { if (!signal.aborted) current.picking = false }
   }
 
   async function enqueue(): Promise<VideoDownloadJob | null> {
@@ -187,7 +192,7 @@ export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/vi
       current.draft = { ...draft, episodes: draft.episodes.map(episode => videoCodes.includes(episode.videoCode) ? { ...episode, state: 'queued' } : episode) }
       current.selectedVideoCodes = []
       return job
-    } catch (error) { current.error = message(error); return null }
+    } catch (error) { current.error = errorMessage(error); return null }
     finally {
       submittingCodes.value = new Set([...submittingCodes.value].filter(code => !videoCodes.includes(code)))
       current.enqueuing = false
@@ -196,7 +201,7 @@ export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/vi
 
   function reset(): void {
     if (current.enqueuing) return
-    current.revision++
+    current.scope.abort(); current.scope = new AbortController()
     current.open = false
     current.preparing = false
     current.picking = false
@@ -215,7 +220,7 @@ export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/vi
     actionIds.value = new Set([...actionIds.value, id])
     jobsError.value = ''
     try { await action() }
-    catch (error) { if (!job || visible(job.category)) jobsError.value = message(error) }
+    catch (error) { if (!job || visible(job.category)) jobsError.value = errorMessage(error) }
     finally { const next = new Set(actionIds.value); next.delete(id); actionIds.value = next }
   }
 

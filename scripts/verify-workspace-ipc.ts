@@ -12,7 +12,6 @@ import { WorkspaceLinks } from '../electron/workspace/links.ts'
 import { PersonalLibrary } from '../electron/workspace/personal.ts'
 import { TimelineLibrary } from '../electron/workspace/timeline.ts'
 import { workspaceOperation, workspaceBusy } from '../electron/workspace/activity.ts'
-import { createWorkspaceAgent } from '../electron/workspace/agent.ts'
 
 test('workspace IPC rejects other windows/frames and imports only approved preview files', async t => {
   assert.ok(fs.existsSync('electron/ipc/workspace.ts'), 'workspace IPC is required')
@@ -27,13 +26,13 @@ test('workspace IPC rejects other windows/frames and imports only approved previ
   const load = createRendererLoader({
     'node:fs/promises':{...fs.promises,default:fs.promises},'node:path':{...path,default:path},
     electron:{app:{on(){},getPath:(name:string)=>{assert.equal(name,'userData');return root}},dialog:{showOpenDialog:async()=>({canceled:controls.cancelled,filePaths:[selected]}),showSaveDialog:async()=>({canceled:false,filePath:selected})},shell:{}},
-    '../services/database.ts':{getDb:()=>db,getSettings:()=>({hide_hentai:true,ai:{}})},
+    '../services/database.ts': { getDb:()=>db },
+    '../services/settings-store.ts': { getSettings:()=>({hide_hentai:true,ai:{}}) },
     './library-backup.ts':{assertLibraryIdle:()=>{if(controls.busy||workspaceBusy())throw new Error('busy')}},
     './archive.ts':{startImportedInsights:async()=>''},
     '../workspace/documents.ts':{DocumentLibrary},'../workspace/links.ts':{WorkspaceLinks},
     '../workspace/personal.ts':{PersonalLibrary},'../workspace/timeline.ts':{TimelineLibrary},
     '../workspace/activity.ts':{workspaceOperation},
-    '../workspace/agent.ts':{createWorkspaceAgent},
     '../workspace/assistant.ts':{generateTimeline:async()=>null,cancelTimeline:()=>{}},
     '../workspace/evidence.ts':{collectEvidence:async()=>null},
     '../services/window-focus.ts':{restoreWindowFocus:()=>{}}

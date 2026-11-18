@@ -3,9 +3,13 @@ import { computed, reactive, ref } from 'vue'
 import type { GameCounts, GameItem, GameQuery, PlayStatus, SaveStatus } from '@/types'
 import { useToast } from '@/composables/useToast'
 import { createLatestGuard, errorMessage, plain } from '@/utils'
+import {projectOf,PROJECT_FILTERS} from '@/utils/game-project'
+import type {GameProjectCheck} from '@/types/game-project'
 
 /** 侧边栏一次只选一样东西：一个虚拟分组、一个分类、或一个标签 */
 export type GameSelection =
+  | {kind:'project';value:keyof typeof PROJECT_FILTERS}
+  | { kind: 'path'; value:'unavailable' }
   | { kind: 'uncategorized'; value: 'uncategorized' }
   | { kind: 'group'; value: 'all' | 'archived' }
   | { kind: 'status'; value: PlayStatus }
@@ -41,10 +45,22 @@ const EMPTY_COUNTS: GameCounts = {
 
 export const useGameStore = defineStore('game', () => {
   const items = ref<GameItem[]>([])
+  const projectChecks=ref<GameProjectCheck[]>([]),checkingProjects=ref(false)
+  const projectCounts=ref<Record<keyof typeof PROJECT_FILTERS,number>>({all:0,issues:0,deferred:0,static:0,updated:0})
+  const matchesProject=(g:GameItem,filter:keyof typeof PROJECT_FILTERS)=>{
+    const p=projectOf(g);if(!p)return false
+    if(filter==='issues')return p.issues.some(i=>i.status==='open')
+    if(filter==='deferred')return p.issues.some(i=>i.status==='deferred')
+    if(filter==='static')return p.facets.some(f=>f.label==='运行验证'&&f.state==='游玩时验证')
+    if(filter==='updated')return projectChecks.value.some(c=>c.id===g.id&&c.state!=='current')
+    return true
+  }
+  async function checkProjects(){checkingProjects.value=true;try{projectChecks.value=await window.baoyi.game.checkProjects();await reload()}catch(e){toastError(errorMessage(e))}finally{checkingProjects.value=false}}
+  const unavailableCount=ref(0)
   const counts = ref<GameCounts>({ ...EMPTY_COUNTS })
   const loading = ref(false)
   const loadedQuery = ref('')
-  const queryPending = computed(() => loading.value || loadedQuery.value !== JSON.stringify(buildQuery()))
+  const queryPending = computed(() => loading.value || loadedQuery.value !== queryKey())
 
   // 快慢两个查询并发时，晚到的旧响应不许覆盖新结果。同 software store
   const loadRounds = createLatestGuard()
@@ -58,6 +74,8 @@ export const useGameStore = defineStore('game', () => {
   const activeKey = computed(() => `${selection.kind}:${selection.value}`)
 
   const heading = computed(() => {
+    if(selection.kind==='project')return PROJECT_FILTERS[selection.value]
+    if (selection.kind === 'path') return '路径不可用'
     if (selection.kind === 'uncategorized') return '未分类'
     if (selection.kind === 'category') return selection.value
     if (selection.kind === 'tag') return `# ${selection.value}`
@@ -77,13 +95,15 @@ export const useGameStore = defineStore('game', () => {
     return q
   }
 
+  const queryKey=()=>JSON.stringify([buildQuery(),selection.kind,selection.value])
+
   async function load(): Promise<void> {
     const round = loadRounds.begin()
     loading.value = true
-    const query = buildQuery()
+    const query = buildQuery(), selected = {...selection}, key = queryKey()
     try {
       const next = await window.baoyi.game.list(query)
-      if (loadRounds.isCurrent(round)) { items.value = next; loadedQuery.value = JSON.stringify(query) }
+      if (loadRounds.isCurrent(round)) { items.value = selected.kind==='project'?next.filter(g=>matchesProject(g,selected.value)):selected.kind==='path'?next.filter(item=>item.path_state&&item.path_state!=='present'):next; loadedQuery.value = key }
     } catch (err) {
       // 失败时保留旧列表，比清空再显示「游戏库是空的」诚实
       if (loadRounds.isCurrent(round)) toastError(`读取游戏列表失败：${errorMessage(err)}`)
@@ -95,7 +115,9 @@ export const useGameStore = defineStore('game', () => {
   async function refreshCounts(): Promise<void> {
     const round = countsRounds.begin()
     try {
-      const next = await window.baoyi.game.counts()
+      const [next,all]=await Promise.all([window.baoyi.game.counts(),window.baoyi.game.list({group:'all'})])
+      if(countsRounds.isCurrent(round))for(const key of Object.keys(PROJECT_FILTERS) as Array<keyof typeof PROJECT_FILTERS>)projectCounts.value[key]=all.filter(g=>matchesProject(g,key)).length
+      if(countsRounds.isCurrent(round))unavailableCount.value=all.filter(item=>item.path_state&&item.path_state!=='present').length
       if (countsRounds.isCurrent(round)) counts.value = next
     } catch (err) {
       if (countsRounds.isCurrent(round)) toastError(`读取统计失败：${errorMessage(err)}`)
@@ -166,6 +188,8 @@ export const useGameStore = defineStore('game', () => {
   }
 
   return {
+    projectChecks,checkingProjects,projectCounts,checkProjects,
+    unavailableCount,
     items,
     counts,
     loading,

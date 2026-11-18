@@ -40,7 +40,7 @@ export async function collectEvidence(db: SqlDb, id: string): Promise<EvidenceRe
   }
   await walk(stat.isDirectory() ? item.path : path.dirname(item.path), item.path, '主目录/', 0)
   for (const entry of item.entries.filter(e => e.type === 'path' && path.resolve(e.path) !== path.resolve(item.path)).slice(0, 10)) {
-    const s = await fs.lstat(entry.path).catch(() => null)
+    const s = await fs.lstat(entry.path).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause })
     if (s?.isDirectory() && !s.isSymbolicLink()) await walk(entry.path, entry.path, `关联目录(${entry.label})/`, 0)
   }
   const saved = timeline.baseline(id), current = JSON.stringify(snapshot)

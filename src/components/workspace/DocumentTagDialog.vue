@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, computed, watch } from 'vue'
 import { Plus, Check, X, Tag } from 'lucide-vue-next'
 import ProjectDialog from '@/components/project/ProjectDialog.vue'
@@ -98,7 +99,7 @@ async function applyBatch() {
         await workspace.documents.update(item.id, patch)
         count++
       } catch (e) {
-        failures.push(`${item.name}：${(e as Error).message}`)
+        failures.push(`${item.name}：${errorMessage(e)}`)
       }
     }
     message.value = `已更新 ${count} 份资料${failures.length ? `，${failures.length} 份失败` : ''}`
@@ -130,7 +131,7 @@ async function renameCategoryTag(oldTag: string) {
     editingTag.value = ''
     renameInput.value = ''
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     emit('updated')
     busy.value = false
@@ -151,7 +152,7 @@ async function deleteCategoryTag(tag: string) {
       await workspace.documents.update(doc.id, { tags: updated })
     }
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     emit('updated')
     busy.value = false

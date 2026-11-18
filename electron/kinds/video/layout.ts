@@ -130,7 +130,8 @@ export async function applyVideoLayout(d: SqlDb, ids: string[], root: string, re
     if (entry.action === 'move-directory' || entry.action === 'move-files') { log.moves.push({ resourceId: entry.resourceId, title: entry.title, from: entry.from, to: entry.to, kind: entry.action, ok, message }); save() }
   }
   // ponytail: 只删「搬空了」的原目录；里面还剩别的东西就留着。根目录和盘符根一律不碰
-  const tidy = (dir: string) => { try { if (dir && !same(dir, preview.root) && !same(dir, path.parse(dir).root) && fs.existsSync(dir) && !fs.readdirSync(dir).length) fs.rmdirSync(dir) } catch { /* 留着也无妨 */ } }
+  const tidy = (dir: string) => { try { if (dir && !same(dir, preview.root) && !same(dir, path.parse(dir).root) && fs.existsSync(dir) && !fs.readdirSync(dir).length) fs.rmdirSync(dir) } catch { // best-effort
+ /* 留着也无妨 */ } }
   const finish = (journal: VideoOrganizeJournal): { ok: boolean; message: string } => {
     const moved = journal.files.filter(file => file.status === 'switched').length
     if (journal.status === 'applied') {
@@ -158,7 +159,8 @@ export async function applyVideoLayout(d: SqlDb, ids: string[], root: string, re
         try { rebaseMovedVideoDirectory(d, entry.resourceId, entry.from, entry.to, preview.root); d.exec('RELEASE SAVEPOINT video_layout') }
         catch (error) {
           d.exec('ROLLBACK TO SAVEPOINT video_layout'); d.exec('RELEASE SAVEPOINT video_layout')
-          try { fs.renameSync(entry.to, entry.from) } catch { /* 目录已搬到新位置、库里还是旧路径：记录里有 from→to，用「重新绑定」能接回来 */ }
+          try { fs.renameSync(entry.to, entry.from) } catch { // best-effort
+ /* 目录已搬到新位置、库里还是旧路径：记录里有 from→to，用「重新绑定」能接回来 */ }
           throw error
         }
         let note = ''

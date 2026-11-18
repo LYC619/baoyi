@@ -47,7 +47,8 @@ try {
     }
   }
   const load = createRendererLoader({ electron,
-    '../services/database.ts': { getDb: () => db, getSettings: () => ({ hide_hentai: hidden }) },
+    '../services/database.ts': { getDb: () => db },
+    '../services/settings-store.ts': { getSettings: () => ({ hide_hentai: hidden }) },
     '../kinds/video/organize.ts': organize
   })
   load('electron/ipc/video-organize.ts').registerVideoOrganizeIpc(() => win, {

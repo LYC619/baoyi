@@ -1,3 +1,4 @@
+import { getDb } from '../../../services/database'
 /**
  * 目录整理的编排层：出方案 → 用户改 → 执行 → 可撤销。
  *
@@ -29,20 +30,10 @@ import type {
   SoftwareItem,
   UndoResult
 } from '../../../../src/types'
-import {
-  deleteSoftware,
-  getOrganizePlan,
-  getSettings,
-  getSoftware,
-  getSoftwareByPath,
-  listSoftware,
-  listCategories,
-  markPlanUndone,
-  remapPaths,
-  saveOrganizePlan,
-  updateSoftware,
-  upsertCategory
-} from '../../../services/database'
+import { deleteSoftware, getSoftware, getSoftwareByPath, listSoftware, updateSoftware } from '../db.ts'
+import { getOrganizePlan, markPlanUndone, remapPaths, saveOrganizePlan } from '../../../services/organize-plans.ts'
+import { getSettings } from '../../../services/settings-store.ts'
+import { listCategories, upsertCategory } from '../../../services/taxonomy-store.ts'
 import { samePath } from '../../../services/fstree.ts'
 import {
   alreadyOrganized,
@@ -77,10 +68,10 @@ import { describeRefs, hasRefs, scanRefs } from './refs'
  * 绿色软件搬走没有副作用，risky 的根本不会被剪切，两种都不值得花几秒去查注册表。
  */
 export async function previewOrganize(ids?: string[]): Promise<OrganizePreview> {
-  const root = getSettings().organize_root
+  const root = getSettings(getDb()).organize_root
   const all = ids?.length
-    ? ids.map((id) => getSoftware(id)).filter((x): x is SoftwareItem => x !== null)
-    : listSoftware({ group: 'all' })
+    ? ids.map((id) => getSoftware(getDb(), id)).filter((x): x is SoftwareItem => x !== null)
+    : listSoftware(getDb(), { group: 'all' })
 
   const entries: OrganizeEntry[] = []
 
@@ -145,7 +136,7 @@ export async function runOrganize(
   commands: OrganizeCommand[],
   onProgress: (p: OrganizeProgress) => void
 ): Promise<OrganizeResult> {
-  const root = getSettings().organize_root
+  const root = getSettings(getDb()).organize_root
   const steps: OrganizeStep[] = []
   const todo = commands.filter((c) => c.action !== 'skip')
 
@@ -159,7 +150,7 @@ export async function runOrganize(
 
   let failed = 0
   for (const cmd of todo) {
-    const item = getSoftware(cmd.software_id)
+    const item = getSoftware(getDb(), cmd.software_id)
     if (!item) {
       processed++
       continue
@@ -192,7 +183,7 @@ export async function runOrganize(
         const outcome = await moveDir(from, to)
         step.ok = outcome.ok
         step.note = outcome.note
-        if (outcome.ok) remapPaths(item.id, from, to, '')
+        if (outcome.ok) remapPaths(getDb(), item.id, from, to, '')
       }
     } else {
       // 已经是链接的条目不能再套一层链接。整目录预览时这种条目会被
@@ -213,7 +204,7 @@ export async function runOrganize(
           })
           // exe_path 指向链接那一侧：用户在整理目录里看到的就是它，
           // 而 junction 是透明的，从链接启动和从真实路径启动完全等价
-          remapPaths(item.id, from, to, from)
+          remapPaths(getDb(), item.id, from, to, from)
         }
       }
     }
@@ -228,7 +219,7 @@ export async function runOrganize(
 
   // 只要动过一次文件就必须留下 plan，哪怕全都失败了 —— 失败的那些也可能
   // 已经把文件复制了一半，用户需要看到清单才知道去哪儿检查
-  const planId = steps.length > 0 ? saveOrganizePlan(root, steps) : ''
+  const planId = steps.length > 0 ? saveOrganizePlan(getDb(), root, steps) : ''
 
   return {
     plan_id: planId,
@@ -249,7 +240,7 @@ export async function runOrganize(
  * 只撤 ok 的步骤。失败的那些本来就没动成，再「撤」一遍等于凭空删东西。
  */
 export async function undoOrganize(planId: string): Promise<UndoResult> {
-  const plan = getOrganizePlan(planId)
+  const plan = getOrganizePlan(getDb(), planId)
   if (!plan) return { restored: 0, failed: 0, notes: ['找不到这条整理记录'] }
   if (plan.undone_at > 0) return { restored: 0, failed: 0, notes: ['这条记录已经撤销过了'] }
 
@@ -264,8 +255,8 @@ export async function undoOrganize(planId: string): Promise<UndoResult> {
       const outcome = await removeJunction(step.to)
       if (outcome.ok) {
         // 标记文件写在真实目录里（junction 是透明的），链接删掉之后它还留着
-        await fsp.rm(path.join(step.from, LINK_MARK), { force: true }).catch(() => {})
-        remapPaths(step.software_id, step.to, step.from, '')
+        await fsp.rm(path.join(step.from, LINK_MARK), { force: true }).catch(() => { /* best-effort */ })
+        remapPaths(getDb(), step.software_id, step.to, step.from, '')
         restored++
       } else {
         failed++
@@ -277,7 +268,7 @@ export async function undoOrganize(planId: string): Promise<UndoResult> {
     // move 的逆动作就是反着搬一次，连同校验和「不覆盖」的规矩一起复用
     const outcome = await moveDir(step.to, step.from)
     if (outcome.ok) {
-      remapPaths(step.software_id, step.to, step.from, '')
+      remapPaths(getDb(), step.software_id, step.to, step.from, '')
       restored++
       if (outcome.note) notes.push(`${step.name}：${outcome.note}`)
     } else {
@@ -288,7 +279,7 @@ export async function undoOrganize(planId: string): Promise<UndoResult> {
 
   // 部分失败也打标：剩下的那些已经回不去了，再点一次撤销只会把成功的那批
   // 反向搬第二遍。失败原因在 notes 里，用户按提示手工处理
-  markPlanUndone(planId)
+  markPlanUndone(getDb(), planId)
   return { restored, failed, notes }
 }
 
@@ -300,7 +291,7 @@ export async function undoOrganize(planId: string): Promise<UndoResult> {
  * 中间那一瞬间万一崩了，用户会发现整理目录里什么都没有了。
  */
 export async function materialize(id: string): Promise<{ ok: boolean; message: string }> {
-  const item = getSoftware(id)
+  const item = getSoftware(getDb(), id)
   if (!item) return { ok: false, message: '找不到这个条目' }
   if (!item.link_target) return { ok: false, message: '这一条不是链接，无需转换' }
 
@@ -311,9 +302,9 @@ export async function materialize(id: string): Promise<{ ok: boolean; message: s
   if (!samePath(await linkTargetOf(linkPath), item.link_target)) {
     return { ok: false, message: '链接目标已变化，请先核对软件记录' }
   }
-  const invalid = await checkLibraryPath(getSettings().organize_root, linkPath)
+  const invalid = await checkLibraryPath(getSettings(getDb()).organize_root, linkPath)
   if (invalid) return { ok: false, message: invalid }
-  const shared = [...listSoftware({}), ...listSoftware({ group: 'archived' })].some(r => r.id !== id && (
+  const shared = [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })].some(r => r.id !== id && (
     nestedInside(linkPath, rootDirOf(r)) || nestedInside(item.link_target, rootDirOf(r)) || (r.link_target && samePath(r.link_target, item.link_target))
   ))
   if (shared) return { ok: false, message: '其他软件记录仍依赖这个目录，请先处理共用记录' }
@@ -342,28 +333,28 @@ export async function materialize(id: string): Promise<{ ok: boolean; message: s
     }
   }
 
-  await fsp.rm(path.join(linkPath, LINK_MARK), { force: true }).catch(() => {})
-  updateSoftware(id, { link_target: '' })
+  await fsp.rm(path.join(linkPath, LINK_MARK), { force: true }).catch(() => { /* best-effort */ })
+  updateSoftware(getDb(), id, { link_target: '' })
   return { ok: true, message: `已转为实体目录：${linkPath}` }
 }
 
 /** 只删链接，不动源。条目的路径退回真实位置 */
 export async function unlink(id: string): Promise<{ ok: boolean; message: string }> {
-  const item = getSoftware(id)
+  const item = getSoftware(getDb(), id)
   if (!item) return { ok: false, message: '找不到这个条目' }
   if (!item.link_target) return { ok: false, message: '这一条不是链接，没有可移除的链接' }
 
   const linkPath = item.source_dir || path.dirname(item.exe_path)
-  const invalid = await checkLibraryPath(getSettings().organize_root, linkPath)
+  const invalid = await checkLibraryPath(getSettings(getDb()).organize_root, linkPath)
   if (invalid) return { ok: false, message: invalid }
   if (!samePath(await linkTargetOf(linkPath), item.link_target)) return { ok: false, message: '链接目标已变化，请先核对软件记录' }
-  const shared = [...listSoftware({}), ...listSoftware({ group: 'archived' })].some(r => r.id !== id && nestedInside(linkPath, rootDirOf(r)))
+  const shared = [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })].some(r => r.id !== id && nestedInside(linkPath, rootDirOf(r)))
   if (shared) return { ok: false, message: '其他软件记录仍共用这个链接，请先处理共用记录' }
   const outcome = await removeJunction(linkPath)
   if (!outcome.ok) return { ok: false, message: outcome.note }
 
-  await fsp.rm(path.join(item.link_target, LINK_MARK), { force: true }).catch(() => {})
-  remapPaths(id, linkPath, item.link_target, '')
+  await fsp.rm(path.join(item.link_target, LINK_MARK), { force: true }).catch(() => { /* best-effort */ })
+  remapPaths(getDb(), id, linkPath, item.link_target, '')
   return { ok: true, message: `已移除链接，条目指回 ${item.link_target}` }
 }
 
@@ -376,12 +367,12 @@ export async function unlink(id: string): Promise<{ ok: boolean; message: string
  * 归档只是卡片墙不显示，文件还在整理目录里占着位置。
  */
 export async function listOrganized(ids?: string[]): Promise<OrganizedList> {
-  const root = getSettings().organize_root
+  const root = getSettings(getDb()).organize_root
   if (!root) return { root: '', entries: [] }
 
   const items = ids
-    ? [...new Set(ids)].map(id => getSoftware(id)).filter((item): item is SoftwareItem => item !== null)
-    : [...listSoftware({}), ...listSoftware({ group: 'archived' })]
+    ? [...new Set(ids)].map(id => getSoftware(getDb(), id)).filter((item): item is SoftwareItem => item !== null)
+    : [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })]
   const entries: OrganizedEntry[] = []
 
   for (const item of items) {
@@ -435,8 +426,8 @@ export async function previewRelocateOrganized(
   category: string,
   folder: string
 ): Promise<RelocatePreview> {
-  const root = getSettings().organize_root
-  const item = getSoftware(id)
+  const root = getSettings(getDb()).organize_root
+  const item = getSoftware(getDb(), id)
   const from = item ? rootDirOf(item) : ''
   const to = targetDir(root, category, folder)
   const preview: RelocatePreview = { ok: false, message: '', from, to, category: path.basename(path.dirname(to)), folder: path.basename(to), is_link: false }
@@ -448,9 +439,9 @@ export async function previewRelocateOrganized(
   if (invalid) return fail(invalid)
   if (!samePath(from, to) && await entryExists(to)) return fail(`目标已存在，没有动：${to}`)
   if (!await entryExists(from)) return fail('原目录已不存在，请先同步整理目录')
-  const other = [...listSoftware({}), ...listSoftware({ group: 'archived' })].find(r => r.id !== id && nestedInside(from, rootDirOf(r)))
+  const other = [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })].find(r => r.id !== id && nestedInside(from, rootDirOf(r)))
   if (other) return fail('这个文件夹还有其他软件记录引用，请先合并或移除重复记录')
-  const duplicate = getSoftwareByPath(rebase(item.exe_path, from, to))
+  const duplicate = getSoftwareByPath(getDb(), rebase(item.exe_path, from, to))
   if (duplicate && duplicate.id !== id) return fail('目标程序路径已被另一条记录占用')
 
   const liveLink = await isLink(from)
@@ -469,9 +460,9 @@ export async function previewRelocateOrganized(
 
 /** Register a newly used folder category without rescanning the whole library. */
 function ensureFolderCategory(name: string): void {
-  const categories = listCategories('software')
+  const categories = listCategories(getDb(), 'software')
   if (categories.some(c => c.name === name)) return
-  upsertCategory({ id: '', name, description: '整理目录下的文件夹', icon: 'folder', sort_order: Math.max(0, ...categories.map(c => c.sort_order)) + 1 }, 'software')
+  upsertCategory(getDb(), { id: '', name, description: '整理目录下的文件夹', icon: 'folder', sort_order: Math.max(0, ...categories.map(c => c.sort_order)) + 1 }, 'software')
 }
 
 export async function relocateOrganized(id: string, category: string, folder: string, expectedFrom?: string): Promise<RelocateResult> {
@@ -479,9 +470,9 @@ export async function relocateOrganized(id: string, category: string, folder: st
   if (!preview.ok) return preview
   const { from, to } = preview
   if (expectedFrom && !samePath(from, expectedFrom)) return { ok: false, message: '位置已变化，请重新预览' }
-  const item = getSoftware(id)!
+  const item = getSoftware(getDb(), id)!
   if (samePath(from, to)) {
-    updateSoftware(id, { category: preview.category })
+    updateSoftware(getDb(), id, { category: preview.category })
     ensureFolderCategory(preview.category)
     return { ok: true, message: '位置没有变化，分类已同步' }
   }
@@ -504,16 +495,16 @@ export async function relocateOrganized(id: string, category: string, folder: st
       created_at: new Date().toISOString(),
       reason: 'relocate'
     })
-    remapPaths(id, from, to, target)
-    updateSoftware(id, { category: preview.category, source_dir: to })
+    remapPaths(getDb(), id, from, to, target)
+    updateSoftware(getDb(), id, { category: preview.category, source_dir: to })
     ensureFolderCategory(preview.category)
     return { ok: true, message: `链接已移到 ${to}` }
   }
 
   const outcome = await moveDir(from, to)
   if (!outcome.ok) return { ok: false, message: outcome.note }
-  remapPaths(id, from, to, '')
-  updateSoftware(id, { category: preview.category, source_dir: to })
+  remapPaths(getDb(), id, from, to, '')
+  updateSoftware(getDb(), id, { category: preview.category, source_dir: to })
   ensureFolderCategory(preview.category)
   return { ok: true, message: outcome.note ? `已移动到 ${to}。${outcome.note}` : `已移动到 ${to}` }
 }
@@ -529,17 +520,17 @@ export async function relocateOrganized(id: string, category: string, folder: st
  * 那是用户自己在别处建的链接，抱一没有资格替他删。
  */
 export async function deleteSoftwareRecord(id: string): Promise<RemoveSoftwareResult> {
-  const item = getSoftware(id)
+  const item = getSoftware(getDb(), id)
   if (!item) return { ok: true, message: '记录已经不在了', link_removed: false }
 
-  const root = getSettings().organize_root
+  const root = getSettings(getDb()).organize_root
   const dir = rootDirOf(item)
   const liveLink = await isLink(dir)
   const safeLayout = root !== '' && !(await checkLibraryPath(root, dir))
   const target = liveLink ? await linkTargetOf(dir) : ''
   // 记录里保存的链接仍归这条记录管理，即使用户后来换过整理根。
   const ours = item.link_target !== '' || (safeLayout && target !== '' && await exists(path.join(target, LINK_MARK)))
-  const shared = [...listSoftware({}), ...listSoftware({ group: 'archived' })].some(x => x.id !== id && nestedInside(dir, rootDirOf(x)))
+  const shared = [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })].some(x => x.id !== id && nestedInside(dir, rootDirOf(x)))
   let real = item.link_target
   let removed = false
 
@@ -563,15 +554,15 @@ export async function deleteSoftwareRecord(id: string): Promise<RemoveSoftwareRe
   // 标记文件写在真实目录里。只有确认没有别的条目还指向同一个真实目录时才清掉它，
   // 否则会把另一条链接的来历一起抹了
   if (real && removed) {
-    const others = [...listSoftware({}), ...listSoftware({ group: 'archived' })].filter(
+    const others = [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })].filter(
       (x) => x.id !== id && x.link_target !== '' && samePath(x.link_target, real)
     )
     if (others.length === 0) {
-      await fsp.rm(path.join(real, LINK_MARK), { force: true }).catch(() => {})
+      await fsp.rm(path.join(real, LINK_MARK), { force: true }).catch(() => { /* best-effort */ })
     }
   }
 
-  deleteSoftware(id)
+  deleteSoftware(getDb(), id)
   return {
     ok: true,
     message: removed ? '已移除记录，整理目录里的链接一并删掉了' : '已移除记录',

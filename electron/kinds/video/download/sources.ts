@@ -100,7 +100,7 @@ async function loadHtml(
   try {
     signal.throwIfAborted()
     const pending = fetcher(pageUrl, { cache: 'no-store', signal, headers: { 'User-Agent': DOWNLOAD_UA, Referer: HANIME_BASE } })
-    void pending.then(res => { if (signal.aborted) void res.body?.cancel().catch(() => {}) }, () => {})
+    void pending.then(res => { if (signal.aborted) void res.body?.cancel().catch(() => { /* best-effort */ }) }, () => {})
     response = await abortable(pending, signal)
     if (!response.ok) throw new Error('解析 HTTP ' + response.status + (response.status === 403 ? '：请到设置完成内置 Cloudflare 验证后重新解析' : '：无法获取播放器页面'))
     if (expectedVideoCode && response.url && toVideoCode(response.url) !== expectedVideoCode) throw new Error('播放器页面发生跳转，站点编号不一致，请重新识别')
@@ -121,8 +121,8 @@ async function loadHtml(
   } catch (err) { throw new Error(safeDownloadError(err)) }
   finally {
     clearTimeout(timer)
-    if (reader) { void reader.cancel().catch(() => {}); reader.releaseLock() }
-    else if (response?.body && !response.body.locked) void response.body.cancel().catch(() => {})
+    if (reader) { void reader.cancel().catch(() => { /* best-effort */ }); reader.releaseLock() }
+    else if (response?.body && !response.body.locked) void response.body.cancel().catch(() => { /* best-effort */ })
   }
 }
 

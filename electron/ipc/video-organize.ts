@@ -1,5 +1,6 @@
 import { app, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
-import { getDb, getSettings } from '../services/database.ts'
+import { getDb } from '../services/database.ts'
+import { getSettings } from '../services/settings-store.ts'
 import {
   applyVideoOrganize, listVideoOrganizeJournal, previewVideoOrganize,
   previewVideoRelocate, relocateVideoDirectory, retryVideoOrganize, rollbackVideoOrganize
@@ -20,7 +21,7 @@ export function registerVideoOrganizeIpc(getWindow: () => BrowserWindow | null, 
     if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('只允许主窗口操作影视库')
   }
   const idsOf = (journal: VideoOrganizeJournal) => [...new Set([journal.survivorId, ...journal.sourceIds, ...journal.files.flatMap(file => file.resourceIds)])]
-  const visible = (ids: string[]) => !getSettings().hide_hentai || ids.every(id => {
+  const visible = (ids: string[]) => !getSettings(getDb()).hide_hentai || ids.every(id => {
     const row = getDb().prepare("SELECT category FROM resource WHERE id = ? AND kind = 'video'").get(id) as { category: string } | undefined
     return row && row.category !== '里番'
   })
@@ -70,7 +71,7 @@ export function registerVideoOrganizeIpc(getWindow: () => BrowserWindow | null, 
     return mutate([request?.preview?.resourceId], () => relocateVideoDirectory(getDb(), request))
   })
   const layoutRoot = () => {
-    const root = getSettings().video_organize_root || ''
+    const root = getSettings(getDb()).video_organize_root || ''
     if (!path.isAbsolute(root)) throw new Error('请先在设置 → 视频导入与文件整理里保存影视整理根目录')
     return root
   }

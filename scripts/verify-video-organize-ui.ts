@@ -43,7 +43,7 @@ function harness(initialWorks = works) {
 let passed = 0, failed = 0
 for (const suffix of [' LEVEL：', ' ＃', ' ']) {
   const h = harness([1, 2].map(number => ({ ...work(String(number)), name_zh: '示例作品' + suffix + number })))
-  try { assert.equal(h.session.collectionTitle.value, '示例作品'); passed++ }
+  try { assert.equal(h.session.collectionTitle.value, '示例作品 1-2'); passed++ }
   catch (cause) { failed++; console.error('FAIL default collection name ' + suffix + ': ' + String(cause)) }
   finally { h.close() }
 }
@@ -78,7 +78,7 @@ await test('主作品、目录和文件名变化后必须重新预览，编号�
   assert.equal(await h.session.apply('logical'), null)
   assert.equal(h.calls.length, 1)
   await h.session.previewChanges('organize')
-  assert.deepEqual(JSON.parse(JSON.stringify(h.calls.at(-1)?.[1])), { resourceIds: ['one', 'two'], survivorId: 'two', collectionTitle: '作品 one', transfer: 'copy', targetDirectory: 'E:/Fixture/two', fileNames: { file: '手动保留名称.mp4' } })
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls.at(-1)?.[1])), { resourceIds: ['one', 'two'], survivorId: 'two', collectionTitle: '所选作品（2 集）', transfer: 'copy', targetRoot: 'E:/Fixture/two', fileNames: { file: '手动保留名称.mp4' } })
 })
 await test('成功执行后的库变更通知不会把成功结果标成需要重新预览', async h => {
   h.api.apply = async request => {

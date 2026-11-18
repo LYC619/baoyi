@@ -100,6 +100,6 @@ export class VideoPreviewService {
       const abort=()=>stream.destroy();request.signal.addEventListener('abort',abort,{once:true})
       stream.once('close',()=>{request.signal.removeEventListener('abort',abort);lease.streams.delete(stream)})
       return new Response(Readable.toWeb(stream) as ReadableStream,{status:range?206:200,headers})
-    }catch(error){await handle?.close().catch(()=>{});return new Response(null,{status:(error as NodeJS.ErrnoException).code==='EACCES'?403:404})}
+    }catch(error){await handle?.close().catch(() => { /* best-effort */ });return new Response(null,{status:(error as NodeJS.ErrnoException).code==='EACCES'?403:404})}
   }
 }

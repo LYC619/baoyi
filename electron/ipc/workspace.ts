@@ -2,7 +2,8 @@ import { app,dialog, nativeImage, shell, type BrowserWindow, type IpcMain, type 
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { getDb, getSettings } from '../services/database.ts'
+import { getDb } from '../services/database.ts'
+import { getSettings } from '../services/settings-store.ts'
 import { assertLibraryIdle } from './library-backup.ts'
 import { restoreWindowFocus } from '../services/window-focus.ts'
 import { DocumentLibrary } from '../workspace/documents.ts'
@@ -17,24 +18,19 @@ import { generateTimeline } from '../workspace/assistant.ts'
 import type { ProjectSession } from '../../src/types/project.ts'
 import type { DocumentScan } from '../../src/types/workspace.ts'
 import { strings, keys, text, name } from '../workspace/validation.ts'
-import { createWorkspaceAgent } from '../workspace/agent.ts'
 import {DocumentFiles,type DocumentFilePlan} from '../workspace/document-files.ts'
 import {DocumentRecycle,type RecycleRecord} from '../workspace/document-recycle.ts'
-import {startImportedInsights} from './archive.ts'
 import {ModulePreferences} from '../workspace/preferences.ts'
 import {actualDirectory} from '../workspace/document-files.ts'
 import type {DocumentImportChoice} from '../../src/types/workspace.ts'
 
 export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc: Pick<IpcMain, 'handle'>, projects?:{organize:(id:string)=>ProjectSession;cancelProject:(id:string)=>void}): void {
-  const docs = () => new DocumentLibrary(getDb(), path.join(app.getPath('userData'), 'cache/novel-index/v1')), links = () => new WorkspaceLinks(getDb(), getSettings().hide_hentai)
+  const docs = () => new DocumentLibrary(getDb(), path.join(app.getPath('userData'), 'cache/novel-index/v1')), links = () => new WorkspaceLinks(getDb(), getSettings(getDb()).hide_hentai)
   const covers=new DocumentCovers(getDb,path.join(app.getPath('userData'),'cache/document-covers/v1'))
   const timeline = () => new TimelineLibrary(getDb()), personal = () => new PersonalLibrary(getDb())
   let preview: { token: string; at: number; scan: DocumentScan; categoryId:string; db: ReturnType<typeof getDb> } | null = null
   const changed = () => { const win = getWindow(); if (win && !win.isDestroyed()) win.webContents.send('workspace:changed') }
-  let agent:ReturnType<typeof createWorkspaceAgent>|undefined,agentDb:ReturnType<typeof getDb>|undefined
-  const preferences=()=>new ModulePreferences(getDb(),getSettings)
-  const assistant=()=>{if(!agent||agentDb!==getDb()){agent?.dispose();agentDb=getDb();agent=createWorkspaceAgent({db:agentDb,config:module=>preferences().config(module),searchConfig:()=>getSettings().search,hideHentai:()=>getSettings().hide_hentai,skillsDirectory:path.join(app.getAppPath(),'resources/agent-skills'),documentAssets:()=>path.join(app.getAppPath(),'dist/pdfjs'),execute:workspaceOperation,updated:changed,changed:session=>{const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('workspace:session',session)}})}return agent}
-  app?.on('will-quit',()=>agent?.dispose())
+  const preferences=()=>new ModulePreferences(getDb(),() => getSettings(getDb()))
   const handle = (name: string, action: (...args: any[]) => unknown) => ipc.handle('workspace:' + name, (event: IpcMainInvokeEvent, ...args: any[]) => {
     const win = getWindow()
     if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw new Error('只允许主窗口操作资料与个人记录')
@@ -102,7 +98,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
   const checkCleanup=async()=>{if(cleanupRunning)return;cleanupRunning=true;try{
     const db=getDb(),day=new Date().toLocaleDateString('sv-SE');if(cleanupDb===db&&cleanupDay===day)return
     await cleanup();cleanupDb=db;cleanupDay=day
-  }catch{/* Startup or active writes can defer the check without losing records. */}finally{cleanupRunning=false}}
+  }catch(cause){console.error('[工作区定时清理]',cause)}finally{cleanupRunning=false}}
   if(app?.on){const timer=setInterval(()=>void checkCleanup(),60000);timer.unref?.();void checkCleanup();app.on('will-quit',()=>clearInterval(timer))}
   let fileChoice:{token:string;projectId:string;source:string;at:number;db:ReturnType<typeof getDb>}|null=null
   let filePreview:{token:string;plan:DocumentFilePlan;db:ReturnType<typeof getDb>}|null=null
@@ -136,10 +132,6 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
   }))
   handle('files:operations',id=>{links().owner('project',id);return new DocumentFiles(getDb()).operations().filter(op=>op.projectId===id&&op.state!=='done')})
   handle('files:recover',id=>operation(async()=>{try{return await new DocumentFiles(getDb()).recover(id)}finally{changed()}}))
-  handle('agent:sessions',module=>assistant().list(module));handle('agent:session',id=>assistant().get(id))
-  handle('agent:create',(module,context)=>assistant().create(module,context));handle('agent:send',(id,text)=>assistant().send(id,text))
-  handle('agent:cancel',id=>assistant().cancel(id));handle('agent:changes',id=>assistant().changes(id))
-  write('agent:apply',(session,id)=>assistant().apply(session,id));write('agent:undo',(session,id)=>assistant().undo(session,id))
   const exportFile = async (name: string, content: string, obsidian = false) => {
     const result = await dialog.showSaveDialog(getWindow()!, { title: obsidian ? '导出到 Obsidian 库中的文件' : '导出 Markdown', defaultPath: name.replace(/[<>:"/\\|?*]/g, '_') + '.md', filters: [{name:'Markdown',extensions:['md']}] })
     restoreWindowFocus(getWindow())
@@ -182,7 +174,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
     if(preview!==saved||saved.db!==getDb())throw new Error('导入预览已变化，请重新选择')
     preview.at=Date.now();return result
   }))
-  handle('documents:confirm-import', (token: string, paths: string[], categoryId?: string, submodule?: any, customGroupId?: string, choices?: DocumentImportChoice[],insightProvider?:string) => operation(async () => {
+  handle('documents:confirm-import', (token: string, paths: string[], categoryId?: string, submodule?: any, customGroupId?: string, choices?: DocumentImportChoice[]) => operation(async () => {
     if (!preview || preview.token !== token || preview.db !== getDb() || Date.now() - preview.at > 30 * 60_000) throw new Error('导入预览已失效，请重新选择')
     const selected = strings(paths, 2000), allowed = new Set(preview.scan.items.filter(i => !i.existing).map(i => i.path))
     if (!selected.length || selected.some(p => !allowed.has(p))) throw new Error('所选文件不在本次可导入的预览中')
@@ -213,7 +205,9 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
         errors.push(path.basename(file) + '：' + (e as Error).message)
       }
     }
-    const insightStatus=importedIds.length?await startImportedInsights(importedIds,insightProvider):''
+    const insightStatus=importedIds.length
+      ? '资料已导入；精读不会在后台自动启动，请在归档助理中主动加载“文档精读”方法。'
+      : ''
     changed(); return { imported, errors,insightStatus }
   }))
   handle('documents:relocate', (id: string) => operation(async () => {
@@ -289,6 +283,8 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
     const side=Math.min(size.width,size.height);return image.crop({x:Math.floor((size.width-side)/2),y:Math.floor((size.height-side)/2),width:side,height:side}).resize({width:256,height:256}).toDataURL()
   }))
   write('personal:capture-state',(name,unit,value,date,metricId)=>personal().captureState(name,unit,value,date,metricId))
+  write('personal:renew',(id,input)=>personal().renew(id,input))
+  write('personal:snooze',(id,until)=>personal().snooze(id,until))
   handle('personal:list',kind=>personal().list(kind)); write('personal:save',input=>{if(input.kind==='profile'&&input.data?.avatar){const image=nativeImage.createFromDataURL(input.data.avatar);if(image.isEmpty()||image.getSize().width>256||image.getSize().height>256)throw new Error('头像无效或尺寸过大')}return personal().save(input)}); write('personal:remove',id=>personal().remove(id))
   handle('personal:overview',()=>{
     return {counts:links().counts()}

@@ -21,11 +21,11 @@ export async function openDownloadResponse(fetcher: typeof fetch, raw: string, i
   for (let hop = 0; ; hop++) {
     signal.throwIfAborted()
     const pending = fetcher(url, { ...init, signal, redirect: 'manual', cache: 'no-store' })
-    void pending.then(res => { if(signal.aborted) void res.body?.cancel().catch(()=>{}) },()=>{})
+    void pending.then(res => { if(signal.aborted) void res.body?.cancel().catch(() => { /* best-effort */ }) },()=>{})
     const response = await abortable(pending, signal)
     tick()
     if (![301,302,303,307,308].includes(response.status)) return { response, url }
-    void response.body?.cancel().catch(()=>{})
+    void response.body?.cancel().catch(() => { /* best-effort */ })
     if(hop >= 5) throw new Error('下载重定向次数过多')
     const location = response.headers.get('location')
     if(!location) throw new Error('下载重定向缺少目标地址')
@@ -68,13 +68,13 @@ export async function readDownloadResource(options: ResourceOptions): Promise<{ 
       reader=response.body.getReader()
       const chunks: Buffer[] = []; let size=0
       const total = Number(response.headers.get('content-length')) || 0
-      try { options.onProgress?.(0,total) } catch { /* Observers do not own requests. */ }
+      try { options.onProgress?.(0,total) } catch (cause) { console.error('[后台通知或记录]', cause) }
       for(;;) {
         const item=await abortable(reader.read(),signal); if(item.done) break
         tick(); size+=item.value.length
         if(size > (options.maxBytes ?? 64*1024*1024)) throw new Error('下载资源超过大小上限')
         chunks.push(Buffer.from(item.value))
-        try { options.onProgress?.(size,total) } catch { /* Observers do not own requests. */ }
+        try { options.onProgress?.(size,total) } catch (cause) { console.error('[后台通知或记录]', cause) }
       }
       if(!size) throw new Error('下载资源为空')
       const declared=response.headers.get('content-length'), encoding=response.headers.get('content-encoding')
@@ -84,11 +84,11 @@ export async function readDownloadResource(options: ResourceOptions): Promise<{ 
     } catch(error) {
       if(options.signal.aborted) throw options.signal.reason
       if(attempt>=retries || !retryableDownloadError(error)) throw error
-      try { options.onRetry?.(attempt+1) } catch { /* Observers do not own requests. */ }
+      try { options.onRetry?.(attempt+1) } catch (cause) { console.error('[后台通知或记录]', cause) }
     } finally {
       watchdog.close()
-      if(reader) { void reader.cancel().catch(()=>{}); reader.releaseLock() }
-      else void response?.body?.cancel().catch(()=>{})
+      if(reader) { void reader.cancel().catch(() => { /* best-effort */ }); reader.releaseLock() }
+      else void response?.body?.cancel().catch(() => { /* best-effort */ })
     }
     await downloadDelay(300*(attempt+1),options.signal)
   }

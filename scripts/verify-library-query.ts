@@ -67,7 +67,7 @@ console.log('PASS real video bulk handlers reject pending writes/removal and pin
     '@/composables/useVideoImport': { useVideoImport: () => ({ busy: Vue.ref(false) }) },
     '@/composables/useVideoAgentOrganize': { useVideoAgentOrganize: () => ({ show: (works: any) => calls.push(works) }) },
     '@/composables/useVideoWorkflow': { videoLibraryView: view, useVideoWorkflow: () => ({ privacyReady, hideHentai, jobs: Vue.ref([]) }), videoJobRetryStages: () => [] }
-  }, { window: { baoyi: { video: { readiness: async () => { calls.push('readiness'); return { ok: true } } } } }, setTimeout, clearTimeout })
+  }, { window: { baoyi: { video: { readiness: async () => { calls.push('readiness'); return { ok: true } } } } }, localStorage: { getItem: () => null, setItem() {} }, setTimeout, clearTimeout })
   const home = scope.run(() => loader('src/pages/video/Home.vue').default.setup({}, { expose() {} }))
   home.selecting.value = true; home.selectedIds.value = ['A', 'B']
   home.selectWork('A'); home.selectAll(); home.organize('organize'); home.requestRemoval(); home.requestLayout(); home.requestAgent(); home.selectReview(); await home.reviewSelected()

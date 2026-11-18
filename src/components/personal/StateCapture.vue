@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref } from "vue";
 import { workspace, localDate } from "@/utils/workspace-api";
 import type { PersonalRecord } from "@/types/workspace";
@@ -25,7 +26,7 @@ async function save() {
     );
     value.value = "";
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = errorMessage(e);
   } finally {
     busy.value = false;
   }

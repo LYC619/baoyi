@@ -1,0 +1,226 @@
+.sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.sec-head h2 {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.sec-desc {
+  font-size: var(--fs-tag);
+  line-height: 1.8;
+  color: var(--text-faint);
+  margin-bottom: 14px;
+}
+
+/* 说明放在操作下面时，上下留白要反过来 */
+.sec-desc--foot {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.row--gap {
+  margin-top: 12px;
+}
+
+.datadir {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-input);
+  background: var(--bg-main);
+  border: 1px solid var(--divider);
+}
+
+.datadir__label {
+  flex-shrink: 0;
+  font-size: var(--fs-tag);
+  color: var(--text-faint);
+}
+
+.datadir__path {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-tag);
+  color: var(--text-sub);
+  text-align: left;
+  transition: color var(--t-fast) ease;
+}
+
+.datadir__path:hover {
+  color: var(--accent);
+}
+
+.hint {
+  font-size: var(--fs-tag);
+  color: var(--text-faint);
+  min-width: 0;
+}
+
+/* 独占一行的说明，不跟按钮挤在同一条 flex 里 */
+.hint--block {
+  display: block;
+  margin-top: 10px;
+  line-height: 1.8;
+}
+
+.input--num {
+  width: 88px;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-tag);
+  color: var(--text-sub);
+  cursor: pointer;
+}
+
+.switch input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+}
+
+/* 配置不全时开关点不动。压淡是为了让「点不动」看起来是有理由的，而不是坏了 */
+.switch--off {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.switch--off input {
+  cursor: not-allowed;
+}
+
+/* 可折叠的小标题 */
+.sec-head--btn {
+  width: 100%;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.sec-head--btn:hover {
+  color: var(--accent);
+}
+
+.result {
+  margin-top: 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-input);
+  background: var(--success-bg);
+  color: var(--success);
+  font-size: var(--fs-tag);
+  line-height: 1.7;
+  word-break: break-all;
+}
+
+.result--bad {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.empty-line {
+  font-size: var(--fs-tag);
+  color: var(--text-faint);
+  margin-bottom: 14px;
+}
+
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-btn);
+  background: var(--bg-main);
+  border: 1px solid var(--divider);
+}
+
+.segmented button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: var(--fs-tag);
+  color: var(--text-sub);
+  transition:
+    background var(--t-fast) ease,
+    color var(--t-fast) ease;
+}
+
+.segmented button.on {
+  background: var(--active-surface);
+  color: var(--accent);
+}
+
+.provider-hint {
+  font-size: var(--fs-tag);
+  line-height: 1.7;
+  color: var(--text-faint);
+  margin: -4px 0 2px;
+}
+
+.tally {
+  list-style: none;
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.tally li {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-input);
+  background: var(--bg-main);
+  border: 1px solid var(--divider);
+}
+
+.tally b {
+  font-size: 17px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+}
+
+.tally span {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

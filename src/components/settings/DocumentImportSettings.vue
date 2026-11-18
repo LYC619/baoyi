@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import DocumentInsightImport from '@/components/workspace/DocumentInsightImport.vue'
+import { errorMessage } from '@/utils'
 import { ref } from 'vue'
 import { workspace } from '@/utils/workspace-api'
 import { useDocumentsStore } from '@/stores/documents'
@@ -7,12 +7,12 @@ import type { DocumentImportSuggestion, DocumentScan } from '@/types/workspace'
 const store = useDocumentsStore()
 const preview = ref<(DocumentScan & { token: string; categoryId: string }) | null>(null)
 const selected = ref<string[]>([]), choices = ref<Record<string, string>>({}), suggestions = ref<Record<string, DocumentImportSuggestion>>({})
-const category = ref(''), busy = ref(false), error = ref(''), message = ref(''),insightProvider=ref('')
-async function run(action: () => Promise<void>) { if (busy.value) return; busy.value = true; error.value = ''; message.value = ''; try { await action() } catch (cause) { error.value = (cause as Error).message } finally { busy.value = false } }
+const category = ref(''), busy = ref(false), error = ref(''), message = ref('')
+async function run(action: () => Promise<void>) { if (busy.value) return; busy.value = true; error.value = ''; message.value = ''; try { await action() } catch (cause) { error.value = errorMessage(cause) } finally { busy.value = false } }
 async function scan(directory: boolean) { await run(async () => {
   const result = await workspace.documents.prepareImport(directory, category.value || undefined)
   if (!result) return
-  preview.value = result; suggestions.value = {};insightProvider.value=''
+  preview.value = result; suggestions.value = {}
   selected.value = result.items.filter(item => !item.existing).map(item => item.path)
   choices.value = Object.fromEntries(result.items.map(item => [item.path, category.value || result.categoryId || item.suggestedCategoryId || 'reading_other']))
 }) }
@@ -22,14 +22,14 @@ async function analyze() { await run(async () => {
   for (const [index, path] of [...selected.value].entries()) {
     message.value = `正在识别 ${index + 1} / ${selected.value.length}`
     try { const result = await workspace.documents.analyzeImport(preview.value.token, path); suggestions.value[path] = result; choices.value[path] = result.categoryId }
-    catch (cause) { failures.push(path + '：' + (cause as Error).message) }
+    catch (cause) { failures.push(path + '：' + errorMessage(cause)) }
   }
   message.value = '识别结束，请核对分类、作者和标签后导入。'; error.value = failures.join('；')
 }) }
 async function confirmImport() { await run(async () => {
   if (!preview.value) return
   const result = await workspace.documents.confirmImport(preview.value.token, [...selected.value], '', undefined, undefined,
-    selected.value.map(path => ({ path, categoryId: choices.value[path], ...(suggestions.value[path] ? { name: suggestions.value[path].name, author: suggestions.value[path].author, tags: [...suggestions.value[path].tags] } : {}) })),insightProvider.value||undefined)
+    selected.value.map(path => ({ path, categoryId: choices.value[path], ...(suggestions.value[path] ? { name: suggestions.value[path].name, author: suggestions.value[path].author, tags: [...suggestions.value[path].tags] } : {}) })))
   await store.refresh(); preview.value = null; selected.value = []; message.value = `已导入 ${result.imported} 份资料`+(result.insightStatus?'；'+result.insightStatus:''); error.value = result.errors.join('；')
 }) }
 </script>
@@ -39,7 +39,6 @@ async function confirmImport() { await run(async () => {
     <label>此次导入分类<select v-model="category" :disabled="busy"><option value="">根据文件初步识别</option><option v-for="row in store.categories" :key="row.id" :value="row.id">{{ row.submodule === 'reading' ? '阅读' : '资料' }} · {{ row.name }}</option></select></label>
     <div class="ws-toolbar"><button class="ws-button" :disabled="busy" @click="scan(false)">选择文件</button><button class="ws-button" :disabled="busy" @click="scan(true)">扫描目录</button></div>
     <template v-if="preview">
-      <DocumentInsightImport v-model="insightProvider" />
       <p>找到 {{ preview.items.length }} 份，已选 {{ selected.length }} 份</p><p v-for="warning in preview.warnings" :key="warning" class="ws-muted">{{ warning }}</p>
       <div class="scan-list"><article v-for="item in preview.items" :key="item.path">
         <label><input v-model="selected" type="checkbox" :value="item.path" :disabled="busy || item.existing" /><span>{{ item.path }}{{ item.existing ? '（已入库）' : '' }}</span></label>

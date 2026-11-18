@@ -87,7 +87,8 @@ async function rendererHarness(firstId, genshinId) {
     'vue-router': [
       'import {reactive} from "vue";',
       'export const route=reactive({name:"game-detail",id:' + JSON.stringify(firstId) + '});',
-      'export const useRouter=()=>({push(next){route.name=next.name;route.id=next.params?.id || route.id}});'
+      'export const useRouter=()=>({push(next){route.name=next.name;route.id=next.params?.id || route.id}});',
+      'export const useRoute=()=>route; export const onBeforeRouteLeave=()=>{}; export const onBeforeRouteUpdate=()=>{};'
     ].join('\n')
   }
   const entry = [
@@ -202,7 +203,8 @@ app.whenReady().then(async () => {
     ? Response.json({ items: [{ id: 400, name: 'Portal', type: 'app' }] }) : imageResponse()
   const load = loader({
     electron: { ...electron, net: { fetch: (url, options) => { requestLog.push(url); return fixtureFetch(url, options) } } },
-    '../../services/database': { getDb: () => db, coversDir: () => covers, getSettings: () => ({ ai: { enabled: false }, search: {} }) },
+    '../../services/database': { getDb: () => db, coversDir: () => covers },
+    '../../services/settings-store.ts': { getSettings: () => ({ ai: { enabled: false }, search: {} }) },
     '../../services/searchService': { imageSearchAvailable: () => false, imageSearchWhyNot: () => '' },
     '../../services/agent/loop': {}, './backup': {}, './savedb': {}, './session': {}, './tools': {}, './prompts': {}, './db': games
   })

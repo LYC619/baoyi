@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { latestOnly, STALE } from '@/composables/latestOnly'
+import { errorMessage } from '@/utils'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, BookOpen, Heart, RefreshCw, FolderOpen, Trash2, Images } from 'lucide-vue-next'
 import { useImageStore } from '@/stores/image'
@@ -27,25 +29,25 @@ const shown=computed(()=>previewPages.value.slice(0,limit.value))
 const previewChapter=computed(()=>item.value?.chapters.find(c=>c.id===selectedChapter.value))
 function selectChapter(id:string){selectedChapter.value=id;limit.value=120}
 const status = ref<'loading' | 'ready' | 'missing' | 'error'>('loading')
-let requestEpoch = 0, routeEpoch = 0, disposed = false
-const currentReady = computed(() => status.value === 'ready' && item.value?.id === props.id)
+const lifetime = new AbortController()
+const readImage = latestOnly(async () => {
+  const nextItem = await window.baoyi.image.get(props.id)
+  const nextPages = nextItem ? await window.baoyi.image.pages(props.id) : []
+  await store.refresh()
+  return { nextItem, nextPages }
+})
+const currentReady = computed(() => status.value === 'ready' && !!item.value)
 const canRecover = computed(() => !busy.value && status.value !== 'loading' && (currentReady.value || !item.value))
 function owner() {
-  const id = props.id, epoch = routeEpoch
-  return { id, current: () => !disposed && props.id === id && routeEpoch === epoch }
+  return { id: props.id, current: () => !lifetime.signal.aborted }
 }
 async function load(autoRead = false) {
-  const target = owner(), request = ++requestEpoch
-  const current = () => target.current() && request === requestEpoch
   status.value = 'loading'
   error.value = ''
   try {
-    const nextItem = await window.baoyi.image.get(target.id)
-    if (!current()) return
-    const nextPages = nextItem ? await window.baoyi.image.pages(target.id) : []
-    if (!current()) return
-    await store.refresh()
-    if (!current()) return
+    const result = await readImage()
+    if (result === STALE || lifetime.signal.aborted) return
+    const { nextItem, nextPages } = result
     item.value = nextItem
     pages.value = nextPages
     status.value = nextItem ? 'ready' : 'missing'
@@ -55,11 +57,11 @@ async function load(autoRead = false) {
     tagText.value = nextItem?.tags.join('，') || ''
     if (autoRead && currentReady.value) read()
   } catch (cause) {
-    if (!current()) return
+    if (lifetime.signal.aborted) return
     item.value = null
     pages.value = []
     status.value = 'error'
-    error.value = (cause as Error).message
+    error.value = errorMessage(cause)
   }
 }
 async function patch(value: ImagePatch) {
@@ -77,7 +79,7 @@ async function patch(value: ImagePatch) {
     status.value = updated ? 'ready' : 'missing'
     return true
   } catch (cause) {
-    if (target.current()) error.value = (cause as Error).message
+    if (target.current()) error.value = errorMessage(cause)
     return false
   } finally {
     if (target.current()) busy.value = false
@@ -86,7 +88,7 @@ async function patch(value: ImagePatch) {
 function read(id = '') {
   if (currentReady.value && item.value) reader.open(item.value, pages.value, id)
 }
-watch(reader.session, value => { if (!value && !disposed) void load() })
+watch(reader.session, value => { if (!value && !lifetime.signal.aborted) void load() })
 async function rescan(relocate = false) {
   if (!canRecover.value) return
   const target = owner()
@@ -97,7 +99,7 @@ async function rescan(relocate = false) {
     else await window.baoyi.image.rescan(target.id)
     if (target.current()) await load()
   } catch (cause) {
-    if (target.current()) error.value = (cause as Error).message
+    if (target.current()) error.value = errorMessage(cause)
   } finally {
     if (target.current()) busy.value = false
   }
@@ -116,7 +118,7 @@ async function remove(deleteFiles = false) {
     await store.refresh()
     if (target.current()) await router.push('/image')
   } catch (cause) {
-    if (target.current()) error.value = (cause as Error).message
+    if (target.current()) error.value = errorMessage(cause)
   } finally {
     if (target.current()) busy.value = false
   }
@@ -132,7 +134,7 @@ async function move() {
     await load()
     if (target.current() && result?.warnings.length) error.value = result.warnings.join('\n')
   } catch (cause) {
-    if (target.current()) error.value = (cause as Error).message
+    if (target.current()) error.value = errorMessage(cause)
   } finally {
     if (target.current()) busy.value = false
   }
@@ -144,20 +146,11 @@ async function reveal() {
     const opened = await window.baoyi.image.reveal(target.id)
     if (target.current() && !opened) error.value = '找不到这个作品的目录，可能已被移动、删除，或所属分类已隐藏'
   } catch (cause) {
-    if (target.current()) error.value = (cause as Error).message
+    if (target.current()) error.value = errorMessage(cause)
   }
 }
-watch(() => props.id, () => {
-  routeEpoch++
-  item.value = null
-  pages.value = []
-  selectedChapter.value = null
-  limit.value = coverLimit.value = 120
-  choosingCover.value = busy.value = false
-  tagText.value = error.value = ''
-  void load(route.query.read === '1')
-}, { immediate: true, flush: 'sync' })
-onUnmounted(() => { disposed = true; requestEpoch++; routeEpoch++ })
+onMounted(() => { void load(route.query.read === '1') })
+onUnmounted(() => lifetime.abort())
 </script>
 <template><main class="im-page image-detail"><header class="detail-toolbar"><button class="im-button" @click="router.push('/image')"><ArrowLeft :size="17"/>{{item?.type!=='comic'?'返回相册':'返回书架'}}</button><span/><button class="im-button" :disabled="!canRecover" @click="rescan()"><RefreshCw :size="16"/>重新扫描</button><button class="im-button" :disabled="!canRecover" @click="rescan(true)"><FolderOpen :size="17"/>重新定位</button><button class="im-icon" aria-label="移除图片资源" :disabled="busy || !currentReady" @click="remove()"><Trash2 :size="18"/></button></header><p v-if="error" role="alert" class="im-error">{{error}}</p>
   <div v-if="status==='loading'" class="im-empty" role="status"><Images :size="40"/><h2>正在读取资源…</h2></div><div v-else-if="status==='error'" class="im-empty"><h2>读取失败</h2><button class="im-button" @click="load()">重试</button></div><div v-else-if="status==='missing'" class="im-empty"><Images :size="40"/><h2>资源不可用</h2><p>资源可能已移除，或所属类型已隐藏。</p></div><template v-else-if="item"><section class="detail-info"><button class="detail-cover-button" :class="{photo:item.type!=='comic'}" :disabled="busy || !currentReady || !pages.length" aria-label="选择或替换封面" title="选择或替换封面" @click="coverLimit=120;choosingCover=true"><ImageCover :page-id="item.coverPageId" :name="item.name" :photo="item.type!=='comic'"/><span>更换封面</span></button><div class="detail-fields"><input class="detail-title" :disabled="busy || !currentReady" :value="item.name" aria-label="图片资源名称" @change="patch({name:($event.target as HTMLInputElement).value})"/><p class="detail-meta">{{item.type==='comic'?'漫画':item.type==='misc'?'杂图':'照片'}} · {{item.chapterCount?item.chapterCount+' 章 · ':''}}{{item.pageCount}} 页 <span v-if="item.source">· {{item.source==='pica'?'哔咔':item.source==='jm'?'JM':item.source}}</span></p><p v-if="item.authors?.length" class="detail-meta">作者：{{item.authors.join("、")}}</p><p class="detail-path">{{item.path}}</p><div class="detail-actions"><button class="im-button im-primary" :disabled="busy || !currentReady || !pages.length" @click="read()"><BookOpen :size="18"/>{{item.type!=='comic'?'浏览照片':item.progress?'继续阅读':'开始阅读'}}</button><button class="im-button" :disabled="busy || !currentReady" :class="{favorite:item.favorite}" @click="patch({favorite:!item.favorite})"><Heart :size="17"/>{{item.favorite?'已收藏':'收藏'}}</button><span v-if="item.progress && item.type==='comic'">读到第 {{item.progress.ordinal+1}} 页</span></div></div></section>

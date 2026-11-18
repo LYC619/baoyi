@@ -1,3 +1,4 @@
+import { getDb } from '../../services/database'
 /**
  * AI 识别的编排层。
  *
@@ -21,18 +22,11 @@ import type {
 import { runAgent, probeToolCalling, apiBase, parseModelList, type AgentEvent } from '../../services/agent/loop'
 import { fillIdentifySystem, itemPrompt, unitPrompt } from './prompts'
 import { buildTools, type ToolContext } from './tools'
-import {
-  getSettings,
-  listBySourceDir,
-  listCategories,
-  listForAi,
-  listUnfinishedUnits,
-  markScanUnit,
-  saveIdentifyLog,
-  saveIdentifyReport,
-  tagPool,
-  updateSoftware
-} from '../../services/database'
+import { getSettings } from '../../services/settings-store.ts'
+import { listBySourceDir, listForAi, updateSoftware } from './db.ts'
+import { listCategories, tagPool } from '../../services/taxonomy-store.ts'
+import { listUnfinishedUnits, markScanUnit } from '../../services/scan-units.ts'
+import { saveIdentifyLog, saveIdentifyReport } from '../../services/identify-records.ts'
 import { searchAvailable } from '../../services/searchService'
 
 /** 同时跑几个目录。三个够把等待时间压下来，又不至于撞上模型的并发限流 */
@@ -133,7 +127,7 @@ async function identifyUnit(
   signal: AbortSignal,
   onEvent: (e: AgentEvent) => void
 ): Promise<UnitOutcome> {
-  const hadEntries = listBySourceDir(unit.dir)
+  const hadEntries = listBySourceDir(getDb(), unit.dir)
 
   let registered = 0
   let skipped = false
@@ -231,7 +225,7 @@ async function identifyItem(
   const base = { turns: result.turns, stopReason: result.stopReason }
 
   if (result.stopReason === 'error') {
-    updateSoftware(item.id, { ai_status: 'failed' })
+    updateSoftware(getDb(), item.id, { ai_status: 'failed' })
     return { ...base, registered: 0, skipped: false, failed: true, tokens: result.tokens, note: result.error }
   }
   if (result.stopReason === 'aborted') {
@@ -239,7 +233,7 @@ async function identifyItem(
   }
   if (registered === 0) {
     // agent 跑完却没注册，说明它没能下结论 —— 保持 failed 让用户能单条重试
-    updateSoftware(item.id, { ai_status: 'failed' })
+    updateSoftware(getDb(), item.id, { ai_status: 'failed' })
     return {
       ...base,
       registered: 0,
@@ -284,7 +278,7 @@ export async function completeWithAi(
   controller = new AbortController()
   const signal = controller.signal
 
-  const settings = getSettings()
+  const settings = getSettings(getDb())
   const ai = settings.ai
   const searchConfig = settings.search
   const withSearch = searchAvailable(searchConfig)
@@ -292,14 +286,14 @@ export async function completeWithAi(
   // 分类和标签池现读现填。用户刚在设置里合并过两个标签，这一轮就该按合并后的来。
   // withSearch 同时决定「注册哪些工具」和「提示词怎么说」—— 两边必须是同一个值，
   // 否则模型会照提示词去调一个没注册的工具，白烧一轮
-  const system = fillIdentifySystem(listCategories(), tagPool(), withSearch)
+  const system = fillIdentifySystem(listCategories(getDb()), tagPool(getDb()), withSearch)
 
   // 指定了 ids 就只补这几条；否则跑完所有待识别目录 + 遗留的待补全条目
   const jobs: Job[] = ids?.length
-    ? listForAi(ids).map((item) => ({ kind: 'item', item }) as Job)
+    ? listForAi(getDb(), ids).map((item) => ({ kind: 'item', item }) as Job)
     : [
-        ...listUnfinishedUnits().map((unit) => ({ kind: 'unit', unit }) as Job),
-        ...listForAi().map((item) => ({ kind: 'item', item }) as Job)
+        ...listUnfinishedUnits(getDb()).map((unit) => ({ kind: 'unit', unit }) as Job),
+        ...listForAi(getDb()).map((item) => ({ kind: 'item', item }) as Job)
       ]
 
   const tally: Tally = {
@@ -332,8 +326,8 @@ export async function completeWithAi(
     // 一条都没跑就没有报告可写 —— 一份全零的报告只会让历史列表变噪音
     let reportId = ''
     if (tally.entries.length > 0) {
-      try {
-        reportId = saveIdentifyReport({
+      {
+        reportId = saveIdentifyReport(getDb(), {
           resource_kind: 'software',
           processed: tally.processed,
           registered: tally.registered,
@@ -344,8 +338,6 @@ export async function completeWithAi(
           searches: tally.searches,
           entries: tally.entries
         })
-      } catch {
-        /* 报告写不进去不该让识别结果跟着失败，它只是事后翻看用的 */
       }
     }
 
@@ -406,7 +398,7 @@ export async function completeWithAi(
 
     if (job.kind === 'unit' && !signal.aborted) {
       markScanUnit(
-        job.unit.dir,
+        getDb(), job.unit.dir,
         outcome.failed ? 'failed' : outcome.registered > 0 ? 'done' : 'skipped',
         outcome.note,
         outcome.registered
@@ -425,8 +417,8 @@ export async function completeWithAi(
         job.kind === 'unit' ? path.basename(job.unit.dir) || job.unit.dir : job.item.file_name
       const searches = trail.filter((e) => e.type === 'tool_call' && e.name === 'web_search').length
 
-      try {
-        saveIdentifyLog({
+      {
+        saveIdentifyLog(getDb(), {
           dir,
           label,
           kind: job.kind,
@@ -440,8 +432,6 @@ export async function completeWithAi(
           stop_reason: outcome.stopReason,
           events: trail
         })
-      } catch {
-        /* 日志写不进去也不该让识别结果跟着失败，它只是事后翻看用的 */
       }
 
       tally.searches += searches

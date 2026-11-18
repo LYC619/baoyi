@@ -59,18 +59,6 @@ test('工作流中途来源变化拒绝保存；重启任务为中断，不会�
   const recovered=new DocumentInsightService({db,assets:'',scope:'public',current:()=>true,config:()=>config,run:()=>{throw new Error('不得自动执行')},changed:()=>{}})
   assert.equal(recovered.list()[0].status,'interrupted');assert.equal(recovered.busy,false);await recovered.close()
 })
-test('默认导入不上传；自动授权只匹配分类和服务商，变更后暂停',async t=>{
-  let calls=0
-  const {service,item,db}=await fixture(t,async input=>{calls++;return submit(input)})
-  assert.equal(service.afterImport([item.id]),'');assert.equal(calls,0)
-  const policy=service.policy();service.savePolicy({...policy,automatic:true,categories:[item.type],maxChars:12000})
-  assert.equal(service.afterImport([item.id],'skip'),'');assert.equal(service.busy,false)
-  assert.match(service.afterImport([item.id]),/1 份/);await waitUntil(()=>!service.busy);assert.equal(calls,1)
-  const stored=JSON.parse((db.prepare("SELECT value FROM settings WHERE key='_document_insight_policy'").get() as any).value);stored.provider='different provider'
-  db.prepare("UPDATE settings SET value=? WHERE key='_document_insight_policy'").run(JSON.stringify(stored))
-  assert.equal(service.policy().authorized,false);assert.match(service.afterImport([item.id]),/暂停/);assert.equal(calls,1)
-  assert.match(service.afterImport([item.id],'different provider'),/变化/);assert.equal(calls,1)
-})
 test('读取范围变化不复用旧结果；清理预览阻止并发改版，人工修订保持当前',async t=>{
   let calls=0;const {service,start,item,db,file}=await fixture(t,async input=>{calls++;return submit(input)})
   await fs.appendFile(file,'\n后续范围内仍有可引用的合成正文。')

@@ -157,6 +157,7 @@ function go(key: ModuleKey): void {
   align-items: center;
   gap: 2px;
   margin-left: 18px;
+  padding:3px; background:var(--hover-surface);border-radius:9px;
   -webkit-app-region: no-drag;
 }
 
@@ -181,8 +182,9 @@ function go(key: ModuleKey): void {
   background: var(--hover-surface);
 }
 .tab--on {
-  background: var(--active-surface);
-  color: var(--accent);
+  background: var(--bg-card);
+  color: var(--text-main);
+  box-shadow:var(--shadow-card);
 }
 
 .tab__n {
@@ -191,7 +193,7 @@ function go(key: ModuleKey): void {
   font-variant-numeric: tabular-nums;
 }
 .tab--on .tab__n {
-  color: var(--accent);
+  color: var(--text-sub);
 }
 
 .tab__dot {
@@ -201,6 +203,7 @@ function go(key: ModuleKey): void {
   background: var(--accent);
 }
 
+.titlebar__controls::before{content:"";width:1px;height:16px;margin:12px 8px;background:var(--divider-strong)}
 .titlebar__controls {
   flex-shrink: 0;
   display: flex;
@@ -223,7 +226,7 @@ function go(key: ModuleKey): void {
   color: var(--text-main);
 }
 .ctl--close:hover {
-  background: #e81123;
+  background: #e5484d;
   color: #fff;
 }
 @media(max-width:1050px){.tab__n{display:none}.tab{padding-inline:7px}.tabs{margin-left:12px;gap:0}.ctl{width:36px}}

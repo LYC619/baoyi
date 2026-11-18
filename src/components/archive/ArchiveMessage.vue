@@ -6,7 +6,7 @@ import {Check,LoaderCircle,ChevronRight,FileText,TriangleAlert} from 'lucide-vue
 import type {LiveBlock} from '@/composables/useArchiveAssistant'
 const props=defineProps<{block:LiveBlock}>(),emit=defineEmits<{source:[id:string]}>()
 const names:Record<string,string>={archive_result:'续读归档结果',archive_search:'查找归档',archive_get:'读取资料信息',archive_catalog:'查看分类',archive_web_search:'检索公开信息',archive_create_category:'建立归档分类',archive_read:'阅读原文',archive_search_text:'检索正文',archive_project_files:'查看项目文件',archive_project_search:'搜索项目内容',archive_update:'保存整理结果',archive_create_personal:'新增个人记录',archive_check:'核验文件',archive_locate:'寻找原文件',archive_relocate:'修复位置',archive_organize:'整理文件',archive_actions:'查阅修改记录',archive_undo:'撤销修改',archive_link:'处理资源关联',archive_skill:'处理技能记录',archive_history:'查找旧对话',memory:'维护记忆',todo_list:'更新任务进度',session_search:'找回历史',skill_manage:'保存归档方法',skill_view:'读取归档方法',skills_list:'查找归档方法'}
-const result=computed(()=>{try{return JSON.parse(props.block.result||'null')}catch{return null}})
+const result=computed(()=>{try{return JSON.parse(props.block.result||'null')}catch { return null /* 无法解析的结果按普通文本显示。 */ }})
 const failure=computed(()=>result.value?.error)
 const sources=computed(()=>{const value=result.value,items=Array.isArray(value)?value:value?.items||value?.matches||[value?.resource||value?.source||value];return items.filter((x:any)=>x?.id&&x?.kind&&x?.name).slice(0,20)})
 const tasks=computed(()=>result.value?.todos||[])

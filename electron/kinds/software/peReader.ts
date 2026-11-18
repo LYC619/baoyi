@@ -44,7 +44,7 @@ export function readPeArch(exePath: string): PeArch {
     if (fd !== null) {
       try {
         fs.closeSync(fd)
-      } catch {
+      } catch { // best-effort
         /* 关不上就算了，不影响结果 */
       }
     }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { computed, onMounted, ref } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { parseProxyInput, serializeProxyInput } from '../../../electron/services/proxy-rules'
@@ -11,10 +12,10 @@ const sources = ref<DiscoverySourceSummary[]>([])
 const activity = ref(''), probeProblem = ref(false)
 const unsaved = computed(() => {
   try {return serializeProxyInput(parseProxyInput(rule.value)) !== serializeProxyInput(parseProxyInput(settings.settings.video_online_proxy ?? 'system://'))}
-  catch {return true}
+  catch { return true /* 无法解析的代理规则仍需保存校验。 */ }
 })
-onMounted(async () => { try { sources.value = (await api.sources()).filter(source => source.online); if (sources.value[0]) url.value = sources.value[0].homeUrl } catch (cause) { error.value = (cause as Error).message } })
-async function run(action: () => Promise<void>, label = '正在处理…') { if (busy.value) return; busy.value = true; activity.value = label; error.value = ''; status.value = ''; probeProblem.value = false; try { await action() } catch (cause) { error.value = (cause as Error).message } finally { busy.value = false; activity.value = '' } }
+onMounted(async () => { try { sources.value = (await api.sources()).filter(source => source.online); if (sources.value[0]) url.value = sources.value[0].homeUrl } catch (cause) { error.value = errorMessage(cause) } })
+async function run(action: () => Promise<void>, label = '正在处理…') { if (busy.value) return; busy.value = true; activity.value = label; error.value = ''; status.value = ''; probeProblem.value = false; try { await action() } catch (cause) { error.value = errorMessage(cause) } finally { busy.value = false; activity.value = '' } }
 async function save() { await run(async () => { const normalized = serializeProxyInput(parseProxyInput(rule.value)); await settings.patch({ video_online_proxy: normalized }); rule.value = normalized; status.value = '已保存，后续在线来源、网页和下载请求使用此配置。' }) }
 async function routeStatus() {if(unsaved.value)return;await run(async()=>{const result=await api.online.networkStatus(url.value);status.value=`已保存配置的路由：${result.resolved}。此结果表示代理配置，不代表网站已连通。`},'正在读取已保存配置的路由…')}
 async function probe() {if(unsaved.value)return;await run(async()=>{const result=await api.online.probe(url.value);status.value=onlineProbeMessage(result);probeProblem.value=result.outcome!=='response_received'},'正在检查网页响应，最多等待约 15 秒…')}

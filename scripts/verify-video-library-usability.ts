@@ -24,8 +24,10 @@ function localService(f: ReturnType<typeof fixture>, enabled = true) {
   const load = createRendererLoader({
     'node:fs': { ...fs, default: fs }, 'node:path': { ...path, default:path },
     electron: { app: { getPath: () => f.root }, net: {}, shell: {} },
-    '../../services/database.ts': { getDb: () => f.db, getSettings: () => ({ ai:{enabled,api_key:enabled?'fixture':''},search:{},tmdb:{} }),
-      listCategories: () => VIDEO_CATEGORIES, tagPool: () => [], saveIdentifyLog: (log:Record<string,any>) => logs.push(log), postersDir: () => f.root },
+    '../../services/database.ts': { getDb: () => f.db, postersDir: () => f.root },
+    '../../services/settings-store.ts': { getSettings: () => ({ ai:{enabled,api_key:enabled?'fixture':''},search:{},tmdb:{} }) },
+    '../../services/taxonomy-store.ts': { listCategories: () => VIDEO_CATEGORIES, tagPool: () => [] },
+    '../../services/identify-records.ts': { saveIdentifyLog: (_db: unknown, log:Record<string,any>) => logs.push(log) },
     '../../services/searchService.ts': { searchAvailable: () => false }, './tmdb.ts': { tmdbAvailable: () => false },
     './hentai/hanime.ts': {}, './mediainfo.ts': { readContainerInfo: async () => null }, './db.ts': videoDb,
     './tools.ts': { buildVideoTools: () => [] },

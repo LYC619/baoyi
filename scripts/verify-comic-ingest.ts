@@ -18,8 +18,8 @@ const base=path.resolve('output/p1-p2-comic-2026-11-06/service');await fs.mkdir(
 async function fixture(t:test.TestContext){
   const root=await fs.mkdtemp(path.join(base,'run-')),db=new DatabaseSync(':memory:');initSchema(db,KINDS);db.exec(VIDEO_JOBS_SQL)
   const catalog=comicCatalog({provider:'jm',workId:'123',name:'合成作品',authors:['合成作者'],description:'',tags:[],publication:'ongoing',adapterVersion:JM_ADAPTER_VERSION,catalogFingerprint:'',chapters:[{id:'123',title:'首章',order:1,pageIds:['p1','p2']},{id:'124',title:'第二章',order:2,pageIds:['p3']}]})
-  let fail=false,downloads=0,seenSkips:string[]=[],allowed=true,failAfter=0,delay=0
-  const createQueue=()=>new ComicIngestService({db,authorizationDirectory:path.join(root,'grants'),allowed:()=>allowed,assertIdle:()=>{},changed:()=>{},jobsChanged:()=>{},verifier:()=>createComicVerifier(pathToFileURL(path.resolve('electron/kinds/image/comic-verify-worker.ts'))),runtime:()=>({resolve:async()=>catalog,download:async(_job,_work,directory,chapters,signal,onPage)=>{
+  let fail=false,downloads=0,seenSkips:string[]=[],allowed=true,failAfter=0,delay=0,notices=0
+  const createQueue=()=>new ComicIngestService({db,authorizationDirectory:path.join(root,'grants'),allowed:()=>allowed,assertIdle:()=>{},changed:()=>{},jobsChanged:()=>{notices++},verifier:()=>createComicVerifier(pathToFileURL(path.resolve('electron/kinds/image/comic-verify-worker.ts'))),runtime:()=>({resolve:async()=>catalog,download:async(_job,_work,directory,chapters,signal,onPage)=>{
     downloads++
     for(const chapter of chapters){seenSkips.push(...chapter.skip);await fs.mkdir(path.join(directory,chapter.directory),{recursive:true})
       for(const [i,id] of chapter.pageIds.entries()){
@@ -35,8 +35,41 @@ async function fixture(t:test.TestContext){
   t.after(async()=>{await queue.stopAll();db.close();await fs.rm(root,{recursive:true,force:true})})
   async function start(chapters:string[]){const preview=await queue.preview('JM123',{mode:'system'});return queue.enqueue(preview.token,chapters,root,preview.directory,null)}
   async function settled(id:string){for(let i=0;i<300;i++){const job=queue.list().find(j=>j.id===id);if(job&&!['running','queued'].includes(job.status))return job;await new Promise(r=>setTimeout(r,20))}throw new Error('任务未结束')}
-  return {root,db,get queue(){return queue},restart:async()=>{await queue.stopAll();queue=createQueue()},start,settled,catalog,library:new ImageLibrary(db),setFail:(value:boolean)=>fail=value,setFailAfter:(n:number)=>failAfter=n,setDelay:(n:number)=>delay=n,downloads:()=>downloads,skips:()=>seenSkips,hide:()=>{allowed=false}}
+  return {root,db,get queue(){return queue},restart:async()=>{await queue.stopAll();queue=createQueue()},start,settled,catalog,library:new ImageLibrary(db),setFail:(value:boolean)=>fail=value,setFailAfter:(n:number)=>failAfter=n,setDelay:(n:number)=>delay=n,downloads:()=>downloads,skips:()=>seenSkips,notices:()=>notices,hide:()=>{allowed=false}}
 }
+
+test('连续页面批量保存进度，避免每页全量落盘与任务刷新，最终页完整入库',async t=>{
+  const f=await fixture(t);f.catalog.chapters[0].pageIds=Array.from({length:40},(_,i)=>'p'+(i+1));f.catalog.catalogFingerprint='';Object.assign(f.catalog,comicCatalog(f.catalog))
+  const rename=fs.rename.bind(fs);let manifestWrites=0
+  t.mock.method(fs,'rename',async(source:any,target:any)=>{if(path.basename(String(target))==='.baoyi-image.json')manifestWrites++;return rename(source,target)})
+  const job=await f.settled(await f.start(['123']));assert.equal(job.status,'success',job.error);assert.equal(f.library.get(job.resourceId)!.pageCount,40)
+  assert.ok(f.notices()<24,`40 页产生 ${f.notices()} 次任务通知`)
+  assert.ok(manifestWrites<24,`40 页写入 ${manifestWrites} 次完整清单`)
+})
+
+test('旧任务补齐稳定创建时间，重试和重新打开不会改变任务排序依据',async t=>{
+  const f=await fixture(t);f.setFail(true);const id=await f.start(['123']);await f.settled(id)
+  const before=f.queue.list().find(job=>job.id===id)!;assert.ok(before.createdAt&&before.createdAt<=before.updatedAt)
+  await f.queue.retry(id);await f.settled(id);await f.restart();assert.equal(f.queue.list().find(job=>job.id===id)!.createdAt,before.createdAt)
+  const row=f.db.prepare('SELECT payload FROM image_download_jobs WHERE id=?').get(id) as {payload:string};const legacy=JSON.parse(row.payload);delete legacy.createdAt;legacy.updatedAt=123456
+  f.db.prepare('UPDATE image_download_jobs SET payload=? WHERE id=?').run(JSON.stringify(legacy),id);await f.restart()
+  assert.equal(f.queue.list().find(job=>job.id===id)!.createdAt,123456)
+  await f.queue.retry(id);await f.settled(id);assert.equal(f.queue.list().find(job=>job.id===id)!.createdAt,123456)
+})
+
+test('不足五页也按定时器保存，暂停落盘后重试不重下已有页',async t=>{
+  const f=await fixture(t);f.setDelay(1800)
+  const id=await f.start(['123'])
+  const manifest=path.join(f.root,'.baoyi-ingest',id,'payload','.baoyi-image.json')
+  let checkpoint=false
+  for(let i=0;i<100;i++){
+    const value=await fs.readFile(manifest,'utf8').then(JSON.parse).catch(()=>null)
+    if(value?.pages['123:p1']){checkpoint=true;break}
+    await new Promise(resolve=>setTimeout(resolve,25))
+  }
+  assert.ok(checkpoint,'首张图片应在下一页到达前保存');await f.queue.stop(id)
+  f.setDelay(0);await f.queue.retry(id);assert.equal((await f.settled(id)).status,'success');assert.ok(f.skips().includes('p1'))
+})
 test('完整所选集入库，补章保留原页、阅读记录和人工标题',async t=>{
   const f=await fixture(t),id=await f.start(['123']),job=await f.settled(id);assert.equal(job.status,'success',job.error)
   for(let i=0;i<50;i++){if(!await fs.stat(path.join(f.root,'.baoyi-ingest',id)).catch(()=>null))break;await new Promise(r=>setTimeout(r,20))}

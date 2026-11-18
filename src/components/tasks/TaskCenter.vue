@@ -52,7 +52,8 @@ const comicIngest=useComicIngest()
 const videoScan = useMediaScan('video')
 const { success, toast } = useToast()
 const actionError = ref('')
-let privacyRevision = 0
+let privacyScope = new AbortController()
+onBeforeUnmount(() => privacyScope.abort())
 const router = inject(routerKey, null)
 const pinia = getCurrentInstance()?.appContext.config.globalProperties.$pinia
 const settings = pinia ? useSettingsStore(pinia) : null
@@ -98,7 +99,7 @@ const tabCounts = computed<Record<Tab, number>>(() => ({
 const retryingEntry = ref('')
 watch(privateHidden, hidden => {
   center.setVideoHidden(hidden)
-  privacyRevision++
+  privacyScope.abort(); privacyScope = new AbortController()
   actionError.value = ''
   retryingEntry.value = ''
   journals.value = []
@@ -120,7 +121,7 @@ const entryLabel = computed(() => `${identifyKindLabel.value}日志：${runningC
 const kindLabels: Record<TaskKind, string> = {
   'software-scan': '软件扫描', 'game-scan': '游戏扫描', 'video-scan': '影视扫描',
   'ai-identify': 'AI 识别', organize: '目录整理', 'hanime-verify': '网络验证', 'video-download': '视频下载',
-  'video-series-download': '系列下载'
+  'video-series-download': '系列下载', 'audio-download': '音乐下载'
 }
 const statusLabels: Record<TaskStatus, string> = { running: '进行中', success: '已完成', failed: '失败', cancelled: '已停止 / 未完成', interrupted: '应用中断 / 待处理' }
 const eventLabels: Record<TaskEventLevel, string> = { info: '信息', success: '完成', warn: '提醒', error: '错误' }
@@ -132,7 +133,7 @@ const identifyKindLabel = computed(() => ({ software: '软件', game: '游戏', 
 const scopeNote = computed(() => activeModule.value === 'image' ? '仅显示图片下载、修复与连载更新记录。暂停后可继续下载。'
   : `仅显示${identifyKindLabel.value}模块的记录；切换顶部模块可查看对应日志。`)
 watch(activeModule, () => {
-  privacyRevision++
+  privacyScope.abort(); privacyScope = new AbortController()
   tab.value = activeModule.value === 'image' ? 'downloads' : 'tasks'
   actionError.value = ''; expanded.value.clear(); identifyLogs.value.clear()
 }, { immediate: true })
@@ -152,17 +153,17 @@ function openWork(id: string, edit = false): void {
 }
 async function retryScan(task: TaskWithResults, entry: TaskScanEntry): Promise<void> {
   if (!entry.resourceId || retryingEntry.value || videoScan.running.value || privateHidden.value) return
-  const revision = privacyRevision
+  const { signal } = privacyScope
   retryingEntry.value = task.id + entry.path
   actionError.value = ''
   try {
     const item = await window.baoyi.video.get(entry.resourceId)
-    if (revision !== privacyRevision) return
+    if (signal.aborted) return
     if (!item) throw new Error('作品不可用，请重新扫描来源目录')
     const updated = await reidentifyVideo(item, false)
-    if (updated && revision === privacyRevision) center.setScanResults(task.id, (task.scanEntries ?? []).map(value => value.path === entry.path
+    if (updated && !signal.aborted) center.setScanResults(task.id, (task.scanEntries ?? []).map(value => value.path === entry.path
       ? { ...value, status: 'updated', message: '重新识别完成，可打开作品核对资料' } : value))
-  } catch (cause) { if (revision === privacyRevision) actionError.value = errorMessage(cause) }
+  } catch (cause) { if (!signal.aborted) actionError.value = errorMessage(cause) }
   finally { retryingEntry.value = '' }
 }
 async function retryUnit(dir: string): Promise<void> {
@@ -175,28 +176,28 @@ async function retryUnit(dir: string): Promise<void> {
 /* ------------------------------ 整理记录 ------------------------------ */
 async function loadJournals(): Promise<void> {
   if (activeModule.value !== 'video' || journalBusy.value || !workflow.privacyReady.value || typeof window === 'undefined' || !window.baoyi?.videoOrganize) return
-  const revision = privacyRevision
+  const { signal } = privacyScope
   journalBusy.value = true
   journalError.value = ''
   try {
     const saved = await window.baoyi.videoOrganize.list()
     const visible = await filterVisibleJournals(saved, privateHidden.value)
-    if (revision !== privacyRevision) return
+    if (signal.aborted) return
     journals.value = visible
     journalsLoaded.value = true
-  } catch (cause) { if (revision === privacyRevision) journalError.value = privateHidden.value ? '读取整理记录失败，请重试。' : errorMessage(cause) }
+  } catch (cause) { if (!signal.aborted) journalError.value = privateHidden.value ? '读取整理记录失败，请重试。' : errorMessage(cause) }
   finally { journalBusy.value = false }
 }
 async function recoverJournal(id: string, action: 'retry' | 'rollback'): Promise<void> {
   if (journalBusy.value || !journals.value.some(journal => journal.id === id && (action === 'retry' ? journal.canRetry : journal.canRollback))) return
-  const revision = privacyRevision
+  const { signal } = privacyScope
   journalBusy.value = true
   journalError.value = ''
   try {
     const journal = await window.baoyi.videoOrganize[action](id)
-    if (revision !== privacyRevision) return
+    if (signal.aborted) return
     journals.value = [journal, ...journals.value.filter(value => value.id !== journal.id)].sort((a, b) => b.updatedAt - a.updatedAt)
-  } catch (cause) { if (revision === privacyRevision) journalError.value = errorMessage(cause) }
+  } catch (cause) { if (!signal.aborted) journalError.value = errorMessage(cause) }
   finally { journalBusy.value = false }
 }
 function showTab(next: Tab): void {
@@ -210,7 +211,7 @@ function time(at: number): string {
 }
 function taskProgress(task: { kind: TaskKind; processed: number; total: number }): string {
   if (task.kind === 'video-series-download') return task.total > 0 ? `${task.processed} / ${task.total} 集` : '集数待确定'
-  if (task.kind !== 'video-download') return task.total > 0 ? `${task.processed} / ${task.total}` : '总数待确定'
+  if (task.kind !== 'video-download' && task.kind !== 'audio-download') return task.total > 0 ? `${task.processed} / ${task.total}` : '总数待确定'
   const received = task.processed > 0 ? formatBytes(task.processed) : '0 B'
   return task.total > 0 ? `${received} / ${formatBytes(task.total)}` : `${received} / 大小未知`
 }

@@ -32,18 +32,18 @@ export function createBudgetedFetch(fetcher:typeof fetch,limiter:DownloadLimiter
     let reader:ReadableStreamDefaultReader<Uint8Array>|undefined,stream:ReadableStreamDefaultController<Uint8Array>|undefined
     let finished=false
     const finish=()=>{if(!finished){finished=true;signal.removeEventListener('abort',abort);release()}}
-    const abort=()=>{void reader?.cancel(signal.reason).catch(()=>{});try{stream?.error(signal.reason)}catch{}finish()}
+    const abort=()=>{void reader?.cancel(signal.reason).catch(() => { /* best-effort */ });try{stream?.error(signal.reason)}catch{ /* best-effort */ }finish()}
     signal.addEventListener('abort',abort,{once:true})
     try{
       signal.throwIfAborted()
       const pending=fetcher(input,init)
-      void pending.then(res=>{if(signal.aborted)void res.body?.cancel().catch(()=>{})},()=>{})
+      void pending.then(res=>{if(signal.aborted)void res.body?.cancel().catch(() => { /* best-effort */ })},()=>{})
       const response=await abortable(pending,signal)
       if(!response.body){finish();return response}
       reader=response.body.getReader()
       const body=new ReadableStream<Uint8Array>({
         start(controller){stream=controller},
-        async pull(controller){try{const chunk=await reader!.read();if(chunk.done){controller.close();finish()}else controller.enqueue(chunk.value)}catch(error){try{controller.error(error)}catch{}finish()}},
+        async pull(controller){try{const chunk=await reader!.read();if(chunk.done){controller.close();finish()}else controller.enqueue(chunk.value)}catch(error){try{controller.error(error)}catch{ /* best-effort */ }finish()}},
         async cancel(reason){try{await reader!.cancel(reason)}finally{finish()}}
       },{highWaterMark:0})
       const result=new Response(body,{status:response.status,statusText:response.statusText,headers:response.headers})

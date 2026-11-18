@@ -4,6 +4,7 @@ import { Check, Clapperboard, Eye, FolderOpen, LayoutGrid, List, ListOrdered, Lo
 import type { VideoAsset, VideoItem, WatchStatus } from '@/types'
 import type { VideoWorkContent, VideoWorkLibrary } from '@/types/video-workflow'
 import { errorMessage, formatBytes, formatDuration, posterUrl } from '@/utils'
+import { useResourcePaths } from '@/composables/useResourceDetail'
 import { useToast } from '@/composables/useToast'
 import {useVideoPreview} from '@/composables/useVideoPreview'
 import { videoEpisodeLabel, videoSeasonLabel, registeredVideoContent } from '@/utils/video-content'
@@ -55,11 +56,11 @@ const seasonGroups = computed(() => {
 const busy = ref('')
 const selectedVersions = ref<Record<string, string>>({})
 const view = ref<'cards' | 'list'>('cards')
-try { if (localStorage.getItem('video-content-view') === 'list') view.value = 'list' } catch { /* Use the default when storage is unavailable. */ }
+try { if (localStorage.getItem('video-content-view') === 'list') view.value = 'list' } catch { /* 偏好缺失或无法解析时使用当前默认视图。 */ }
 const failedPosters = ref<Record<string, string>>({})
 function changeView(value: 'cards' | 'list'): void {
   view.value = value
-  try { localStorage.setItem('video-content-view', value) } catch { /* A preference need not block the view. */ }
+  try { localStorage.setItem('video-content-view', value) } catch (cause) { useToast().error(errorMessage(cause)) }
 }
 type ContentRow = { id: string; title: string; label: string; poster: string; content: VideoWorkContent | null; assets: VideoAsset[]; path: string; watched: boolean; duration: number }
 const rows = computed<ContentRow[]>(() => {
@@ -120,11 +121,13 @@ async function setDefault(row: ContentRow): Promise<void> {
   } catch (cause) { error(errorMessage(cause)) }
   finally { busy.value = '' }
 }
+const resourcePaths = useResourcePaths({
+  reveal: (id: string) => window.baoyi.video.revealAsset(id),
+  copied: '文件路径已复制', copyTone: 'success', copyErrorPrefix: ''
+})
 async function reveal(row: ContentRow): Promise<void> {
   const asset = selected(row)
-  if (!asset) return
-  try { if (!(await window.baoyi.video.revealAsset(asset.id))) error('文件位置不可用，请检查磁盘是否在线') }
-  catch (cause) { error(errorMessage(cause)) }
+  if (asset) await resourcePaths.reveal(asset.id)
 }
 async function relocate(row: ContentRow): Promise<void> {
   const asset = selected(row)
@@ -137,9 +140,7 @@ async function relocate(row: ContentRow): Promise<void> {
 }
 async function copyPath(row: ContentRow): Promise<void> {
   const asset = selected(row)
-  if (!asset) return
-  try { await window.baoyi.app.copyText(asset.path); success('文件路径已复制') }
-  catch (cause) { error(errorMessage(cause)) }
+  if (asset) await resourcePaths.copyPath(asset.path)
 }
 </script>
 

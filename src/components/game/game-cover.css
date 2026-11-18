@@ -1,0 +1,50 @@
+.game-cover{position:relative;width:100%;aspect-ratio:2/3;border-radius:10px;overflow:hidden;isolation:isolate;container-type:inline-size;background:var(--bg-card);box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)}
+.game-cover--wide{aspect-ratio:16/9}.cv-bg{position:absolute;inset:-8%;width:116%;height:116%;object-fit:cover;filter:blur(18px) brightness(.55);z-index:0}.cv-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:var(--focus);z-index:1}.cv-img--hidden{opacity:0}.cv-cap{overflow:hidden}.cv-cap b{overflow-wrap:anywhere}.cv-art img{object-fit:contain!important}
+.fb{position:absolute;inset:0;z-index:1;overflow:hidden;color:hsl(var(--h) 30% 92%);
+  background:
+    radial-gradient(110% 70% at 100% 0%,hsl(var(--h) 42% 40% / .45),transparent 60%),
+    linear-gradient(168deg,hsl(var(--h) 24% 21%),hsl(calc(var(--h) + 24) 26% 10%));}
+.fb::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg,rgba(255,255,255,.028) 0 1px,transparent 1px 6px);mix-blend-mode:screen}
+.fb__frame{position:absolute;inset:6cqw;border:1px solid hsl(var(--h) 40% 80% / .14);border-radius:3cqw}
+.fb__wm{position:absolute;right:-14cqw;bottom:-22cqw;font:400 96cqw/1 var(--font-display);color:hsl(var(--h) 40% 80% / .06);pointer-events:none}
+/* 竖排题名与副题放进同一个 row-reverse 容器：列宽由内容决定，长题名换成两列时副题自动让位，不会叠字 */
+.fb__col{position:absolute;top:13cqw;right:12cqw;bottom:34cqw;display:flex;flex-direction:row-reverse;align-items:flex-start;gap:3.5cqw}
+.fb__title{writing-mode:vertical-rl;font:600 var(--tfs,15cqw)/1.12 var(--font-display);letter-spacing:.1em;max-height:100%;overflow:hidden;text-shadow:0 2px 12px rgba(0,0,0,.35)}
+.fb__sub{writing-mode:vertical-rl;font:400 6cqw/1.4 var(--font-ui);letter-spacing:.12em;color:hsl(var(--h) 25% 80% / .62);max-height:86%;overflow:hidden;padding-top:1cqw}
+.fb__seal{position:absolute;left:12cqw;bottom:12cqw;width:15cqw;height:15cqw;display:grid;place-items:center;border-radius:2cqw;font:600 9cqw/1 var(--font-display);color:hsl(var(--h) 70% 82% / .9);box-shadow:0 0 0 1px hsl(var(--h) 70% 78% / .55) inset;background:hsl(var(--h) 60% 50% / .12)}
+.fb__cat{position:absolute;left:12cqw;bottom:31cqw;font:500 5.6cqw/1 var(--font-mono);letter-spacing:.1em;color:hsl(var(--h) 25% 80% / .55);text-transform:uppercase}
+/* 拉丁标题：横排、左上、无衬线粗体 —— 竖排拉丁字母会躺倒，读不了 */
+.fb--latin .fb__col,.fb--wide .fb__col{display:contents}
+.fb--latin .fb__title{position:absolute;writing-mode:horizontal-tb;top:13cqw;left:12cqw;right:12cqw;font:700 13cqw/1.05 var(--font-ui);letter-spacing:-.01em;max-height:none;word-break:break-word}
+.fb--latin .fb__sub{position:absolute;writing-mode:horizontal-tb;top:auto;bottom:48cqw;left:12cqw;right:12cqw;font-size:5.6cqw;letter-spacing:.02em;max-height:3em}
+/* 横版：题名横排压在左下，印章挪到右上 */
+.fb--wide .fb__frame{inset:3.6cqw;border-radius:2cqw}
+.fb--wide .fb__title{position:absolute;writing-mode:horizontal-tb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;top:auto;right:auto;left:7cqw;bottom:9cqw;font-size:7.4cqw;letter-spacing:.08em;max-height:none;max-width:74%}
+.fb--wide .fb__sub{position:absolute;writing-mode:horizontal-tb;top:auto;right:auto;left:7cqw;bottom:19cqw;font-size:3.2cqw;max-width:70%;white-space:nowrap;text-overflow:ellipsis}
+.fb--wide .fb__seal{left:auto;right:7cqw;top:7cqw;bottom:auto;width:8cqw;height:8cqw;font-size:4.8cqw;border-radius:1.2cqw}
+.fb--wide .fb__cat{left:7cqw;top:8cqw;bottom:auto;font-size:2.8cqw}
+.fb--wide .fb__wm{font-size:60cqw;right:-6cqw;bottom:-18cqw}
+:root[data-theme=light] .fb{color:hsl(var(--h) 35% 18%);background:radial-gradient(110% 70% at 100% 0%,hsl(var(--h) 70% 90% / .9),transparent 60%),linear-gradient(168deg,hsl(var(--h) 34% 88%),hsl(calc(var(--h) + 24) 28% 78%))}
+:root[data-theme=light] .fb::before{background:repeating-linear-gradient(135deg,rgba(0,0,0,.025) 0 1px,transparent 1px 6px);mix-blend-mode:multiply}
+:root[data-theme=light] .fb__title{text-shadow:none}
+:root[data-theme=light] .fb__frame{border-color:hsl(var(--h) 30% 30% / .14)}
+:root[data-theme=light] .fb__wm{color:hsl(var(--h) 30% 30% / .07)}
+:root[data-theme=light] .fb__sub,:root[data-theme=light] .fb__cat{color:hsl(var(--h) 25% 25% / .6)}
+:root[data-theme=light] .fb__seal{color:hsl(var(--h) 60% 35%);box-shadow:0 0 0 1px hsl(var(--h) 50% 35% / .45) inset;background:hsl(var(--h) 60% 50% / .08)}
+
+.cv-comp{position:absolute;inset:0;z-index:1}
+.cv-comp::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.1),rgba(0,0,0,.5))}
+.cv-comp--h::before{background:linear-gradient(90deg,rgba(0,0,0,.05),rgba(0,0,0,.45))}
+.cv-art{position:absolute;overflow:hidden;box-shadow:0 12px 28px -10px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.1)}
+.cv-art img{width:100%;height:100%;object-fit:cover;display:block}
+.cv-comp--v .cv-art{left:6cqw;right:6cqw;top:10cqw;height:88cqw}
+.cv-comp--h .cv-art{top:7cqw;bottom:7cqw;left:6cqw;width:45cqw;border-radius:1.6cqw}
+.cv-cap{position:absolute;color:#fff;display:flex;flex-direction:column;gap:1.6cqw;text-shadow:0 2px 10px rgba(0,0,0,.55)}
+.cv-cap b{font-weight:600;font-family:var(--font-display);letter-spacing:.04em;line-height:1.2}
+.cv-cap span{color:rgba(255,255,255,.66);font-family:var(--font-ui)}
+.cv-comp--v .cv-cap{left:9cqw;right:9cqw;bottom:11cqw}
+.cv-comp--v .cv-cap b{font-size:11cqw}
+.cv-comp--v .cv-cap span{font-size:5.4cqw}
+.cv-comp--h .cv-cap{left:56cqw;right:6cqw;bottom:8cqw;max-height:40cqw}
+.cv-comp--h .cv-cap b{font-size:6.4cqw}
+.cv-comp--h .cv-cap span{font-size:3.2cqw}

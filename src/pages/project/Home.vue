@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import {computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { FolderKanban, Plus, Search, Pin, ArrowUpRight, FolderOpen, History, Code2, BookOpen, Wrench, RefreshCw, LayoutGrid, List } from 'lucide-vue-next'
@@ -10,6 +11,7 @@ import { rememberScroll, recallScroll } from '@/composables/useModules'
 import { useLibrarySelection } from '@/composables/useLibrarySelection'
 import { type ProjectItem, type ProjectMoveRecord } from '@/types/project'
 import LibraryBulkPanel from '@/components/library/LibraryBulkPanel.vue'
+import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
 import ProjectImport from '@/components/project/ProjectImport.vue'
 import ProjectDialog from '@/components/project/ProjectDialog.vue'
 import '@/styles/project.css'
@@ -24,23 +26,26 @@ watch(selecting, async active => { if (!active) { await nextTick(); bulkTrigger.
 const sourceNames: Record<string, string> = { self: '自己建立', 'third-party': '第三方', mixed: '混合来源', unknown: '来源未标记' }
 const stateNames: Record<string, string> = { active: '使用中', maintaining: '维护中', paused: '已暂停', archived: '已归档' }
 const heading = computed(() => store.pinned ? '置顶项目' : store.group || store.category || '全部项目')
-const filtered = computed(() => !!(store.search.trim() || store.category || store.group || store.source || store.state || store.pinned || store.availability))
+const filtered = computed(() => !!(store.search.trim() || store.category || store.group || store.source || store.state || store.pinned || store.availability||store.tag))
 const opening=ref(new Set<string>())
+const removing=ref<ProjectItem|null>(null),removeBusy=ref(false)
+async function removeProject(){const target=removing.value;if(!target||removeBusy.value)return;removeBusy.value=true;try{await window.baoyi.project.remove(target.id);removing.value=null;success('项目已删除，原文件保留');await store.refresh()}catch(e){toastError(errorMessage(e))}finally{removeBusy.value=false}}
+const tags=computed(()=>[...new Set(store.items.flatMap(item=>item.tags))].sort())
 const icon = (category: string) => category === '软件项目' ? Code2 : category === '调研写作' ? BookOpen : category === '资料处理' ? Wrench : FolderKanban
-function clearFilters() { store.search = ''; store.category = ''; store.group = ''; store.source = ''; store.state = ''; store.pinned = false; store.availability = '' }
+function clearFilters() { store.search = ''; store.category = ''; store.group = ''; store.source = ''; store.state = ''; store.pinned = false; store.availability = '';store.tag='' }
 function detail(item: ProjectItem) { if (selecting.value) { if (!store.loading && !store.error) selection.toggle(item.id) } else void router.push('/project/' + item.id) }
 async function bulkCompleted(failedIds: string[]) { selectedIds.value = new Set(failedIds); await store.refresh() }
-async function open(item: ProjectItem,entryId?:string) { if(opening.value.has(item.id))return;opening.value.add(item.id);try { await window.baoyi.project.open(item.id,entryId) } catch (e) { toastError((e as Error).message) } finally{opening.value.delete(item.id)} }
+async function open(item: ProjectItem,entryId?:string) { if(opening.value.has(item.id))return;opening.value.add(item.id);try { await window.baoyi.project.open(item.id,entryId) } catch (e) { toastError(errorMessage(e)) } finally{opening.value.delete(item.id)} }
 function openChoice(item:ProjectItem,event:Event){const input=event.target as HTMLSelectElement;if(input.value)void open(item,input.value);input.value=''}
-async function pin(item: ProjectItem) { try { await window.baoyi.project.update(item.id, { pinned: !item.pinned }); await store.refresh() } catch (e) { toastError((e as Error).message) } }
-async function showHistory() { try { records.value = await window.baoyi.project.moveRecords(); history.value = true } catch (e) { toastError((e as Error).message) } }
-async function recover(id: string) { busy.value = true; try { success(await window.baoyi.project.recoverMove(id)); records.value = await window.baoyi.project.moveRecords(); await store.refresh() } catch (e) { toastError((e as Error).message) } finally { busy.value = false } }
+async function pin(item: ProjectItem) { try { await window.baoyi.project.update(item.id, { pinned: !item.pinned }); await store.refresh() } catch (e) { toastError(errorMessage(e)) } }
+async function showHistory() { try { records.value = await window.baoyi.project.moveRecords(); history.value = true } catch (e) { toastError(errorMessage(e)) } }
+async function recover(id: string) { busy.value = true; try { success(await window.baoyi.project.recoverMove(id)); records.value = await window.baoyi.project.moveRecords(); await store.refresh() } catch (e) { toastError(errorMessage(e)) } finally { busy.value = false } }
 function key(event: KeyboardEvent) { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && !importer.value && !history.value) { event.preventDefault(); searchInput.value?.focus() } }
 onMounted(async () => { document.addEventListener('keydown', key); await store.refresh(); await nextTick(); if (scroll.value) scroll.value.scrollTop = recallScroll('project') })
 onBeforeUnmount(() => { document.removeEventListener('keydown', key); rememberScroll('project', scroll.value?.scrollTop || 0) })
 const gitClock=ref(Date.now()),gitTimer=setInterval(()=>gitClock.value=Date.now(),1000)
 onBeforeUnmount(()=>clearInterval(gitTimer))
-async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refresh:true});await store.refresh()}catch(e){toastError((e as Error).message)}}
+async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refresh:true});await store.refresh()}catch(e){toastError(errorMessage(e))}}
 </script>
 
 <template>
@@ -60,13 +65,15 @@ async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refr
       <header class="pj-page-header"><div><h1>{{ heading }}<small>{{ store.shown.length }} 个项目</small></h1></div><button class="pj-button pj-primary" :disabled="bulkBusy" @click="importer = true"><Plus :size="18" />添加项目</button></header>
       <div class="pj-toolbar">
         <label class="pj-search"><Search :size="18" /><input ref="searchInput" v-model="store.search" placeholder="搜索名称、分组、入口或路径，多词用空格…" aria-label="搜索项目" /><kbd>Ctrl K</kbd></label>
-        <select v-model="store.source" aria-label="筛选项目来源"><option value="">全部来源</option><option v-for="(label, value) in sourceNames" :key="value" :value="value">{{ label }}</option></select>
-        <select v-model="store.state" aria-label="筛选项目状态"><option value="">全部状态</option><option v-for="(label, value) in stateNames" :key="value" :value="value">{{ label }}</option></select>
-        <select v-model="store.availability" aria-label="筛选项目位置"><option value="">全部位置</option><option value="available">位置可用</option><option value="missing">位置失效</option></select>
         <select v-model="store.sort" aria-label="项目排序"><option value="recent">最近打开</option><option value="updated">最近更新</option><option value="name">按名称</option></select>
         <button class="pj-icon" aria-label="刷新项目" :disabled="store.loading || bulkBusy" @click="store.refresh"><RefreshCw :size="17" /></button>
         <div class="pj-view-switch" role="group" aria-label="项目显示方式"><button class="pj-icon" :aria-pressed="store.layout==='cards'" aria-label="卡片视图" @click="store.layout='cards'"><LayoutGrid :size="16"/></button><button class="pj-icon" :aria-pressed="store.layout==='list'" aria-label="列表视图" @click="store.layout='list'"><List :size="16"/></button></div>
         <button ref="bulkTrigger" v-if="!selecting" class="pj-button" :disabled="!store.shown.length || store.loading" @click="selection.toggleMode">批量管理</button>
+      </div>
+      <div class="pj-filter-tags" aria-label="项目标签筛选">
+        <div role="group" aria-label="项目状态"><button :aria-pressed="!store.state" @click="store.state=''">全部状态</button><button v-for="(label,value) in stateNames" :key="value" :aria-pressed="store.state===value" @click="store.state=store.state===value?'':value">{{label}}</button></div>
+        <div v-if="tags.length" role="group" aria-label="项目标签"><button :aria-pressed="!store.tag" @click="store.tag=''">全部标签</button><button v-for="tag in tags" :key="tag" :aria-pressed="store.tag===tag" @click="store.tag=store.tag===tag?'':tag">#{{tag}}</button></div>
+        <details><summary>来源与位置{{store.source||store.availability?'（已筛选）':''}}</summary><div role="group" aria-label="项目来源"><button :aria-pressed="!store.source" @click="store.source=''">全部来源</button><button v-for="(label,value) in sourceNames" :key="value" :aria-pressed="store.source===value" @click="store.source=store.source===value?'':value">{{label}}</button></div><div role="group" aria-label="项目位置"><button :aria-pressed="!store.availability" @click="store.availability=''">全部位置</button><button :aria-pressed="store.availability==='available'" @click="store.availability=store.availability==='available'?'':'available'">位置可用</button><button :aria-pressed="store.availability==='missing'" @click="store.availability=store.availability==='missing'?'':'missing'">位置失效</button></div></details>
       </div>
       <div v-if="store.items.length" class="pj-filter-summary"><span>显示 {{store.shown.length}} / {{store.items.length}} 个项目<span v-if="store.availability"> · {{store.availability==='missing'?'位置失效':'位置可用'}}</span></span><button v-if="filtered" @click="clearFilters">清空筛选</button></div>
       <p v-if="store.error" class="pj-error" role="alert">{{ store.error }} <button class="pj-button" @click="store.refresh">重试</button></p>
@@ -86,6 +93,7 @@ async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refr
             <div class="pj-project-symbol" :class="{ 'pj-symbol-research': item.category === '调研写作' }"><component :is="icon(item.category)" :size="25" /></div>
             <span class="pj-chip">{{ sourceNames[item.source] }}</span>
             <button v-if="!selecting" class="pj-icon" :class="{ selected: item.pinned }" :aria-label="item.pinned ? '取消置顶' : '置顶项目'" @click="pin(item)"><Pin :size="16" /></button>
+            <LibraryToolbarMenu v-if="!selecting" label="更多"><button class="pj-danger" @click="removing=item">删除项目</button></LibraryToolbarMenu>
           </div>
           <button class="pj-card-title" :disabled="bulkBusy" @click="detail(item)">{{ item.name }}</button>
           <p class="pj-card-summary">{{ item.summary || '添加一句简介，下次更快找到它。' }}</p>
@@ -104,6 +112,7 @@ async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refr
       </div>
     </main>
     <ProjectImport v-if="importer" @close="importer = false" @imported="store.refresh" />
+    <ProjectDialog v-if="removing" title="删除项目" :busy="removeBusy" @close="removing=null"><p>从抱一中删除“{{removing.name}}”及其项目登记与记录？项目目录和原文件保留在原位置。</p><template #footer><button class="pj-button" :disabled="removeBusy" @click="removing=null">取消</button><button class="pj-button pj-danger" :disabled="removeBusy" @click="removeProject">确认删除项目</button></template></ProjectDialog>
     <ProjectDialog v-if="history" title="项目移动记录" :busy="busy" @close="history = false">
       <p class="pj-muted">记录保留原位置、新位置及恢复结果。原位关联的参考文件不会随主目录搬走。</p><p v-if="!records.length">还没有移动记录。</p>
       <article v-for="r in records" :key="r.id" class="pj-history">
@@ -116,6 +125,7 @@ async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refr
 </template>
 
 <style scoped>
+.pj-filter-tags{margin:0 0 12px;display:grid;gap:8px;font-size:12px}.pj-filter-tags [role=group]{display:flex;gap:6px;flex-wrap:wrap}.pj-filter-tags button{padding:4px 9px;border-radius:12px;border:1px solid var(--divider);color:var(--text-sub)}.pj-filter-tags button[aria-pressed=true]{color:var(--accent);background:var(--hover-surface);border-color:var(--accent)}.pj-filter-tags summary{cursor:pointer;color:var(--text-sub)}.pj-filter-tags details [role=group]{margin-top:8px}
 .pj-git-status{display:block;text-align:left;margin:10px 0;color:var(--text-sub);font-size:12px}.pj-git-status small{font-size:10px;color:var(--text-faint)}
 
 .pj-context-preview{font-size:12px;line-height:1.7;color:var(--text-sub);margin:10px 0}.pj-context-preview p{margin:4px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.pj-context-preview span{color:var(--text-faint);margin-right:8px}

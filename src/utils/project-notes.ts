@@ -1,3 +1,5 @@
+import { latestOnly, STALE } from '../composables/latestOnly.ts'
+import { errorMessage } from './index.ts'
 import { emptyProjectContext, type ProjectContext } from '../types/workspace.ts'
 
 export interface ProjectNotesApi { context(id:string):Promise<ProjectContext>; updateContext(id:string,input:ProjectContext):Promise<ProjectContext> }
@@ -20,18 +22,18 @@ export class ProjectNotesSession {
   private timer:ReturnType<typeof setTimeout>|undefined
   private pending:Promise<boolean>|null=null
   private disposed=false
-  private loadRevision=0
+  private readContext=latestOnly(()=>this.api.context(this.id))
   constructor(id:string,api:ProjectNotesApi,changed:()=>void){this.id=id;this.api=api;this.changed=changed}
   get dirty(){return content(this.value)!==content(this.saved)}
   async load():Promise<void>{
-    const run=++this.loadRevision;this.loading=true;this.changed()
+    this.loading=true;this.changed()
     try{
-      const value=await this.api.context(this.id)
-      if(this.disposed||run!==this.loadRevision)return
+      const value=await this.readContext()
+      if(value===STALE||this.disposed)return
       if(!this.dirty&&!this.saving&&value.revision>=this.saved.revision){this.value=copy(value);this.saved=copy(value);this.error='';this.latest=null}
       this.loaded=true
-    }catch(error){if(!this.disposed&&run===this.loadRevision)this.error=(error as Error).message}
-    finally{if(!this.disposed&&run===this.loadRevision){this.loading=false;this.changed()}}
+    }catch(error){if(!this.disposed)this.error=errorMessage(error)}
+    if(!this.disposed){this.loading=false;this.changed()}
   }
   edit(patch:Partial<Pick<ProjectContext,'current'|'next'|'prompt'|'rules'>>){
     this.value={...this.value,...patch};this.changed();this.schedule()
@@ -54,7 +56,7 @@ export class ProjectNotesSession {
         this.value={...this.value,revision:saved.revision,updatedAt:saved.updatedAt,version:saved.version}
         this.latest=null
         return true
-      }catch(error){this.error=(error as Error).message;return false}
+      }catch(error){this.error=errorMessage(error);return false}
       finally{this.saving=false;this.pending=null;this.changed()}
     })
     const ok=await this.pending
@@ -62,7 +64,7 @@ export class ProjectNotesSession {
     return ok
   }
   async compare(){
-    try{this.latest=await this.api.context(this.id)}catch(error){this.error=(error as Error).message}
+    try{this.latest=await this.api.context(this.id)}catch(error){this.error=errorMessage(error)}
     this.changed()
   }
   useLatest(){if(!this.latest)return;this.value=copy(this.latest);this.saved=copy(this.latest);this.latest=null;this.error='';this.changed()}
@@ -71,5 +73,5 @@ export class ProjectNotesSession {
     this.saved=copy(this.latest);this.value={...this.value,revision:this.latest.revision,updatedAt:this.latest.updatedAt};this.latest=null
     return this.flush()
   }
-  dispose(){this.disposed=true;this.loadRevision++;this.clearTimer()}
+  dispose(){this.disposed=true;this.clearTimer()}
 }

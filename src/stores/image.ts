@@ -1,3 +1,4 @@
+import { errorMessage } from '@/utils'
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type { ImageCollection, ImageGroup, ImageItem, ImageQuery } from '@/types/image'
@@ -20,7 +21,7 @@ export const useImageStore = defineStore('image', () => {
       const sets = await window.baoyi.image.collections?.() || []
       if (token !== revision) return
       items.value = next; groups.value = types; collections.value=sets; error.value = ''
-    } catch (cause) { if (token === revision) error.value = (cause as Error).message }
+    } catch (cause) { if (token === revision) error.value = errorMessage(cause) }
     finally { if (token === revision) loading.value = false }
   }
   const shown = computed(() => {

@@ -15,7 +15,8 @@ const load = createRendererLoader({
       resolveProxy: async () => rule === 'system://' ? 'PROXY fixture:1234' : 'DIRECT'
     }
   } } },
-  './database.ts': { getSettings: () => ({ video_online_proxy: rule, proxy: 'socks5://hanime-only:4321' }) }
+  './database.ts': { getDb: () => ({}) },
+    './settings-store.ts': { getSettings: () => ({ video_online_proxy: rule, proxy: 'socks5://hanime-only:4321' }) }
 }, { URL, Response })
 const network = load('electron/services/online-network.ts') as typeof import('../electron/services/online-network.ts')
 await Promise.all([network.onlineFetch('https://example.org/list'), network.onlineFetch('https://example.org/detail')])

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { latestOnly, STALE } from '@/composables/latestOnly'
+import { errorMessage } from '@/utils'
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import {
   useRouter,
@@ -41,9 +43,6 @@ import type {
   DocumentProjectReference,
   NovelIndexResult,
 } from '@/types/workspace'
-import {
-  workspaceSources,
-} from '@/utils/workspace-sources'
 import '@/styles/workspace.css'
 const props = defineProps<{ id: string }>(),
   router = useRouter(),
@@ -86,21 +85,20 @@ function onChapterChange(idx: number) {
   currentChapterIndex.value = idx
 }
 
+const readIndex = latestOnly((encoding?: string) => workspace.documents.textIndex(props.id, encoding))
 async function reloadEncoding() {
   if (!item.value || !novelIndex.value) return
-  const run = ++revision, id = props.id
   try {
     loading.value = true
     const enc = readerSettings.value.encoding === 'auto' ? undefined : readerSettings.value.encoding
-    const index = await workspace.documents.textIndex(id, enc)
-    if (run !== revision) return
+    const index = await readIndex(enc)
+    if (index === STALE) return
     novelIndex.value = index
     pageCount.value = Math.max(1, novelIndex.value?.chapters.length || 1)
   } catch (e) {
-    if (run === revision) error.value = (e as Error).message
-  } finally {
-    if (run === revision) loading.value = false
+    error.value = errorMessage(e)
   }
+  loading.value = false
 }
 const sideTrigger = ref<HTMLButtonElement>()
 function closeSide() {
@@ -117,35 +115,26 @@ const supported = computed(
       item.value.format,
     ),
 )
-let revision = 0,
-  saveTimer: ReturnType<typeof setTimeout> | undefined,
+let saveTimer: ReturnType<typeof setTimeout> | undefined,
   disposed = false
 const projectReferences = ref<DocumentProjectReference[]>([])
-let referenceRevision = 0
+const lifetime = new AbortController()
+const readReferences = latestOnly(() => workspace.links.projectReferences([props.id]))
 async function refreshReferences() {
-  const id = props.id,
-    run = ++referenceRevision
   try {
-    const refs = await workspace.links.projectReferences([id])
-    if (!disposed && id === props.id && run === referenceRevision)
+    const refs = await readReferences()
+    if (refs !== STALE && !disposed)
       projectReferences.value = refs
   } catch (e) {
-    if (!disposed && id === props.id && run === referenceRevision)
-      error.value = '项目引用读取失败：' + (e as Error).message
+    if (!disposed)
+      error.value = '项目引用读取失败：' + errorMessage(e)
   }
 }
 const offReferences = workspace.onChanged(() => void refreshReferences())
 const offProjects = window.baoyi.project.onChanged(
   () => void refreshReferences(),
 )
-watch(
-  () => props.id,
-  () => {
-    projectReferences.value = []
-    void refreshReferences()
-  },
-  { immediate: true },
-)
+onMounted(() => { void refreshReferences() })
 function toggleToc() {
   toc.value = !toc.value
   if (toc.value && window.innerWidth <= 850) side.value = false
@@ -154,73 +143,50 @@ function toggleSide() {
   side.value = !side.value
   if (side.value && window.innerWidth <= 850) toc.value = false
 }
+const readDocument = latestOnly(async () => {
+  const value = await workspace.documents.get(props.id)
+  if (lifetime.signal.aborted) return null
+  if (!value) throw new Error('资料索引已移除')
+  const [notes, preferences] = await Promise.all([workspace.documents.annotations(props.id), workspace.preferences.get('document')])
+  if (lifetime.signal.aborted) return null
+  let c: Awaited<ReturnType<typeof workspace.documents.content>> | null = null
+  let index: NovelIndexResult | null = null, contentFailure = ''
+  if (['pdf', 'md', 'markdown', 'txt', 'png', 'jpg', 'jpeg'].includes(value.format) && value.available) {
+    try {
+      c = await workspace.documents.content(props.id)
+      if (((value.format === 'txt' && (value.type === 'novel' || c.isLarge)) || (['md', 'markdown'].includes(value.format) && c.isLarge)) && typeof workspace.documents.textIndex === 'function') {
+        const enc = readerSettings.value.encoding === 'auto' ? undefined : readerSettings.value.encoding
+        index = await workspace.documents.textIndex(props.id, enc)
+      }
+    } catch (e) { contentFailure = errorMessage(e) }
+  }
+  return { value, notes, preferences, c, index, contentFailure }
+})
 async function load() {
-  const run = ++revision,
-    id = props.id,
-    query = { ...route.query }
+  const query = { ...route.query }
   loading.value = true
-  error.value = ''
-  contentError.value = ''
-  content.value = null
-  novelIndex.value = null
-  item.value = null
-  annotations.value = []
-  message.value = ''
-  locationStates.value = {}
-  activeAnnotation.value = ''
+  error.value = ''; contentError.value = ''; content.value = null; novelIndex.value = null; item.value = null
+  annotations.value = []; message.value = ''; locationStates.value = {}; activeAnnotation.value = ''
   clearTimeout(saveTimer)
   unsaved.value = false
   try {
-    const value = await workspace.documents.get(id)
-    if (run !== revision) return
-    if (!value) throw new Error('资料索引已移除')
-    const [notes, preferences] = await Promise.all([workspace.documents.annotations(id), workspace.preferences.get('document')])
-    if (run !== revision) return
+    const result = await readDocument()
+    if (result === STALE || !result || lifetime.signal.aborted) return
+    const { value, notes, preferences, c, index, contentFailure } = result
     readerSettings.value.fontSize = preferences.fontSize
-    item.value = value
-    annotations.value = notes
-    position.value = { ...value.position }
-    const requestedOffset =
-      query.offset === undefined ? value.position.offset : Number(query.offset)
+    item.value = value; annotations.value = notes; position.value = { ...value.position }
+    const requestedOffset = query.offset === undefined ? value.position.offset : Number(query.offset)
     initial.value = {
       page: Math.max(1, Number(query.page) || value.position.page),
-      offset: Number.isFinite(requestedOffset)
-        ? Math.min(1, Math.max(0, requestedOffset))
-        : value.position.offset,
+      offset: Number.isFinite(requestedOffset) ? Math.min(1, Math.max(0, requestedOffset)) : value.position.offset,
     }
-    pageCount.value = Math.max(1, value.pageCount)
-    if (supported.value && value.available) {
-      try {
-        const c = await workspace.documents.content(id)
-        if (run !== revision) return
-        if (((value.format === 'txt' && (value.type === 'novel' || c.isLarge)) || (['md', 'markdown'].includes(value.format) && c.isLarge)) && typeof workspace.documents.textIndex === 'function') {
-          const enc = readerSettings.value.encoding === 'auto' ? undefined : readerSettings.value.encoding
-          const index = await workspace.documents.textIndex(id, enc)
-          if (run !== revision) return
-          novelIndex.value = index
-          pageCount.value = Math.max(1, novelIndex.value?.chapters.length || value.pageCount || 1)
-        }
-        if (run === revision) content.value = c
-      } catch (e) {
-        if (run === revision) contentError.value = (e as Error).message
-      }
-    }
-  } catch (e) {
-    if (run === revision) error.value = (e as Error).message
-  } finally {
-    if (run === revision) loading.value = false
-  }
+    novelIndex.value = index
+    pageCount.value = Math.max(1, index?.chapters.length || value.pageCount || 1)
+    content.value = c; contentError.value = contentFailure
+  } catch (e) { error.value = errorMessage(e) }
+  loading.value = false
 }
-watch(
-  () => props.id,
-  () => {
-    selected.value = []
-    quote.value = ''
-    editing.value = null
-    void load()
-  },
-  { immediate: true },
-)
+onMounted(() => { void load() })
 function changedLocation(location: ReadingLocation, count: number) {
   position.value = location
   pageCount.value = count
@@ -237,13 +203,12 @@ async function savePosition() {
   try {
     await workspace.documents.position(id, loc, count)
     if (
-      id === item.value?.id &&
       position.value.page === loc.page &&
       position.value.offset === loc.offset
     )
       unsaved.value = false
   } catch (e) {
-    if (!disposed) error.value = '阅读位置未保存：' + (e as Error).message
+    if (!disposed) error.value = '阅读位置未保存：' + errorMessage(e)
   }
 }
 async function beforeNavigate() {
@@ -256,8 +221,7 @@ onBeforeRouteLeave(beforeNavigate)
 onBeforeRouteUpdate(beforeNavigate)
 onBeforeUnmount(() => {
   disposed = true
-  revision++
-  referenceRevision++
+  lifetime.abort()
   offReferences()
   offProjects()
   clearTimeout(saveTimer)
@@ -270,7 +234,7 @@ async function run(fn: () => Promise<unknown>) {
   try {
     await fn()
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     busy.value = false
   }
@@ -416,41 +380,23 @@ async function ready() {
     await focus(a)
     return
   }
-  const id = props.id,
-    run = revision
+  const id = props.id
   if(typeof route.query.insight==='string'&&typeof route.query.evidence==='string'){
     try{
       const result=await window.baoyi.archive.insights.detail(id)
-      if(run!==revision||id!==props.id)return
+      if(disposed)return
       const note=result.history.find(note=>note.id===route.query.insight),evidence=note?.evidence.find(value=>value.id===route.query.evidence)
       if(evidence)await canvas.value?.focusSource({documentId:id,name:'精读证据',quote:evidence.quote,location:{page:evidence.page||1,offset:0},line:evidence.startLine,label:evidence.page?'第 '+evidence.page+' 页':'原文引文'})
       else error.value='这条精读证据已不可用，可从速览重新打开'
-    }catch(e){error.value=(e as Error).message}
+    }catch(e){error.value=errorMessage(e)}
     return
   }
-  if (
-    typeof route.query.sourceSession === 'string' &&
-    typeof route.query.message === 'string'
-  )
-    try {
-      const session = await workspace.agent.session(route.query.sourceSession)
-      if (run !== revision || id !== props.id || !session) return
-      const source = workspaceSources(session, route.query.message)[
-        Number(route.query.source) || 0
-      ]
-      if (source?.documentId === id) await canvas.value?.focusSource(source)
-    } catch (e) {
-      error.value = (e as Error).message
-    }
 }
 watch(
   () => [
     route.query.annotation,
     route.query.insight,
     route.query.evidence,
-    route.query.sourceSession,
-    route.query.message,
-    route.query.source,
   ],
   () => {
     if (content.value) void ready()

@@ -57,7 +57,7 @@ export async function readOnlinePage(rawUrl: string, fetchPage: typeof fetch, sa
           } finally { await reader.cancel(); reader.releaseLock() }
         }
         return { html: Buffer.concat(chunks).toString('utf8'), url }
-      } finally { if (!response.body?.locked) await response.body?.cancel().catch(() => {}) }
+      } finally { if (!response.body?.locked) await response.body?.cancel().catch(() => { /* best-effort */ }) }
     }
     throw new Error('网页重定向次数超过 5 次')
   } catch (error) {
@@ -92,7 +92,7 @@ const idPrefix = (adapter: AdapterId) => adapter === 'javdb' ? 'javdb-' : 'onlin
 
 export function createOnlineSource(catalogue: DiscoveryCatalogue, fetchPage: typeof fetch) {
   let queue: Promise<unknown> = Promise.resolve()
-  function serial<T>(run: () => Promise<T>): Promise<T> { const next = queue.then(run); queue = next.catch(() => {}); return next }
+  function serial<T>(run: () => Promise<T>): Promise<T> { const next = queue.then(run); queue = next.catch(() => { /* 原始 Promise 的错误已交给调用方；这里只释放队列或监听。 */ }); return next }
   function source(id: string): DiscoverySource {
     const value = catalogue.get(id)
     if (!value.online) throw new Error('此来源不是在线来源')

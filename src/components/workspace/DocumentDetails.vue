@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, watch, onBeforeUnmount } from 'vue'
 import { BookOpen, Star, ExternalLink, FolderOpen } from 'lucide-vue-next'
 import { workspace } from '@/utils/workspace-api'
@@ -18,7 +19,7 @@ function save(patch:DocumentPatch) {
   saving.value = true; saved.value = false
   queue = queue.then(async () => {
     try { await workspace.documents.update(id,patch); error.value = ''; emit('updated'); saved.value = true; clearTimeout(timer); timer = setTimeout(() => saved.value=false,1800) }
-    catch(e) {error.value=(e as Error).message}
+    catch(e) {error.value=errorMessage(e)}
   }).finally(() => saving.value=false)
 }
 function saveField(key:'name'|'author'|'notes'|'tags') {
@@ -26,7 +27,7 @@ function saveField(key:'name'|'author'|'notes'|'tags') {
   else if (draft.value[key]!==props.item[key]) save({[key]:draft.value[key]})
 }
 async function action(kind:'open'|'reveal'|'relocate') {
-  try { await workspace.documents[kind](props.item.id); if(kind==='relocate') emit('updated') } catch(e) { error.value=(e as Error).message }
+  try { await workspace.documents[kind](props.item.id); if(kind==='relocate') emit('updated') } catch(e) { error.value=errorMessage(e) }
 }
 onBeforeUnmount(()=>clearTimeout(timer))
 </script>

@@ -20,14 +20,10 @@ import type {
   VideoScanProgress,
   VideoScanResult
 } from '../../../src/types'
-import {
-  getDb,
-  getSettings,
-  listCategories,
-  postersDir,
-  saveIdentifyLog,
-  tagPool
-} from '../../services/database.ts'
+import { getDb, postersDir } from '../../services/database.ts'
+import { getSettings } from '../../services/settings-store.ts'
+import { listCategories, tagPool } from '../../services/taxonomy-store.ts'
+import { saveIdentifyLog } from '../../services/identify-records.ts'
 import { runAgent } from '../../services/agent/loop.ts'
 import type { SqlDb } from '../../services/schema.ts'
 import type { VideoImportCommand } from './import-command.ts'
@@ -107,7 +103,7 @@ export function cancelVideoScan(): void {
  * 自检拿内存库直驱）。这里是它和设置之间的唯一接缝 —— 加一处新的读取点之前，
  * 先想清楚为什么不能走这儿。
  */
-const hideHentai = (): boolean => getSettings().hide_hentai === true
+const hideHentai = (): boolean => getSettings(getDb()).hide_hentai === true
 
 export async function listVideoItems(query: VideoQuery = {}): Promise<VideoItem[]> {
   const items = listVideos(getDb(), query, hideHentai()), summaries = await readVideoListState(getDb(), items)
@@ -303,7 +299,7 @@ export function useVideoEpisodeArtwork(resourceId: string, episodeId: string, ro
   if (!installed.ok) return { ...installed, item: null }
   d.prepare('UPDATE video_meta SET poster_source = ? WHERE resource_id = ?').run((role === 'thumbnail' ? episode.thumbnail_source : episode.poster_source) || '', resourceId)
   if (d.prepare('SELECT resource_id FROM video_directories WHERE resource_id = ?').get(resourceId)) {
-    try { persistVideoWorkBundle(d, resourceId) } catch { /* 清单写不进去不影响库里已经换好的封面，下次同步会补 */ }
+    persistVideoWorkBundle(d, resourceId)
   }
   return { ok: true, message: '已用这一集的图作为作品封面', item: getVideoItem(resourceId) }
 }
@@ -688,13 +684,13 @@ async function identifyOne(
   force = false,
   runtime?: VideoImportRuntime
 ): Promise<void> {
-  const settings = getSettings()
+  const settings = getSettings(getDb())
   const withSearch = searchAvailable(settings.search)
   const withTmdb = tmdbAvailable(settings.tmdb)
   // 分类和标签池现读现填，且都按 kind='video' 取 ——
   // 软件的「开发工具」和游戏的「魂系」不能进这个 prompt
-  const pool = tagPool('video')
-  const categories = listCategories('video')
+  const pool = tagPool(getDb(), 'video')
+  const categories = listCategories(getDb(), 'video')
   const categoryNames = categories.map((c2) => c2.name)
   const db = runtime?.db || getDb()
 
@@ -717,7 +713,7 @@ async function identifyOne(
       const review = getVideo(db, registered.id)?.needs_review
       const message = review ? '已按本地文件入库，资料不足；可选中后让 Agent 复查' : '已读取本地资料，无需调用 Agent'
       result.entries ||= []; result.entries.push({ path: c.path, resourceId: registered.id, status: review ? 'review' : registered.created ? 'new' : 'updated', message })
-      try {
+      {
         const item = getVideo(db, registered.id)!
         const details = [message, `名称：${item.name_zh || item.name_en || item.file_name}`,
           item.published_start ? `发布时间：${new Date(item.published_start).toISOString().slice(0,10)}` : '',
@@ -725,9 +721,9 @@ async function identifyOne(
           `本地视频：${candidateFiles(c).length} 个`, `本地资料：${[...facts.nfo_files, ...facts.local_metadata?.attachments?.filter(a => /\.(json|nfo)$/i.test(a.path)).map(a => a.path) || []].map(p=>path.basename(p)).join('、') || '文件名与媒体信息'}`]
           .filter(Boolean).join('\n')
         if (runtime) runtime.log(c.path, details)
-        else saveIdentifyLog({dir:facts.dir,label:item.name_zh || item.file_name,kind:'item',resource_kind:'video',status:'success',summary:message,
+        else saveIdentifyLog(getDb(), {dir:facts.dir,label:item.name_zh || item.file_name,kind:'item',resource_kind:'video',status:'success',summary:message,
           registered:1,rounds:0,duration_ms:0,tokens:0,stop_reason:'done',events:[{type:'text',text:details}]})
-      } catch { /* The completed registration must survive a log storage failure. */ }
+      }
       report({ current: c.path, processed: index + 1, log: message })
     } catch (error) { result.failed++; result.entries ||= []; result.entries.push({ path: c.path, status: 'failed', message: String(error) }); report({ log: '本地注册失败：' + String(error) }) }
     return
@@ -797,8 +793,8 @@ async function identifyOne(
                  run.stopReason === 'max_turns' ? '达到轮数上限' :
                  result.registered > countBefore ? '已注册' : '未注册任何条目'
 
-    try {
-      saveIdentifyLog({
+    {
+      saveIdentifyLog(getDb(), {
         dir: facts.dir,
         label: path.basename(facts.dir),
         kind: 'unit',
@@ -812,8 +808,6 @@ async function identifyOne(
         stop_reason: run.stopReason,
         events: trail
       })
-    } catch {
-      /* 日志写不进去不该让识别结果跟着失败 */
     }
   }
 
@@ -956,7 +950,7 @@ export async function reidentifyVideo(
 
   try {
     if (getDb().prepare('SELECT resource_id FROM video_directories WHERE resource_id = ?').get(id)) {
-      const synced = syncVideoWorkFiles(getDb(), id, { roots: getSettings().video_scan_dirs })
+      const synced = syncVideoWorkFiles(getDb(), id, { roots: getSettings(getDb()).video_scan_dirs })
       onProgress({ phase: 'identifying', current: item.path, processed: 0, total: 1, registered: 0, failed: 0, log: synced.message })
       item = getVideo(getDb(), id)!
       if (item.hanime_id) return await refreshManagedVideoEpisodes(id, onProgress)
@@ -1057,7 +1051,7 @@ async function refreshManagedVideoEpisodes(id: string, onProgress: (p: VideoScan
  */
 export function videoScanReadiness(forAgent = false): { ok: boolean; message: string } {
   if (!forAgent) return { ok: true, message: '' }
-  const s = getSettings()
+  const s = getSettings(getDb())
   if (!s.ai.enabled || !s.ai.api_key.trim()) {
     return { ok: false, message: 'Agent 复查需要先在设置中启用并配置 AI；本地扫描无需配置。' }
   }
@@ -1106,7 +1100,7 @@ function dropPosterFiles(id: string, keep = ''): void {
     if (name === keep) continue
     try {
       fs.rmSync(path.join(dir, name), { force: true })
-    } catch {
+    } catch { // best-effort
       /* 正被渲染进程占用之类，删不掉就留着，下次换海报会覆盖 */
     }
   }
@@ -1142,7 +1136,8 @@ export function setVideoPoster(id: string, source: string, manual = true): { ok:
   } catch (err: any) {
     return { ok: false, message: `拷贝失败：${err?.message ?? '未知错误'}` }
   } finally {
-    try { fs.rmSync(temporary, { force: true }) } catch { /* 留待临时文件清理 */ }
+    try { fs.rmSync(temporary, { force: true }) } catch { // best-effort
+ /* 留待临时文件清理 */ }
   }
 
   dropPosterFiles(id, name)
@@ -1206,7 +1201,7 @@ async function downloadPoster(
   cacheOnly = false
 ): Promise<{ ok: boolean; message: string; image?: VideoArtwork }> {
   const allowed =
-    source === 'tmdb' ? acceptPosterUrl(url, getSettings().tmdb) : acceptExternalPosterUrl(url)
+    source === 'tmdb' ? acceptPosterUrl(url, getSettings(getDb()).tmdb) : acceptExternalPosterUrl(url)
   if (!allowed) return { ok: false, message: '这个图片地址不在允许的来源里' }
 
   let tmp = ''
@@ -1243,7 +1238,7 @@ async function downloadPoster(
       total += value.byteLength
       // 边下边数：content-length 可以撒谎，也可以干脆不给
       if (total > MAX_POSTER_BYTES) {
-        await reader.cancel().catch(() => undefined)
+        await reader.cancel().catch(() => { /* best-effort */ })
         return { ok: false, message: '图太大了，已中止下载' }
       }
       chunks.push(Buffer.from(value))
@@ -1279,7 +1274,7 @@ async function downloadPoster(
     if (tmp) {
       try {
         fs.rmSync(tmp, { force: true })
-      } catch {
+      } catch { // best-effort
         /* 临时文件删不掉不影响海报已经装好这件事，系统会自己清 temp */
       }
     }
@@ -1374,7 +1369,7 @@ async function fetchPosterOnce(
   const revision = posterRevisions.get(id) ?? 0
   const download = (source: string) => isRemotePoster(source)
     ? downloadPoster(id, source, 'external', revision)
-    : downloadPoster(id, imageUrl(getSettings().tmdb, source, 'w500'), 'tmdb', revision)
+    : downloadPoster(id, imageUrl(getSettings(getDb()).tmdb, source, 'w500'), 'tmdb', revision)
   let failure = ''
   /*
    * 里番的封面是一个完整的 https 地址（hanime 的图床，主机名我们说不出来），
@@ -1399,8 +1394,8 @@ async function fetchPosterOnce(
         fresh = hits.find(hit => hit.videoCode === item.hanime_id)?.coverUrl ?? ''
       } catch { /* 搜索失败仍可凭精确 ID 取详情 */ }
       if (!fresh) fresh = (await hanimeDetail(item.hanime_id, budget))?.coverUrl ?? ''
-    } else if (item.tmdb_id && tmdbAvailable(getSettings().tmdb)) {
-      fresh = (await tmdbDetail(getSettings().tmdb, item.video_type === 'series' ? 'tv' : 'movie', Number(item.tmdb_id)))?.poster_path ?? ''
+    } else if (item.tmdb_id && tmdbAvailable(getSettings(getDb()).tmdb)) {
+      fresh = (await tmdbDetail(getSettings(getDb()).tmdb, item.video_type === 'series' ? 'tv' : 'movie', Number(item.tmdb_id)))?.poster_path ?? ''
     }
     if (fresh && fresh !== rel && (posterRevisions.get(id) ?? 0) === revision) {
       rel = fresh

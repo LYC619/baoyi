@@ -1,8 +1,9 @@
+import { getDb } from '../../services/database'
 import { shell } from 'electron'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { getSoftware, recordLaunch } from '../../services/database'
+import { getSoftware, recordLaunch } from './db.ts'
 import type { SoftwareItem } from '../../../src/types'
 import { isMobilePackage } from '../../../src/utils/software-package'
 
@@ -25,7 +26,7 @@ function resolveTarget(item: SoftwareItem, launcherPath?: string): string {
  * 绿色软件普遍依赖同目录的配置和 dll，cwd 不对会直接启动失败。
  */
 export async function launchSoftware(id: string, launcherPath?: string): Promise<boolean> {
-  const item = getSoftware(id)
+  const item = getSoftware(getDb(), id)
   if (!item) return false
 
   const target = resolveTarget(item, launcherPath)
@@ -54,11 +55,11 @@ export async function launchSoftware(id: string, launcherPath?: string): Promise
     if (err) return false
   }
 
-  recordLaunch(id)
+  recordLaunch(getDb(), id)
   return true
 }
 
 export function revealInFolder(id: string, launcherPath?: string): void {
-  const item = getSoftware(id)
+  const item = getSoftware(getDb(), id)
   if (item) shell.showItemInFolder(resolveTarget(item, launcherPath))
 }

@@ -6,7 +6,10 @@ import {
   type PersonalRecord,
   type PersonalKind,
   type PersonalData,
+  type AssetRenewal,
+  type AssetRenewalInput,
 } from "../../src/types/workspace.ts";
+import { renewalDate } from '../../src/utils/personal-assets.ts';
 import * as v from "./validation.ts";
 const allowed: Record<PersonalKind, string[]> = {
   profile: ["motto", "avatar"],
@@ -18,6 +21,8 @@ const allowed: Record<PersonalKind, string[]> = {
     "expiresOn",
     "url",
     "provider",
+    "snoozedUntil",
+    "renewals",
   ],
   skill: ["stages", "practice", "level"],
   experience: ["date", "organization", "category"],
@@ -25,6 +30,12 @@ const allowed: Record<PersonalKind, string[]> = {
   measurement: ["metricId", "value", "date"],
   todo: ["dueOn", "done"],
 };
+function currencyCode(value: unknown): string {
+  const code = v.text(value, '币种', 20).trim().toUpperCase();
+  const result = ({人民币:'CNY',元:'CNY',RMB:'CNY',美元:'USD',美金:'USD',欧元:'EUR',日元:'JPY',港币:'HKD'} as Record<string,string>)[code] || code;
+  if (result && !/^[A-Z]{3}$/.test(result)) throw new Error('币种请使用 CNY、USD 等三位代码');
+  return result;
+}
 export function validatePersonal(input: PersonalInput): PersonalInput {
   v.keys(input, ["id", "kind", "name", "body", "data"]);
   if (!PERSONAL_KINDS.includes(input.kind)) throw new Error("个人记录类型无效");
@@ -39,25 +50,26 @@ export function validatePersonal(input: PersonalInput): PersonalInput {
       )
         throw new Error("请选择有效的 PNG 头像");
       data[key] = avatar;
+    } else if (key === 'snoozedUntil') {
+      data[key] = v.date(value);
+      if (!data[key]) throw new Error('暂缓日期无效');
     } else if (["expiresOn", "date", "dueOn"].includes(key))
       data[key] = v.date(value);
     else if (key === "cost") {
       if (value !== "") data[key] = v.number(value, "费用", 0, 1000000000);
     } else if (key === "currency") {
-      const currency = v.text(value, "币种", 20).trim().toUpperCase();
-      data[key] =
-        (
-          {
-            人民币: "CNY",
-            元: "CNY",
-            RMB: "CNY",
-            美元: "USD",
-            美金: "USD",
-            欧元: "EUR",
-            日元: "JPY",
-            港币: "HKD",
-          } as Record<string, string>
-        )[currency] || currency;
+      data[key] = currencyCode(value);
+    } else if (key === 'renewals') {
+      if (!Array.isArray(value)) throw new Error('续费记录无效');
+      data.renewals = value.map(raw => {
+        const entry = v.object(raw);
+        v.keys(entry, ['on', 'from', 'to', 'cost', 'currency']);
+        const result: AssetRenewal = { on: v.date(entry.on), from: v.date(entry.from), to: v.date(entry.to) };
+        if (!result.on || !result.to) throw new Error('续费记录日期无效');
+        if (entry.cost !== undefined) result.cost = v.number(entry.cost, '费用', 0, 1000000000);
+        if (entry.currency !== undefined) result.currency = currencyCode(entry.currency);
+        return result;
+      }).slice(-50);
     } else if (key === "value")
       data[key] = v.number(value, "测量值", -1000000, 1000000);
     else if (key === "done") {
@@ -82,8 +94,6 @@ export function validatePersonal(input: PersonalInput): PersonalInput {
     )
       throw new Error("管理入口请使用 HTTP/HTTPS 地址");
   }
-  if (data.currency && !/^[A-Z]{3}$/.test(String(data.currency)))
-    throw new Error("币种请使用 CNY、USD 等三位代码");
   if (
     data.cycle &&
     !["once", "monthly", "yearly", "other"].includes(String(data.cycle))
@@ -166,6 +176,36 @@ export class PersonalLibrary {
       .prepare("SELECT * FROM personal_records WHERE id=?")
       .get(v.text(id, "记录编号", 128));
     return row ? this.item(row) : null;
+  }
+  renew(id: string, input: AssetRenewalInput): PersonalRecord {
+    v.keys(input, ['to', 'cost', 'currency']);
+    const record = this.get(id);
+    if (!record || record.kind !== 'asset') throw new Error('背包记录不存在');
+    const to = input.to === undefined ? renewalDate(record) : v.date(input.to);
+    if (!to) throw new Error('请填写新的到期日');
+    const data = { ...record.data }, renewal: AssetRenewal = { on: new Date().toLocaleDateString('sv-SE'), from: String(data.expiresOn || ''), to };
+    if (input.cost !== undefined) {
+      renewal.cost = v.number(input.cost, '费用', 0, 1000000000);
+      data.cost = renewal.cost;
+      if (input.currency !== undefined) data.currency = currencyCode(input.currency);
+      if (data.currency) renewal.currency = String(data.currency);
+    }
+    data.expiresOn = to;
+    data.renewals = [...(data.renewals || []), renewal];
+    delete data.snoozedUntil;
+    return this.save({ id, kind: 'asset', name: record.name, body: record.body, data });
+  }
+  snooze(id: string, until: string | null): PersonalRecord {
+    const record = this.get(id);
+    if (!record || record.kind !== 'asset') throw new Error('背包记录不存在');
+    const data = { ...record.data };
+    if (until === null) delete data.snoozedUntil;
+    else {
+      const date = v.date(until);
+      if (date <= new Date().toLocaleDateString('sv-SE')) throw new Error('暂缓日期必须晚于今天');
+      data.snoozedUntil = date;
+    }
+    return this.save({ id, kind: 'asset', name: record.name, body: record.body, data });
   }
   save(input: PersonalInput): PersonalRecord {
     const value = validatePersonal(input),

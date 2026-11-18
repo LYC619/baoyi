@@ -8,7 +8,7 @@ import * as utils from '../src/utils/index.ts'
 import * as proxyRules from '../electron/services/proxy-rules.ts'
 import type { GameScanProgress, VideoScanResult } from '../src/types/index.ts'
 
-const source = fs.readFileSync(path.resolve('src/pages/Settings.vue'), 'utf8')
+const source = fs.readFileSync(path.resolve('src/components/settings/tabs/ScanTab.vue'), 'utf8')
 const result: VideoScanResult = { candidates: 2, registered: 1, skipped: 1, failed: 0, tokens: 0, episodes: 0, searches: 0 }
 const softwareResult = { found: 2, added: 1, pending: 1, settled: 0, loose_files: [] }
 const tick = async (): Promise<void> => { for (let i = 0; i < 6; i++) await Promise.resolve() }
@@ -19,7 +19,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function harness(kind: 'software' | 'game' | 'video' = 'game') {
+function harness(kind: 'software' | 'game' | 'video' = 'game', tab = 'Scan') {
   const notices: Array<{ type: string; message: string }> = []
   const scanCalls: Array<{ kind: string; dirs: string[] }> = []
   const reloads: string[] = []
@@ -27,7 +27,7 @@ function harness(kind: 'software' | 'game' | 'video' = 'game') {
   const listeners = new Map<string, (p: GameScanProgress) => void>()
   const routes: unknown[] = []
   const activeModule = Vue.ref(kind)
-  const settings = Vue.reactive({ settings: {
+  let settings = Vue.reactive({ settings: {
     ai: { api_url: '', api_key: 'test-key', enabled: true, model: 'test' },
     ai_profiles: [], ai_profile_id: '',
     search: { provider: 'model_builtin', api_key: '', endpoint: '', enabled: false },
@@ -84,19 +84,24 @@ function harness(kind: 'software' | 'game' | 'video' = 'game') {
     '@/composables/useAI': { useAI: () => ({ running: Vue.ref(false) }) },
     '@/composables/useToast': { useToast: () => Object.fromEntries(['success', 'error', 'toast'].map(type => [type, (message: string) => notices.push({ type, message })])) },
     '@/stores/settings': { useSettingsStore: () => settings },
+    pinia: { defineStore: (_id: string, setup: () => unknown) => () => Vue.reactive(setup() as object) },
+    './software': { useSoftwareStore: () => ({ ...stores('software'), refreshCounts: async () => {} }) },
     '@/stores/project': { useProjectStore: () => ({ refresh: async () => {} }) },
     '@/stores/software': { useSoftwareStore: () => stores('software') },
     '@/stores/video': { useVideoStore: () => stores('video') },
     '@/stores/game': { useGameStore: () => stores('game') },
     '@/stores/categories': { ICON_NAMES: [], useCategoriesStore: () => ({}) },
     '@/utils': utils,
-    '../../electron/services/proxy-rules': proxyRules
+    '../../../../electron/services/proxy-rules': proxyRules
   }
   const scope = Vue.effectScope()
   const load = createRendererLoader(mocks, {
     window: { baoyi, confirm: () => confirmResult }, console: { info: () => {}, warn: () => {}, error: () => {} }
   })
-  const module = load('src/pages/Settings.vue')
+  const initialSettings = settings.settings
+  settings = scope.run(() => load('src/stores/settings.ts').useSettingsStore())!
+  Object.assign(settings.settings, initialSettings)
+  const module = load(`src/components/settings/tabs/${tab}Tab.vue`)
   const taskCenter = load('src/composables/useTaskCenter.ts').useTaskCenter()
   const state = scope.run(() => module.default.setup({}, { expose: () => {} }))!
 
@@ -187,7 +192,7 @@ await test('游戏未启用 AI 时，不启动一轮注定失败的扫描', asyn
     h.settings.settings.ai.enabled = false
     await h.state.runScan()
     assert.equal(h.scanCalls.length, 0)
-    assert.equal(h.state.tab.value, 'ai')
+    assert.equal((h.routes.at(-1) as any).query.tab, 'ai')
     assert.equal((h.routes.at(-1) as any).query.scope, 'global')
     assert.match(h.notices.at(-1)?.message ?? '', /AI/)
   } finally { h.dispose() }
@@ -342,7 +347,7 @@ await test('扫描页面绑定当前扫描状态，软件识别按钮不泄漏�
 })
 
 await test('验证结束后立即解锁，辅助代理状态查询悬挂不能锁住验证按钮', async () => {
-  const h = harness()
+  const h = harness('game', 'Network')
   const pending = deferred<{ rules: string; resolved: string }>()
   h.setVerification(async () => true)
   h.setStatus(() => pending.promise)
@@ -363,7 +368,7 @@ await test('验证结束后立即解锁，辅助代理状态查询悬挂不能�
 
 for (const mode of ['incomplete', 'error', 'success'] as const) {
   await test(`Cloudflare ${mode}：验证结果不被随后代理状态查询覆盖，异常不逃逸`, async () => {
-    const h = harness()
+    const h = harness('game', 'Network')
     try {
       h.setVerification(async () => {
         if (mode === 'error') throw new Error('验证窗口加载失败')

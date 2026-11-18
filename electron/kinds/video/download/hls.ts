@@ -135,7 +135,7 @@ async function downloadHlsParts(options: HlsDownloadOptions, tempDir: string, te
     if (!force && now - lastTick < 300) return
     lastTick = now
     const bytes=receivedBytes+[...receiving.values()].reduce((sum,n)=>sum+n,0)
-    try { options.onProgress?.({ phase, checkingCache, receivedBytes:bytes, totalBytes, bytesPerSecond: checkingCache ? 0 : Math.round(Math.max(0, bytes - cachedBytes) * 1000 / Math.max(1, now - started)), message }) } catch { /* UI 观察者不能影响下载 */ }
+    try { options.onProgress?.({ phase, checkingCache, receivedBytes:bytes, totalBytes, bytesPerSecond: checkingCache ? 0 : Math.round(Math.max(0, bytes - cachedBytes) * 1000 / Math.max(1, now - started)), message }) } catch (cause) { console.error('[后台通知或记录]', cause) }
   }
   const request = async (url: string, range?: ByteRange, progressKey?:string) => {
     const headers: Record<string, string> = { ...options.headers, Accept: '*/*', 'Accept-Encoding': 'identity' }

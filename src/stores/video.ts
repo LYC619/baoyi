@@ -245,9 +245,7 @@ export const useVideoStore = defineStore('video', () => {
       try {
         const r = await window.baoyi.video.fetchPoster(id)
         if (r.ok) merge(r.item)
-      } catch {
-        /* 单张失败不打断后面的 */
-      }
+      } catch (cause) { useToast().error(errorMessage(cause)) }
     }
   }
 

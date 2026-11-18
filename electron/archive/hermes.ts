@@ -78,7 +78,7 @@ export class HermesRuntime {
       let grace:ReturnType<typeof setTimeout>|undefined
       const runningChild=this.child
       const cancel=()=>{
-        void this.request('cancel').catch(()=>{})
+        void this.request('cancel').catch(() => { /* best-effort */ })
         // A synchronous HTTP client can ignore Hermes cancellation until its
         // network timeout. Dedicated read-only workflows release the slot anyway.
         if(options.cancelGraceMs!==undefined)grace=setTimeout(()=>{if(this.child===runningChild)runningChild?.kill()},options.cancelGraceMs)

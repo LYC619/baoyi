@@ -348,7 +348,7 @@ export async function readContainerInfo(filePath: string): Promise<ContainerInfo
   } catch {
     return null
   } finally {
-    if (handle) await handle.close().catch(() => {})
+    if (handle) await handle.close().catch(() => { /* best-effort */ })
   }
 }
 

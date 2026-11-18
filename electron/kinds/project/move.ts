@@ -133,14 +133,14 @@ export async function executeProjectMove(db:SqlDb,plan:ProjectMovePlan,options:E
       try{if(await info(record.source))throw new Error('原位置已被占用');await fs.rename(record.destination,record.source);record.phase='rolled-back'}
       catch(rollback){record.phase='attention';record.error+='；回退失败：'+(rollback as Error).message}
     }else record.phase=committed||placed||record.copied?'attention':'rolled-back'
-    await saveRecord(options.journalDir,record).catch(()=>{})
+    await saveRecord(options.journalDir,record)
     throw new Error(record.error+(record.phase==='attention'?'。文件已保留，请在移动记录中恢复；新位置：'+record.destination:''))
   }
 }
 export async function projectMoveRecords(dir:string):Promise<ProjectMoveRecord[]>{
   const result:ProjectMoveRecord[]=[]
   for(const name of await fs.readdir(dir).catch(()=>[]))if(/^[a-f0-9-]+\.json$/.test(name)){
-    try{const r=JSON.parse(await fs.readFile(path.join(dir,name),'utf8'));if(r.id+'.json'===name&&path.isAbsolute(r.source)&&path.isAbsolute(r.destination))result.push(r)}catch{}
+    try{const r=JSON.parse(await fs.readFile(path.join(dir,name),'utf8'));if(r.id+'.json'===name&&path.isAbsolute(r.source)&&path.isAbsolute(r.destination))result.push(r)}catch{ /* 无效移动记录不作为恢复依据，原文件保留。 */ }
   }
   return result.sort((a,b)=>b.createdAt-a.createdAt)
 }

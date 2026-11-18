@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { latestOnly, STALE } from '@/composables/latestOnly'
+import { errorMessage } from '@/utils'
 import {
   ref,
   shallowRef,
@@ -84,7 +86,8 @@ watch([activeChapter,()=>props.toc],async()=>{
 })
 const currentChapterText = ref('')
 const chapterLoading = ref(false)
-let chapterRevision = 0
+const readChapter = latestOnly((id: string, offset: number, length: number, encoding: string) => workspace.documents.textSlice(id, offset, length, encoding))
+let chapterScope = new AbortController()
 
 const novelParagraphs = computed(() => {
   if (!currentChapterText.value) return []
@@ -99,32 +102,33 @@ async function loadChapter(index: number, initialOffset = 0) {
   const safeIdx = Math.max(0, Math.min(index, props.novelIndex.chapters.length - 1))
   activeChapter.value = safeIdx
   const ch = props.novelIndex.chapters[safeIdx]
-  const run = ++chapterRevision
+  chapterScope.abort(); chapterScope = new AbortController()
+  const { signal } = chapterScope
   chapterLoading.value = true
   highlights.value = []
   try {
-    const res = await workspace.documents.textSlice(
+    const res = await readChapter(
       props.documentId,
       ch.byteOffset,
       ch.byteLength,
       props.novelIndex.encoding,
     )
-    if (run !== chapterRevision || disposed) return
+    if (res === STALE || signal.aborted || disposed) return
     currentChapterText.value = res.text
     page.value = safeIdx + 1
     count.value = props.novelIndex.chapters.length
     emit('chapterChange', safeIdx)
     await nextTick()
-    if (run !== chapterRevision || disposed) return
+    if (signal.aborted || disposed) return
     if (viewport.value) {
       viewport.value.scrollTop = initialOffset * Math.max(1, viewport.value.scrollHeight - viewport.value.clientHeight)
     }
     emit('position', position(), count.value)
     refreshHighlights()
   } catch (e) {
-    if (run === chapterRevision) error.value = (e as Error).message
+    if (!signal.aborted) error.value = errorMessage(e)
   } finally {
-    if (run === chapterRevision) chapterLoading.value = false
+    if (!signal.aborted) chapterLoading.value = false
   }
 }
 
@@ -646,7 +650,7 @@ async function find(query:string) {
       }
       searchMessage.value='未找到匹配内容'
     }
-  }catch(e){if(!disposed)searchMessage.value='搜索失败：'+(e as Error).message}
+  }catch(e){if(!disposed)searchMessage.value='搜索失败：'+errorMessage(e)}
   finally{searching.value=false}
 }
 watch(zoom, async () => {
@@ -723,12 +727,13 @@ onMounted(async () => {
     })
     if (viewport.value) observer.observe(viewport.value)
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     loading.value = false
   }
 })
 onBeforeUnmount(() => {
+  chapterScope.abort()
   disposed = true
   ;(CSS as any).highlights?.delete('document-search')
   ready = false

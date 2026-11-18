@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { workspace } from '@/utils/workspace-api'
@@ -42,7 +43,7 @@ async function open() {
     const result = await window.baoyi.project.list()
     if (alive && run === revision) projects.value = result
   } catch (e) {
-    if (alive && run === revision) error.value = (e as Error).message
+    if (alive && run === revision) error.value = errorMessage(e)
   } finally {
     if (alive && run === revision) loading.value = false
   }
@@ -69,7 +70,7 @@ async function add(project: Pick<ProjectItem, 'id'>) {
       close()
     }
   } catch (e) {
-    if (alive) error.value = (e as Error).message
+    if (alive) error.value = errorMessage(e)
   } finally {
     if (alive) busy.value = ''
   }

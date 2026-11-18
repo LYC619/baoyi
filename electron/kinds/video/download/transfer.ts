@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { bufferedWriter } from './buffered-writer.ts'
 
 export const DOWNLOAD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 export interface TransferProgress {
@@ -65,7 +66,7 @@ export function httpUrl(raw: string, base?: string): string {
 
 /** Abort stalled boundaries even when a mock/underlying reader ignores its fetch signal. */
 export function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
-  if(signal.aborted) { void pending.catch(()=>{}); signal.throwIfAborted() }
+  if(signal.aborted) { void pending.catch(() => { /* 原始 Promise 的错误已交给调用方；这里只释放队列或监听。 */ }); signal.throwIfAborted() }
   return new Promise<T>((resolve, reject) => {
     const aborted = () => { signal.removeEventListener('abort', aborted); reject(signal.reason) }
     signal.addEventListener('abort', aborted, { once: true })
@@ -120,7 +121,7 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
     lastTick = now
     bytesPerSecond = Math.max(0,Math.round((receivedBytes-lastSpeedBytes)*1000/Math.max(1,now-lastSpeedAt)))
     lastSpeedBytes=receivedBytes;lastSpeedAt=now
-    try { options.onProgress?.({ phase, receivedBytes, totalBytes, bytesPerSecond }) } catch { /* UI observers cannot damage a transfer. */ }
+    try { options.onProgress?.({ phase, receivedBytes, totalBytes, bytesPerSecond }) } catch (cause) { console.error('[后台通知或记录]', cause) }
   }
   try {
     signal.throwIfAborted()
@@ -135,11 +136,11 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
         signal, redirect: 'manual', [DOWNLOAD_QUEUE]: watchdog.queue
       } as DownloadRequestInit)
       // If cancellation wins before headers, dispose a late response instead of leaking its body.
-      void pending.then(res => { if (signal.aborted) void res.body?.cancel().catch(() => {}) }, () => {})
+      void pending.then(res => { if (signal.aborted) void res.body?.cancel().catch(() => { /* best-effort */ }) }, () => {})
       response = await abortable(pending, signal)
       resetTimer()
       if (![301, 302, 303, 307, 308].includes(response.status)) break
-      void response.body?.cancel().catch(() => {})
+      void response.body?.cancel().catch(() => { /* best-effort */ })
       if (redirects >= 5) throw new Error('下载重定向次数过多')
       const location = response.headers.get('location')
       if (!location) throw new Error('下载重定向缺少目标地址')
@@ -162,6 +163,7 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
     handle = await io.open(candidate, 'wx', 0o600)
     temporary = candidate // Never unlink a file that this invocation did not create.
     reader = response.body.getReader()
+    const writer=bufferedWriter(bytes=>handle!.writeFile(bytes))
     let head = Buffer.alloc(0)
     let checked = false
     emit(true)
@@ -176,7 +178,7 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
         head = Buffer.concat([head, bytes.subarray(0, 32 - head.length)])
         if (head.length >= 16) { checkContainer(head); checked = true }
       }
-      await handle.writeFile(bytes)
+      await writer.write(bytes)
       receivedBytes += bytes.length
       if (totalBytes && receivedBytes > totalBytes) throw new Error('视频大小超过响应声明长度，文件完整性检查失败')
       emit(receivedBytes === bytes.length)
@@ -185,6 +187,7 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
     if (!receivedBytes) throw new Error('服务器返回空视频文件')
     if (totalBytes && receivedBytes !== totalBytes) throw new Error('视频大小与声明长度不符，下载不完整')
     signal.throwIfAborted()
+    await writer.flush()
     phase = 'finalizing'
     emit(true)
     await handle.sync()
@@ -204,8 +207,8 @@ export async function transferVideo(options: TransferOptions): Promise<TransferR
   } catch (err) { failure = err }
   finally {
     watchdog.close()
-    if (reader) { void reader.cancel().catch(() => {}); reader.releaseLock() }
-    else if (response?.body) void response.body.cancel().catch(() => {})
+    if (reader) { void reader.cancel().catch(() => { /* best-effort */ }); reader.releaseLock() }
+    else if (response?.body) void response.body.cancel().catch(() => { /* best-effort */ })
     if (handle) {
       try { await handle.close() } catch (err) { warnings.push('关闭临时文件失败：' + safeDownloadError(err)) }
     }

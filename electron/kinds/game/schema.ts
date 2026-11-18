@@ -6,6 +6,7 @@
  * CREATE TABLE IF NOT EXISTS 同时覆盖全新安装和从 0.5 升上来两条路。
  */
 
+import {GAME_NOTES_SQL,migrateLegacyGameNotes} from './notes.ts'
 import type { KindSchema } from '../types.ts'
 
 /**
@@ -30,6 +31,7 @@ export const GAME_META_SQL = `
     resource_id TEXT PRIMARY KEY REFERENCES resource(id) ON DELETE CASCADE,
 
     -- 竖版 2:3 封面 / 横版背景图的本地路径。空串 = 还没有，界面上退回首字占位
+    cover_focus TEXT NOT NULL DEFAULT '',
     cover_path TEXT DEFAULT '',
     background_path TEXT DEFAULT '',
     cover_source TEXT NOT NULL DEFAULT '',
@@ -86,6 +88,7 @@ export const GAME_VIEW_SQL = `
     r.official_url, r.ai_status,
     r.why_choose, r.use_cases, r.notes, r.alternatives, r.mastery_level,
     r.last_used_at, r.use_count, r.is_archived, r.external_active_at,
+    COALESCE(m.cover_focus, '') AS cover_focus,
     COALESCE(m.cover_path, '') AS cover_path,
     COALESCE(m.background_path, '') AS background_path,
     COALESCE(m.cover_source, '') AS cover_source,
@@ -112,14 +115,15 @@ export const GAME_INDEXES_SQL = `
 `
 
 export const gameSchema: KindSchema = {
-  tables: GAME_META_SQL + SAVE_BACKUPS_SQL,
+  tables: GAME_META_SQL + SAVE_BACKUPS_SQL + GAME_NOTES_SQL,
   view: GAME_VIEW_SQL,
   indexes: GAME_INDEXES_SQL,
-  migrate(d) {
+  migrate(d,from) {
     const columns = new Set<string>(
       (d.prepare('PRAGMA table_info(game_meta)').all() as Array<{ name: string }>).map((r) => r.name)
     )
     const additions: Array<[string, string]> = [
+      ['cover_focus', "TEXT NOT NULL DEFAULT ''"],
       ['cover_source', "TEXT NOT NULL DEFAULT ''"],
       ['cover_source_url', "TEXT NOT NULL DEFAULT ''"],
       ['cover_status', "TEXT NOT NULL DEFAULT 'missing'"],
@@ -130,6 +134,7 @@ export const gameSchema: KindSchema = {
     ]
     for (const [name, type] of additions) if (!columns.has(name)) d.exec(`ALTER TABLE game_meta ADD COLUMN ${name} ${type}`)
     // 旧版本的 game 视图没有新增字段，重建后让查询立即看到完整形状。
+    if(from<31)migrateLegacyGameNotes(d)
     d.exec('DROP VIEW IF EXISTS game')
   }
 }

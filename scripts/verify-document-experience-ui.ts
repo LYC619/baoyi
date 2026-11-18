@@ -231,7 +231,7 @@ try {
   await size(1280)
   await nav('/document')
   await page.locator('.document-row').first().waitFor()
-  assert.equal(await page.locator('.document-row').count(), 16)
+  assert.equal(await page.locator('.document-row').count(), 15)
   assert.equal(
     await page.locator('.document-assistant-panel:visible').count(),
     0,
@@ -251,14 +251,10 @@ try {
     '58',
   )
   assert.match(await first.innerText(), /被 1 个项目引用/)
-  assert.equal(
-    await page
-      .locator('.document-row')
-      .filter({ hasText: '资格证书' })
-      .getByRole('progressbar')
-      .count(),
-    0,
-  )
+  await page.locator('.document-subnav').getByRole('button', { name: '资料', exact: true }).click()
+  await page.locator('.document-row').filter({ hasText: '资格证书' }).waitFor()
+  assert.equal(await page.locator('.document-row').filter({ hasText: '资格证书' }).getByRole('progressbar').count(), 0)
+  await page.locator('.document-subnav').getByRole('button', { name: '阅读', exact: true }).click()
   assert.match(
     await page
       .locator('.document-row')

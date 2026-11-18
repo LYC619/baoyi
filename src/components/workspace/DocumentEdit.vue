@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, computed, onMounted, watch } from 'vue'
 import ProjectDialog from '@/components/project/ProjectDialog.vue'
 import { workspace, plain } from '@/utils/workspace-api'
@@ -64,7 +65,7 @@ async function save() {
     emit('saved')
     emit('close')
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     busy.value = false
   }

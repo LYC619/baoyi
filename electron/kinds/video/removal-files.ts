@@ -52,7 +52,8 @@ export function pruneVideoDirectories(roots:string[],files:string[]):void {
       while(parent!==root && parent.startsWith(root+path.sep)){candidates.add(parent);parent=path.dirname(parent)}
     }
     for(const folder of [...candidates].sort((a,b)=>b.length-a.length)) {
-      try {if(withoutLinks(root,folder) && fs.readdirSync(folder).length===0)fs.rmdirSync(folder)}catch{/* Nonempty, missing or busy directories are retained. */}
+      try {if(withoutLinks(root,folder) && fs.readdirSync(folder).length===0)fs.rmdirSync(folder)}catch { // best-effort
+/* Nonempty, missing or busy directories are retained. */}
     }
   }
 }

@@ -60,6 +60,9 @@ function fixture() {
     './video-organize.ts': { videoOrganizationBusy: () => controls.busy },
     './video-agent-organize.ts': { videoAgentOrganizationBusy: () => false },
     './video-import.ts': { videoImportBusy: () => false }
+    ,'./archive.ts': { archiveAssistantBusy: () => false, closeArchiveAssistant: async () => {} }
+    ,'./music.ts': { musicBusy: () => false }
+    ,'./video-preview.ts': { closeVideoPreview: () => {} }
   }, { Buffer, JSON, Object, Array })
   load('electron/ipc/library-backup.ts').registerLibraryBackupIpc(() => win, {
     handle: (name: string, handler: (...args: any[]) => any) => handlers.set(name, handler)

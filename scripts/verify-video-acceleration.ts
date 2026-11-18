@@ -7,11 +7,11 @@ const impl:any=await import('../electron/kinds/video/download/ranges.ts').catch(
 assert.equal(typeof impl.transferAccelerated,'function','missing parallel Range transfer')
 const root=await fs.mkdtemp(path.join(os.tmpdir(),'baoyi-acceleration-'))
 const media=Buffer.concat([Buffer.from([0,0,0,24]),Buffer.from('ftypisom'),Buffer.alloc(512*1024,31)])
-let active=0,peak=0,mode='range',requests=0
+let active=0,peak=0,mode='range',requests=0,identity='strong',ifRange:string[]=[]
 const server=createServer((req,res)=>{
   requests++
   const range=/^bytes=(\d+)-(\d+)$/.exec(req.headers.range||'')
-  res.setHeader('Content-Type','video/mp4');res.setHeader('ETag','"stable"')
+  res.setHeader('Content-Type','video/mp4');if(identity!=='none')res.setHeader('ETag',identity==='weak'?'W/"stable"':'"stable"');if(req.headers['if-range'])ifRange.push(String(req.headers['if-range']))
   if(mode==='stall'){res.writeHead(200);res.flushHeaders();return}
   if(range && mode!=='ignore'){
     const start=Number(range[1]),end=Math.min(Number(range[2]),media.length-1)
@@ -30,6 +30,18 @@ try{
   const success=await impl.transferAccelerated(options('success'))
   assert.deepEqual(await fs.readFile(success.destination),media);assert.equal(success.receivedBytes,media.length)
   assert.ok(peak>1 && peak<=4,'Range requests must overlap within worker limit')
+  for(const value of ['weak','none']){
+    identity=value;peak=0;ifRange=[];mode='range'
+    const result=await impl.transferAccelerated(options(value))
+    assert.deepEqual(await fs.readFile(result.destination),media);assert.ok(peak>1);assert.equal(ifRange.length,0,'weak identity must not use If-Range')
+    const control=new AbortController()
+    await assert.rejects(impl.transferAccelerated(options(value+'-restart',{signal:control.signal,onProgress:(p:any)=>{if(p.receivedBytes>1)control.abort(new Error('取消'))}})),/取消/)
+    media.fill(value==='weak'?42:53,12)
+    const restarted=await impl.transferAccelerated(options(value+'-restart'))
+    assert.deepEqual(await fs.readFile(restarted.destination),media,'weak/no identity must never mix prior-run cached bytes')
+  }
+  identity='weak';mode='changed';await assert.rejects(impl.transferAccelerated(options('weak-changed')),/身份|变化/)
+  identity='strong'
   mode='ignore';const ignored=await impl.transferAccelerated(options('ignored'))
   assert.deepEqual(await fs.readFile(ignored.destination),media,'servers ignoring Range must fall back safely')
   for(const value of ['bad','changed']){mode=value;await assert.rejects(impl.transferAccelerated(options(value)),/范围|身份|变化|长度/);await assert.rejects(fs.stat(path.join(root,value+'.mp4')),/ENOENT/)}

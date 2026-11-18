@@ -68,8 +68,9 @@ export const LIBRARY_BACKUP_COLUMNS = {
     resource_id: 'text', file_description: 'text?', company: 'text?', version: 'text?',
     launchers: 'text?', is_portable: 'integer?', move_risk: 'text?', link_target: 'text?', category_locked: 'integer'
   },
+  game_notes:{id:'text',resource_id:'text',title:'text',body:'text',sort:'integer',created_at:'integer',updated_at:'integer'},
   game_meta: {
-    resource_id: 'text', cover_path: 'text?', background_path: 'text?', cover_source: 'text',
+    resource_id: 'text', cover_focus:'text', cover_path: 'text?', background_path: 'text?', cover_source: 'text',
     cover_source_url: 'text', cover_status: 'text', cover_detail: 'text', identity_name: 'text',
     identity_query: 'text', identity_confirmed: 'integer', play_status: 'text',
     total_playtime_sec: 'integer', last_played_at: 'integer', save_paths: 'text', linked_files: 'text'

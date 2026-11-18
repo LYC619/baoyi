@@ -1,0 +1,2108 @@
+[
+  {
+    "file": "agent-selfcheck.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "check-comic-runtime.cjs",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "check-hermes-runtime.cjs",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "check-module-memory.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-agent-queue.ts",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-agent-runtime.ts",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-annotation-project-links.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-archive-assistant-live.ts",
+    "module": "archive",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-archive-assistant-renderer.ts",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-archive-assistant-ui.ts",
+    "module": "archive",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-archive-assistant.ts",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-audio-experience-ui.ts",
+    "module": "audio",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-audio-experience.ts",
+    "module": "audio",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-build-boundaries.cjs",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-cover-cache.ts",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-files.ts",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-ingest-ui.ts",
+    "module": "comic",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.click: Timeout 20000ms exceeded.；waiting for getByRole('button', { name: '从 JM 添加', exact: true })",
+    "packaged": true
+  },
+  {
+    "file": "verify-comic-ingest.ts",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-live.ts",
+    "module": "comic",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-comic-log.ts",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-manifest.ts",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-network.py",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-protocol.ts",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-proxy.ts",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-recovery-ui.ts",
+    "module": "comic",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "重新核验被拒绝：漫画提交记录与本机授权不一致，弹窗未关闭；保留产品/夹具疑点，不改校验",
+    "packaged": true
+  },
+  {
+    "file": "verify-comic-runtime.py",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-source-rules.ts",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-comic-throughput.py",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-conversation-context.ts",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-discovery-ui.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-discovery-workflow.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-anchors.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-annotation-ui.ts",
+    "module": "document",
+    "kind": "ui-dev",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-categories.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-category-ui.ts",
+    "module": "document",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.click: Timeout 15000ms exceeded.；waiting for locator('.ws-sidebar button').filter({ hasText: /^证书/ })"
+  },
+  {
+    "file": "verify-document-cover-queue.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-covers.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-crosspage-ui.ts",
+    "module": "document",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-document-experience-ui.ts",
+    "module": "document",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "阅读进度断言 actual=0、expected=58，未放宽断言；其他旧页面断言未走完"
+  },
+  {
+    "file": "verify-document-experience.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-extraction.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-feedback-round3.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-feedback-round4-ui.ts",
+    "module": "document",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-document-feedback-round4.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-feedback-ui.ts",
+    "module": "document",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.fill: Timeout 18000ms exceeded.；waiting for getByLabel('批量设置标签')",
+    "packaged": true
+  },
+  {
+    "file": "verify-document-feedback.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-files.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-insight-live.ts",
+    "module": "document",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-document-insight-service.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-insight-ui.ts",
+    "module": "document",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-document-insights.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-organize.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-outline-navigation.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-outline.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-recycle.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-submodule.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-tag-dialog.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-document-text.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-download-cache.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-download-ffmpeg-local.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-download-improvements.cjs",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-download-progress-ui.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "pass"
+  },
+  {
+    "file": "verify-download-release-ui.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "pass"
+  },
+  {
+    "file": "verify-download-stability.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-feedback-round2-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-feedback-round2.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-feedback-round3-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-field-20261007.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-field-downloads.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-field-feedback-20261028-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.fill: Timeout 15000ms exceeded.；waiting for getByLabel('仓库子目录（相对于项目目录）')"
+  },
+  {
+    "file": "verify-field-feedback-20261028.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-field-feedback-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.click: Timeout 20000ms exceeded.；waiting for getByRole('button', { name: '返回', exact: true })",
+    "packaged": true
+  },
+  {
+    "file": "verify-field-ffmpeg.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-field-game.ts",
+    "module": "game",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-field-libraries-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.selectOption: Timeout 10000ms exceeded.；waiting for getByLabel('游戏分组', { exact: true })",
+    "packaged": true
+  },
+  {
+    "file": "verify-field-renderer.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-field-video.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-files-settings-ui.ts",
+    "module": "settings",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "七模块外观轮巡等待 app__view 且无过渡类超时（脚本第 64 行）",
+    "packaged": true
+  },
+  {
+    "file": "verify-game-covers-electron.cjs",
+    "module": "game",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "旧路由夹具缺 query.tab，且仍等待已替换的 .hero__img；需更新整套封面夹具"
+  },
+  {
+    "file": "verify-game-covers-fixtures.ts",
+    "module": "game",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-game-covers-packaged.ts",
+    "module": "game",
+    "kind": "e2e-packaged",
+    "status": "pass"
+  },
+  {
+    "file": "verify-game-covers-service.ts",
+    "module": "game",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-game-covers-ui.ts",
+    "module": "game",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-game-covers.ts",
+    "module": "game",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-game-identify-budget.ts",
+    "module": "game",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-game-projects-ui.ts",
+    "module": "project",
+    "kind": "real-env",
+    "status": "pass",
+    "reason": "本机 E:/Games 资料及可选日常库副本验证通过；保留 real-env 分类，不纳入普通自动入口。"
+  },
+  {
+    "file": "verify-game-projects.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-game-review-ui.ts",
+    "module": "game",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-game-workspace-ui.ts",
+    "module": "game",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-game-workspace.ts",
+    "module": "game",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-global-media-state.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-hanime-browser.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-hanime-cdn-routing.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-hanime-verification.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-hentai-e2e.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-hermes-backup.py",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-hermes-cancel.ts",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-hermes-lightweight.py",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-hermes-runtime.py",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-hermes-workflows.py",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-icons.ts",
+    "module": "software",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-identify-cdp.ts",
+    "module": "software",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-image-bulk-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.selectOption: Timeout 90000ms exceeded.；waiting for getByLabel('批量已读状态', { exact: true })",
+    "packaged": true
+  },
+  {
+    "file": "verify-image-bulk.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-concurrent-jobs.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-download-control-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.click: Timeout 6000ms exceeded.；waiting for getByRole('button', { name: '从哔咔添加', exact: true })",
+    "packaged": true
+  },
+  {
+    "file": "verify-image-download-control.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-download-progress-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-image-download-progress.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-download.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-field-round5-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.waitFor: Timeout 6000ms exceeded.；waiting for locator('.detail-utilities') to be visible",
+    "packaged": true
+  },
+  {
+    "file": "verify-image-integrity-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.click: Timeout 8000ms exceeded.；waiting for getByRole('button', { name: '检查完整性', exact: true })",
+    "packaged": true
+  },
+  {
+    "file": "verify-image-integrity.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-library-performance.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-library.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-management-field.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-network-live.cjs",
+    "module": "image",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-image-network.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-progress-meter.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-reader-layout.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-reader-state.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-reader-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-image-repair.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-request-gate.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-source-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.click: Timeout 15000ms exceeded.；waiting for getByRole('button', { name: '从哔咔添加', exact: true })",
+    "packaged": true
+  },
+  {
+    "file": "verify-image-source.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-transfer-events.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "Error: 分类与图片类型不匹配或已隐藏",
+    "packaged": true
+  },
+  {
+    "file": "verify-image-updates-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.waitFor: Timeout 8000ms exceeded.；waiting for getByRole('button', { name: '检查连载更新', exact: true }) to be visible",
+    "packaged": true
+  },
+  {
+    "file": "verify-image-updates.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-ux-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "FAIL chapter-preview page.waitForFunction: Timeout 3500ms exceeded.；waiting for getByRole('button', { name: '检查完整性', exact: true })",
+    "packaged": true
+  },
+  {
+    "file": "verify-image-webp-field.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-image-webp-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-interaction-boundaries-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-interaction-fixes-renderer.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-interaction-fixes-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-javdb-parse.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-library-backup-ipc.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-library-backup.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-library-query.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-library-review-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "旧资料分类/分组夹具更新后，资料7隐藏断言仍不符（预期 0，实际 1）",
+    "packaged": true
+  },
+  {
+    "file": "verify-library-review.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-library-selection.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-library-snapshot-ipc.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-library-startup-electron.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass"
+  },
+  {
+    "file": "verify-library-startup.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-library-upgrade-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-library-upgrade.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-migration.ts",
+    "module": "infra",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-missav-parse.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-mobile-packages.ts",
+    "module": "software",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-module-preferences.ts",
+    "module": "settings",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-native-runtime.cjs",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass"
+  },
+  {
+    "file": "verify-novel-reader-ui.ts",
+    "module": "document",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-novel-streaming.ts",
+    "module": "document",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-online-music.ts",
+    "module": "audio",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-online-native.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-online-network.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-online-source-ui.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.waitFor: Timeout 30000ms exceeded.；waiting for getByText('此作品未提供可内置播放的媒体文件。', { exact: true }) to be visible",
+    "packaged": true
+  },
+  {
+    "file": "verify-online-source.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-organize-mutation.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-organize-refresh.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-organize-renderer.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-organize-service.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-organize-sync.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-organize-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-packaged-content.cjs",
+    "module": "infra",
+    "kind": "e2e-packaged",
+    "status": "failing",
+    "reason": "旧 0.19.9 成品与清理后的当前构建内容不同；方案 01 不重新打包"
+  },
+  {
+    "file": "verify-packaged-icons.ts",
+    "module": "software",
+    "kind": "e2e-packaged",
+    "status": "pass"
+  },
+  {
+    "file": "verify-packaged.ts",
+    "module": "infra",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-personal-optimization-ui.ts",
+    "module": "personal",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-personal-optimization.ts",
+    "module": "personal",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-personal-revision-ui.ts",
+    "module": "personal",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.fill: Timeout 15000ms exceeded.；waiting for getByLabel('搜索背包', { exact: true })"
+  },
+  {
+    "file": "verify-personal-revision.ts",
+    "module": "personal",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-photo-data-migration.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-photo-folder-sync.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-photo-followup-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-photo-followup.cjs",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-photo-library.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-photo-ui.ts",
+    "module": "image",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "照片筛选/排序后的 DOM 条件等待超时（脚本第 36 行）",
+    "packaged": true
+  },
+  {
+    "file": "verify-pi-adapter.ts",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-poster-storage-electron.cjs",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "pass"
+  },
+  {
+    "file": "verify-poster-storage.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-agent-live.ts",
+    "module": "project",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-project-agent-ui.ts",
+    "module": "project",
+    "kind": "ui-dev",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-agent-workflow.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-agent.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-automation.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-context.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-files.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-git.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-handoff-live.ts",
+    "module": "project",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-project-handoff-ui.ts",
+    "module": "project",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.waitFor: Timeout 15000ms exceeded.；waiting for getByLabel('当前情况', { exact: true }) to be visible",
+    "packaged": true
+  },
+  {
+    "file": "verify-project-handoff.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-history-live.ts",
+    "module": "project",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-project-history.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-job.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-launch-ui.ts",
+    "module": "project",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.waitFor: Timeout 15000ms exceeded.；waiting for getByLabel('当前情况', { exact: true }) to be visible",
+    "packaged": true
+  },
+  {
+    "file": "verify-project-launch.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-list-performance.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "failing",
+    "reason": "AssertionError [ERR_ASSERTION]: 本地1000项目列表 p95 应小于100ms"
+  },
+  {
+    "file": "verify-project-notes-renderer.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-notes.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-runs.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-summaries.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-summary-panel.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-summary-ui.ts",
+    "module": "project",
+    "kind": "ui-dev",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project-ui.ts",
+    "module": "project",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-project-workbench-ui.ts",
+    "module": "project",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.selectOption: Timeout 15000ms exceeded.；waiting for getByLabel('筛选项目位置')",
+    "packaged": true
+  },
+  {
+    "file": "verify-project-workbench.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-project.ts",
+    "module": "project",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-proxy.cjs",
+    "module": "infra",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-release-config.cjs",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-reset-cdp.ts",
+    "module": "infra",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-reset-seed.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "failing",
+    "reason": "用法: node --experimental-strip-types scripts/verify-reset-seed.ts <profile 目录>"
+  },
+  {
+    "file": "verify-resource-reliability-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-resource-reliability.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-retest-audio.ts",
+    "module": "audio",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-retest-course.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-retest-photo.ts",
+    "module": "image",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-retest-taxonomy.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-retest-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.waitFor: Timeout 15000ms exceeded.；waiting for getByRole('button', { name: '创建合集', exact: true }) to be visible",
+    "packaged": true
+  },
+  {
+    "file": "verify-review-boundaries.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-review-fixes-ui.ts",
+    "module": "personal",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-review-fixes.ts",
+    "module": "personal",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-review-ux-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "FAIL video-real-ipc-query: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:；waiting for getByText('已登记，可分析', { exact: true }) to be visible",
+    "packaged": true
+  },
+  {
+    "file": "verify-search-log-scope.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-settings-recovery-ui.ts",
+    "module": "settings",
+    "kind": "e2e-packaged",
+    "status": "failing",
+    "reason": "locator.click: Timeout 30000ms exceeded.；waiting for getByRole('button', { name: '网站与代理', exact: true })"
+  },
+  {
+    "file": "verify-settings-routing.ts",
+    "module": "settings",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-settings-scan.ts",
+    "module": "settings",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-settings-taxonomy.ts",
+    "module": "settings",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-skill-profile.ts",
+    "module": "personal",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-snapshot-live-db.cjs",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-software-category.ts",
+    "module": "software",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-source-hub-bridge.py",
+    "module": "comic",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-source-hub-network.ts",
+    "module": "video",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-source-hub.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-storage-optimization.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-storage-performance.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-storage-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-stream-recovery.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-task-center-ui.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-task-center.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-task-module-scope.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-task-operations.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-task-persistence.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-unified-settings-ui.ts",
+    "module": "settings",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-unified-ux.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "FAIL project-bulk-workflow: Error: locator.click: Error: strict mode violation: getByRole('button', { name: '清空筛选', exact: true }) resolved to 2 elements:；waiting for getByRole('button', { name: '批量整理', exact: true })"
+  },
+  {
+    "file": "verify-ux-packaged-integration.ts",
+    "module": "infra",
+    "kind": "e2e-packaged",
+    "status": "failing",
+    "reason": "成品布局宽度断言预期 960，实际 959；未放宽阈值"
+  },
+  {
+    "file": "verify-video-acceleration.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-actual-packaged.ts",
+    "module": "video",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-video-actual-snapshot.ts",
+    "module": "video",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-video-agent-background-packaged.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "failing",
+    "reason": "FAIL background fixture: locator.evaluate: Timeout 15000ms exceeded.；waiting for getByRole('button', { name: 'Agent 整理', exact: true })"
+  },
+  {
+    "file": "verify-video-agent-background.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-agent-grouping-packaged.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "failing",
+    "reason": "FAIL packaged grouping: locator.click: Timeout 30000ms exceeded.；waiting for getByRole('button', { name: 'Agent 整理', exact: true })"
+  },
+  {
+    "file": "verify-video-agent-grouping-renderer.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-agent-grouping.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-agent-organize.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-batch-ux.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-bundle-registration.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-cdp.ts",
+    "module": "video",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-video-codecs-ui.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "默认入口缺少 FFmpeg 路径和合成视频矩阵目录参数（paths[0] 为 undefined）"
+  },
+  {
+    "file": "verify-video-concurrency.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-discovery.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-download-electron.cjs",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-download-network.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-download-service.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-download-settings-ui.ts",
+    "module": "settings",
+    "kind": "ui-dev",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-download-ui.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-download.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-feedback-fixes.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-feedback-live-packaged.ts",
+    "module": "video",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-video-feedback-packaged.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "failing",
+    "reason": "ExpectError: expect(locator).toContainText(expected) failed；waiting for locator('.scan-results')"
+  },
+  {
+    "file": "verify-video-feedback-renderer.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "FAIL 首页展开合集，并由单集标签进入对应介绍 Expected values to be strictly equal:；waiting for getByRole('button', { name: '编辑这一集', exact: true })"
+  },
+  {
+    "file": "verify-video-field-feedback-renderer.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-field-feedback.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-field-retest-packaged.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "failing",
+    "reason": "FAIL native field retest: locator.click: Timeout 20000ms exceeded.；waiting for getByRole('button', { name: '创建合集', exact: true })"
+  },
+  {
+    "file": "verify-video-field-retest-renderer.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "FAIL import has scoped identify logs and finished downloads stay collapsed after task history: locator.click: Timeout 3000ms exceeded.；waiting for getByRole('button', { name: /^日志：/ })"
+  },
+  {
+    "file": "verify-video-field-retest.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-field-round2-packaged.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-field-round2-real-db.ts",
+    "module": "video",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-video-field-round2-renderer.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "FAIL B2 搜索命中单集的合集自动展开，只命中作品名的不展开，清空后全部收回 关键词命中一集：展开且只列那一集；waiting for getByRole('button', { name: '展开 10 集', exact: true })"
+  },
+  {
+    "file": "verify-video-field-round3-real-db.ts",
+    "module": "video",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-video-field-round3.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-field-round4-real-db.ts",
+    "module": "video",
+    "kind": "real-env",
+    "status": "failing",
+    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
+  },
+  {
+    "file": "verify-video-field-round4.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-frame-cancel.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "failing",
+    "reason": "需要 FFmpeg 路径和合成视频参数，统一入口未提供"
+  },
+  {
+    "file": "verify-video-frame-matrix.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "failing",
+    "reason": "自动入口未配置 FFmpeg；显式设置 BAOYI_TEST_FFMPEG 的后台验证已通过"
+  },
+  {
+    "file": "verify-video-frames-native.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "failing",
+    "reason": "自动入口未配置 FFmpeg；显式设置 BAOYI_TEST_FFMPEG 的后台验证已通过"
+  },
+  {
+    "file": "verify-video-frames-ui.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "AssertionError [ERR_ASSERTION]: 显式提供FFmpeg及合成视频路径；actual=undefined, expected=true,"
+  },
+  {
+    "file": "verify-video-frames.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-import-preview-packaged.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "failing",
+    "reason": "FAIL native import preview: Error: expect(locator).toHaveText(expected) failed；waiting for locator('.episode-reading__head h2').first()"
+  },
+  {
+    "file": "verify-video-import-preview.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-library-db.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-library-scan.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-library-service.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-library-ui.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-library-usability-packaged.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-library-usability-renderer.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "FAIL Agent review is explicit and the Hanime entry follows the private content scope: locator.click: Timeout 3000ms exceeded.；waiting for getByRole('button', { name: '从 Hanime 添加', exact: true })"
+  },
+  {
+    "file": "verify-video-library-usability.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-local-import.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-local-structure-packaged.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "failing",
+    "reason": "ExpectError: expect(locator).toHaveCount(expected) failed；waiting for locator('.video-item')"
+  },
+  {
+    "file": "verify-video-local-structure-renderer.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:；actual=4, expected=5,"
+  },
+  {
+    "file": "verify-video-local-structure.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-media.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-organize-integration.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-organize-ipc.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-organize-renderer.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "FAIL 选完作品自动预览，默认只有创建合集，无文件路径表单或自动执行: locator.click: Timeout 3000ms exceeded. Call log:   - waiting for getByRole('button', { name: '创建合集', exact: true })；waiting for getByRole('button', { name: '创建合集', exact: true }) "
+  },
+  {
+    "file": "verify-video-organize-ui.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-organize.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-packaged-ui.ts",
+    "module": "video",
+    "kind": "e2e-packaged",
+    "status": "failing",
+    "reason": "locator.click: Timeout 30000ms exceeded.；waiting for locator('.sidebar .row').filter({ hasText: '其他分类' })"
+  },
+  {
+    "file": "verify-video-posters.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-preview-ui.ts",
+    "module": "video",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-video-preview.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-removal-residue.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-seed.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "failing",
+    "reason": "用法: node --experimental-strip-types scripts/verify-video-seed.ts <profile 目录>"
+  },
+  {
+    "file": "verify-video-series-download-ui.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-series-download.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-source-fields.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-source-management.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-streams.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-work-library.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-workflow-ui.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-video-workflow.ts",
+    "module": "video",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-web-browser-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass",
+    "packaged": true
+  },
+  {
+    "file": "verify-web-browser.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-workspace-assistant.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-workspace-file-ipc.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-workspace-ipc.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-workspace-reader.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-workspace-ui.ts",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "failing",
+    "reason": "locator.waitFor: Timeout 15000ms exceeded.；waiting for getByRole('heading', { name: '资料' }).first() to be visible",
+    "packaged": true
+  },
+  {
+    "file": "verify-workspace.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  }
+]

@@ -1,0 +1,7 @@
+/** Minimal uncompressed OOXML fixture, no third-party workbook runtime needed. */
+export function zipWorkbook(rows=3){
+ const files:Record<string,string>={'xl/workbook.xml':'<workbook><sheets><sheet name="路线" r:id="r1"/></sheets></workbook>','xl/_rels/workbook.xml.rels':'<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/></Relationships>','xl/sharedStrings.xml':'<sst><si><t>第一章</t></si></sst>','xl/worksheets/sheet1.xml':'<worksheet><sheetData>'+Array.from({length:rows},(_,i)=>`<row r="${i+1}"><c r="A${i+1}" t="s"><v>0</v></c><c r="C${i+1}" t="inlineStr"><is><t>物品</t></is></c></row>`).join('')+'</sheetData></worksheet>'}
+ const local:Buffer[]=[],central:Buffer[]=[];let offset=0
+ for(const [name,text] of Object.entries(files)){const n=Buffer.from(name),data=Buffer.from(text),h=Buffer.alloc(30);h.writeUInt32LE(0x04034b50);h.writeUInt32LE(data.length,18);h.writeUInt32LE(data.length,22);h.writeUInt16LE(n.length,26);local.push(h,n,data);const c=Buffer.alloc(46);c.writeUInt32LE(0x02014b50);c.writeUInt32LE(data.length,20);c.writeUInt32LE(data.length,24);c.writeUInt16LE(n.length,28);c.writeUInt32LE(offset,42);central.push(c,n);offset+=h.length+n.length+data.length}
+ const dir=Buffer.concat(central),end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(Object.keys(files).length,10);end.writeUInt32LE(dir.length,12);end.writeUInt32LE(offset,16);return Buffer.concat([...local,dir,end])
+}

@@ -47,12 +47,15 @@ function find(predicate: (n: Node) => boolean): Node {
 }
 function classed(name: string): Node { return find(n => String(n.props.class ?? '').split(' ').includes(name)) }
 const load = createRendererLoader({
-  vue: { ...Vue, Transition: { props: ['name'], setup: (_: unknown, ctx: any) => () => ctx.slots.default?.() } }
+  vue: { ...Vue, Transition: { props: ['name'], setup: (_: unknown, ctx: any) => () => ctx.slots.default?.() } },
+  '@/composables/useComicIngest': { useComicIngest: () => ({ jobs: Vue.ref([]), active: Vue.ref([]), attention: Vue.ref([]), showRecords: Vue.ref(false), refresh: async () => {} }) },
+  '@/composables/useDocumentInsights': { useDocumentInsights: () => ({ runs: Vue.ref([]), initialize() {} }) }
 }, { document: doc, console: { info: () => {}, warn: () => {}, error: () => {} } }, true)
 const center = load('src/composables/useTaskCenter.ts').useTaskCenter()
 const activeModule = load('src/composables/useModules.ts').activeModule
 activeModule.value = 'video'
 const app = renderer.createApp(load('src/components/tasks/TaskCenter.vue').default)
+app.config.errorHandler = error => { console.error(error); throw error }
 app.config.warnHandler = message => { throw new Error('Unexpected Vue warning: ' + message) }
 app.mount(root)
 const click = async (n: Node) => { n.props.onClick({ stopPropagation: () => {} }); await Vue.nextTick() }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {isWindowsGameEntry} from '@/utils/game-entry'
 import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
 /**
  * 游戏库首页：封面墙 + 侧边栏。
@@ -9,8 +10,11 @@ import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
  */
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { FilePlus, FolderPlus, Image, ListChecks, Search, X } from 'lucide-vue-next'
+import { FilePlus, FolderPlus, Image, ListChecks, Search, X, AlertTriangle, Play } from 'lucide-vue-next'
+import GameCover from '@/components/game/GameCover.vue'
 import GameCard from '@/components/game/GameCard.vue'
+import ProjectImportDialog from '@/components/game/ProjectImportDialog.vue'
+import type { GameProjectPreview } from '@/types/game-project'
 import LibraryBulkPanel from '@/components/library/LibraryBulkPanel.vue'
 import { useLibrarySelection } from '@/composables/useLibrarySelection'
 import Sidebar from '@/components/game/Sidebar.vue'
@@ -21,7 +25,7 @@ import { useMediaScan } from '@/composables/useMediaScan'
 import { useTaskCenter } from '@/composables/useTaskCenter'
 import { useSettingsStore } from '@/stores/settings'
 import { useGameStore } from '@/stores/game'
-import { debounce, errorMessage, shortenPath } from '@/utils'
+import { debounce, errorMessage, shortenPath, gameTitle, formatRelative } from '@/utils'
 import { useLibraryView } from '@/composables/useLibraryView'
 import { libraryBlocks } from '@/utils/library-grouping'
 
@@ -31,7 +35,13 @@ const settings = useSettingsStore()
 const { toast, success, error } = useToast()
 
 const content = ref<HTMLElement | null>(null)
-const { grouping, cardSize } = useLibraryView('game')
+const searchInput=ref<HTMLInputElement>(),pathDismissed=ref(false)
+const resumeGame=computed(()=>store.selection.kind==='group'&&store.selection.value==='all'&&!store.keyword.trim()&&store.sort==='played'&&!selecting.value?store.items.find(g=>isWindowsGameEntry(g.path)&&g.play_status==='playing'&&g.last_played_at>0):undefined)
+function searchKey(e:KeyboardEvent){if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();searchInput.value?.focus()}}
+const launching=ref(false)
+async function resumeLaunch(withTools=false){if(!resumeGame.value||launching.value)return;launching.value=true;try{const result=await window.baoyi.game.launch(resumeGame.value.id,withTools?{trainers:resumeGame.value.linked_files.filter(f=>f.type==='trainer'&&f.role!=='usage'&&/\.(exe|bat|cmd|lnk)$/i.test(f.path)).map(f=>f.path)}:{});if(result.ok)toast(result.message);else error(result.message)}catch(cause){error(errorMessage(cause))}finally{launching.value=false}}
+onMounted(()=>window.addEventListener('keydown',searchKey));onBeforeUnmount(()=>window.removeEventListener('keydown',searchKey))
+const { grouping, cardSize,coverShape } = useLibraryView('game')
 const blocks = computed(() => libraryBlocks(store.items, grouping.value, item => ['其他','未分类'].includes(item.category) ? '' : item.category, item => item.source_dir, settings.settings.game_scan_dirs))
 const unavailable = computed(() => store.items.filter(item=>item.path_state && item.path_state !== 'present'))
 
@@ -41,6 +51,14 @@ const preparing = ref(false)
 const fillingCovers = ref(false)
 const coverSummary = ref('')
 const registering = ref(false)
+const projectPreview = ref<GameProjectPreview|null>(null), previewingProjects = ref(false)
+async function previewProjects() {
+  previewingProjects.value=true
+  try { const result=await window.baoyi.game.previewProjects(); if(!pageDisposed)projectPreview.value=result }
+  catch(cause){error(errorMessage(cause))}finally{previewingProjects.value=false}
+}
+async function projectsImported(message:string){projectPreview.value=null;success(message);await store.checkProjects()}
+async function restoreProjectArtwork(){try{const count=await window.baoyi.game.restoreProjectArtwork();if(count){success(`已恢复 ${count} 款游戏的图片`);await store.checkProjects()}}catch(cause){error(errorMessage(cause))}}
 const bulkBusy = ref(false), savedCategories = ref<string[]>([])
 const selection = useLibrarySelection(() => store.items, () => bulkBusy.value || coversBusy.value)
 const { selecting, selectedIds } = selection
@@ -69,7 +87,7 @@ let focusedAt=0
 function refreshOnFocus(){if(Date.now()-focusedAt>2000){focusedAt=Date.now();void store.load()}}
 
 onMounted(async () => {
-  if (store.selection.kind === 'save') store.select({ kind: 'group', value: 'all' })
+
   window.addEventListener('focus',refreshOnFocus)
   // 在封面墙上也订阅：用户可能从详情页启动完就退回来，等游戏关掉时人在这一屏。
   // 不订阅的话卡片上的时长要等到下一次开库才更新
@@ -111,8 +129,8 @@ function clearKeyword(): void {
   void store.load()
 }
 
-function open(id: string): void {
-  void router.push({ name: 'game-detail', params: { id } })
+function open(id: string,tab?:string): void {
+  void router.push({ name: 'game-detail', params: { id },query:tab?{tab}:{} })
 }
 
 function cancelScan(): void {
@@ -241,6 +259,7 @@ const emptyHint = computed(() => {
 </script>
 
 <template>
+  <ProjectImportDialog v-if="projectPreview" :preview="projectPreview" @close="projectPreview=null" @completed="projectsImported"/>
   <div class="home" @keydown="selection.key">
     <Sidebar />
 
@@ -254,6 +273,7 @@ const emptyHint = computed(() => {
         <div class="search">
           <Search :size="15" class="search__icon" />
           <input
+            ref="searchInput"
             v-model="store.keyword"
             class="search__input"
             type="text"
@@ -261,6 +281,7 @@ const emptyHint = computed(() => {
             placeholder="搜索游戏名、简介、标签"
             @input="onKeyword"
           />
+          <kbd v-if="!store.keyword">Ctrl K</kbd>
           <button v-if="store.keyword" class="search__clear" title="清空" @click="clearKeyword">
             <X :size="14" />
           </button>
@@ -273,34 +294,35 @@ const emptyHint = computed(() => {
             <option v-for="o in SORTS" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
 
-          <button class="btn btn--primary" :disabled="registering" @click="addManualGame">
-            <FilePlus :size="15" />
-            {{ registering ? '登记中' : '加游戏' }}
-          </button>
 
 
 
 
 
-          <button ref="bulkTrigger" v-if="!selecting" class="btn btn--ghost" :aria-pressed="selecting" :disabled="store.items.length === 0 || store.loading || coversBusy" @click="toggleSelection">
+
+          <button style="order:2" ref="bulkTrigger" v-if="!selecting" class="btn btn--ghost" :aria-pressed="selecting" :disabled="store.items.length === 0 || store.loading || coversBusy" @click="toggleSelection">
             <ListChecks :size="15" />
             批量管理
           </button>
 
           <LibraryToolbarMenu label="视图">
-          <select v-model="grouping" class="select" aria-label="游戏分组"><option value="none">不分组</option><option value="category">按分类分组</option><option value="directory">按一级文件夹分组</option></select>
-          <label class="card-size">卡片大小<input v-model.number="cardSize" type="range" min="110" max="260" step="10" aria-label="游戏卡片大小"/></label>
+          <div class="view-section"><span>封面形状</span><div class="view-seg"><button :aria-pressed="coverShape==='portrait'" @click="coverShape='portrait'">竖版 2:3</button><button :aria-pressed="coverShape==='landscape'" @click="coverShape='landscape'">横版 16:9</button></div></div>
+          <div class="view-section"><span>分组</span><div class="view-seg"><button v-for="(label,key) in {none:'不分组',category:'分类',directory:'一级文件夹'}" :key="key" :aria-pressed="grouping===key" @click="grouping=key">{{label}}</button></div></div>
+          <label class="card-size">卡片大小 {{cardSize}} px<input v-model.number="cardSize" type="range" min="110" max="260" step="10" aria-label="游戏卡片大小"/></label>
           </LibraryToolbarMenu>
-          <LibraryToolbarMenu label="更多">
+          <LibraryToolbarMenu style="order:3" label="更多">
+          <button class="btn btn--ghost" :disabled="previewingProjects || scanning" @click="previewProjects"><FolderPlus :size="15"/>{{previewingProjects?'读取清单中…':'从项目清单登记'}}</button>
+          <button class="btn btn--ghost" :disabled="previewingProjects || scanning" @click="restoreProjectArtwork">撤销项目图片更新</button>
           <button class="btn btn--ghost" :disabled="scanning" title="扫描目录并由 AI 识别游戏" @click="addGames">
             <FolderPlus :size="15" />
             AI 扫描
           </button>
           <button class="btn btn--ghost" :disabled="bulkBusy || coversBusy || coverScope.length === 0" :title="selecting ? '只补齐当前筛选中已选择游戏的缺失封面' : '为当前筛选列表补齐缺失封面'" @click="fillMissingCovers">
             <Image :size="15" />
-            {{ coversBusy ? '补图中' : `补齐封面（${coverScope.length}）` }}
+            {{ coversBusy ? '补图中' : `补齐封面（${store.items.filter(g=>!g.cover_path&&!g.background_path).length} 缺失）` }}
           </button>
-          </LibraryToolbarMenu>
+          <button class="btn btn--ghost" @click="store.reload()">重新检查路径</button><button class="btn btn--ghost" @click="store.select({kind:'group',value:'archived'})">查看已归档</button>
+          </LibraryToolbarMenu><button style="order:4" class="btn btn--primary" :disabled="registering" @click="addManualGame"><FilePlus :size="15"/>{{registering?'登记中':'加游戏'}}</button>
 
         </div>
       </header>
@@ -316,11 +338,12 @@ const emptyHint = computed(() => {
       </Transition>
 
       <p v-if="coverSummary" class="cover-summary" role="status">{{ coverSummary }}</p>
-      <p v-if="unavailable.length" class="cover-summary" role="status">{{unavailable.length}} 个游戏的程序路径不可用，进入详情可重新定位文件夹。<button class="btn btn--subtle" @click="store.reload()">重新检查</button></p>
+      <div v-if="unavailable.length&&!pathDismissed" class="path-alert" role="status"><AlertTriangle :size="16"/><p><strong>{{unavailable.length}} 个游戏</strong>的程序路径不可用，重新定位后可继续启动。</p><button class="btn btn--sm" @click="store.select({kind:'path',value:'unavailable'})">只看这些</button><button class="btn btn--sm" @click="store.reload()">重新检查</button><button class="btn btn--sm btn--icon" aria-label="关闭路径提示" @click="pathDismissed=true"><X :size="14"/></button></div>
 
       <section ref="content" class="home__content">
-        <template v-if="store.items.length > 0"><section v-for="block in blocks" :key="block.key" class="game-group"><h2 v-if="block.name">{{block.name}} <small>{{block.items.length}}</small></h2><div class="wall" :style="{gridTemplateColumns:`repeat(auto-fill, minmax(${cardSize}px, 1fr))`}">
-          <GameCard v-for="g in block.items" :key="g.id" :item="g" :selectable="selecting" :selected="selectedIds.has(g.id)" :locked="bulkBusy || coversBusy || store.queryPending" @open="open" @select="toggleSelected" />
+        <div v-if="resumeGame" class="resume"><div class="resume__cover"><GameCover :item="resumeGame"/></div><div><small>继续游玩</small><h2>{{gameTitle(resumeGame)}}</h2><p>{{formatRelative(resumeGame.last_played_at)}}</p></div><button v-if="resumeGame.linked_files.some(f=>f.type==='trainer'&&f.role!=='usage'&&/\.(exe|bat|cmd|lnk)$/i.test(f.path))" class="btn btn--subtle" :disabled="launching||!!resumeGame.path_state&&resumeGame.path_state!=='present'" @click="resumeLaunch(true)">连同修改器</button><button class="btn btn--subtle" @click="open(resumeGame.id)">查看详情</button><button class="btn btn--primary" :disabled="launching||!!resumeGame.path_state&&resumeGame.path_state!=='present'" @click="resumeLaunch()"><Play :size="15"/>启动</button></div>
+        <template v-if="store.items.length > 0"><section v-for="block in blocks" :key="block.key" class="game-group"><h2 v-if="block.name">{{block.name}} <small>{{block.items.length}}</small></h2><div class="wall" :style="{gridTemplateColumns:`repeat(auto-fill, minmax(${coverShape==='landscape'?Math.round(cardSize*1.55):cardSize}px, 1fr))`}">
+          <GameCard v-for="g in block.items" :key="g.id" :item="g" :cover-shape="coverShape" :selectable="selecting" :selected="selectedIds.has(g.id)" :locked="bulkBusy || coversBusy || store.queryPending" @open="open" @select="toggleSelected" />
         </div></section></template>
         <div v-else-if="!store.loading" class="empty">
           <h2>{{ emptyHint.title }}</h2>
@@ -505,4 +528,5 @@ const emptyHint = computed(() => {
   font-size: var(--fs-body);
   color: var(--text-faint);
 }
+.search kbd{position:absolute;right:10px;font:10px var(--font-mono);color:var(--text-faint);border:1px solid var(--divider);border-radius:4px;padding:2px 4px}.search__input{padding-right:55px}.toolbar{gap:14px;padding:18px 24px}.toolbar__title{min-width:90px}.toolbar__actions{gap:8px}.home__content{padding:8px 24px 30px}.wall{gap:24px 18px}.view-section{padding:8px;display:grid;gap:8px;font-size:11px;color:var(--text-faint)}.view-seg{display:flex;background:var(--hover-surface);padding:2px;border-radius:7px}.view-seg button{flex:1;padding:5px 8px;border-radius:5px;color:var(--text-sub)}.view-seg [aria-pressed=true]{background:var(--bg-card);color:var(--text-main);box-shadow:var(--shadow-card)}.path-alert{display:flex;align-items:center;gap:10px;margin:0 24px 10px;background:var(--warning-bg);color:var(--warning);padding:10px 14px;border-radius:8px;font-size:12px}.path-alert p{flex:1}.resume{display:flex;gap:18px;align-items:center;background:var(--bg-card);border-radius:12px;padding:16px 20px;margin-bottom:24px;border:1px solid var(--card-border)}.resume__cover{width:50px;flex:none}.resume>div:nth-child(2){flex:1}.resume small,.resume p{font-size:11px;color:var(--text-sub)}.resume h2{font-size:17px;margin:6px 0}
 </style>

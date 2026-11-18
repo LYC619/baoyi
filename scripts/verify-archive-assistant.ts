@@ -224,6 +224,17 @@ test('assistant file tools preview, move, undo and relocate real isolated files'
   assert.deepEqual(await fs.readFile(file),original)
 })
 
+test('light chat stays light; task follow-ups and attached resources retain full capabilities',async t=>{
+  const {db,root,doc}=await fixture(t),calls:any[]=[]
+  const assistant=new ArchiveAssistant({db,home:root,runtime:root,bridge:root,assets:root,hideHentai:()=>true,current:()=>true,config:()=>({enabled:true,api_url:'http://fixture',api_key:'fixture',model:'fixture'}),event:()=>{},changed:()=>{},operation:async action=>action(),updateResource:()=>{}})
+  t.after(()=>assistant.dispose());assistant.runtime.start=async()=>{}
+  assistant.runtime.run=async(args:any)=>{calls.push(args);return {completed:true,sessionId:args.sessionId} as any}
+  async function send(input:any){const run=assistant.send(input);while(assistant.running)await new Promise(r=>setImmediate(r));return run.sessionId}
+  const id=await send({text:'你好'});await send({sessionId:id,text:'解释彩虹'});assert.deepEqual(calls.map(c=>c.mode),['chat','chat']);assert.ok(calls.every(c=>c.tools.length===0))
+  await send({sessionId:id,text:'读取这个资料'});await send({sessionId:id,text:'好的'});assert.ok(calls.slice(2).every(c=>c.mode==='archive'&&c.tools.length>20))
+  await send({text:'你好',contextIds:[doc.id]});assert.equal(calls.at(-1).mode,'archive')
+})
+
 test('stopping a turn waits for its already accepted file operation before marking it idle',async t=>{
   const {db,root,doc,docs}=await fixture(t),target=path.join(root,'stopped-copy');await fs.mkdir(target)
   let commit!:()=>void,entered!:()=>void,finish!:(value:any)=>void,completed!:()=>void

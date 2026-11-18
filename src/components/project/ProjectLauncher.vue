@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
+import { latestOnly, STALE } from '@/composables/latestOnly'
 import { onMounted,ref,watch } from 'vue'
 import {useFloatingDock} from '@/composables/useFloatingDock'
 import { Play,Square,Terminal,FolderOpen,Plus,Pencil,RotateCcw,ShieldOff,ExternalLink } from 'lucide-vue-next'
@@ -8,17 +10,17 @@ import type { ProjectApplication } from '@/types/project'
 import type { ProjectLaunchProfile,ProjectLaunchInput } from '@/types/project-launch'
 const launcher=useProjectLaunch(),{item,seed,runs,active,preview,showRuns,error,busy}=launcher,projectApi=window.baoyi.project,api=projectApi.launch
 const applications=ref<ProjectApplication[]>([]),profiles=ref<ProjectLaunchProfile[]>([]),editing=ref<ProjectLaunchInput|null>(null),argsText=ref(''),remember=ref(true),loading=ref(false)
-let loadRevision=0
+const readProfiles=latestOnly((id?:string)=>id?Promise.all([api.profiles(id),projectApi.applications()]):Promise.resolve(null))
 onMounted(()=>void launcher.initialize())
 watch(()=>item.value?.id,()=>{editing.value=null;profiles.value=[];applications.value=[];void load()})
 watch(seed,value=>{if(value)edit(value)})
 watch(preview,()=>remember.value=true)
-async function load(){const id=item.value?.id,run=++loadRevision;if(!id)return;loading.value=true;try{const [result,apps]=await Promise.all([api.profiles(id),projectApi.applications()]);if(item.value?.id===id&&run===loadRevision){profiles.value=result;applications.value=apps}}catch(e){error.value=(e as Error).message}finally{if(run===loadRevision)loading.value=false}}
+async function load(){loading.value=true;try{const value=await readProfiles(item.value?.id);if(value===STALE)return;if(value){const [result,apps]=value;profiles.value=result;applications.value=apps}}catch(e){error.value=errorMessage(e)}loading.value=false}
 function edit(value?:ProjectLaunchInput|ProjectLaunchProfile){
   editing.value=value?{...(value.id?{id:value.id,revision:value.revision}:{}),name:value.name,kind:value.kind,command:value.command,args:[...value.args],cwd:value.cwd,source:value.source,sourceRef:value.sourceRef,port:value.port,url:value.url,enabled:value.enabled}:{name:'',kind:'script',command:'',args:[],cwd:'',source:'manual',sourceRef:'',port:null,url:'',enabled:true}
   argsText.value=editing.value.args.join('\n');error.value=''
 }
-async function act(fn:()=>Promise<unknown>){if(busy.value)return;busy.value=true;error.value='';try{await fn()}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
+async function act(fn:()=>Promise<unknown>){if(busy.value)return;busy.value=true;error.value='';try{await fn()}catch(e){error.value=errorMessage(e)}finally{busy.value=false}}
 async function save(){if(!item.value||!editing.value)return;const id=item.value.id,input={...editing.value,args:argsText.value?argsText.value.split(/\r?\n/):[],port:editing.value.port===null||String(editing.value.port)===''?null:Number(editing.value.port)};await act(async()=>{await api.save(id,input);editing.value=null;seed.value=null;await load()})}
 async function chooseProgram(){const target=await projectApi.pickPath(false);if(target&&editing.value)editing.value.command=target}
 async function openApplication(application:ProjectApplication){if(!item.value)return;const id=item.value.id;await act(async()=>{if(!application.available&&!await projectApi.selectApplication(application.id))return;await projectApi.openApplication(id,application.id);await load()})}

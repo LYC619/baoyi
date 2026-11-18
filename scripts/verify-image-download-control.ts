@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { DatabaseSync } from 'node:sqlite'
 import { initSchema } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
-import { createImageDownloads } from '../electron/kinds/image/downloads.ts'
+import { createImageDownloads, isWritingTo } from '../electron/kinds/image/downloads.ts'
 import { PicacomicSource } from '../electron/kinds/image/source.ts'
 import { pngImage } from './helpers/test-images.ts'
 
@@ -58,11 +58,14 @@ try {
   queue.options({ concurrency: 1, jobConcurrency: 1 })
   const paused = await queue.enqueue(work('paused'), chapters, root, null)
   await until(() => calls.includes('paused/2') && queue.list().find(j => j.id === paused.id)!.processed === 1)
+  const writing=path.join(root,fs.readdirSync(root).find(name=>name.startsWith('paused ['))!)
+  assert.equal(isWritingTo(writing),true);assert.equal(isWritingTo(root),true);assert.equal(isWritingTo(path.join(writing,'chapter')),true);assert.equal(isWritingTo(writing+'-other'),false)
   await queue.retry(paused.id)
   assert.equal(queue.list().find(j => j.id === paused.id)?.status, 'running', '运行中重试必须立即空操作，不能等完成后再启动一遍')
   await queue.pause(paused.id); await queue.idle()
   assert.equal(queue.list()[0].status, 'paused')
   assert.equal(active, 0, '暂停返回前全部传输已收敛')
+  assert.equal(isWritingTo(root),false,'paused writes release sync exclusion')
   assert.equal(queue.list()[0].progress?.bytesPerSecond, 0)
   await assert.rejects(queue.enqueue(work('paused'), chapters, root, null), /已有下载任务/)
   queue = createImageDownloads({ db, source, changed: () => {} })
@@ -130,6 +133,7 @@ try {
   assert.equal(queue.list().find(j => j.id === failure.id)?.status, 'failed')
   assert.match(queue.list().find(j => j.id === failure.id)!.error, /404/)
   assert.equal(active, 0, '第一个失败发生后等待其他 worker 退出')
+  assert.equal(isWritingTo(root),false,'failed writes release sync exclusion')
   assert.equal(fs.readdirSync(root, { recursive: true }).some(name => String(name).endsWith('.part')), false)
 } finally { db.close() }
 console.log('PASS 暂停续传、队列排序、重启持久化、三路并发、清单完整、共享限流及失败收敛')

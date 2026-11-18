@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, onMounted, computed } from "vue";
 import ProjectDialog from "@/components/project/ProjectDialog.vue";
 import { workspace, plain, localDate } from "@/utils/workspace-api";
@@ -61,7 +62,7 @@ onMounted(async () => {
   try {
     preferences.value = await workspace.preferences.get("personal");
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = errorMessage(e);
   }
 });
 const categories = computed(() => [
@@ -81,7 +82,7 @@ async function chooseAvatar() {
     const avatar = await workspace.personal.chooseAvatar();
     if (avatar) form.value.data.avatar = avatar;
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = errorMessage(e);
   } finally {
     busy.value = false;
   }
@@ -95,7 +96,7 @@ async function save() {
     emit("saved", value);
     emit("close");
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = errorMessage(e);
   } finally {
     busy.value = false;
   }

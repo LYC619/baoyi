@@ -32,7 +32,8 @@ function harness() {
   const load = createRendererLoader({
     'node:fs': { ...fs, default: fs }, 'node:path': { ...path, default: path },
     electron: { app: { getPath: () => root }, net: { fetch }, shell: {}, nativeImage: { createFromBuffer: dimensions, createFromPath: (p: string) => dimensions(fs.readFileSync(p)) } },
-    '../../services/database.ts': { getDb: () => db, getSettings: () => settings, postersDir: () => cache },
+    '../../services/database.ts': { getDb: () => db, postersDir: () => cache },
+    '../../services/settings-store.ts': { getSettings: () => settings },
     '../../services/agent/loop.ts': {}, '../../services/searchService.ts': {},
     './db.ts': dbVideo, './posters.ts': posters, './facts.ts': {}, './prompts.ts': {}, './tools.ts': {},
     './download/sources.ts': { loadVideoWork: async () => work },

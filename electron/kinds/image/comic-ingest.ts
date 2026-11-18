@@ -32,15 +32,16 @@ export class ComicIngestService {
   constructor(deps:Dependencies){
     this.deps=deps;this.library=new ImageLibrary(deps.db);this.log=new ComicLog(path.join(path.dirname(deps.authorizationDirectory),'comic-logs'))
     for(const row of deps.db.prepare('SELECT payload FROM image_download_jobs').all() as {payload:string}[]){
-      try{const raw=JSON.parse(row.payload);if(raw.version!==2)continue;const job=comicJob(raw)
-        if(['running','queued'].includes(job.status)){job.status='interrupted';job.error='上次任务已中断，已完成页面保留';this.save(job)}
-        this.jobs.set(job.id,job)
-      }catch{/* Preserve unsupported historical rows without starting work. */}
+      let job:ComicIngestJob
+      try{const raw=JSON.parse(row.payload);if(raw.version!==2)continue;job=comicJob(raw)}
+      catch{continue /* 无法解析的任务保留在数据库中，不启动文件操作。 */}
+      if(['running','queued'].includes(job.status)){job.status='interrupted';job.error='上次任务已中断，已完成页面保留';this.save(job)}
+      this.jobs.set(job.id,job)
     }
   }
   private save(job:ComicIngestJob){job.updatedAt=Date.now();this.deps.db.prepare('INSERT INTO image_download_jobs(id,status,updated_at,payload) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,payload=excluded.payload').run(job.id,job.status,job.updatedAt,JSON.stringify(job));this.log.append(job,()=>new Set([...this.jobs.values()].filter(j=>!['success','cancelled'].includes(j.status)).map(j=>j.id)));this.deps.jobsChanged()}
   private visible(job:ComicIngestJob){return this.deps.allowed()&&!this.library.groups().some(g=>g.id===job.groupId&&g.hidden)&&(!job.resourceId||!!this.library.get(job.resourceId))}
-  list(){return [...this.jobs.values()].filter(j=>this.visible(j)).sort((a,b)=>b.updatedAt-a.updatedAt).map(j=>({...j,catalog:undefined,operationId:'',requestId:''}))}
+  list(){return [...this.jobs.values()].filter(j=>this.visible(j)).sort((a,b)=>(b.createdAt??b.updatedAt)-(a.createdAt??a.updatedAt)||a.id.localeCompare(b.id)).map(j=>({...j,catalog:undefined,operationId:'',requestId:''}))}
   private get(id:string){const job=this.jobs.get(id);if(!job||!this.visible(job))throw new Error('漫画任务不可用');return job}
   private check(){if(this.closing||!this.deps.allowed())throw new Error('请先开启隐私内容访问');this.deps.assertIdle()}
   private grantFile(id:string){return path.join(this.deps.authorizationDirectory,id+'.json')}
@@ -84,7 +85,7 @@ export class ComicIngestService {
     delete preview.catalog.cover
     const grant:Grant={version:1,jobId:id,operationId,root,directory,workId:preview.catalog.workId,proxy:preview.proxy,existing:identity}
     await fs.mkdir(this.deps.authorizationDirectory,{recursive:true});await writeComicJson(this.grantFile(id),grant)
-    const job:ComicIngestJob={version:2,provider:'jm',id,workId:preview.catalog.workId,name:preview.catalog.name,authors:preview.catalog.authors,selectedChapters:selected,catalog:preview.catalog,root:root.path,directory,groupId:existing?.groupId||groupId,operationId,requestId:token,status:'queued',phase:'downloading',processed:0,total:manifest.chapters.reduce((n,c)=>n+c.pageIds.length,0),completedChapters:0,current:'',error:'',errorCode:'',resourceId:existing?.id||'',updatedAt:Date.now(),retryNotBefore:0,requiresRevalidation:false,adapterVersion:preview.catalog.adapterVersion,catalogFingerprint:preview.catalog.catalogFingerprint,manifestDigest:''}
+    const job:ComicIngestJob={version:2,provider:'jm',id,workId:preview.catalog.workId,name:preview.catalog.name,authors:preview.catalog.authors,selectedChapters:selected,catalog:preview.catalog,root:root.path,directory,groupId:existing?.groupId||groupId,operationId,requestId:token,status:'queued',phase:'downloading',processed:0,total:manifest.chapters.reduce((n,c)=>n+c.pageIds.length,0),completedChapters:0,current:'',error:'',errorCode:'',resourceId:existing?.id||'',createdAt:Date.now(),updatedAt:Date.now(),retryNotBefore:0,requiresRevalidation:false,adapterVersion:preview.catalog.adapterVersion,catalogFingerprint:preview.catalog.catalogFingerprint,manifestDigest:''}
     this.jobs.set(id,job);this.save(job);this.previews.delete(token);this.pump();return id
   }
   private async authorized(job:ComicIngestJob){
@@ -102,6 +103,7 @@ export class ComicIngestService {
   }
   private async run(job:ComicIngestJob,controller:AbortController){
     const signal=controller.signal;let verifier:ReturnType<Dependencies['verifier']>|undefined,release:(()=>unknown)|undefined,writes=Promise.resolve(),writeError:unknown
+    let progressTimer:ReturnType<typeof setTimeout>|undefined,flushProgress=async(_force=false)=>{}
     job.status='running';job.error='';this.save(job)
     try{
       verifier=this.deps.verifier()
@@ -149,6 +151,14 @@ export class ComicIngestService {
         await writeComicJson(path.join(stage.payload,'.baoyi-image.json'),manifest)
         await commitReady()
         job.phase='downloading';this.save(job)
+        let dirtyPages=0,lastCheckpoint=Date.now()
+        const completed=new Map(manifest.chapters.map(chapter=>[chapter.id,chapter.pageIds.filter(id=>!!manifest!.pages[chapter.id+':'+id]).length]))
+        flushProgress=async(force=false)=>{
+          if(!dirtyPages||!force&&dirtyPages<5&&Date.now()-lastCheckpoint<1500)return
+          clearTimeout(progressTimer);progressTimer=undefined
+          await writeComicJson(path.join(stage.payload,'.baoyi-image.json'),manifest)
+          dirtyPages=0;lastCheckpoint=Date.now();this.save(job)
+        }
         if(requests.some(c=>c.skip.length!==c.pageIds.length)){
           if(job.retryNotBefore>Date.now())throw new ComicSourceError('rate_limited','来源限流，请到时间后重试',job.retryNotBefore)
           const onPage=(page:ComicPageResult)=>{
@@ -157,11 +167,16 @@ export class ComicIngestService {
               const chapter=manifest!.chapters.find(c=>c.id===page.chapterId),position=chapter?.pageIds.indexOf(page.pageId)??-1
               if(!chapter||position<0||page.file!==chapter.directory+'/'+String(position+1).padStart(5,'0')+'.png')throw new Error('来源页面与所选章节不一致')
               await verify(stage.payload,page)
-              const key=page.chapterId+':'+page.pageId;if(!manifest!.pages[key])job.processed++
+              const key=page.chapterId+':'+page.pageId;if(!manifest!.pages[key]){job.processed++;completed.set(chapter.id,(completed.get(chapter.id)||0)+1)}
               manifest!.pages[key]={file:page.file,size:page.size,sha256:page.sha256}
-              await writeComicJson(path.join(stage.payload,'.baoyi-image.json'),manifest)
-              job.current=chapter.title;this.save(job)
-              await commitReady()
+              dirtyPages++;job.current=chapter.title
+              const chapterDone=completed.get(chapter.id)===chapter.pageIds.length
+              await flushProgress(chapterDone)
+              if(dirtyPages&&!progressTimer)progressTimer=setTimeout(()=>{
+                progressTimer=undefined
+                writes=writes.then(()=>flushProgress(true)).catch(error=>{writeError=error;controller.abort(error)})
+              },Math.max(1,1500-(Date.now()-lastCheckpoint)))
+              if(chapterDone)await commitReady()
             }).catch(error=>{writeError=error;controller.abort(error)})
           }
           await this.deps.runtime(grant.proxy).download(job.id,job.workId,stage.payload,requests,signal,onPage)
@@ -183,7 +198,12 @@ export class ComicIngestService {
       await writes
       if(!['paused','cancelled'].includes(job.status)){job.status='failed';job.error=(writeError||error as Error) instanceof Error?((writeError||error) as Error).message:'漫画摄入失败'}
       if(error instanceof ComicSourceError){job.errorCode=error.code;job.retryNotBefore=error.retryAt}
-    }finally{await verifier?.close();release?.();this.save(job)}
+    }finally{
+      clearTimeout(progressTimer)
+      await writes
+      try{await flushProgress(true)}catch(error){job.status='failed';job.error='暂存进度保存失败：'+(error as Error).message}
+      await verifier?.close();release?.();this.save(job)
+    }
   }
   async stop(id:string,status:'paused'|'cancelled'='paused'){
     const job=this.get(id);if(job.status==='success')return
@@ -229,7 +249,7 @@ export class ComicIngestService {
           const manifest=await readImageManifest(stage.payload,job.workId,'jm'),expected=emptyComicManifest(job.catalog,job.selectedChapters)
           if(!manifest||manifest.catalogFingerprint!==job.catalogFingerprint||JSON.stringify(manifest.chapters)!==JSON.stringify(expected.chapters))throw new Error('暂存章节与备份不一致')
           for(const chapter of manifest.chapters){
-            const inDestination=stage.intent.chapters.some(c=>c.id===chapter.id&&c.placed)||!!stage.intent.merge&&!(await fs.stat(path.join(stage.payload,chapter.directory)).catch(()=>null))
+            const inDestination=stage.intent.chapters.some(c=>c.id===chapter.id&&c.placed)||!!stage.intent.merge&&!(await fs.stat(path.join(stage.payload,chapter.directory)).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause }))
             for(const pageId of chapter.pageIds){const page=manifest.pages[chapter.id+':'+pageId];if(page)await verifier.verify(inDestination?stage.destination:stage.payload,page)}
           }
         }else{

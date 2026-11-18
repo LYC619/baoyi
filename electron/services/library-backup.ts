@@ -9,6 +9,7 @@
  * save_backups and recovery journals are replaced as metadata; their disk copies
  * and all library source files are untouched. Historical orphan records are valid.
  */
+import {migrateLegacyGameNotes,validateGameNote} from '../kinds/game/notes.ts'
 import { Buffer } from 'node:buffer'
 import path from 'node:path'
 import {comicJob,backupComicJob} from '../kinds/image/comic-job.ts'
@@ -172,6 +173,7 @@ function primaryKey(table: LibraryBackupTableName): readonly string[] {
 
 function validateRow(table: LibraryBackupTableName, input: unknown, at: string, budget: Budget, partial = false, embedded = false): Row {
   const columns = columnNames(table)
+  if(table==='game_notes'&&!partial){const note=object(input,at);try{validateGameNote(note as any)}catch{invalid('invalid game note')}}
   if (table === 'episode' && !partial) input = { published_at: 0, studio: '', tags: '[]', poster_source: '', thumbnail_path: '', thumbnail_source: '', original_title: '', description: '', original_description: '', poster_path: '', source_url: '', notes: '', ...object(input, at) }
   if (table === 'video_meta' && !partial) input = { media_kind:'video', thumbnail_path: '', thumbnail_source: '', ...object(input, at) }
   if (table === 'video_directories' && !partial) input = { missing: '[]', ...object(input, at) }
@@ -577,7 +579,7 @@ function validateInput(input: unknown): LibraryBackup {
   const legacyCollections = header.schema_version < 13 ? {image_collections:[],image_collection_members:[]} : {}
   const legacyProjects = {...(header.schema_version < 14 ? {project_meta:[]} : {}),...(header.schema_version < 15 ? {project_sessions:[]} : {})}
   const legacyWorkspace = { ...(header.schema_version < 17 ? { document_meta: [], document_annotations: [], project_context: [], project_events: [], personal_records: [], resource_links: [] } : {}), ...(header.schema_version < 18 ? { project_event_generation: [], project_automation: [] } : {}),...(header.schema_version<19?{document_categories:DEFAULT_DOCUMENT_CATEGORIES.map(({order,...c})=>({...c,sort_order:order}))}:{}) }
-  const source = keys({ ...(header.schema_version<29?{document_insights:[]}:{}), ...(header.schema_version<28?{project_launch_profiles:[]}:{}), ...(header.schema_version<27?{archive_actions:[],archive_runs:[]}:{}), ...(header.schema_version<25?{document_custom_groups:[]}:{}), ...(header.schema_version<24?{skill_card:[],skill_metric:[],skill_record:[],skill_proposal:[]}:{}), video_scan_state: [], video_scan_ignores: [], video_detached_owners: [], video_discovery_sources: [], video_discovery_marks: [], ...(header.schema_version<23?{document_recycle:[]}:{}),...(header.schema_version<22?{document_files:[],document_file_operations:[]}:{}),...(header.schema_version<21?{project_summaries:[]}:{}),...(header.schema_version<19?{workspace_sessions:[],workspace_changes:[]}:{}),...legacyImages, ...legacyReader, ...legacyCollections, ...legacyProjects, ...legacyWorkspace, ...object(header.tables, 'tables') }, LIBRARY_BACKUP_TABLE_NAMES, 'tables')
+  const source = keys({ ...(header.schema_version<31?{game_notes:[]}:{}), ...(header.schema_version<29?{document_insights:[]}:{}), ...(header.schema_version<28?{project_launch_profiles:[]}:{}), ...(header.schema_version<27?{archive_actions:[],archive_runs:[]}:{}), ...(header.schema_version<25?{document_custom_groups:[]}:{}), ...(header.schema_version<24?{skill_card:[],skill_metric:[],skill_record:[],skill_proposal:[]}:{}), video_scan_state: [], video_scan_ignores: [], video_detached_owners: [], video_discovery_sources: [], video_discovery_marks: [], ...(header.schema_version<23?{document_recycle:[]}:{}),...(header.schema_version<22?{document_files:[],document_file_operations:[]}:{}),...(header.schema_version<21?{project_summaries:[]}:{}),...(header.schema_version<19?{workspace_sessions:[],workspace_changes:[]}:{}),...legacyImages, ...legacyReader, ...legacyCollections, ...legacyProjects, ...legacyWorkspace, ...object(header.tables, 'tables') }, LIBRARY_BACKUP_TABLE_NAMES, 'tables')
   let totalRows = 0
   // Bound every table before traversing any rows or issuing metadata writes.
   for (const table of LIBRARY_BACKUP_TABLE_NAMES) {
@@ -592,6 +594,7 @@ function validateInput(input: unknown): LibraryBackup {
     for (const [index, inputRow] of array(source[table], `tables.${table}`).entries()) {
       let legacyRow=table==='software_meta' && header.schema_version<16
         ? {category_locked:0,...object(inputRow,`${table}[${index}]`)} : inputRow
+      if(table==='game_meta'&&header.schema_version<31)legacyRow={cover_focus:'',...object(legacyRow,`${table}[${index}]`)}
       if(table==='archive_actions'||table==='archive_runs')legacyRow={scope:'all',...object(legacyRow,`${table}[${index}]`)}
       if(table==='project_context'&&header.schema_version<28)legacyRow={prompt_text:'',rules:'[]',version:1,revision:0,updated_at:0,...object(legacyRow,`${table}[${index}]`)}
       if(table==='document_custom_groups'&&!('category_id' in object(legacyRow,`${table}[${index}]`))){const row=object(legacyRow,`${table}[${index}]`);legacyRow={category_id:row.submodule==='archive'?'archive_other':'novel',...row}}
@@ -666,7 +669,7 @@ function checkIntegrity(db: SqlDb): void {
   const parents=new Map((db.prepare('SELECT id,parent_id FROM skill_card').all() as {id:string;parent_id:string}[]).map(c=>[c.id,c.parent_id]))
   for(const id of parents.keys()){const seen=new Set<string>();let current=id;while(current){if(seen.has(current))invalid('cyclic skill hierarchy');seen.add(current);current=parents.get(current)||''}}
   for (const [table, kind] of [
-    ['software_meta', 'software'], ['project_meta', 'project'], ['project_sessions','project'], ['project_context','project'], ['project_launch_profiles','project'], ['project_events','project'], ['project_summaries','project'],['document_meta','document'], ['document_annotations','document'],['document_files','document'],['document_insights','document'],['document_recycle','document'],['document_file_operations','document'], ['game_meta', 'game'], ['video_meta', 'video'], ['episode', 'video'],
+    ['software_meta', 'software'], ['project_meta', 'project'], ['project_sessions','project'], ['project_context','project'], ['project_launch_profiles','project'], ['project_events','project'], ['project_summaries','project'],['document_meta','document'], ['document_annotations','document'],['document_files','document'],['document_insights','document'],['document_recycle','document'],['document_file_operations','document'], ['game_meta', 'game'], ['game_notes','game'], ['video_meta', 'video'], ['episode', 'video'],
     ['video_sources', 'video'], ['video_directories', 'video'], ['video_assets', 'video'],
     ['image_meta', 'image'], ['image_chapters', 'image'], ['image_pages', 'image'], ['image_progress', 'image'], ['image_reader_state', 'image'], ['image_bookmarks', 'image']
   ] as const) {
@@ -835,6 +838,7 @@ function replace(db: SqlDb, input: unknown, commit: boolean): LibraryBackupSumma
         if (changes !== 1 && changes !== 1n) invalid(`${table} did not insert exactly one row`)
       }
     }
+    if(backup.schema_version<31)migrateLegacyGameNotes(db)
     checkIntegrity(db)
     return summarize(backup)
   })

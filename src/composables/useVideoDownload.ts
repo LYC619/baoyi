@@ -1,3 +1,4 @@
+import { errorMessage } from '@/utils'
 import { computed, reactive, toRefs } from 'vue'
 import type {
   VideoDownloadCatalog,
@@ -45,10 +46,6 @@ function stateFor(resourceId: string): DownloadState {
     states.set(resourceId, state)
   }
   return state
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /**

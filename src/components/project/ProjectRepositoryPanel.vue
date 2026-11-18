@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { computed, ref, watch } from 'vue'
 import type { ProjectSession } from '@/types/project'
 const props = defineProps<{ session: ProjectSession; busy: boolean }>()
@@ -19,7 +20,7 @@ async function continueReview(select: boolean) {
   try {
     if (select) emit('updated', await window.baoyi.project.selectRepository(id, choice.value.trim()))
     if (paused.value) emit('updated', await window.baoyi.project.resumeOrganize(id))
-  } catch (cause) { error.value = (cause as Error).message }
+  } catch (cause) { error.value = errorMessage(cause) }
   finally { working.value = false; emit('working', false) }
 }
 </script>

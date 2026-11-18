@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { Database, FolderOpen, RefreshCw, ShieldCheck } from 'lucide-vue-next'
 import type { LibrarySafetyInfo } from '@/types/library-snapshot'
-import { formatBytes } from '@/utils'
+import { errorMessage, formatBytes } from '@/utils'
 const props = defineProps<{ refreshKey: number }>()
 const emit = defineEmits<{ 'storage-changed': [] }>()
 const info = ref<LibrarySafetyInfo | null>(null), loading = ref(false), action = ref(''), error = ref(''), notice = ref('')
@@ -11,13 +11,13 @@ let revision = 0
 async function refresh() {
   const token = ++revision; loading.value = true; error.value = ''
   try { const result = await window.baoyi.data.snapshotInfo(); if (token === revision) info.value = result }
-  catch (cause) { if (token === revision) error.value = (cause as Error).message }
+  catch (cause) { if (token === revision) error.value = errorMessage(cause) }
   finally { if (token === revision) loading.value = false }
 }
 async function create() {
   action.value = 'create'; error.value = ''; notice.value = ''
   try { await window.baoyi.data.createSnapshot(); notice.value = '数据库快照已创建，创建校验通过'; await refresh(); emit('storage-changed') }
-  catch (cause) { error.value = (cause as Error).message }
+  catch (cause) { error.value = errorMessage(cause) }
   finally { action.value = '' }
 }
 async function archive() {
@@ -27,16 +27,16 @@ async function archive() {
     await refresh(); emit('storage-changed')
     notice.value = `已压缩 ${result.archived} 份旧快照，释放 ${formatBytes(result.reclaimedBytes)}；全部恢复点保留`
     error.value = result.warnings.join('；')
-  } catch (cause) { error.value = (cause as Error).message }
+  } catch (cause) { error.value = errorMessage(cause) }
   finally { action.value = '' }
 }
 async function exportSnapshot(id: string) {
   action.value = 'export'; error.value = ''; notice.value = ''
   try { const result = await window.baoyi.data.exportSnapshot(id); if (result) notice.value = '已导出并核对原始摘要：' + result.file }
-  catch (cause) { error.value = (cause as Error).message }
+  catch (cause) { error.value = errorMessage(cause) }
   finally { action.value = '' }
 }
-async function open() { try { await window.baoyi.data.openSnapshotDir() } catch (cause) { error.value = (cause as Error).message } }
+async function open() { try { await window.baoyi.data.openSnapshotDir() } catch (cause) { error.value = errorMessage(cause) } }
 const stateLabel = (state: string) => state === 'available' ? '文件存在' : state === 'missing' ? '文件缺失' : '文件已变化'
 const time = (value: number) => new Date(value).toLocaleString()
 watch(() => props.refreshKey, refresh)

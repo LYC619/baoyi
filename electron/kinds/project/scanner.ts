@@ -24,7 +24,7 @@ export async function inspectProject(input:string):Promise<ProjectCandidate> {
   const files=children.filter(e=>e.isFile()), names=new Set(files.map(e=>e.name))
   const guide=files.find(e=>/^项目目录说明\.md$/i.test(e.name))||files.find(e=>/^readme(?:\.md|\.txt)?$/i.test(e.name))
   const readme=guide?await text(path.join(root,guide.name)):''
-  let pkg:Record<string,any>={};try{pkg=JSON.parse(await text(path.join(root,'package.json')))||{}}catch{}
+  let pkg:Record<string,any>={};try{pkg=JSON.parse(await text(path.join(root,'package.json')))||{}}catch{ /* 项目配置无效时使用目录和文档信息。 */ }
   const software=files.some(e=>manifests.has(e.name))
   const report=/调研|要报|研究|报告|合同|招标|论文|工程实录/.test(path.basename(root))||names.has('项目目录说明.md')
   const scriptCount=files.filter(e=>scripts.test(e.name)).length
@@ -59,7 +59,7 @@ export async function scanProjects(root:string,mode:'single'|'discover'):Promise
       if(excluded.has(entry.name)||sensitive.test(entry.name)||entry.isSymbolicLink()||entry.name.startsWith('.'))continue
       const target=path.join(dir,entry.name)
       if(entry.isDirectory()){
-        try{const candidate=await inspectProject(target);results.push(candidate);if(!candidate.suggested&&depth<2)await visit(target,depth+1)}catch{}
+        const candidate=await inspectProject(target);results.push(candidate);if(!candidate.suggested&&depth<2)await visit(target,depth+1)
       }else if(entry.isFile()&&(documents.test(entry.name)||scripts.test(entry.name)||/\.exe$/i.test(entry.name)))results.push(await inspectProject(target))
     }
   }

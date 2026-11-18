@@ -1,3 +1,4 @@
+import { getDb } from '../../../services/database'
 /**
  * 整理目录的「读回来」编排：把 syncPlan 算出来的对账结果落到库和磁盘上。
  *
@@ -13,16 +14,10 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { OrganizeSyncReport } from '../../../../src/types'
-import {
-  getSettings,
-  getSoftwareByPath,
-  insertScanned,
-  listCategories,
-  listSoftware,
-  remapPaths,
-  updateSoftware,
-  upsertCategory
-} from '../../../services/database'
+import { getSettings } from '../../../services/settings-store.ts'
+import { getSoftwareByPath, insertScanned, listSoftware, updateSoftware } from '../db.ts'
+import { listCategories, upsertCategory } from '../../../services/taxonomy-store.ts'
+import { remapPaths } from '../../../services/organize-plans.ts'
 import { exists, samePath, nestedInside } from '../../../services/fstree.ts'
 import { extractIcon } from '../../../services/iconExtractor'
 import { readPeInfo } from '../peReader'
@@ -31,7 +26,7 @@ import { rootDirOf } from './plan.ts'
 import { matchLayout, scanOrganizeLayout, type RecordRef } from './syncPlan.ts'
 
 export async function syncOrganizeRoot(): Promise<OrganizeSyncReport> {
-  const root = getSettings().organize_root
+  const root = getSettings(getDb()).organize_root
   const report: OrganizeSyncReport = {
     root,
     ran: false,
@@ -58,13 +53,13 @@ export async function syncOrganizeRoot(): Promise<OrganizeSyncReport> {
 
   // 分类：文件夹就是分类，缺哪个补哪个。只补不删 —— 删分类会把条目打回「其他」，
   // 而「文件夹没了」未必是用户想删分类（可能只是改了名）
-  const existing = listCategories('software')
+  const existing = listCategories(getDb(), 'software')
   const known = new Set(existing.map((c) => c.name))
   let order = existing.reduce((n, c) => Math.max(n, c.sort_order), 0)
   for (const name of layout.categories) {
     if (known.has(name)) continue
     upsertCategory(
-      { id: '', name, description: '整理目录下的文件夹，同步时自动登记', icon: 'folder', sort_order: ++order },
+      getDb(), { id: '', name, description: '整理目录下的文件夹，同步时自动登记', icon: 'folder', sort_order: ++order },
       'software'
     )
     known.add(name)
@@ -72,7 +67,7 @@ export async function syncOrganizeRoot(): Promise<OrganizeSyncReport> {
   }
 
   // 对账。归档的也要算进来：归档只是卡片墙不显示，文件还在整理目录里
-  const records = [...listSoftware({}), ...listSoftware({ group: 'archived' })]
+  const records = [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })]
   const refs: RecordRef[] = records.map((r) => ({
     id: r.id,
     dir: rootDirOf(r),
@@ -85,13 +80,13 @@ export async function syncOrganizeRoot(): Promise<OrganizeSyncReport> {
 
   for (const h of plan.healed) {
     // 旧记录可能只把 bin 当作根。文件并没有移动，只补全 source_dir。
-    if (!h.preserve_paths) remapPaths(h.id, h.from, h.to, h.link_target)
-    updateSoftware(h.id, { source_dir: h.to })
+    if (!h.preserve_paths) remapPaths(getDb(), h.id, h.from, h.to, h.link_target)
+    updateSoftware(getDb(), h.id, { source_dir: h.to })
     report.healed.push({ name: h.name, from: h.from, to: h.to, why: h.why })
   }
 
   for (const c of plan.recategorized) {
-    updateSoftware(c.id, { category: c.to })
+    updateSoftware(getDb(), c.id, { category: c.to })
     report.recategorized.push({ name: c.name, from: c.from, to: c.to })
   }
 
@@ -104,7 +99,7 @@ export async function syncOrganizeRoot(): Promise<OrganizeSyncReport> {
       continue
     }
     const pe = readPeInfo(a.exe, size)
-    const inserted = insertScanned([
+    const inserted = insertScanned(getDb(), [
       {
         exe_path: a.exe,
         file_name: path.basename(a.exe),
@@ -114,16 +109,16 @@ export async function syncOrganizeRoot(): Promise<OrganizeSyncReport> {
         file_size: size
       }
     ])
-    const item = inserted[0] ?? getSoftwareByPath(a.exe)
+    const item = inserted[0] ?? getSoftwareByPath(getDb(), a.exe)
     if (!item) {
       report.notes.push(`入库失败：${a.exe}`)
       continue
     }
     // insertScanned 把 source_dir 记成 exe 所在目录；这里要的是软件目录本身 ——
     // 它才是整理时被搬动 / 被链接的单位，exe 可能躺在它的 bin\ 里
-    updateSoftware(item.id, { source_dir: a.dir, category: a.category, name_zh: a.name })
+    updateSoftware(getDb(), item.id, { source_dir: a.dir, category: a.category, name_zh: a.name })
     const icon = await extractIcon(a.exe)
-    if (icon) updateSoftware(item.id, { icon_path: icon })
+    if (icon) updateSoftware(getDb(), item.id, { icon_path: icon })
     report.software_added.push({ name: a.name, dir: a.dir, category: a.category })
   }
 
@@ -152,10 +147,10 @@ export async function removeOrphanLinks(
   const removed_paths: string[] = []
   let failed = 0
   const notes: string[] = []
-  const root = getSettings().organize_root
+  const root = getSettings(getDb()).organize_root
   if (!root) return { removed: 0, removed_paths, failed: paths.length, notes: ['还没有设置整理目录'] }
   const layout = await scanOrganizeLayout(root)
-  const records = [...listSoftware({}), ...listSoftware({ group: 'archived' })]
+  const records = [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })]
   for (const p of new Set(paths)) {
     const entry = layout.software.find(s => samePath(s.dir, p) && s.is_link)
     const owned = records.some(r => nestedInside(p, rootDirOf(r)))

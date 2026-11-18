@@ -66,7 +66,7 @@ export function createVideoDownloadService(deps: Dependencies) {
   const concurrency=()=>deps.concurrency ? videoTransferOptions({video_download_concurrency:deps.concurrency()}).concurrency : 1
   const busy=(requestId:string,resourceId:string)=>active.has(requestId)||active.size>=concurrency()||[...active.values()].some(value=>value.resourceId===resourceId)
   let lastDirectory = ''
-  const log = (message: string) => { try { deps.log('[视频下载] ' + safeDownloadError(message)) } catch { /* Logging is not a file operation. */ } }
+  const log = (message: string) => { try { deps.log('[视频下载] ' + safeDownloadError(message)) } catch (cause) { console.error('[后台通知或记录]', cause) } }
   const prune = () => {
     for (const [key, value] of tokens) if (value.expires <= now()) tokens.delete(key)
     while (tokens.size > 200) tokens.delete(tokens.keys().next().value!)
@@ -170,7 +170,7 @@ export function createVideoDownloadService(deps: Dependencies) {
     let completedCount = 0; let failedCount = 0; let skippedCount = 0; let fallbackCount = 0
     const emit = (phase: VideoSeriesDownloadProgress['phase'], index: number, episode: { videoCode: string; title: string }, message: string, episodeResult?: VideoSeriesEpisodeResult, stats=current) => {
       try { onProgress({ requestId, resourceId, phase, episodeIndex: index, episodeTotal: episodes.length, videoCode: episode.videoCode, title: episode.title, message, ...stats, ...(episodeResult ? { episodeResult } : {}) }) }
-      catch { /* A closed renderer cannot damage the queue. */ }
+      catch (cause) { console.error('[后台通知或记录]', cause) }
     }
     const record = (index: number, result: VideoSeriesEpisodeResult, stats=current) => {
       results.push(result)
@@ -290,7 +290,7 @@ export function createVideoDownloadService(deps: Dependencies) {
     const controller = new AbortController()
     active.set(requestId,{resourceId,controller})
     const emit = (phase: VideoDownloadProgress['phase'], message: string) => {
-      try { onProgress({ requestId, resourceId, phase, message, ...progress }) } catch { /* A closed page cannot corrupt a download. */ }
+      try { onProgress({ requestId, resourceId, phase, message, ...progress }) } catch (cause) { console.error('[后台通知或记录]', cause) }
     }
     try {
       prune()

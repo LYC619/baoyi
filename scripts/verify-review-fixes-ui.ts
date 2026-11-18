@@ -5,8 +5,8 @@ import {createRequire} from 'node:module'
 import {DatabaseSync} from 'node:sqlite'
 import {initSchema} from '../electron/services/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
+import {DocumentLibrary} from '../electron/workspace/documents.ts'
 import {PersonalLibrary} from '../electron/workspace/personal.ts'
-import {WorkspaceChanges} from '../electron/workspace/agent-changes.ts'
 import {ProjectLibrary} from '../electron/kinds/project/library.ts'
 import {inspectProject} from '../electron/kinds/project/scanner.ts'
 import {DEFAULT_MODULE_PREFERENCES} from '../src/types/workspace.ts'
@@ -21,9 +21,10 @@ const db=new DatabaseSync(path.join(profile,'baoyi.db'));initSchema(db,KINDS)
 for(const [key,value] of Object.entries({onboarded:true,theme:'light',hanime_builtin_hosts:false,_module_preferences_personal:{...DEFAULT_MODULE_PREFERENCES,showCompleted:false}}))db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key,JSON.stringify(value))
 const personal=new PersonalLibrary(db),projects=new ProjectLibrary(db)
 for(const [name,done] of [['未完成样例',false],['已完成样例',true]] as const)personal.save({kind:'todo',name,body:'isolated',data:{done,dueOn:'2026-11-04'}})
-db.prepare('INSERT INTO workspace_sessions(id,module,title,created_at,updated_at,payload) VALUES(?,?,?,?,?,?)').run('review-personal','personal','isolated',1,1,'{}')
-const metricId=new WorkspaceChanges(db).savePersonal('review-personal',{kind:'metric',name:'无单位评分',body:'旧格式，无 unit 字段',data:{}}).targetId
+const metricId=personal.save({kind:'metric',name:'无单位评分',body:'旧格式，无 unit 字段',data:{}}).id
 const existing=personal.save({kind:'measurement',name:'旧评分',body:'保留原记录',data:{metricId,value:6,date:'2026-11-03'}})
+const documentFile=path.join(fixture,'清理后阅读样例.txt');fs.writeFileSync(documentFile,'第一章\n旧助手清理后仍可阅读的正文。')
+const documentItem=await new DocumentLibrary(db).register(documentFile,'novel')
 const a=projects.register(await inspectProject(alpha)),b=projects.register(await inspectProject(beta));db.close()
 const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;delete env.VITE_DEV_SERVER_URL
 let app:any,page:any;const checks:string[]=[],errors:string[]=[]
@@ -54,6 +55,9 @@ async function settledSession(id:string){
 let sessionA:string,sessionB:string,sessionOther:string
 try{
  await open()
+ await check('document reader opens after retiring the workspace assistant',async()=>{
+  await route('/document/'+documentItem.id);await page.getByText('旧助手清理后仍可阅读的正文。',{exact:false}).first().waitFor()
+ })
  await check('unitless legacy metric captures without manual normalization and keeps history',async()=>{
   await personalPage('state');await page.locator('.state-capture').getByRole('button',{name:'无单位评分',exact:true}).click()
   await page.getByLabel('快捷状态数值').fill('7');await page.locator('.state-capture').getByRole('button',{name:'记录状态',exact:true}).click()

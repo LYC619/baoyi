@@ -4,24 +4,18 @@ import { DatabaseSync } from 'node:sqlite'
 import { initSchema } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { PersonalLibrary } from '../electron/workspace/personal.ts'
-import { WorkspaceChanges } from '../electron/workspace/agent-changes.ts'
 
 function fixture(t: { after: (fn:()=>void)=>void }) {
   const db=new DatabaseSync(':memory:');db.exec('PRAGMA foreign_keys=ON');initSchema(db,KINDS)
-  db.prepare('INSERT INTO workspace_sessions(id,module,title,created_at,updated_at,payload) VALUES(?,?,?,?,?,?)').run('session','personal','review fixes',1,1,'{}')
-  t.after(()=>db.close());return {db,personal:new PersonalLibrary(db),changes:new WorkspaceChanges(db)}
+  t.after(()=>db.close());return {db,personal:new PersonalLibrary(db)}
 }
 
-test('assistant-created unitless metric accepts capture, preserves identity and idempotent retries', t=>{
-  const {personal,changes}=fixture(t),input={kind:'metric' as const,name:'心情分数',body:'',data:{}}
-  const created=changes.savePersonal('session',input),metric=personal.get(created.targetId)!
+test('unitless metric accepts capture and preserves identity', t=>{
+  const {personal}=fixture(t),metric=personal.save({kind:'metric',name:'心情分数',body:'',data:{}})
   const recorded=personal.captureState(metric.name,'',7,'2026-11-04',metric.id)
   assert.equal(recorded.data.metricId,metric.id);assert.equal(recorded.data.value,7)
-  assert.equal(changes.savePersonal('session',input).id,created.id)
   assert.equal(personal.list('metric').length,1)
-  assert.deepEqual(personal.get(metric.id)!.data,metric.data,'capture leaves audited metric data unchanged')
-  personal.remove(recorded.id)
-  assert.equal(changes.undo(created.id).undone,true,'existing audit remains undoable')
+  assert.deepEqual(personal.get(metric.id)!.data,metric.data)
 })
 
 test('legacy missing unit with history accepts new values and rejects attaching a nonempty unit', t=>{

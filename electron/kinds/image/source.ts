@@ -54,7 +54,7 @@ export async function boundedBody(response:Response,max:number,onBytes?:(bytes:n
   if(Number(response.headers.get('content-length'))>max)throw new Error('来源响应超过大小限制')
   const reader=response.body?.getReader();if(!reader)throw new Error('来源响应为空')
   const chunks:Uint8Array[]=[];let total=0
-  try{while(true){const {done,value}=await reader.read();if(done)break;total+=value.length;onBytes?.(value.length);if(total>max)throw new Error('来源响应超过大小限制');chunks.push(value)}return Buffer.concat(chunks)}finally{await reader.cancel().catch(()=>{})}
+  try{while(true){const {done,value}=await reader.read();if(done)break;total+=value.length;onBytes?.(value.length);if(total>max)throw new Error('来源响应超过大小限制');chunks.push(value)}return Buffer.concat(chunks)}finally{await reader.cancel().catch(() => { /* best-effort */ })}
 }
 export class PicacomicSource {
   private deps:Dependencies
@@ -122,7 +122,7 @@ export class PicacomicSource {
       }
       // Pica storage redirects to its image CDN; validate every hop before requesting it.
       if([301,302,303,307,308].includes(response.status)){
-        await response.body?.cancel().catch(()=>{})
+        await response.body?.cancel().catch(() => { /* best-effort */ })
         const location=response.headers.get('location')
         if(!location||hop===5)throw new Error('图片跳转异常或次数过多')
         let next:string
@@ -133,7 +133,7 @@ export class PicacomicSource {
         continue
       }
       if(!response.ok){
-        await response.body?.cancel().catch(()=>{})
+        await response.body?.cancel().catch(() => { /* best-effort */ })
         const message=`图片下载失败（HTTP ${response.status}）`
         if([408,429,500,502,503,504].includes(response.status))throw new ImageNetworkError(message,retryAfterMs(response),response.status===429)
         throw new Error(message)

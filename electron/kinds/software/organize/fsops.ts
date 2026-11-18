@@ -104,13 +104,13 @@ export async function moveDir(from: string, to: string): Promise<MoveOutcome> {
     await fsp.cp(from, to, { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true })
   } catch (err: any) {
     // 复制失败要把半成品清掉，否则下次进来会被当成「目标已存在」而永远跳过
-    await fsp.rm(to, { recursive: true, force: true }).catch(() => {})
+    await fsp.rm(to, { recursive: true, force: true }).catch(() => { /* best-effort */ })
     return { ok: false, note: `复制失败：${err?.code ?? err?.message ?? '未知错误'}` }
   }
 
   const bad = await verifyCopy(from, to)
   if (bad) {
-    await fsp.rm(to, { recursive: true, force: true }).catch(() => {})
+    await fsp.rm(to, { recursive: true, force: true }).catch(() => { /* best-effort */ })
     return { ok: false, note: bad }
   }
 
@@ -167,9 +167,7 @@ export async function writeLinkMark(at: string, info: Record<string, unknown>): 
     '',
     JSON.stringify(info, null, 2)
   ].join('\n')
-  await fsp.writeFile(path.join(at, LINK_MARK), body, 'utf-8').catch(() => {
-    /* 标记文件写不进去（目录只读）不该让整理算失败，链接本身已经建好了 */
-  })
+  await fsp.writeFile(path.join(at, LINK_MARK), body, 'utf-8')
 }
 
 /**

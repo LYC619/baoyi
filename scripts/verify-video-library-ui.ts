@@ -21,10 +21,10 @@ async function test(name: string, run: () => Promise<void>) {
 }
 async function rows() { return parse(await renderToString(Vue.createSSRApp(Sidebar))).querySelectorAll('button').map(x => x.textContent) }
 await store.reload()
-await test('hentai is a type row while other category remains selectable when empty', async () => {
+await test('hentai is a type row and retired other-category entry stays hidden', async () => {
   const labels = await rows()
   assert.ok(labels.some(x => x.includes('里番')))
-  assert.ok(labels.some(x => x.includes('其他分类')))
+  assert.ok(labels.every(x => !x.includes('其他分类')))
   assert.ok(labels.some(x => x.includes('培训系列')))
   assert.ok(labels.every(x => !x.includes('站方系列')))
 })

@@ -1,3 +1,4 @@
+import { str } from '../../services/agent/values.ts'
 /**
  * 交给游戏识别 agent 的工具集。
  *
@@ -55,10 +56,6 @@ export interface GameToolContext {
 
 function resolveInside(ctx: GameToolContext, raw: unknown): string {
   return resolveInsideRoots(ctx.roots, raw)
-}
-
-function str(raw: unknown, max: number): string {
-  return typeof raw === 'string' ? raw.trim().slice(0, max) : ''
 }
 
 /* ------------------------------ 目录浏览 ------------------------------ */

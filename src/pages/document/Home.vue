@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -31,7 +32,6 @@ import {
 } from '@/types/workspace'
 import DocumentRemove from '@/components/workspace/DocumentRemove.vue'
 import DocumentInsightSummary from '@/components/workspace/DocumentInsightSummary.vue'
-import DocumentInsightImport from '@/components/workspace/DocumentInsightImport.vue'
 import DocumentDetails from '@/components/workspace/DocumentDetails.vue'
 import DocumentBulk from '@/components/workspace/DocumentBulk.vue'
 import DocumentAssistant from '@/components/workspace/DocumentAssistant.vue'
@@ -74,8 +74,7 @@ const preview = ref<
   backlinks = ref<Awaited<ReturnType<typeof workspace.links.backlinks>>>([])
 
 const agentImport = ref(false), analyzing = ref(false), analysisAttempted = ref(false), stopAnalysis = ref(false), analysisStatus = ref(''), suggestions = ref<Record<string, DocumentImportSuggestion>>({})
-const insightProvider=ref(''),insightImportMessage=ref('')
-watch(preview,()=>{insightProvider.value=''})
+const insightImportMessage=ref('')
 const current = computed(() => store.items.find((i) => i.id === store.selected))
 
 const currentTitle = computed(() => {
@@ -289,7 +288,7 @@ async function detail() {
       backlinks.value = b
     }
   } catch (e) {
-    if (run === revision) error.value = (e as Error).message
+    if (run === revision) error.value = errorMessage(e)
   }
 }
 
@@ -324,7 +323,7 @@ async function run(fn: () => Promise<unknown>) {
   try {
     await fn()
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     busy.value = false
   }
@@ -355,7 +354,7 @@ async function analyzeImport() {
         const result = await workspace.documents.analyzeImport(token,path)
         if (preview.value?.token !== token) return
         suggestions.value[path] = result; importChoices.value[path] = result.categoryId
-      } catch (e) { failures.push(path.split(/[\\/]/).pop() + '：' + (e as Error).message) }
+      } catch (e) { failures.push(path.split(/[\\/]/).pop() + '：' + errorMessage(e)) }
     }
     analysisStatus.value = '已识别 ' + Object.keys(suggestions.value).length + ' 份，可修改建议后导入。'
     error.value = failures.join('\n')
@@ -372,7 +371,6 @@ async function importFiles() {
       undefined,
       undefined,
       selectedPaths.value.map(path => ({ path, categoryId: importChoices.value[path] || importCategoryId.value, ...(agentImport.value && suggestions.value[path] ? {name:suggestions.value[path].name,author:suggestions.value[path].author,tags:[...suggestions.value[path].tags]} : {}) })),
-      insightProvider.value||undefined,
     )
     preview.value = null
     await store.refresh()
@@ -886,7 +884,6 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
       @close="preview = null"
     >
       <div class="ws">
-        <DocumentInsightImport v-model="insightProvider" />
         <p class="ws-muted">
           已找到 {{ preview.items.length }} 份资料，已登记的文件会跳过。
         </p>

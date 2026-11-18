@@ -97,7 +97,7 @@ await test('占位集：启动清理只删历史遗留的无关占位，同系�
 await test('简繁搜索：简体关键词搜到繁体标题、单集标题和文件名，反过来也行', f => {
   f.work('被幹鬥士 瘋狂性愛！', '9001', 'A/被幹鬥士.mp4')
   f.work('哥布林农场', '9002', 'B/哥布林農場 第1話.mp4')
-  const names = (keyword: string) => listVideos(f.db, { keyword }).map(item => item.name_zh).sort()
+  const names = (keyword: string) => listVideos(f.db, { keyword, type: 'hentai' }).map(item => item.name_zh).sort()
   assert.deepEqual(names('斗士'), ['被幹鬥士 瘋狂性愛！'])
   assert.deepEqual(names('疯狂性爱'), ['被幹鬥士 瘋狂性愛！'])
   assert.deepEqual(names('鬥士'), ['被幹鬥士 瘋狂性愛！'], '繁体关键词照样能搜')

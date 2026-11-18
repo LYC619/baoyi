@@ -13,7 +13,7 @@ export function frameFfmpeg(configured:string,roots:string[]=[]){
     const candidates:string[]=[]
     if(configured.trim())candidates.push(configured.trim())
     else{
-      try{const {stdout}=await exec(process.platform==='win32'?'where.exe':'which',['ffmpeg'],{windowsHide:true,timeout:3000,maxBuffer:65536});candidates.push(...stdout.trim().split(/\r?\n/))}catch{}
+      try{const {stdout}=await exec(process.platform==='win32'?'where.exe':'which',['ffmpeg'],{windowsHide:true,timeout:3000,maxBuffer:65536});candidates.push(...stdout.trim().split(/\r?\n/))}catch{ /* PATH 中未找到 FFmpeg 时继续检查已有候选位置。 */ }
       const dirs=[process.env.LOCALAPPDATA?path.join(process.env.LOCALAPPDATA,'ffmpeg','bin'):'','C:/ffmpeg/bin','C:/Program Files/ffmpeg/bin',process.env.USERPROFILE?path.join(process.env.USERPROFILE,'scoop/apps/ffmpeg/current/bin'):'','/usr/bin','/usr/local/bin']
       for(const dir of dirs.filter(Boolean))candidates.push(path.join(dir,process.platform==='win32'?'ffmpeg.exe':'ffmpeg'))
     }
@@ -21,7 +21,7 @@ export function frameFfmpeg(configured:string,roots:string[]=[]){
     for(const file of candidates)if(await check(file))return file
     if(configured)return null
     const queue=roots.map(file=>({file,depth:0}));let visited=0
-    while(queue.length&&visited++<1200){const current=queue.shift()!;try{for(const entry of await fs.readdir(current.file,{withFileTypes:true})){const file=path.join(current.file,entry.name);if(entry.isFile()&&/^ffmpeg(?:\.exe)?$/i.test(entry.name)&&await check(file))return file;if(entry.isDirectory()&&current.depth<4&&!/^(node_modules|\.git|cache|data)$/i.test(entry.name))queue.push({file,depth:current.depth+1})}}catch{}}
+    while(queue.length&&visited++<1200){const current=queue.shift()!;try{for(const entry of await fs.readdir(current.file,{withFileTypes:true})){const file=path.join(current.file,entry.name);if(entry.isFile()&&/^ffmpeg(?:\.exe)?$/i.test(entry.name)&&await check(file))return file;if(entry.isDirectory()&&current.depth<4&&!/^(node_modules|\.git|cache|data)$/i.test(entry.name))queue.push({file,depth:current.depth+1})}}catch{ /* 无法读取的候选目录不提供 FFmpeg 路径。 */ }}
     return null
   })();capability={key,at:Date.now(),value};return value
 }

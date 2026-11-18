@@ -124,14 +124,12 @@ export interface ProjectSummary {id:string;projectId:string;kind:SummaryKind;key
 export type EventSuggestion = Pick<TimelineEvent, 'title' | 'body' | 'source' | 'sourceKey' | 'evidence'> & { occurredAt?: number; version?: string }
 export const PERSONAL_KINDS = ['profile', 'asset', 'skill', 'experience', 'metric', 'measurement', 'todo'] as const
 export type PersonalKind = typeof PERSONAL_KINDS[number]
-export type PersonalData = Record<string, string | number | boolean | string[]>
+export interface AssetRenewal { on: string; from: string; to: string; cost?: number; currency?: string }
+export interface AssetRenewalInput { to?: string; cost?: number; currency?: string }
+export type PersonalData = Record<string, string | number | boolean | string[] | AssetRenewal[]> & { renewals?: AssetRenewal[] }
 export interface PersonalRecord { id: string; kind: PersonalKind; name: string; body: string; data: PersonalData; createdAt: number; updatedAt: number }
 export type PersonalInput = Pick<PersonalRecord, 'kind' | 'name' | 'body' | 'data'> & { id?: string }
-export interface WorkspaceChange {id:string;sessionId:string;entity:'personal'|'document'|'link';targetId:string;before:Record<string,any>|null;after:Record<string,any>;state:'proposed'|'applied'|'undone';createdAt:number}
-export type WorkspaceModule='document'|'personal'
 export interface WorkspaceAgentContext {documentIds?:string[];selection?:{documentId:string;quote:string;location:ReadingLocation}}
-export interface DocumentMetadataCursor {index:number;offset:number;stamp:string;compact:boolean;id?:string;query?:string}
-export interface WorkspaceSession {id:string;module:WorkspaceModule;title:string;context:WorkspaceAgentContext;createdAt:number;updatedAt:number;status:'idle'|'running'|'interrupted'|'failed';messages:import('./project').ProjectMessage[];tokens:number;error:string;contextCheckpoint?:import('./project').ConversationCheckpoint;documentProgress?:{position:number;total:number;stamp:string;nextCursor:DocumentMetadataCursor|null}}
 export interface EvidenceReport { source: 'git' | 'directory'; key: string; title: string; text: string; evidence: string[]; message: string; occurredAt: number; version: string; snapshot?: string }
 export interface DocumentOrganizePreviewItem {
   id: string
@@ -182,12 +180,6 @@ export interface WorkspaceApi {
     operations(projectId:string):Promise<Array<{id:string;source:string;destination:string;mode:string;state:string;error:string}>>
     recover(id:string):Promise<{state:string}>
   }
-  agent:{
-    sessions(module:WorkspaceModule):Promise<Array<Omit<WorkspaceSession,'messages'>>>;session(id:string):Promise<WorkspaceSession|null>
-    create(module:WorkspaceModule,context?:WorkspaceAgentContext):Promise<WorkspaceSession>;send(id:string,text:string):Promise<WorkspaceSession>;cancel(id:string):Promise<void>
-    changes(id:string):Promise<WorkspaceChange[]>;apply(sessionId:string,id:string):Promise<WorkspaceChange>;undo(sessionId:string,id:string):Promise<{undone:boolean;reason:string}>
-    onSession(callback:(session:WorkspaceSession)=>void):()=>void
-  }
   documents: {
     covers: DocumentCoversApi
     categories(submodule?: DocumentSubmodule): Promise<DocumentCategory[]>
@@ -202,7 +194,7 @@ export interface WorkspaceApi {
     update(id: string, patch: DocumentPatch): Promise<DocumentItem>
     prepareImport(directory: boolean, categoryId?: string): Promise<(DocumentScan & { token: string; categoryId: string }) | null>
     analyzeImport(token:string,path:string):Promise<DocumentImportSuggestion>
-    confirmImport(token: string, paths: string[], categoryId?: string, submodule?: DocumentSubmodule | null, customGroupId?: string, choices?: DocumentImportChoice[],insightProvider?:string): Promise<{ imported: number; errors: string[];insightStatus?:string }>
+    confirmImport(token: string, paths: string[], categoryId?: string, submodule?: DocumentSubmodule | null, customGroupId?: string, choices?: DocumentImportChoice[]): Promise<{ imported: number; errors: string[];insightStatus?:string }>
     remove(id: string): Promise<void>; relocate(id: string): Promise<DocumentItem | null>; open(id: string): Promise<void>; reveal(id: string): Promise<void>
     content(id: string): Promise<{ format: string; text: string; data?: Uint8Array; isLarge?: boolean; size?: number }>
     textIndex(id: string, encoding?: string): Promise<NovelIndexResult>
@@ -235,6 +227,8 @@ export interface WorkspaceApi {
     chooseAvatar(): Promise<string | null>
     captureState(name:string,unit:string,value:number,date:string,metricId?:string):Promise<PersonalRecord>
     list(kind?: PersonalKind): Promise<PersonalRecord[]>; save(input: PersonalInput): Promise<PersonalRecord>; remove(id: string): Promise<void>
+    renew(id: string, input: AssetRenewalInput): Promise<PersonalRecord>
+    snooze(id: string, until: string | null): Promise<PersonalRecord>
     overview(): Promise<{ counts: Record<string, number> }>
   }
   onChanged(callback: () => void): () => void

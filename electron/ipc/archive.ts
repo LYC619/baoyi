@@ -1,6 +1,8 @@
 import {app,type BrowserWindow,type IpcMain} from 'electron'
 import path from 'node:path'
-import {getDb,getSettings,updateSoftware} from '../services/database.ts'
+import { getDb } from '../services/database.ts'
+import { getSettings } from '../services/settings-store.ts'
+import { updateSoftware } from '../kinds/software/db.ts'
 import {updateGameItem} from '../kinds/game/service.ts'
 import {updateVideoItem} from '../kinds/video/service.ts'
 import {ProjectHandoffs,HANDOFF_TOOLS,HANDOFF_SYSTEM,validateProjectPrompt,projectHandoffPage} from '../kinds/project/handoff.ts'
@@ -16,8 +18,6 @@ import {assertLibraryIdle,libraryRestoreInProgress} from './library-backup.ts'
 
 let activeAssistant:ArchiveAssistant|undefined
 let insightService:DocumentInsightService|undefined,insightAssistant:ArchiveAssistant|undefined
-let importInsights:(ids:string[],provider?:string)=>Promise<string>=async()=>''
-export const startImportedInsights=(ids:string[],provider?:string)=>importInsights(ids,provider)
 let closing=Promise.resolve()
 export const archiveAssistantBusy=()=>!!activeAssistant?.running||!!insightService?.busy
 export function closeArchiveAssistant(){const previous=activeAssistant,background=insightAssistant,service=insightService;activeAssistant=undefined;insightAssistant=undefined;insightService=undefined;closing=Promise.all([closing,previous?.dispose(),background?.dispose(),service?.close()]).then(()=>{});return closing}
@@ -28,7 +28,7 @@ export function registerArchiveIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
   async function assistant():Promise<ArchiveAssistant>{
     await closing
     if(libraryRestoreInProgress())throw new Error('资料库正在恢复，请等待重启')
-    const db=getDb(),hidden=getSettings().hide_hentai
+    const db=getDb(),hidden=getSettings(getDb()).hide_hentai
     if(activeAssistant&&(db!==instanceDb||privacy!==hidden)){await closeArchiveAssistant();return assistant()}
     if(!activeAssistant){
       instanceDb=db;privacy=hidden
@@ -36,11 +36,11 @@ export function registerArchiveIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
       const instance:ArchiveAssistant=new ArchiveAssistant({db,home,assets:path.join(app.getAppPath(),'dist/pdfjs'),
         runtime:app.isPackaged?path.join(process.resourcesPath,'hermes-runtime'):path.join(app.getAppPath(),'output/hermes-runtime'),
         bridge:app.isPackaged?path.join(process.resourcesPath,'hermes/bridge.py'):path.join(app.getAppPath(),'resources/hermes/bridge.py'),
-        hideHentai:()=>hidden,current:()=>activeAssistant===instance&&db===getDb()&&hidden===getSettings().hide_hentai,
-        config:id=>{const settings=getSettings();if(!id)return settings.ai;const profile=settings.ai_profiles.find(x=>x.id===id);if(!profile)throw new Error('模型配置已不存在，请重新选择');return profile},
-        searchConfig:()=>getSettings().search,
+        hideHentai:()=>hidden,current:()=>activeAssistant===instance&&db===getDb()&&hidden===getSettings(getDb()).hide_hentai,
+        config:id=>{const settings=getSettings(getDb());if(!id)return settings.ai;const profile=settings.ai_profiles.find(x=>x.id===id);if(!profile)throw new Error('模型配置已不存在，请重新选择');return profile},
+        searchConfig:()=>getSettings(getDb()).search,
         operation:action=>{assertLibraryIdle(true);return workspaceOperation(action)},
-        updateResource:(kind,id,patch)=>{const {name,...value}=patch;return kind==='software'?updateSoftware(id,value):kind==='game'?updateGameItem(id,value):updateVideoItem(id,value)},
+        updateResource:(kind,id,patch)=>{const {name,...value}=patch;return kind==='software'?updateSoftware(getDb(), id,value):kind==='game'?updateGameItem(id,value):updateVideoItem(id,value)},
         changed,event:event=>{const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('archive:event',event)}
       })
       activeAssistant=instance
@@ -50,32 +50,30 @@ export function registerArchiveIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
   const handle=(name:string,action:(assistant:ArchiveAssistant,...args:any[])=>unknown)=>ipc.handle('archive:'+name,async(event,...args)=>{const win=getWindow();if(!win||win.isDestroyed()||event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw new Error('只允许主窗口使用归档助理');return action(await assistant(),...args)})
   const handoffs=new WeakMap<ArchiveAssistant,ProjectHandoffs>(),generating=new WeakMap<ArchiveAssistant,string>()
   const handoff=(a:ArchiveAssistant)=>{let value=handoffs.get(a);if(!value){value=new ProjectHandoffs(getDb());handoffs.set(a,value)}return value}
-  const projectConfig=()=>new ModulePreferences(getDb(),getSettings).config('project')
+  const projectConfig=()=>new ModulePreferences(getDb(),() => getSettings(getDb())).config('project')
   const insightChanged=()=>{const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('archive:insights-changed');if(!insightService?.busy)changed()}
   const insights=()=>{
     if(!insightService){
-      const db=getDb(),hidden=getSettings().hide_hentai,home=path.join(app.getPath('userData'),'archive-assistant',hidden?'public':'all')
+      const db=getDb(),hidden=getSettings(getDb()).hide_hentai,home=path.join(app.getPath('userData'),'archive-assistant',hidden?'public':'all')
       const background:ArchiveAssistant=new ArchiveAssistant({db,home,assets:path.join(app.getAppPath(),'dist/pdfjs'),recoverRuns:false,
         runtime:app.isPackaged?path.join(process.resourcesPath,'hermes-runtime'):path.join(app.getAppPath(),'output/hermes-runtime'),
         bridge:app.isPackaged?path.join(process.resourcesPath,'hermes/bridge.py'):path.join(app.getAppPath(),'resources/hermes/bridge.py'),
-        hideHentai:()=>hidden,current:()=>insightAssistant===background&&db===getDb()&&hidden===getSettings().hide_hentai,
-        config:()=>new ModulePreferences(db,getSettings).config('document'),operation:action=>workspaceOperation(action),
+        hideHentai:()=>hidden,current:()=>insightAssistant===background&&db===getDb()&&hidden===getSettings(getDb()).hide_hentai,
+        config:()=>new ModulePreferences(db,() => getSettings(getDb())).config('document'),operation:action=>workspaceOperation(action),
         updateResource:()=>{throw new Error('精读工作流不允许直接修改资料')},changed,event:()=>{}})
       insightAssistant=background
       insightService=new DocumentInsightService({db,assets:path.join(app.getAppPath(),'dist/pdfjs'),scope:hidden?'public':'all',
-        current:()=>insightAssistant===background&&db===getDb()&&hidden===getSettings().hide_hentai&&!libraryRestoreInProgress(),
-        config:()=>new ModulePreferences(db,getSettings).config('document'),run:input=>background.runWorkflow(input),budget:(config,text)=>background.runtime.request('insight_budget',{config,text}),changed:insightChanged})
+        current:()=>insightAssistant===background&&db===getDb()&&hidden===getSettings(getDb()).hide_hentai&&!libraryRestoreInProgress(),
+        config:()=>new ModulePreferences(db,() => getSettings(getDb())).config('document'),run:input=>background.runWorkflow(input),budget:(config,text)=>background.runtime.request('insight_budget',{config,text}),changed:insightChanged})
     }
     return insightService
   }
-  handle('insight-preview',(_a,ids,range)=>insights().preview(ids,range))
+  const retiredInsight=()=>{throw new Error('精读已改为归档助理的方法，请主动加载“文档精读”')}
+  handle('insight-preview',retiredInsight)
   handle('insight-cleanup-preview',()=>insights().cleanupPreview())
   handle('insight-cleanup',(_a,token)=>{assertLibraryIdle();return insights().cleanup(token)})
   handle('insight-clear-cache',()=>insights().clearCache())
-  handle('insight-policy',()=>insights().policy())
-  handle('insight-save-policy',(_a,value)=>insights().savePolicy(value))
-  importInsights=async(ids,provider)=>{try{await assistant();return insights().afterImport(ids,provider)}catch(error){return '资料已导入，但精读未开始：'+(error as Error).message}}
-  handle('insight-start',(_a,token,force)=>{if(libraryRestoreInProgress())throw new Error('资料库正在恢复');return insights().start(token,force===true)})
+  handle('insight-start',retiredInsight)
   handle('insight-list',()=>insights().list())
   handle('insight-detail',(_a,id)=>insights().detail(id))
   handle('insight-cancel',(_a,id)=>insights().cancel(id))
@@ -117,9 +115,9 @@ export function registerArchiveIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
     if(current.revision!==revision)throw new Error('便签已更新。请复制结果后手动合并，避免覆盖新内容')
     const result=timeline.updateContext(id,{...current,prompt});changed();const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('project:changed');return result
   })
-  handle('status',a=>{const s=getSettings();return {engine:'Hermes v0.22.7',configured:!!(s.ai.enabled&&s.ai.model&&s.ai.api_url&&s.ai.api_key),model:s.ai.model,active:a.running,profiles:s.ai_profiles.map(p=>({id:p.id,name:p.name,model:p.model}))}})
+  handle('status',a=>{const s=getSettings(getDb());return {engine:'Hermes v0.22.7',configured:!!(s.ai.enabled&&s.ai.model&&s.ai.api_url&&s.ai.api_key),model:s.ai.model,active:a.running,profiles:s.ai_profiles.map(p=>({id:p.id,name:p.name,model:p.model}))}})
   handle('sessions',(a,query)=>a.sessions(query));handle('session',(a,id)=>a.session(id))
-  handle('send',(a,input)=>{assertLibraryIdle(true);return a.send(input)})
+  handle('send',(a,input)=>{if(libraryRestoreInProgress())throw new Error('资料库正在恢复，请等待重启');return a.send(input)})
   handle('cancel',a=>a.cancel())
   handle('steer',(a,text)=>a.runtime.request('steer',{text}))
   handle('rename',(a,id,title)=>a.rename(id,title))

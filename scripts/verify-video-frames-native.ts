@@ -5,7 +5,7 @@ import {execFile} from 'node:child_process'
 import {promisify} from 'node:util'
 import {imageSize} from 'image-size'
 import {frameFfmpeg,generateFrames} from '../electron/kinds/video/frame-generator.ts'
-const exec=promisify(execFile),ffmpeg=process.argv[2]
+const exec=promisify(execFile),ffmpeg=await frameFfmpeg(process.argv[2] || process.env.BAOYI_TEST_FFMPEG || '')
 assert.ok(ffmpeg,'显式提供本机FFmpeg路径')
 const root=path.resolve('output/p1-p2-video-2026-11-06/native-frames');await fs.mkdir(root,{recursive:true});const run=await fs.mkdtemp(path.join(root,'run-'))
 assert.equal(await frameFfmpeg(ffmpeg),ffmpeg)

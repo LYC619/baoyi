@@ -4,7 +4,7 @@ import {X,ExternalLink,FolderOpen} from 'lucide-vue-next'
 import {useVideoPreview} from '@/composables/useVideoPreview'
 import {useVideoFrames} from '@/composables/useVideoFrames'
 import VideoFrameStrip from './VideoFrameStrip.vue'
-import {formatPosition} from '@/utils'
+import { errorMessage, formatPosition } from '@/utils'
 const preview=useVideoPreview(),dialog=ref<HTMLDialogElement>(),video=ref<HTMLVideoElement>(),playbackError=ref(''),notice=ref(''),playing=ref(false)
 const frames=useVideoFrames(),contact=ref(false)
 let timer:ReturnType<typeof setTimeout>|undefined
@@ -18,10 +18,10 @@ function seek(seconds:number){if(video.value){video.value.currentTime=seconds;vi
 function loaded(){clearTimeout(timer);const target=video.value;if(target&&preview.startAt.value>0)target.currentTime=Math.min(preview.startAt.value,Math.max(0,target.duration-.1))}
 function ready(){clearTimeout(timer)}
 function failed(){clearTimeout(timer);const code=video.value?.error?.code;playbackError.value=code===2?'文件读取中断，请检查磁盘或重新打开。':code===3?'当前视频无法解码，可使用系统播放器继续。':code===4?'当前容器或音视频编码不受内嵌播放器支持。':'视频未能加载，可使用系统播放器或检查文件位置。'}
-async function external(custom=false){try{if(preview.session.value)await window.baoyi.video.preview.external(preview.session.value.token,custom)}catch(e){playbackError.value=(e as Error).message}}
-async function player(){try{if(await window.baoyi.video.preview.pickPlayer())await external(true)}catch(e){playbackError.value=(e as Error).message}}
-async function copy(){try{if(preview.session.value){await window.baoyi.video.preview.copyPath(preview.session.value.token);notice.value='文件路径已复制'}}catch(e){playbackError.value=(e as Error).message}}
-async function reveal(){try{if(preview.session.value)await window.baoyi.video.preview.reveal(preview.session.value.token)}catch(e){playbackError.value=(e as Error).message}}
+async function external(custom=false){try{if(preview.session.value)await window.baoyi.video.preview.external(preview.session.value.token,custom)}catch(e){playbackError.value=errorMessage(e)}}
+async function player(){try{if(await window.baoyi.video.preview.pickPlayer())await external(true)}catch(e){playbackError.value=errorMessage(e)}}
+async function copy(){try{if(preview.session.value){await window.baoyi.video.preview.copyPath(preview.session.value.token);notice.value='文件路径已复制'}}catch(e){playbackError.value=errorMessage(e)}}
+async function reveal(){try{if(preview.session.value)await window.baoyi.video.preview.reveal(preview.session.value.token)}catch(e){playbackError.value=errorMessage(e)}}
 </script>
 <template><Teleport to="body"><dialog ref="dialog" class="video-preview" aria-label="视频试看" @cancel.prevent="close">
   <header><div><h2>{{preview.selection.value?.title||'视频试看'}}</h2><p>仅试看 · 不改变观看记录</p></div><button aria-label="关闭试看" @click="close"><X :size="20"/></button></header>

@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { Backpack } from "lucide-vue-next";
 import type { PersonalRecord } from "@/types/workspace";
-import { assetAnnualCosts, filterAssets, matchesExpiry } from "@/utils/personal-assets";
+import { assetAnnualCosts, filterAssets, matchesExpiry, isReminding, isSnoozed } from "@/utils/personal-assets";
 import { usePersonalView } from "@/composables/usePersonalView";
 import { daysUntil, dueText } from "@/utils/personal-view";
 const props = defineProps<{
@@ -25,6 +25,7 @@ const filtered = computed(() =>
 const annual = computed(() => assetAnnualCosts(props.records));
 const days = (r: PersonalRecord) => daysUntil(r.data.expiresOn, props.today);
 const expiry = (r: PersonalRecord) => days(r) === null ? '未设置到期日' : dueText(r.data.expiresOn, props.today);
+const snoozedDate = (r: PersonalRecord) => { const [, month, day] = String(r.data.snoozedUntil).split('-'); return `${Number(month)} 月 ${Number(day)} 日` };
 function reset() { view.query=''; view.category=''; view.status='all'; view.sort='expiry' }
 const cycles: Record<string, string> = {
   once: "一次性",
@@ -41,7 +42,7 @@ const cycles: Record<string, string> = {
       >
       <span
         ><strong>{{
-          records.filter((r) => days(r) !== null && days(r)! <= remindDays).length
+          records.filter((r) => isReminding(r, remindDays, today)).length
         }}</strong>
         项已到期 / {{ remindDays }} 天内到期</span
       >
@@ -102,14 +103,15 @@ const cycles: Record<string, string> = {
         <span
           class="asset-expiry"
           :class="{
-            urgent: days(record) !== null && days(record)! <= Math.min(10, remindDays),
+            urgent: isReminding(record, Math.min(10, remindDays), today),
             soon:
-              days(record) !== null &&
+              isReminding(record, remindDays, today) &&
               days(record)! > Math.min(10, remindDays) &&
               days(record)! <= remindDays,
           }"
           >{{ expiry(record) }}</span
         >
+        <span v-if="isSnoozed(record, today)" class="asset-snoozed">已暂缓至 {{ snoozedDate(record) }}</span>
       </button>
     </div>
     <p v-if="!filtered.length" class="ws-empty">
@@ -122,6 +124,7 @@ const cycles: Record<string, string> = {
   </section>
 </template>
 <style scoped>
+.asset-snoozed { color:var(--text-sub); font-size:12px; }
 .asset-summary {
   display: flex;
   gap: 16px 24px;

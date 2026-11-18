@@ -5,7 +5,8 @@ import { createRendererLoader } from './helpers/renderer-harness.ts'
 
 let passed = 0
 let failed = 0
-function fixture(page: 'Home' | 'Detail') {
+function fixture(page: 'Home' | 'Detail', id = 'one') {
+  const unmount: Array<() => void> = []
   const requests: unknown[][] = []
   const game = { id: 'one', name_en: 'Portal', name_zh: '', file_name: 'game.exe', source_dir: 'X:/fixture', cover_path: 'X:/cover.png', identity_name: 'Portal', identity_query: '', identity_confirmed: false, save_paths: [], linked_files: [], tags: [], total_playtime_sec: 0, last_played_at: 0, play_status: 'unplayed', updated_at: 1 }
   const store = Vue.reactive({
@@ -24,8 +25,8 @@ function fixture(page: 'Home' | 'Detail') {
     onCoverProgress: () => () => {}, backups: async () => [], running: async () => false
   }
   const load = createRendererLoader({
-    vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: () => {} },
-    'vue-router': { useRoute: () => ({ query: {}, params: { id: 'one' } }), useRouter: () => ({ push: async (route: unknown) => { requests.push(['route', route]) }, replace: async () => {} }) },
+    vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: (fn: () => void) => unmount.push(fn) },
+    'vue-router': { onBeforeRouteLeave() {}, onBeforeRouteUpdate() {}, useRoute: () => ({ query: {}, params: { id: 'one' } }), useRouter: () => ({ push: async (route: unknown) => { requests.push(['route', route]) }, replace: async () => {} }) },
     '@/stores/game': { useGameStore: () => store, PLAY_STATUS_LABEL: {} },
     '@/stores/settings': { useSettingsStore: () => ({ settings: { ai: { enabled: false, api_key: '' }, title_lang: 'en' } }) },
     '@/composables/useToast': { useToast: () => ({ error: () => {}, success: () => {}, toast: () => {} }) },
@@ -40,8 +41,8 @@ function fixture(page: 'Home' | 'Detail') {
     }) }
   }, { window: { baoyi: { game: api }, confirm: () => true }, setTimeout, clearTimeout })
   const component = load(`src/pages/game/${page}.vue`).default
-  const state = component.setup({ id: 'one' }, { expose: () => {} })
-  return { state, api, requests, store, taskState, game }
+  const state = component.setup({ id }, { expose: () => {} })
+  return { state, api, requests, store, taskState, game, dispose: () => unmount.forEach(fn => fn()) }
 }
 
 async function test(name: string, run: () => Promise<void>) {
@@ -67,10 +68,13 @@ await test('a file dialog result for the previous game cannot replace the curren
   let release!: (result: unknown) => void
   h.api.pickCover = () => new Promise(resolve => { release = resolve })
   const pending = h.state.pickCover()
-  h.state.item.value = { ...h.game, id: 'two' }
+  h.dispose()
+  const next = fixture('Detail', 'two'); await next.state.load()
   release({ ok: true, item: { ...h.game, cover_path: 'old-game-cover' }, message: '' })
   await pending
-  assert.equal(h.state.item.value.id, 'two')
+  assert.equal(next.state.item.value.id, 'two')
+  assert.notEqual(next.state.item.value.cover_path, 'old-game-cover')
+  next.dispose()
 })
 
 await test('changing the cover keyword invalidates an older search for the same game', async () => {

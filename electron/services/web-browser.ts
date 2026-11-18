@@ -76,7 +76,7 @@ export function createWebBrowser(getMainWindow: () => BrowserWindow | null) {
       if (!mainFrame || code === -3 || !isWebNavigation(validatedUrl) || win.isDestroyed()) return
       target = validatedUrl; failed = true
       const html = `<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>网页加载失败</title></head><body style="background:#1c1c2c;color:#ececf5;font-family:system-ui;padding:64px;line-height:1.8"><h1>网页加载失败</h1><p style="overflow-wrap:anywhere">${escapeHtml(validatedUrl)}</p><p>${escapeHtml(description)}</p><p>可使用上方菜单“刷新”重试，或选择“更换网址”。</p></body></html>`
-      void contents.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch(() => {})
+      void contents.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch(cause => { console.error(cause); if (!win.isDestroyed()) win.setTitle('网页加载失败 · 抱一') })
     })
     contents.on('did-navigate', updateMenu); contents.on('did-navigate-in-page', updateMenu); contents.on('did-stop-loading', updateMenu)
     const blockDownload = (event: Electron.Event, _item: Electron.DownloadItem, sender: Electron.WebContents) => {

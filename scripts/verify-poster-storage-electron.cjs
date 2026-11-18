@@ -76,6 +76,7 @@ app.whenReady().then(() => {
 }).catch(cause => { console.error(cause); process.exitCode = 1 }).finally(() => {
   api?.closeDb()
   assert.equal(path.dirname(root), path.resolve(os.tmpdir())); assert.ok(path.basename(root).startsWith('baoyi-poster-native-'))
-  fs.rmSync(root, { recursive: true, force: true })
+  try { fs.rmSync(root, { recursive: true, force: true }) }
+  catch (cause) { console.warn('Temporary profile cleanup: ' + cause.message) } // best-effort: Electron may still hold cache files until exit.
   app.exit(process.exitCode || 0)
 })

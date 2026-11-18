@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { computed, ref, watch } from 'vue'
 import { ChevronDown, Loader2, ShieldCheck, Wrench } from 'lucide-vue-next'
 import { useImageDownloads } from '@/composables/useImageDownloads'
@@ -18,7 +19,7 @@ async function audit() {
   expanded.value = true
   busy.value = true; error.value = ''; message.value = ''; limit.value = 100
   try { report.value = await window.baoyi.image.audit(props.resourceId) }
-  catch (cause) { report.value = null; error.value = (cause as Error).message }
+  catch (cause) { report.value = null; error.value = errorMessage(cause) }
   finally { busy.value = false }
 }
 async function repair() {
@@ -27,7 +28,7 @@ async function repair() {
     const result = await window.baoyi.image.repair(props.resourceId)
     if (result) { pending.value = result.id; message.value = '已加入修复队列'; await downloads.refresh() }
     else { message.value = '没有可修复的异常页'; report.value = await window.baoyi.image.audit(props.resourceId) }
-  } catch (cause) { error.value = (cause as Error).message }
+  } catch (cause) { error.value = errorMessage(cause) }
   finally { busy.value = false }
 }
 watch([() => job.value?.status, busy], async ([status, working]) => {

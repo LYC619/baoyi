@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { computed, ref, watch } from 'vue'
 import { Check } from 'lucide-vue-next'
 import type { ImageBulkPatch, ImageGroup, ImageType } from '@/types/image'
@@ -19,7 +20,7 @@ async function manage(action:'collection'|'move'){
       notice.value='已保存合集，原文件与阅读进度保留'
     }else{const result=await window.baoyi.image.move(ids,organizeByCategory.value,chooseTarget.value);if(!result)return;notice.value=`已移动 ${result.moved} 项`;error.value=result.warnings.join('\n');if(result.warnings.length){await store.refresh();return}}
     await store.refresh();emit('applied',ids.length)
-  }catch(cause){error.value=(cause as Error).message}finally{busy.value=false;emit('busy',false)}
+  }catch(cause){error.value=errorMessage(cause)}finally{busy.value=false;emit('busy',false)}
 }
 const modified = computed(() => (group.value !== 'unchanged') || (props.type === 'comic' && read.value !== 'unchanged') || !!tagText.value.trim() || tagMode.value === 'replace')
 async function apply() {
@@ -31,7 +32,7 @@ async function apply() {
   if (patch.tags?.mode === 'replace' && !confirm(`替换所选 ${props.ids.length} 项的全部标签？`)) return
   busy.value = true; emit('busy', true); error.value = ''
   try { const count = await window.baoyi.image.bulkUpdate([...props.ids], patch); emit('applied', count) }
-  catch (cause) { error.value = (cause as Error).message }
+  catch (cause) { error.value = errorMessage(cause) }
   finally { busy.value = false; emit('busy', false) }
 }
 </script>

@@ -25,7 +25,8 @@ function fixture() {
   const load = createRendererLoader({
     'node:fs': { ...fs, default: fs }, 'node:path': { ...path, default: path },
     electron: { app: { getPath: () => root }, shell: {}, net: {} },
-    '../../services/database.ts': { getDb: () => db, getSettings: () => ({}), postersDir: () => root },
+    '../../services/database.ts': { getDb: () => db, postersDir: () => root },
+    '../../services/settings-store.ts': { getSettings: () => ({}) },
     './download/sources.ts': { loadVideoWork: () => pending },
     './hentai/hanime.ts': {}, './mediainfo.ts': {}, './db.ts': video,
     '../../services/agent/loop.ts': {}, '../../services/searchService.ts': {}, './tmdb.ts': {}, './tools.ts': {}, './prompts.ts': {}, './facts.ts': {}

@@ -4,9 +4,11 @@ import {randomUUID} from 'node:crypto'
 import {rememberDownloadRoot,validateDownloadRoot} from '../kinds/image/download-target.ts'
 import fs from 'node:fs/promises'
 import {pathToFileURL} from 'node:url'
-import {getDb,getSettings} from '../services/database.ts'
+import { getDb } from '../services/database.ts'
+import { getSettings } from '../services/settings-store.ts'
 import {libraryRestoreInProgress} from './library-backup.ts'
 import {ComicRuntime} from '../kinds/image/comic-runtime.ts'
+import {ComicCoverCache} from '../kinds/image/comic-cover-cache.ts'
 import {ComicIngestService} from '../kinds/image/comic-ingest.ts'
 import {createComicVerifier} from '../kinds/image/comic-verifier.ts'
 import {comicProxyMap} from '../kinds/image/comic-proxy.ts'
@@ -27,15 +29,15 @@ export function registerComicIngestIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
   let proxySequence=Promise.resolve<Record<string,string>>({})
   const defaultsFile=path.join(app.getPath('userData'),'comic-preferences.json')
   let defaults:{proxy:ComicProxy;root:string}={proxy:{mode:'system'},root:''}
-  const loaded=fs.readFile(defaultsFile,'utf8').then(text=>{const value=JSON.parse(text);defaults={proxy:comicProxy(value.proxy),root:typeof value.root==='string'?value.root:''}}).catch(()=>{})
+  const loaded=fs.readFile(defaultsFile,'utf8').then(text=>{const value=JSON.parse(text);defaults={proxy:comicProxy(value.proxy),root:typeof value.root==='string'?value.root:''}}).catch(()=>{ /* 偏好文件不存在或无效时使用系统代理与默认目录。 */ })
   const remember=async(patch:Partial<typeof defaults>)=>{await loaded;defaults={...defaults,...patch};await writeComicJson(defaultsFile,defaults)}
   const runtime=(proxy:ComicProxy)=>new ComicRuntime({python:path.join(app.isPackaged?process.resourcesPath:app.getAppPath(),app.isPackaged?'hermes-runtime':'output/hermes-runtime','python/python.exe'),
       runtime:path.join(app.isPackaged?process.resourcesPath:app.getAppPath(),app.isPackaged?'comic-runtime':'output/comic-runtime'),
       bridge:path.join(app.isPackaged?process.resourcesPath:app.getAppPath(),app.isPackaged?'comic/bridge.py':'resources/comic/bridge.py'),
-      proxies:()=>{proxySequence=proxySequence.catch(()=>({})).then(()=>comicProxyMap(proxy,getSettings().proxy,session.fromPartition('comic-ingest-network')));return proxySequence}
+      proxies:()=>{proxySequence=proxySequence.catch(()=>({})).then(()=>comicProxyMap(proxy,getSettings(getDb()).proxy,session.fromPartition('comic-ingest-network')));return proxySequence}
     })
   const queue=current=new ComicIngestService({db:getDb(),authorizationDirectory:path.join(app.getPath('userData'),'comic-authorizations'),
-    allowed:()=>!getSettings().hide_hentai,assertIdle:()=>{if(libraryRestoreInProgress())throw new Error('资料库正在恢复，请等待重启')},
+    allowed:()=>!getSettings(getDb()).hide_hentai,assertIdle:()=>{if(libraryRestoreInProgress())throw new Error('资料库正在恢复，请等待重启')},
     changed:()=>send('image:changed'),jobsChanged,
     verifier:()=>createComicVerifier(pathToFileURL(path.join(app.getAppPath(),'dist-electron/comic-verify-worker.js'))),
     runtime
@@ -45,18 +47,19 @@ export function registerComicIngestIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
   handle('defaults',async()=>{await loaded;return {proxy:defaults.proxy}})
   let browseController:AbortController|undefined
   const covers=new Set<AbortController>()
+  const coverCache=new ComicCoverCache(path.join(app.getPath('userData'),'cache','comic-covers','jmcomic-2.7.11-v1'))
   const cancelBrowse=()=>{browseController?.abort();for(const controller of covers)controller.abort();covers.clear()}
-  handle('browse',async(query,proxy)=>{if(getSettings().hide_hentai)throw new Error('请先开启隐私内容访问');browseController?.abort();const controller=browseController=new AbortController();return runtime(comicProxy(proxy)).browse(randomUUID(),query,controller.signal)})
-  handle('cover',async(id,proxy)=>{if(getSettings().hide_hentai)throw new Error('请先开启隐私内容访问');if(covers.size>=3)return '';const controller=new AbortController();covers.add(controller);try{return await runtime(comicProxy(proxy)).cover(randomUUID(),id,controller.signal)}finally{covers.delete(controller)}})
+  handle('browse',async(query,proxy)=>{if(getSettings(getDb()).hide_hentai)throw new Error('请先开启隐私内容访问');browseController?.abort();const controller=browseController=new AbortController();return runtime(comicProxy(proxy)).browse(randomUUID(),query,controller.signal)})
+  handle('cover',async(id,proxy)=>{if(getSettings(getDb()).hide_hentai)throw new Error('请先开启隐私内容访问');const connection=comicProxy(proxy);if(covers.size>=3)return '';const controller=new AbortController();covers.add(controller);try{return await coverCache.get(id,controller.signal,()=>runtime(connection).cover(randomUUID(),id,controller.signal))}finally{covers.delete(controller)}})
   cancelDiscovery=cancelBrowse
   handle('cancel-browse',cancelBrowse)
   app.on('before-quit',cancelBrowse)
   handle('logs',id=>queue.logs(id))
   handle('preview',async(input,proxy)=>{const result=await queue.preview(input,proxy);await remember({proxy:comicProxy(proxy)});return result});handle('cancel-preview',()=>queue.cancelPreview());handle('jobs',()=>queue.list())
   handle('start',async(token:string,chapters:string[],directory:string,groupId:string|null,root?:string)=>{
-    if(getSettings().hide_hentai)throw new Error('请先开启隐私内容访问')
+    if(getSettings(getDb()).hide_hentai)throw new Error('请先开启隐私内容访问')
     await loaded
-    if(root!==undefined){const target=await validateDownloadRoot(root);const id=await queue.enqueue(token,chapters,target,directory,groupId);void rememberDownloadRoot(app.getPath('userData'),'jm',target).catch(()=>{});return id}
+    if(root!==undefined){const target=await validateDownloadRoot(root);const id=await queue.enqueue(token,chapters,target,directory,groupId);await rememberDownloadRoot(app.getPath('userData'),'jm',target);return id}
     const lib=new ImageLibrary(getDb()),group=lib.groups().find(g=>g.id===groupId)
     const selected=await dialog.showOpenDialog(getWindow()!,{title:'选择漫画存放根目录（补章请选择原根目录）',defaultPath:group?.directory||defaults.root||undefined,properties:['openDirectory','createDirectory']})
     restoreWindowFocus(getWindow());if(selected.canceled||!selected.filePaths[0])return null

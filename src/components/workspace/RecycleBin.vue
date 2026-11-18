@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import {ref,onMounted,onBeforeUnmount} from 'vue'
 import {workspace} from '@/utils/workspace-api'
 import type {RecycleItem} from '@/types/workspace'
 const rows=ref<RecycleItem[]>([]),busy=ref(false),error=ref('')
-async function refresh(){try{rows.value=await workspace.recycle.list()}catch(e){error.value=(e as Error).message}}
+async function refresh(){try{rows.value=await workspace.recycle.list()}catch(e){error.value=errorMessage(e)}}
 const off=workspace.onChanged(()=>void refresh());onBeforeUnmount(off);onMounted(refresh)
-async function run(fn:()=>Promise<unknown>){busy.value=true;error.value='';try{await fn();await refresh()}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
+async function run(fn:()=>Promise<unknown>){busy.value=true;error.value='';try{await fn();await refresh()}catch(e){error.value=errorMessage(e)}finally{busy.value=false}}
 const labels:Record<string,string>={indexed:'仅移除索引',recycled:'文件已回收',attention:'需要处理',purged:'文件已到期清理'}
 </script>
 <template><section class="ws ws-card recycle-bin"><header class="ws-section-head"><h3>回收站</h3><button class="ws-button" :disabled="busy" @click="run(()=>workspace.recycle.cleanup())">检查到期文件</button></header><p class="ws-muted">源文件保留一个自然月，月底取下月最后一天。应用启动及每天检查，只清理登记且核验一致的文件。恢复中断的记录保留，等待继续处理。</p><p v-if="error" class="ws-error" role="alert">{{error}}</p><p v-if="!rows.length" class="ws-muted">回收站为空。</p>

@@ -12,15 +12,21 @@ import { readImageManifest, readManifestPage, type ImageManifest } from './manif
 import { auditImage } from './integrity.ts'
 import { createTransferMeter, normalizeDownloadProgress } from './download-progress.ts'
 import { createImageRequestGate, type ImageRequestGate } from './request-gate.ts'
+import { PicaLog } from './comic-log.ts'
 
 const hash = (s: string | Uint8Array) => createHash('sha256').update(s).digest('hex')
 const safeName = (s: string) => s.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 60) || '漫画'
-type Dependencies = { db: SqlDb; source: PicacomicSource; changed: () => void; jobsChanged?: () => void }
+const activeDirectories = new Set<string>()
+export function isWritingTo(directory: string): boolean {
+  const contains=(root:string,target:string)=>{const relative=path.relative(root,target);return relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative)}
+  return [...activeDirectories].some(active=>contains(active,directory)||contains(directory,active))
+}
+type Dependencies = { db: SqlDb; source: PicacomicSource; changed: () => void; jobsChanged?: () => void; logDirectory?: string }
 
 async function writeJson(file: string, value: unknown) {
   const temporary = file + '.' + randomUUID() + '.tmp'
   try { await fs.writeFile(temporary, JSON.stringify(value, null, 2), { flag: 'wx' }); await fs.rename(temporary, file) }
-  catch (cause) { await fs.unlink(temporary).catch(() => {}); throw cause }
+  catch (cause) { await fs.unlink(temporary).catch(() => { /* best-effort */ }); throw cause }
 }
 async function realDirectory(directory: string, root: string) {
   await fs.mkdir(directory, { recursive: true })
@@ -33,37 +39,45 @@ export function createImageDownloads(deps: Dependencies) {
   const jobs = new Map<string, ImageDownloadJob>(), controllers = new Map<string, AbortController>()
   const settling = new Map<string, Promise<void>>(), gates = new Map<string, ImageRequestGate>()
   const jobsChanged = deps.jobsChanged || deps.changed
+  const log = deps.logDirectory ? new PicaLog(deps.logDirectory) : undefined
+  const record = (job: ImageDownloadJob) => log?.append(job, () => new Set([...jobs.values()].filter(j => !['success', 'cancelled'].includes(j.status)).map(j => j.id)))
   let pumping = false, nextOrder = 0, configuredConcurrency = 2, configuredJobConcurrency = 3
-  try {
+  {
     const row = db.prepare("SELECT value FROM settings WHERE key='image_download_job_concurrency'").get() as {value:string} | undefined
-    const saved = row && JSON.parse(row.value)
-    if (Number.isInteger(saved) && saved >= 1 && saved <= 4) configuredJobConcurrency = saved
-  } catch { /* bounded default */ }
-  try {
+    try {
+      const saved = row && JSON.parse(row.value)
+      if (Number.isInteger(saved) && saved >= 1 && saved <= 4) configuredJobConcurrency = saved
+    } catch { /* 无效 JSON 使用已有并发默认值。 */ }
+  }
+  {
     const row = db.prepare("SELECT value FROM settings WHERE key='image_download_concurrency'").get() as { value: string } | undefined
-    const saved = row ? JSON.parse(row.value) : 2
-    if (Number.isInteger(saved) && saved >= 1 && saved <= 3) configuredConcurrency = saved
-  } catch { /* Invalid historical settings use the bounded default. */ }
+    try {
+      const saved = row ? JSON.parse(row.value) : 2
+      if (Number.isInteger(saved) && saved >= 1 && saved <= 3) configuredConcurrency = saved
+    } catch { /* 无效 JSON 使用已有并发默认值。 */ }
+  }
   const persist = (job: ImageDownloadJob) => {
     job.updatedAt = Date.now()
     db.prepare('INSERT INTO image_download_jobs(id,status,updated_at,payload) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,payload=excluded.payload').run(job.id, job.status, job.updatedAt, JSON.stringify(job))
   }
-  const save = (job: ImageDownloadJob) => { persist(job); jobsChanged() }
+  const save = (job: ImageDownloadJob) => { persist(job); record(job); jobsChanged() }
   for (const row of db.prepare('SELECT * FROM image_download_jobs ORDER BY updated_at').all() as Array<{ id: string; status: string; payload: string }>) {
+    let job: ImageDownloadJob
     try {
-      const job = JSON.parse(row.payload) as ImageDownloadJob
+      job = JSON.parse(row.payload) as ImageDownloadJob
       const identity=job as ImageDownloadJob&{version?:number;provider?:string}
       if(identity.version!==undefined&&identity.version!==1||identity.provider!==undefined&&identity.provider!=='pica')continue
       if (job.id !== row.id || !job.work?.id || !Array.isArray(job.chapters) || !path.isAbsolute(job.root)) continue
+      job.createdAt = Number.isSafeInteger(job.createdAt) && job.createdAt! >= 0 ? job.createdAt : job.updatedAt
       job.status = row.status as ImageDownloadJob['status']
       job.queueOrder = Number.isSafeInteger(job.queueOrder) && job.queueOrder! >= 0 ? job.queueOrder : nextOrder++
       nextOrder = Math.max(nextOrder, job.queueOrder! + 1)
       job.progress = normalizeDownloadProgress(job.progress)
       job.retryNotBefore = Number.isFinite(job.retryNotBefore) && job.retryNotBefore! > Date.now() ? job.retryNotBefore : 0
       job.progress.bytesPerSecond = 0; job.progress.retryAt = 0; job.progress.phase = 'idle'
-      if (['running', 'queued'].includes(row.status)) { job.status = 'interrupted'; job.error = '应用中断，请重试剩余页'; persist(job) }
-      jobs.set(job.id, job)
-    } catch { /* Keep malformed rows on disk without starting filesystem work. */ }
+    } catch { continue /* 无法解析的任务保留在数据库中，不启动文件操作。 */ }
+    if (['running', 'queued'].includes(row.status)) { job.status = 'interrupted'; job.error = '应用中断，请重试剩余页'; persist(job) }
+    jobs.set(job.id, job)
   }
   const visible = (job: ImageDownloadJob) => !library.groups().some(g => g.id === job.groupId && g.hidden) && (!job.resourceId || !!library.get(job.resourceId))
   const queued = () => [...jobs.values()].filter(j => j.status === 'queued').sort((a, b) => a.queueOrder! - b.queueOrder!)
@@ -85,13 +99,14 @@ export function createImageDownloads(deps: Dependencies) {
     return { concurrency: configuredConcurrency, jobConcurrency: configuredJobConcurrency }
   }
   async function run(job: ImageDownloadJob) {
+    let activeDirectory = ''
     const controller = new AbortController()
     controllers.set(job.id, controller)
     job.status = 'running'; job.error = ''; job.processed = 0; job.total = 0; job.completedChapters = 0
     const progress = job.progress = normalizeDownloadProgress(), meter = createTransferMeter()
     const states = new Map<number, { phase: ImageDownloadProgress['phase']; retryAt: number }>()
     let workflow: ImageDownloadProgress['phase'] = 'catalog', lastNotice = 0, dirty = false
-    const notify = (force = false) => { dirty = true; if (force || Date.now() - lastNotice >= 250) { lastNotice = Date.now(); dirty = false; jobsChanged() } }
+    const notify = (force = false) => { record(job); dirty = true; if (force || Date.now() - lastNotice >= 250) { lastNotice = Date.now(); dirty = false; jobsChanged() } }
     function aggregate(force = false) {
       const all = [...states.values()], old = progress.phase
       progress.effectiveConcurrency = gate.concurrency()
@@ -124,7 +139,7 @@ export function createImageDownloads(deps: Dependencies) {
     let commits = Promise.resolve()
     const commit = (action: () => Promise<void>) => {
       const pending = commits.then(() => { controller.signal.throwIfAborted(); return action() })
-      commits = pending.catch(() => {})
+      commits = pending.catch(() => { /* 原始 Promise 的错误已交给调用方；这里只释放队列或监听。 */ })
       return pending
     }
     try {
@@ -135,6 +150,7 @@ export function createImageDownloads(deps: Dependencies) {
       if (job.resourceId && existing?.id !== job.resourceId) throw new Error('目标作品已移除或隐藏，未写入下载文件')
       if (existing && path.dirname(existing.path).toLowerCase() !== root.toLowerCase()) throw new Error('作品已在另一目录中，请使用原下载根目录补齐章节')
       const directory = await realDirectory(existing?.path || path.join(root, safeName(job.work.title) + ' [' + hash(job.work.id).slice(0, 8) + ']'), root)
+      activeDirectory = directory; activeDirectories.add(directory)
       const manifestFile = path.join(directory, '.baoyi-image.json')
       const manifest: ImageManifest = await readImageManifest(directory, job.work.id) || { version: 1, source: 'pica', sourceId: job.work.id, name: job.work.title, description: job.work.description, tags: job.work.tags, publication: job.work.finished ? 'completed' : 'ongoing', chapters: [], pages: {} }
       const catalog: Array<{ chapter: ImageSourceChapter; pages: ImageSourcePage[]; ordinals: number[] }> = []
@@ -189,7 +205,7 @@ export function createImageDownloads(deps: Dependencies) {
                 try { const present = await fs.lstat(file); if (present.isSymbolicLink()) throw new Error('目标页面是链接'); await fs.rename(file, file + '.damaged-' + Date.now()) }
                 catch (cause) { if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause }
                 await fs.rename(temporary, file)
-              } catch (cause) { await fs.unlink(temporary).catch(() => {}); throw cause }
+              } catch (cause) { await fs.unlink(temporary).catch(() => { /* best-effort */ }); throw cause }
               manifest.pages[entryKey] = { file: path.relative(directory, file).replaceAll('\\', '/'), sha256: hash(data) }
               await writeJson(manifestFile, manifest)
               job.processed++; progress.chapterProcessed++; progress.storedBytes += size; save(job)
@@ -222,7 +238,8 @@ export function createImageDownloads(deps: Dependencies) {
       job.error = job.status === 'paused' ? '' : job.status === 'cancelled' ? '已停止，可重试剩余页' : String((cause as Error)?.message || cause)
       if (job.status === 'paused') job.current = '已暂停'
     } finally {
-      clearInterval(timer); await commits; states.clear(); phase('idle')
+      clearInterval(timer); await commits; activeDirectories.delete(activeDirectory)
+      states.clear(); phase('idle')
       gate.dispose(); gates.delete(job.id); controllers.delete(job.id); save(job)
     }
   }
@@ -249,7 +266,7 @@ export function createImageDownloads(deps: Dependencies) {
       const target = library.get(request.resourceId)
       if (!target || target.source !== 'pica' || target.sourceId !== work.id) throw new Error('目标作品不可用')
     }
-    const job: ImageDownloadJob = { id: randomUUID(), work, chapters: chapters.slice().sort((a, b) => a.order - b.order), root: actualRoot, groupId, status: 'queued', processed: 0, total: 0, completedChapters: 0, current: '等待下载', error: '', updatedAt: Date.now(), resourceId: '', progress: normalizeDownloadProgress(), queueOrder: nextOrder++ }
+    const job: ImageDownloadJob = { id: randomUUID(), work, chapters: chapters.slice().sort((a, b) => a.order - b.order), root: actualRoot, groupId, status: 'queued', processed: 0, total: 0, completedChapters: 0, current: '等待下载', error: '', createdAt: Date.now(), updatedAt: Date.now(), resourceId: '', progress: normalizeDownloadProgress(), queueOrder: nextOrder++ }
     if (request?.repairPages) job.repairPages = structuredClone(request.repairPages)
     if (request?.resourceId) job.resourceId = request.resourceId
     jobs.set(job.id, job); save(job); pump(); return structuredClone(job)
@@ -327,5 +344,6 @@ export function createImageDownloads(deps: Dependencies) {
     }
     return result
   }
-  return { enqueue, enqueueBatch, repair, retry, pause, resume, cancel, move, options, dismiss, list, idle: async () => { while (settling.size) {await Promise.allSettled([...settling.values()]); await Promise.resolve()} } }
+  async function logs(id: string) { available(id); const entries = await log?.read(id) || []; available(id); return entries }
+  return { enqueue, enqueueBatch, repair, retry, pause, resume, cancel, move, options, dismiss, list, logs, idle: async () => { while (settling.size) {await Promise.allSettled([...settling.values()]); await Promise.resolve()} await log?.flush() } }
 }

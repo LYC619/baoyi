@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, useId } from 'vue'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown,MoreHorizontal } from 'lucide-vue-next'
 
-defineProps<{ label: string }>()
+defineProps<{ label: string;icon?:'more'|'chevron' }>()
 const id = useId(), open = ref(false)
 const root = ref<HTMLElement>(), trigger = ref<HTMLButtonElement>(), panel = ref<HTMLElement>()
 function close(restoreFocus = true) {
@@ -34,7 +34,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside))
 
 <template>
   <div ref="root" class="library-toolbar-menu" @focusout="leave" @keydown="key">
-    <button ref="trigger" type="button" class="btn btn--subtle" :aria-expanded="open" :aria-controls="id" @click="toggle">{{label}}<ChevronDown :size="13"/></button>
+    <button ref="trigger" type="button" class="btn btn--subtle" :class="{'btn--icon':icon}" :aria-label="label" :aria-expanded="open" :aria-controls="id" @click="toggle"><template v-if="!icon">{{label}}</template><component :is="icon==='more'?MoreHorizontal:ChevronDown" :size="icon?15:13"/></button>
     <div v-if="open" :id="id" ref="panel" class="toolbar-popover" role="group" :aria-label="label + '选项'" @click="action"><slot /></div>
   </div>
 </template>

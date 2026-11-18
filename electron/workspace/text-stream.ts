@@ -105,7 +105,8 @@ export class TextStreamService {
     const after = await fs.stat(filePath)
     if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs) throw new Error('索引期间原文件已变化，请重试')
     const result = { version, encoding, fileSize: stat.size, chapters, isChunked }
-    try { await fs.mkdir(this.cacheDir, { recursive: true }); await fs.writeFile(cacheFile, JSON.stringify(result), 'utf8') } catch { /* optional cache */ }
+    await fs.mkdir(this.cacheDir, { recursive: true })
+    await fs.writeFile(cacheFile, JSON.stringify(result), 'utf8')
     return result
   }
   async sliceText(filePath: string, byteOffset: number, byteLength: number, encoding = 'utf-8') {

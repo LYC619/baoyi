@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { computed, ref, watch, onUnmounted } from 'vue'
 import type { ImageApi,ImageItem,ImageGroup } from '@/types/image'
 import type { PhotoView } from '@/composables/usePhotoView'
@@ -16,7 +17,7 @@ const pageCount=computed(()=>Math.max(1,Math.ceil(total.value/pageSize)))
 async function load() {
   const token=++revision;busy.value=true;error.value='';pages.value=[]
   try {const result=await window.baoyi.image.gallery(props.items.map(item=>item.id),(page.value-1)*pageSize,pageSize);if(token!==revision||disposed)return;pages.value=result.pages;total.value=result.total}
-  catch(cause){if(token===revision&&!disposed)error.value=(cause as Error).message}
+  catch(cause){if(token===revision&&!disposed)error.value=errorMessage(cause)}
   finally{if(token===revision&&!disposed)busy.value=false}
 }
 watch(()=>[props.queryKey,props.items.map(i=>i.id+':'+i.updatedAt).join('|')],()=>{page.value=1;void load()},{immediate:true})
@@ -37,7 +38,7 @@ const blocks=computed(()=>{
 async function open(p:Page){
   if(opening.value)return;opening.value=true;error.value=''
   try{const item=items.value.get(p.resourceId);if(!item)return;const all=await window.baoyi.image.pages(item.id);if(!disposed)reader.open(item,all,p.id)}
-  catch(cause){if(!disposed)error.value=(cause as Error).message}finally{opening.value=false}
+  catch(cause){if(!disposed)error.value=errorMessage(cause)}finally{opening.value=false}
 }
 async function turn(value:number){page.value=value;await load();root.value?.scrollIntoView({block:'start'})}
 </script>

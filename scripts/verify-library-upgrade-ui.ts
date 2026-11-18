@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema, SCHEMA_KEY } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_KEY, SCHEMA_VERSION } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { APP_VERSION_KEY } from '../electron/services/library-snapshots.ts'
 import { seedImageLibrary } from './helpers/image-library-fixture.ts'
@@ -35,7 +35,7 @@ try {
   await page.evaluate(() => { location.hash = '/settings?tab=data' })
   await page.getByRole('button', { name: '创建数据库快照', exact: true }).waitFor()
   const before = await page.evaluate(() => window.baoyi.data.snapshotInfo())
-  assert.equal(before.version, version); assert.equal(before.schema, 13); assert.equal(before.dataDirectory, profile); assert.equal(before.inventory.total, 1)
+  assert.equal(before.version, version); assert.equal(before.schema, SCHEMA_VERSION); assert.equal(before.dataDirectory, profile); assert.equal(before.inventory.total, 1)
   const copy = new DatabaseSync(path.join(before.inventory.directory, before.inventory.snapshots[0].file), { readOnly: true })
   try { assert.equal(copy.prepare('SELECT value FROM settings WHERE key=?').get(SCHEMA_KEY)!.value, String(sourceSchema)); assert.ok(copy.prepare("SELECT id FROM resource WHERE id='fixture-0'").get()); assert.equal(!!copy.prepare("SELECT 1 FROM sqlite_master WHERE name='image_reader_state'").get(),sourceSchema===12);assert.equal(copy.prepare("SELECT 1 FROM sqlite_master WHERE name='image_collections'").get(),undefined) } finally { copy.close() }
   await page.getByRole('button', { name: '创建数据库快照', exact: true }).click()

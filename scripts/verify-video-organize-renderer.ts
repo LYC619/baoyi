@@ -1,7 +1,7 @@
 /** W7 against actual Vue pages in an isolated browser. All operations are fixtures. */
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { createWorkflowRendererFixture } from './verify-video-workflow-renderer.ts'
+import { createWorkflowRendererFixture } from './helpers/video-renderer.ts'
 
 const extension = String.raw`
 const org = { calls: [], flavor: 'normal', staleNext: false, serial: 0, pickValue: 'E:/Fixture/整理目录', histories: [], holdPreview: false, resolvePreview: null }

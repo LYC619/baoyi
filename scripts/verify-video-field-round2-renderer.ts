@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createWorkflowRendererFixture } from './verify-video-workflow-renderer.ts'
+import { createWorkflowRendererFixture } from './helpers/video-renderer.ts'
 
 const fixture = await createWorkflowRendererFixture(), { page, errors } = fixture
 const evidence = path.resolve(process.argv[2] || 'output/field-test-round2/renderer'); fs.mkdirSync(evidence, { recursive: true })

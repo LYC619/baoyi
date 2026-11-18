@@ -67,7 +67,7 @@ try {
   assert.equal((await page.evaluate(() => window.baoyi.image.downloadOptions())).concurrency, 3)
   await assert.rejects(page.evaluate(() => window.baoyi.image.downloadOptions({ concurrency: 4 })), /1.*3/)
   const beta = await enqueue('beta'), gamma = await enqueue('gamma')
-  const article = (id: string) => page.locator(`.image-download-list article[data-job-id="${id}"]`)
+  const article = (id: string) => page.locator(`.comic-downloads article[data-job-id="${id}"]`)
   await article(gamma.id).getByRole('button', { name: '上移任务', exact: true }).click()
   await waitJobs(jobs => jobs.find(j => j.id === gamma.id)?.queuePosition === 1)
   for (const id of [gamma.id, beta.id, alpha.id]) {

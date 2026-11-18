@@ -1,3 +1,4 @@
+import type { JobLogEntry } from './comic-ingest'
 export type ImageType = 'photo' | 'comic' | 'misc'
 export type ImageReadMode = 'single' | 'double' | 'scroll'
 export interface ImagePreferences { mode: ImageReadMode; direction: 'ltr' | 'rtl'; fit: 'screen' | 'width' | 'original'; coverSingle?: boolean; zoom?: number }
@@ -64,7 +65,7 @@ export interface ImageBatchDownloadResult { enqueued: number; skipped: number; e
 export interface ImageDownloadJob {
   id: string; work: ImageSourceWork; chapters: ImageSourceChapter[]; root: string; groupId: string | null;
   status: 'queued' | 'running' | 'paused' | 'success' | 'failed' | 'cancelled' | 'interrupted';
-  processed: number; total: number; completedChapters: number; current: string; error: string; updatedAt: number; resourceId: string;
+  processed: number; total: number; completedChapters: number; current: string; error: string; createdAt?: number; updatedAt: number; resourceId: string;
   progress?: ImageDownloadProgress;
   queueOrder?: number; queuePosition?: number;
   retryNotBefore?: number;
@@ -107,6 +108,7 @@ export interface ImageApi {
   download(workId: string, chapters: string[], groupId: string | null,root?:string): Promise<ImageDownloadJob | null>;
   downloadBatch(workIds: string[], groupId: string | null,root?:string): Promise<ImageBatchDownloadResult | null>;
   jobs(): Promise<ImageDownloadJob[]>; retryJob(id: string): Promise<void>; cancelJob(id: string): Promise<void>; dismissJob(id: string): Promise<void>;
+  jobLogs(id: string): Promise<JobLogEntry[]>;
   pauseJob(id: string): Promise<void>; resumeJob(id: string): Promise<void>;
   moveJob(id: string, direction: 'up' | 'down'): Promise<void>;
   downloadOptions(value?: ImageDownloadOptions): Promise<ImageDownloadOptions>;

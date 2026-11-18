@@ -5,15 +5,25 @@ import path from 'node:path'
 import http from 'node:http'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
+import { spawnSync } from 'node:child_process'
 import { initSchema } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { createDiscoveryCatalogue } from '../electron/kinds/video/discovery/catalogue.ts'
 import { pngImage } from './helpers/test-images.ts'
+import { locateFfmpeg } from '../electron/kinds/video/download/ffmpeg.ts'
 const require = createRequire(import.meta.url)
 const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
 const output = path.resolve('output/discovery-ui'); fs.mkdirSync(output, { recursive: true })
 const profile = fs.mkdtempSync(path.join(output, 'profile-')), mediaRoot = path.join(profile, 'videos'); fs.mkdirSync(mediaRoot)
-let video = Buffer.alloc(0)
+// A hidden desktop does not reliably produce canvas capture frames.
+const ffmpeg = locateFfmpeg('')
+assert.ok(ffmpeg, 'A real local FFmpeg executable is required')
+const videoFile = path.join(profile, 'source.webm')
+const encoded = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin',
+  '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=15', '-t', '2', '-c:v', 'libvpx', videoFile],
+{ encoding: 'utf8', windowsHide: true, timeout: 30000 })
+assert.equal(encoded.status, 0, encoded.error?.message || encoded.stderr)
+const video = fs.readFileSync(videoFile)
 const hits: string[] = [], posters = new Map<string, Buffer>()
 const server = http.createServer((request, response) => {
   hits.push(request.url || '/')
@@ -63,12 +73,6 @@ try {
   await page.waitForFunction(() => !!(window as any).baoyi)
   const generated = await page.evaluate(async () => {
     const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180
-    const context = canvas.getContext('2d')!, recorder = new MediaRecorder(canvas.captureStream(15), { mimeType: 'video/webm;codecs=vp8' })
-    const chunks: Blob[] = []
-    const recorded = new Promise<number[]>(resolve => { recorder.ondataavailable = event => chunks.push(event.data); recorder.onstop = async () => resolve([...new Uint8Array(await new Blob(chunks).arrayBuffer())]) })
-    recorder.start()
-    for (let i = 0; i < 20; i++) { context.fillStyle = `hsl(${160 + i * 3},35%,25%)`; context.fillRect(0, 0, 320, 180); context.fillStyle = '#fff'; context.font = '20px sans-serif'; context.fillText('Local media test ' + i, 55, 95); await new Promise(resolve => setTimeout(resolve, 50)) }
-    recorder.stop(); const bytes = await recorded
     const images = Array.from({ length: 12 }, (_, i) => {
       canvas.width = 400; canvas.height = 600
       const ctx = canvas.getContext('2d')!, hue = [158, 210, 35, 192, 98, 20][i % 6]
@@ -79,9 +83,9 @@ try {
       ctx.font = '15px sans-serif'; ctx.fillText('A LOCAL SCREENING COLLECTION', 32, 520)
       return canvas.toDataURL('image/png').split(',')[1]
     })
-    return { bytes, images }
+    return images
   })
-  video = Buffer.from(generated.bytes); generated.images.forEach((image: string, i: number) => posters.set('/poster/' + i, Buffer.from(image, 'base64')))
+  generated.forEach((image: string, i: number) => posters.set('/poster/' + i, Buffer.from(image, 'base64')))
   await page.evaluate(() => { location.hash = '/video' })
   await page.getByRole('button', { name: '找视频', exact: true }).click()
   await page.getByRole('button', { name: /开放影像/ }).click()

@@ -32,8 +32,10 @@ function serviceFixture() {
   const load = createRendererLoader({
     'node:fs': { ...io, default: io }, 'node:path': { ...path, default: path },
     electron: { app: { getPath: () => root }, net: {}, shell: {} },
-    '../../services/database.ts': { getDb: () => db, getSettings: () => ({ hide_hentai: false, ai: {}, search: {}, tmdb: {} }),
-      listCategories: () => [], tagPool: () => [], saveIdentifyLog: () => {}, postersDir: () => path.join(root, 'posters') },
+    '../../services/database.ts': { getDb: () => db, postersDir: () => path.join(root, 'posters') },
+    '../../services/settings-store.ts': { getSettings: () => ({ hide_hentai: false, ai: {}, search: {}, tmdb: {} }) },
+    '../../services/taxonomy-store.ts': { listCategories: () => [], tagPool: () => [] },
+    '../../services/identify-records.ts': { saveIdentifyLog: () => {} },
     './db.ts': videoDb, './tmdb.ts': {}, './hentai/hanime.ts': {}, './mediainfo.ts': {}, '../../services/searchService.ts': {}, './tools.ts': {}, '../../services/agent/loop.ts': {}
   }, { Buffer, URL, AbortController, AbortSignal, setTimeout, clearTimeout })
   const service = load('electron/kinds/video/service.ts') as typeof import('../electron/kinds/video/service.ts')
@@ -105,22 +107,6 @@ await test('multiple video qualities count as one episode and poster-only entrie
     ] })
     const [item] = await f.service.listVideoItems()
     assert.equal(item.available_files, 2); assert.equal(item.episode_total, 1); assert.equal(item.episode_present, 1)
-  } finally { f.db.close() }
-})
-
-await test('unchanged artwork is cached and removing its cache regenerates it asynchronously', async () => {
-  const f = serviceFixture()
-  try {
-    const id = f.work('Artwork', [f.file('Artwork.mp4')]), source = f.file('Library/poster.png')
-    f.db.prepare('UPDATE video_meta SET poster_path=? WHERE resource_id=?').run(source, id)
-    const [first] = await f.service.listVideoItems(), [second] = await f.service.listVideoItems()
-    assert.notEqual(first.poster_path, source); assert.equal(first.poster_path, second.poster_path)
-    assert.equal(f.imageReads.filter(file => file === source).length, 1)
-    assert.ok(!second.pending_reasons?.includes('poster')); assert.equal(f.syncReads(), 0)
-    fs.unlinkSync(second.poster_path)
-    const [third] = await f.service.listVideoItems()
-    assert.equal(third.poster_path, second.poster_path); assert.ok(fs.existsSync(third.poster_path))
-    assert.equal(f.imageReads.filter(file => file === source).length, 2)
   } finally { f.db.close() }
 })
 

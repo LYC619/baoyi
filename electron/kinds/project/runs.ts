@@ -23,12 +23,13 @@ export class ProjectRuns {
     await fs.mkdir(this.options.directory,{recursive:true})
     for(const file of await fs.readdir(this.options.directory,{withFileTypes:true})){
       if(!file.isDirectory()||!/^[a-f0-9-]{36}$/.test(file.name))continue
+      let run:ProjectRun
       try{
-        const run=JSON.parse(await fs.readFile(path.join(this.options.directory,file.name,'state.json'),'utf8')) as ProjectRun
+        run=JSON.parse(await fs.readFile(path.join(this.options.directory,file.name,'state.json'),'utf8')) as ProjectRun
         if(run.id!==file.name||typeof run.projectId!=='string'||!Array.isArray(run.lines))continue
-        if(['starting','running','stopping'].includes(run.status)){run.status='interrupted';run.error='上次抱一退出时中断；可核对配置后重跑';run.endedAt=Date.now();run.pid=null;await this.save(run)}
-        this.history.set(run.id,run)
-      }catch{/* An incomplete runtime record grants no authority over old PIDs. */}
+      }catch{continue /* 不完整的运行记录不授予对旧进程的控制权。 */}
+      if(['starting','running','stopping'].includes(run.status)){run.status='interrupted';run.error='上次抱一退出时中断；可核对配置后重跑';run.endedAt=Date.now();run.pid=null;await this.save(run)}
+      this.history.set(run.id,run)
     }
   }
   async list(projectId?:string):Promise<ProjectRun[]>{await this.ready;return [...this.history.values()].filter(r=>!projectId||r.projectId===projectId).sort((a,b)=>b.startedAt-a.startedAt).map(r=>({...r,lines:[...r.lines]}))}
@@ -116,7 +117,7 @@ export class ProjectRuns {
     const runs=await this.list(projectId)
     for(const run of runs.slice(20))if(!this.active.has(run.id)){
       // IDs originate here or from a directory name checked during load.
-      await fs.rm(path.join(this.options.directory,run.id),{recursive:true,force:true}).catch(()=>{})
+      await fs.rm(path.join(this.options.directory,run.id),{recursive:true,force:true}).catch(() => { /* best-effort */ })
       this.history.delete(run.id)
     }
   }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, computed, onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -20,9 +21,12 @@ import ExperienceTimeline from "@/components/personal/ExperienceTimeline.vue";
 import StateCapture from "@/components/personal/StateCapture.vue";
 import SkillCards from "@/components/personal/SkillCards.vue";
 import AssetGrid from "@/components/personal/AssetGrid.vue";
+import AssetReminderDialog from "@/components/personal/AssetReminderDialog.vue";
+import { isReminding, isSnoozed } from '@/utils/personal-assets';
+import { useToast } from '@/composables/useToast';
 import { workspace, plain, kindLabels } from "@/utils/workspace-api";
 import { usePersonalDate, usePersonalView } from "@/composables/usePersonalView";
-import { daysUntil, dueText, filterTodos } from "@/utils/personal-view";
+import { dueText, filterTodos } from "@/utils/personal-view";
 import type { SkillCard } from "@/types/skill-profile";
 import { DEFAULT_MODULE_PREFERENCES } from "@/types/workspace";
 import type { PersonalRecord, PersonalKind } from "@/types/workspace";
@@ -30,7 +34,7 @@ import type { ProjectItem } from "@/types/project";
 import "@/styles/workspace.css";
 async function openAssetUrl(raw: string) {
   try { const input=raw.trim(); const url=new URL(/^[a-z][a-z0-9+.-]*:/i.test(input)?input:'https://'+input); if(!['http:','https:'].includes(url.protocol))throw new Error('管理入口仅支持 HTTP 或 HTTPS 链接'); await window.baoyi.app.openUrl(url.href) }
-  catch(cause){error.value=(cause as Error).message}
+  catch(cause){error.value=errorMessage(cause)}
 }
 const quickTodo = ref(""), quickDue = ref("");
 const view = usePersonalView('home', {todoView:'',todoPreference:'',todoQuery:'',stateQuery:''});
@@ -102,7 +106,8 @@ const activeMetric = computed(
   () =>
     list("metric").find((r) => r.id === metricId.value) || list("metric")[0],
 );
-const dueAssets = computed(() => list('asset').filter(r => { const days=daysUntil(r.data.expiresOn,today.value); return days !== null && days <= preferences.value.remindDays }).sort((a,b)=>String(a.data.expiresOn).localeCompare(String(b.data.expiresOn))));
+const dueAssets = computed(() => list('asset').filter(r => isReminding(r, preferences.value.remindDays, today.value)).sort((a,b)=>String(a.data.expiresOn).localeCompare(String(b.data.expiresOn))));
+const assetDialog = ref<'renew' | 'snooze' | null>(null);
 const dueLabel = (r: PersonalRecord) => dueText(r.data.expiresOn,today.value);
 let revision = 0;
 async function load() {
@@ -113,7 +118,7 @@ async function load() {
   error.value=''; warning.value='';
   const [prefs,personal,overview,project,skills] = result;
   if(personal.status === 'fulfilled') records.value=personal.value;
-  else error.value='个人记录读取失败：' + String(personal.reason?.message || personal.reason);
+  else error.value='个人记录读取失败：' + errorMessage(personal.reason);
   if(prefs.status === 'fulfilled') {
     const nextPreference=String(prefs.value.showCompleted);
     // A changed default updates general views, while explicit date/completed filters stay selected.
@@ -158,7 +163,8 @@ async function action(fn: () => Promise<unknown>) {
     await fn();
     await load();
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = errorMessage(e);
+    useToast().error(error.value);
   } finally {
     busy.value = false;
   }
@@ -510,6 +516,8 @@ function saved(record: PersonalRecord) {
             </button>
           </header>
           <dl class="asset-facts"><div><dt>类别 / 提供方</dt><dd>{{ selected.data.category || '其他' }} · {{ selected.data.provider || '未填写' }}</dd></div><div><dt>费用 / 周期</dt><dd>{{ typeof selected.data.cost === 'number' ? selected.data.cost + ' ' + (selected.data.currency || '') : '费用未填写' }} · {{ ({monthly:'每月',yearly:'每年',once:'一次性',other:'其他周期'} as Record<string,string>)[String(selected.data.cycle)] || '未设置周期' }}</dd></div><div><dt>到期</dt><dd>{{ selected.data.expiresOn || '未设到期日' }} <small>{{ selected.data.expiresOn ? dueLabel(selected) : '' }}</small></dd></div></dl>
+          <div class="asset-reminder-actions"><button class="ws-button" :disabled="busy" @click="assetDialog = 'renew'">已续费</button><button v-if="isSnoozed(selected, today)" class="ws-button" :disabled="busy" @click="action(() => workspace.personal.snooze(selected!.id, null))">取消暂缓</button><button v-else class="ws-button" :disabled="busy" @click="assetDialog = 'snooze'">暂缓提醒</button><small v-if="isSnoozed(selected, today)" class="ws-muted">已暂缓至 {{ selected.data.snoozedUntil }}</small></div>
+          <section v-if="selected.data.renewals?.length" class="asset-renewals"><h3>续费记录</h3><ul><li v-for="(renewal, index) in [...selected.data.renewals].reverse()" :key="index"><time>{{ renewal.on }}</time><span>{{ renewal.from || '未设到期日' }} → {{ renewal.to }}</span><span>{{ renewal.cost === undefined ? '费用未填写' : renewal.cost + ' ' + (renewal.currency || '') }}</span></li></ul></section>
           <p class="ws-pre">{{ selected.body || '尚未补充用途或备注' }}</p>
           <button v-if="selected.data.url" class="ws-button" @click="openAssetUrl(String(selected.data.url))">管理入口</button><ResourceLinks
             owner="asset"
@@ -534,6 +542,7 @@ function saved(record: PersonalRecord) {
         @close="editing = false"
         @saved="saved"
       />
+      <AssetReminderDialog v-if="assetDialog && selected?.kind === 'asset'" :key="selected.id + ':' + assetDialog" :record="selected" :mode="assetDialog" :today="today" @close="assetDialog = null" @saved="saved" />
     </section>
     <PersonalAssistant ref="assistant" />
   </main>
@@ -544,6 +553,8 @@ function saved(record: PersonalRecord) {
 .personal-focus strong { font-size:28px; color:var(--accent); font-weight:600; }
 .personal-focus small { color:var(--text-sub); }
 .asset-detail > .ws-section-head { margin-top:20px; }
+.asset-reminder-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin:18px 0; }
+.asset-renewals { margin:24px 0; }.asset-renewals h3 { font-size:14px; }.asset-renewals ul { padding:0; list-style:none; }.asset-renewals li { display:flex; flex-wrap:wrap; gap:10px 24px; padding:10px 0; border-bottom:1px solid var(--divider); font-size:12px; }.asset-renewals time { color:var(--text-sub); }
 .asset-facts { display:flex; flex-wrap:wrap; gap:24px; padding:18px 0; border-block:1px solid var(--divider); }
 .asset-facts dt { font-size:12px; color:var(--text-sub); margin-bottom:8px; }
 .asset-facts dd { margin:0; overflow-wrap:anywhere; }

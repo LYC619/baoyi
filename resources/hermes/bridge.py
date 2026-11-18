@@ -23,6 +23,8 @@ ACTIVE = None
 ACTIVE_SESSION = ''
 CANCELLED = threading.Event()
 DB = None
+CACHED_AGENT = None
+CACHED_KEY = None
 HOME_DIR = Path(sys.argv[1]).resolve()
 RUNTIME = Path(sys.argv[2]).resolve()
 HOME_DIR.mkdir(parents=True, exist_ok=True)
@@ -84,7 +86,7 @@ def automatic_title(session_id, text):
 
 
 def run_turn(request):
-    global ACTIVE, ACTIVE_SESSION
+    global ACTIVE, ACTIVE_SESSION, CACHED_AGENT, CACHED_KEY
     started = time.monotonic()
     args = request['args']
     session_id = args['sessionId']
@@ -92,12 +94,13 @@ def run_turn(request):
     agent = None
     summary = None
     failure = None
+    workflow = args.get('workflow')
     try:
         from run_agent import AIAgent
         from tools.registry import registry
-        workflow = args.get('workflow')
         if workflow not in (None, 'project_prompt', 'document_insight'):
             raise ValueError('未知限定工作流')
+        light = not workflow and args.get('mode') == 'chat'
         toolset = 'baoyi_' + workflow if workflow else 'baoyi'
         for spec in args['tools']:
             name = spec['name']
@@ -107,15 +110,26 @@ def run_turn(request):
         config = args['config']
         base_url = config['api_url'].strip().rstrip('/').removesuffix('/chat/completions')
         history = DB.get_messages_as_conversation(session_id, include_ancestors=True) if DB.get_session(session_id) and not workflow else []
-        agent = AIAgent(
+        key = json.dumps([session_id, config, workflow, light, args['tools'], args['system']], sort_keys=True, ensure_ascii=False)
+        reused = bool(not workflow and CACHED_AGENT is not None and CACHED_KEY == key)
+        if not reused and CACHED_AGENT is not None:
+            CACHED_AGENT.close()
+            CACHED_AGENT = None
+            CACHED_KEY = None
+        # Host adapter only: upstream Hermes remains unchanged. Simple chat uses
+        # the same streaming/session engine with a bounded prompt and zero tools.
+        class ChatAgent(AIAgent):
+            def _build_system_prompt(self, system_message=None):
+                return args['system']
+        agent = CACHED_AGENT if reused else (ChatAgent if light else AIAgent)(
             model=config['model'], api_key=config['api_key'], base_url=base_url,
             provider='custom', api_mode='chat_completions',
-            enabled_toolsets=[toolset] if workflow else ['baoyi', 'memory', 'todo', 'session_search', 'skills'],
-            skip_memory=bool(workflow),
+            enabled_toolsets=[] if light else [toolset] if workflow else ['baoyi', 'memory', 'todo', 'session_search', 'skills'],
+            skip_memory=bool(workflow) or light,
             quiet_mode=True, skip_context_files=True, skip_background_review=True,
             session_db=DB, session_id=session_id, max_iterations=args.get('maxIterations', 100),
             max_tokens=2200 if workflow == 'document_insight' else None,
-            ephemeral_system_prompt=args['system'], cwd=str(HOME_DIR),
+            ephemeral_system_prompt=None if light else args['system'], cwd=str(HOME_DIR),
             stream_delta_callback=lambda text: event('delta', text=text) if text else None,
             tool_start_callback=lambda call_id, name, arguments: event('tool_start', callId=call_id, name=name, args=arguments),
             tool_complete_callback=lambda call_id, name, arguments, result: event('tool_end', callId=call_id, name=name, args=arguments, result=result),
@@ -125,15 +139,26 @@ def run_turn(request):
         )
         if workflow and agent.valid_tool_names != {spec['name'] for spec in args['tools']}:
             raise RuntimeError('限定工作流的工具范围不一致')
+        if light:
+            if agent.valid_tool_names:
+                raise RuntimeError('轻量会话工具范围不一致')
+            # A prior full turn may have persisted its prompt in the session DB.
+            agent._cached_system_prompt = args['system']
+            agent._cached_system_prompt_static = args['system']
+        elif not reused:
+            # Rebuild the native task prompt when returning from lightweight chat.
+            agent._cached_system_prompt = agent._build_system_prompt()
         if workflow == 'document_insight':
             # Hermes owns retry classification and Retry-After handling. Keep the
             # archive batch to one attempt plus two retries, without its recovery ladder.
             agent._api_max_retries = 3
             agent._auto_recovery_cycles = 0
+        if not workflow:
+            CACHED_AGENT, CACHED_KEY = agent, key
         ACTIVE = agent
         if CANCELLED.is_set():
             raise InterruptedError('任务已停止')
-        event('ready', engine='Hermes v0.22.7', workflow=workflow, tools=sorted(agent.valid_tool_names), memoryEnabled=agent._memory_enabled, elapsedMs=round((time.monotonic()-started)*1000))
+        event('ready', engine='Hermes v0.22.7', workflow=workflow, mode='chat' if light else 'archive', reused=reused, toolSchemaBytes=len(json.dumps(args['tools'],ensure_ascii=False).encode()), tools=sorted(agent.valid_tool_names), memoryEnabled=agent._memory_enabled, elapsedMs=round((time.monotonic()-started)*1000))
         result = agent.run_conversation(args['text'], conversation_history=history, task_id=session_id)
         final_id = agent.session_id
         if not DB.get_session_title(final_id):
@@ -145,14 +170,18 @@ def run_turn(request):
         logging.exception('Hermes turn failed')
         failure = str(exc)
     finally:
-        if agent:
+        if agent and (workflow or failure or CANCELLED.is_set() or summary and (summary.get('failed') or summary.get('interrupted'))):
             agent.close()
+            if CACHED_AGENT is agent:
+                CACHED_AGENT = None
+                CACHED_KEY = None
         ACTIVE = None
         ACTIVE_SESSION = ''
     reply(request['id'], summary, failure)
 
 
 def command(request):
+    global CACHED_AGENT, CACHED_KEY
     args = request.get('args', {})
     method = request['method']
     if method == 'insight_budget':
@@ -195,6 +224,10 @@ def command(request):
         if method == 'memory_edit':
             if ACTIVE_SESSION:
                 raise ValueError('请先停止当前任务，再修改记忆')
+            if CACHED_AGENT is not None:
+                CACHED_AGENT.close()
+                CACHED_AGENT = None
+                CACHED_KEY = None
             target, action = args['target'], args['action']
             if target not in ('memory', 'user') or action not in ('add', 'replace', 'remove'):
                 raise ValueError('记忆操作无效')
@@ -266,6 +299,8 @@ def main():
                 pending['value'] = json.dumps({'error':'应用已关闭'})
                 pending['event'].set()
         executor.shutdown(wait=True, cancel_futures=True)
+        if CACHED_AGENT is not None:
+            CACHED_AGENT.close()
         DB.close()
 
 

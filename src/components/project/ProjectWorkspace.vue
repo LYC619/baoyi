@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { computed,onBeforeUnmount,ref,watch } from 'vue'
 import { ChevronRight,Copy,FileText,Folder,FolderOpen,GitBranch,RefreshCw,Terminal } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
@@ -14,22 +15,22 @@ const scripts=ref<ProjectScript[]>([]),scriptWarnings=ref<string[]>([]),scriptBu
 const currentPage=computed(()=>pages.value[pageIndex.value]),filteredScripts=computed(()=>scripts.value.filter(s=>(s.name+' '+s.command).toLocaleLowerCase().includes(scriptQuery.value.trim().toLocaleLowerCase())))
 const crumbs=computed(()=>directory.value.split(/[\\/]/).filter(Boolean).map((name,i,parts)=>({name,path:parts.slice(0,i+1).join('/')})))
 let overviewRun=0,filesRun=0,textRun=0,scriptsRun=0,queryTimer:ReturnType<typeof setTimeout>|undefined
-async function loadOverview(refresh=false,repoPath?:string){const run=++overviewRun;overviewBusy.value=true;overviewError.value='';try{const value=await api.overview(props.id,{refresh,repoPath});if(run===overviewRun){overview.value=value;repository.value=value.git.repoPath}}catch(e){if(run===overviewRun)overviewError.value=(e as Error).message}finally{if(run===overviewRun)overviewBusy.value=false}}
+async function loadOverview(refresh=false,repoPath?:string){const run=++overviewRun;overviewBusy.value=true;overviewError.value='';try{const value=await api.overview(props.id,{refresh,repoPath});if(run===overviewRun){overview.value=value;repository.value=value.git.repoPath}}catch(e){if(run===overviewRun)overviewError.value=errorMessage(e)}finally{if(run===overviewRun)overviewBusy.value=false}}
 async function loadFiles(more=false){const run=++filesRun,old=listing.value;filesBusy.value=true;filesError.value='';try{
   const result=await api.files(props.id,directory.value,{query:query.value,cursor:more&&old?.next?{...old.next}:undefined})
   if(run===filesRun)listing.value={...result,files:more&&old?[...old.files,...result.files]:result.files}
-}catch(e){if(run===filesRun)filesError.value=(e as Error).message}finally{if(run===filesRun)filesBusy.value=false}}
-async function loadScripts(){const run=++scriptsRun;scriptBusy.value=true;try{const result=await api.scripts(props.id,directory.value);if(run===scriptsRun){scripts.value=result.scripts;scriptWarnings.value=result.warnings}}catch(e){if(run===scriptsRun){scripts.value=[];scriptWarnings.value=[(e as Error).message]}}finally{if(run===scriptsRun)scriptBusy.value=false}}
+}catch(e){if(run===filesRun)filesError.value=errorMessage(e)}finally{if(run===filesRun)filesBusy.value=false}}
+async function loadScripts(){const run=++scriptsRun;scriptBusy.value=true;try{const result=await api.scripts(props.id,directory.value);if(run===scriptsRun){scripts.value=result.scripts;scriptWarnings.value=result.warnings}}catch(e){if(run===scriptsRun){scripts.value=[];scriptWarnings.value=[errorMessage(e)]}}finally{if(run===scriptsRun)scriptBusy.value=false}}
 function navigate(relative:string){clearTimeout(queryTimer);directory.value=relative;query.value='';listing.value=null;selected.value='';pages.value=[];textError.value='';textRun++;textBusy.value=false;scripts.value=[];void loadFiles();void loadScripts()}
 function search(){clearTimeout(queryTimer);queryTimer=setTimeout(()=>void loadFiles(),180)}
 async function preview(relative:string,more=false){const run=++textRun;selected.value=relative;textBusy.value=true;textError.value='';const previous=currentPage.value
   if(!more){pages.value=[];pageIndex.value=0}
   try{const result=await api.readFile(props.id,relative,more&&previous?.next?{...previous.next}:undefined);if(run===textRun){pages.value.push(result);pageIndex.value=pages.value.length-1}}
-  catch(e){if(run===textRun)textError.value=(e as Error).message}finally{if(run===textRun)textBusy.value=false}
+  catch(e){if(run===textRun)textError.value=errorMessage(e)}finally{if(run===textRun)textBusy.value=false}
 }
 function nextPage(){if(pageIndex.value<pages.value.length-1)pageIndex.value++;else void preview(selected.value,true)}
-async function open(relative:string){if(launchBusy.value)return;launchBusy.value=true;try{await api.openFile(props.id,relative)}catch(e){toastError((e as Error).message)}finally{launchBusy.value=false}}
-async function terminal(){if(launchBusy.value)return;launchBusy.value=true;try{await api.openTerminal(props.id,directory.value);success('已在当前目录打开 PowerShell')}catch(e){toastError((e as Error).message)}finally{launchBusy.value=false}}
+async function open(relative:string){if(launchBusy.value)return;launchBusy.value=true;try{await api.openFile(props.id,relative)}catch(e){toastError(errorMessage(e))}finally{launchBusy.value=false}}
+async function terminal(){if(launchBusy.value)return;launchBusy.value=true;try{await api.openTerminal(props.id,directory.value);success('已在当前目录打开 PowerShell')}catch(e){toastError(errorMessage(e))}finally{launchBusy.value=false}}
 async function copy(text:string){try{await window.baoyi.app.copyText(text);success('已复制')}catch{toastError('复制失败，请手动选择文字复制')}}
 watch(()=>[props.id,props.path],()=>{overview.value=null;void loadOverview();navigate('')},{immediate:true})
 onBeforeUnmount(()=>{overviewRun++;filesRun++;textRun++;scriptsRun++;clearTimeout(queryTimer)})

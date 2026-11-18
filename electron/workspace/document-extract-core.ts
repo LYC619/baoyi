@@ -27,6 +27,12 @@ function fragments(text:string,page?:number,start=0,startLine?:number):DocumentF
   return parts
 }
 export async function extractDocumentFile(input:ExtractionRequest,progress:(page:number,total:number)=>void=()=>{}):Promise<DocumentExtraction>{
+  try{return await extractAvailableFile(input,progress)}catch(error){
+    if((error as NodeJS.ErrnoException).code==='ENOENT')throw new Error('未在本地找到该文件，请核对路径后重新读取')
+    throw error
+  }
+}
+async function extractAvailableFile(input:ExtractionRequest,progress:(page:number,total:number)=>void):Promise<DocumentExtraction>{
   const before=await fs.lstat(input.file)
   if(!before.isFile()||before.isSymbolicLink())throw new Error('请选择实际资料文件')
   if(!['pdf','txt','md','markdown'].includes(input.format))throw new Error('此格式暂不支持精读；可继续使用外部应用阅读')

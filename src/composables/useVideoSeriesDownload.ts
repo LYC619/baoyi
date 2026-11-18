@@ -6,7 +6,7 @@ import type {
   VideoSeriesEpisodeResult
 } from '@/types'
 import { useTaskCenter } from '@/composables/useTaskCenter'
-import { formatBytes } from '@/utils'
+import { errorMessage, formatBytes } from '@/utils'
 
 interface SeriesDownloadState {
   resourceId: string
@@ -52,10 +52,6 @@ function stateFor(resourceId: string): SeriesDownloadState {
     states.set(resourceId, state)
   }
   return state
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /**

@@ -37,11 +37,10 @@ function harness() {
       openPath: async (path: string) => { shellCalls.push({ action: 'open', path }); return '' },
       showItemInFolder: (path: string) => { shellCalls.push({ action: 'reveal', path }) }
     } },
-    '../../services/database.ts': {
-      getDb: () => db,
-      getSettings: () => ({ ai: { enabled: true, api_key: 'fixture' }, search: {}, tmdb: {} }),
-      listCategories: () => VIDEO_CATEGORIES, tagPool: () => [], saveIdentifyLog: () => {}, postersDir: () => root
-    },
+    '../../services/database.ts': { getDb: () => db, postersDir: () => root },
+    '../../services/settings-store.ts': { getSettings: () => ({ ai: { enabled: true, api_key: 'fixture' }, search: {}, tmdb: {} }) },
+    '../../services/taxonomy-store.ts': { listCategories: () => VIDEO_CATEGORIES, tagPool: () => [] },
+    '../../services/identify-records.ts': { saveIdentifyLog: () => {} },
     '../../services/searchService.ts': { searchAvailable: () => false },
     './tmdb.ts': { tmdbAvailable: () => false }, './hentai/hanime.ts': {},
     './mediainfo.ts': { readContainerInfo: async () => null },

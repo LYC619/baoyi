@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { ref, computed, onMounted, watch } from 'vue'
 import {
   Plus,
@@ -62,7 +63,7 @@ async function run(action: () => Promise<void>) {
     await action()
     await store.refresh()
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     busy.value = false
   }
@@ -202,7 +203,7 @@ async function generatePreview() {
     })
     if (signature === organizeSignature.value) { organizePreview.value = result; previewSignature.value = signature }
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     organizeLoading.value = false
   }
@@ -223,7 +224,7 @@ async function executeOrganize() {
     await store.refresh()
     await generatePreview()
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     organizeLoading.value = false
   }
@@ -248,10 +249,10 @@ async function undoOrganize(id: string) {
       error.value = res.reason || '撤销未成功'
     }
   } catch (e) {
-    error.value = (e as Error).message
+    error.value = errorMessage(e)
   } finally {
     try { historyList.value = await workspace.documents.organizeHistory() }
-    catch (e) { error.value ||= (e as Error).message }
+    catch (e) { error.value ||= errorMessage(e) }
     finally { busy.value = false }
   }
 }

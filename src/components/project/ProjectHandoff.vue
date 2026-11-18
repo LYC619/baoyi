@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import {onBeforeUnmount,ref,watch} from 'vue'
 import {Copy,Sparkles} from 'lucide-vue-next'
 import ProjectDialog from './ProjectDialog.vue'
@@ -10,13 +11,13 @@ let revision=0,disposed=false
 async function load(automatic=false){
   const run=++revision;loading.value=true;error.value='';preview.value=null
   try{const value=await api.projectHandoffPreview(props.id,automatic?undefined:includeRules.value);if(disposed||run!==revision)return;preview.value=value;includeRules.value=value.includeRules;if(automatic)remember.value=value.remembered;if(automatic&&value.remembered&&value.configured)await generate();return value}
-  catch(e){if(!disposed&&run===revision)error.value=(e as Error).message}
+  catch(e){if(!disposed&&run===revision)error.value=errorMessage(e)}
   finally{if(run===revision)loading.value=false}
 }
 async function generate(){
   if(!preview.value||busy.value)return;busy.value=true;error.value='';notice.value='';adopted.value=false;const run=revision
   try{const value=await api.projectHandoffGenerate({token:preview.value.token,stamp:preview.value.stamp,remember:remember.value});if(!disposed&&run===revision)result.value=value}
-  catch(e){if(!disposed&&run===revision){error.value=(e as Error).message;preview.value=null}}
+  catch(e){if(!disposed&&run===revision){error.value=errorMessage(e);preview.value=null}}
   finally{if(run===revision)busy.value=false}
 }
 async function adjustScope(){
@@ -29,10 +30,10 @@ async function regenerate(){
   // Generation consumes the previous preview token; always obtain a fresh one.
   if(value?.configured)await generate()
 }
-async function copy(text:string){try{await window.baoyi.app.copyText(text);notice.value='已复制，可以继续使用'}catch(e){error.value=(e as Error).message}}
-async function adopt(){if(!result.value)return;try{await api.projectHandoffAdopt(props.id,result.value.contextRevision,result.value.prompt);adopted.value=true;notice.value='已设为关键 Prompt'}catch(e){error.value=(e as Error).message}}
+async function copy(text:string){try{await window.baoyi.app.copyText(text);notice.value='已复制，可以继续使用'}catch(e){error.value=errorMessage(e)}}
+async function adopt(){if(!result.value)return;try{await api.projectHandoffAdopt(props.id,result.value.contextRevision,result.value.prompt);adopted.value=true;notice.value='已设为关键 Prompt'}catch(e){error.value=errorMessage(e)}}
 async function history(){if(!result.value)return;await assistant.show();await assistant.load(result.value.sessionId);emit('close')}
-async function stop(){try{await api.projectHandoffCancel(props.id)}catch(e){error.value=(e as Error).message}}
+async function stop(){try{await api.projectHandoffCancel(props.id)}catch(e){error.value=errorMessage(e)}}
 watch(()=>props.id,()=>{result.value=null;preview.value=null;void load(true)},{immediate:true})
 watch(assistant.privacyRevision,()=>emit('close'))
 onBeforeUnmount(()=>{disposed=true;revision++;if(busy.value)void api.projectHandoffCancel(props.id)})

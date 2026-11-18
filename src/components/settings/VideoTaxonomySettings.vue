@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import { computed, onMounted, ref } from 'vue'
 import { useVideoStore } from '@/stores/video'
 import type { VideoTaxonomy } from '@/types/video-taxonomy'
@@ -17,7 +18,7 @@ async function edit(from: string | null, to: string | null) {
     const count = await window.baoyi.video.editTaxonomy({ hentai: props.hentai, field: props.section, from, to, ...(from === null ? { ids: [...selected.value] } : {}) })
     if ((store.selection.kind === 'tag' || store.selection.kind === 'collection') && store.selection.value === from && store.inHentaiScope === props.hentai) store.select({ kind: 'group', value: 'all' })
     await load(); await store.reload(); message.value = `已更新 ${count} 个作品`; name.value = ''; emit('updated')
-  } catch (cause) { error.value = (cause as Error).message } finally { busy.value = false }
+  } catch (cause) { error.value = errorMessage(cause) } finally { busy.value = false }
 }
 </script>
 <template>

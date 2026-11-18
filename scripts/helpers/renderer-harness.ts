@@ -21,7 +21,7 @@ export function createRendererLoader(mocks: Record<string, unknown>, globals: Re
     cache.set(absolute, module)
     const require = (name: string): unknown => {
       if (name in mocks) return mocks[name]
-      if (name.endsWith('.vue')) return {}
+      if (name.endsWith('.vue') && name !== '@/components/library/LibrarySidebar.vue') return {}
       if (name.startsWith('@/') || name.startsWith('.')) {
         let target = name.startsWith('@/') ? path.resolve('src', name.slice(2)) : path.resolve(path.dirname(absolute), name)
         if (fs.existsSync(target) && fs.statSync(target).isDirectory()) target = path.join(target, 'index.ts')
@@ -30,7 +30,7 @@ export function createRendererLoader(mocks: Record<string, unknown>, globals: Re
       }
       return nodeRequire(name)
     }
-    vm.runInNewContext(compiled, { module, exports: module.exports, require, Error, console, ...globals }, { filename: absolute })
+    vm.runInNewContext(compiled, { module, exports: module.exports, require, Error, AbortController, console, ...globals }, { filename: absolute })
     return module.exports
   }
   return load

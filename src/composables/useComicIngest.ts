@@ -1,16 +1,38 @@
+import { useToast } from '@/composables/useToast'
+import { errorMessage } from '@/utils'
 import {computed,ref,watch} from 'vue'
 import {useSettingsStore} from '@/stores/settings'
 import type {ComicJobView} from '@/types/comic-ingest'
 const jobs=ref<ComicJobView[]>([]),open=ref(false),request=ref(''),recovery=ref<ComicJobView|null>(null),showRecords=ref(false),error=ref('')
 const provider=ref<'pica'|'jm'>('pica')
-try{if(localStorage.getItem('baoyi.comic.source')==='jm')provider.value='jm'}catch{}
-watch(provider,value=>{try{localStorage.setItem('baoyi.comic.source',value)}catch{}})
+try{if(localStorage.getItem('baoyi.comic.source')==='jm')provider.value='jm'}catch { /* 无法读取上次来源时使用哔咔。 */ }
+watch(provider,value=>{try{localStorage.setItem('baoyi.comic.source',value)}catch (cause) { useToast().error(errorMessage(cause)) }})
 let initialized=false,generation=0,timer:ReturnType<typeof setTimeout>|undefined
+let refreshing:Promise<void>|undefined,pending=false
+function reconcile(value:ComicJobView[]){
+  const previous=new Map(jobs.value.map(job=>[job.id,job]))
+  const next=value.map(job=>{
+    const current=previous.get(job.id);if(!current)return job
+    for(const key of Object.keys(job) as Array<keyof ComicJobView>){
+      const before=current[key],after=job[key]
+      if(Array.isArray(before)&&Array.isArray(after)&&before.length===after.length&&before.every((item,index)=>item===after[index]))continue
+      if(before!==after)Object.assign(current,{[key]:after})
+    }
+    return current
+  })
+  if(next.length!==jobs.value.length||next.some((job,index)=>job!==jobs.value[index]))jobs.value=next
+}
 export function useComicIngest(){
   const settings=useSettingsStore(),visible=computed(()=>settings.loaded&&!settings.settings.hide_hentai)
   async function refresh(){
-    const stamp=++generation;if(!visible.value){jobs.value=[];return}
-    try{const value=await window.baoyi.comic.jobs();if(stamp===generation&&visible.value){jobs.value=value;error.value=''}}catch(e){if(stamp===generation)error.value=(e as Error).message}
+    pending=true;if(refreshing)return refreshing
+    refreshing=(async()=>{
+      while(pending){
+        pending=false;const stamp=generation;if(!visible.value){jobs.value=[];continue}
+        try{const value=await window.baoyi.comic.jobs();if(stamp===generation&&visible.value){reconcile(value);error.value=''}}catch(e){if(stamp===generation&&visible.value)error.value=errorMessage(e)}
+      }
+    })().finally(()=>{refreshing=undefined;if(pending)void refresh()})
+    return refreshing
   }
   if(!initialized&&window.baoyi?.comic){
     initialized=true;watch(visible,show=>{generation++;jobs.value=[];open.value=false;request.value='';recovery.value=null;if(show)void refresh()},{immediate:true})

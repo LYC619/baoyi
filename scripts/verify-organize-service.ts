@@ -20,18 +20,18 @@ async function fixture() {
     rows.set(id, row); return row
   }
   const db = {
-    getSettings: () => ({ organize_root: root }), getSoftware: (id: string) => rows.get(id) ?? null,
-    listSoftware: (q: any = {}) => [...rows.values()].filter(r => r.is_archived === (q.group === 'archived')),
-    deleteSoftware: (id: string) => rows.delete(id),
-    updateSoftware: (id: string, patch: any) => Object.assign(rows.get(id), patch),
-    remapPaths: (id: string, from: string, to: string, target: string) => {
+    getSettings: () => ({ organize_root: root }), getSoftware: (_db: unknown, id: string) => rows.get(id) ?? null,
+    listSoftware: (_db: unknown, q: any = {}) => [...rows.values()].filter(r => r.is_archived === (q.group === 'archived')),
+    deleteSoftware: (_db: unknown, id: string) => rows.delete(id),
+    updateSoftware: (_db: unknown, id: string, patch: any) => Object.assign(rows.get(id), patch),
+    remapPaths: (_db: unknown, id: string, from: string, to: string, target: string) => {
       const r = rows.get(id); r.source_dir = rebase(r.source_dir, from, to); r.exe_path = rebase(r.exe_path, from, to); r.link_target = target; return r
     },
-    listCategories: () => categories, upsertCategory: (c: any) => categories.push(c),
-    insertScanned: (files: any[]) => files.map((f, i) => add('new-' + i, path.dirname(f.exe_path))),
-    getSoftwareByPath: (exe: string) => [...rows.values()].find(r => r.exe_path === exe)
+    listCategories: () => categories, upsertCategory: (_db: unknown, c: any) => categories.push(c),
+    insertScanned: (_db: unknown, files: any[]) => files.map((f, i) => add('new-' + i, path.dirname(f.exe_path))),
+    getSoftwareByPath: (_db: unknown, exe: string) => [...rows.values()].find(r => r.exe_path === exe)
   }
-  const load = createRendererLoader({ 'node:fs/promises': { default: fsp }, 'node:path': { default: path }, 'node:fs': { default: fs }, '../../../services/database': db,
+  const load = createRendererLoader({ 'node:fs/promises': { default: fsp }, 'node:path': { default: path }, 'node:fs': { default: fs }, '../../../services/database': { getDb: () => ({}) }, '../db.ts': db, '../../../services/taxonomy-store.ts': db, '../../../services/settings-store.ts': db, '../../../services/organize-plans.ts': db,
     '../../../services/iconExtractor': { extractIcon: async () => '' },
     './refs': { scanRefs: async () => ({}), hasRefs: () => false, describeRefs: () => '' }
   }, { Buffer, process })

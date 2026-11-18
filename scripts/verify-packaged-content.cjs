@@ -6,7 +6,7 @@ const asar = require('@electron/asar')
 
 const root = path.resolve(__dirname, '..')
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
-const directory = path.resolve(process.argv[2] || path.join(root, 'release', pkg.version, 'win-unpacked'))
+const directory = path.dirname(path.resolve(process.argv[2] || path.join(root, 'release', pkg.version, 'win-unpacked', pkg.productName + '.exe')))
 const archive = path.join(directory, 'resources/app.asar')
 const packed = JSON.parse(asar.extractFile(archive, 'package.json').toString('utf8'))
 assert.equal(packed.version, pkg.version)

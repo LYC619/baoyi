@@ -15,7 +15,8 @@ export async function projectWorkbenchSnapshot(db:SqlDb,id:string,signal?:AbortS
   const item=new ProjectLibrary(db).get(id);if(!item)throw new Error('项目不存在')
   const context=new TimelineLibrary(db).context(id)
   let repoPath=''
-  try{const saved=JSON.parse((db.prepare('SELECT value FROM settings WHERE key=?').get('project_repository:'+id) as {value:string})?.value||'null');if(saved?.root===item.path)repoPath=saved.repoPath||''}catch{}
+  const repositoryJson=(db.prepare('SELECT value FROM settings WHERE key=?').get('project_repository:'+id) as {value:string})?.value||'null'
+    try{const saved=JSON.parse(repositoryJson);if(saved?.root===item.path)repoPath=saved.repoPath||''}catch{ /* 无效仓库偏好使用项目根目录。 */ }
   const git=await projectGitCache.read(item.path,{repoPath,signal})
   const launchers=new ProjectLaunchProfiles(db).list(id).map(({name,command,args,cwd,port})=>({name,command,args,cwd,port}))
   return {projectId:id,name:item.name,git,context,launchers,readAt:git.readAt,contextRevision:context.revision,head:git.head,truncated:git.truncated,warnings:git.message?[git.message]:[]}
@@ -50,11 +51,13 @@ export class ProjectHandoffs {
   async preview(id:string,config:AIConfig,includeRules?:boolean):Promise<ProjectHandoffPreview>{
     const item=new ProjectLibrary(this.db).get(id);if(!item)throw new Error('项目不存在')
     let consentSaved:{stamp:string;includeRules:boolean}|null=null
-    try{consentSaved=JSON.parse((this.db.prepare('SELECT value FROM settings WHERE key=?').get('project_prompt_consent:'+id) as {value:string})?.value||'null')}catch{}
+    const consentJson=(this.db.prepare('SELECT value FROM settings WHERE key=?').get('project_prompt_consent:'+id) as {value:string})?.value||'null'
+    try{consentSaved=JSON.parse(consentJson)}catch{ /* 无效授权记录按未授权处理。 */ }
     includeRules=includeRules??consentSaved?.includeRules??false
     const context=new TimelineLibrary(this.db).context(id),warnings:string[]=[]
     let repoPath=''
-    try{const saved=JSON.parse((this.db.prepare('SELECT value FROM settings WHERE key=?').get('project_repository:'+id) as {value:string})?.value||'null');if(saved?.root===item.path)repoPath=saved.repoPath||''}catch{}
+    const repositoryJson=(this.db.prepare('SELECT value FROM settings WHERE key=?').get('project_repository:'+id) as {value:string})?.value||'null'
+    try{const saved=JSON.parse(repositoryJson);if(saved?.root===item.path)repoPath=saved.repoPath||''}catch{ /* 无效仓库偏好使用项目根目录。 */ }
     const git=await projectGitCache.read(item.path,{repoPath})
     // A filename can contain secrets too. Disclose redaction instead of sending the line.
     const lines=git.status.split('\n'),safe=lines.filter(line=>!/(?:api[_-]?key|password|secret|bearer|token)\s*[:=]|sk-[a-z0-9]{16,}/i.test(line))

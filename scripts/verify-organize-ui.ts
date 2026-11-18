@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
 import { initSchema } from '../electron/services/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
+import { stagePending } from '../electron/kinds/software/db.ts'
 
 const require = createRequire(import.meta.url)
 const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'))
@@ -39,6 +40,14 @@ const reinstalled = directory(path.join(root, 'Old', 'ReinstalledTool')); record
 const uninstalled = directory(path.join(root, 'Old', 'UninstalledTool')); record('UninstalledTool', uninstalled); fs.unlinkSync(path.join(uninstalled, 'app.exe'))
 db.prepare("UPDATE software_meta SET is_portable=0, move_risk='risky' WHERE resource_id IN ('ReinstalledTool','UninstalledTool')").run()
 for (let i = 0; i < 18; i++) record('Filler' + i, directory(path.join(root, 'Old', 'Filler' + i)))
+// Fixed recognition results keep this database/UI check independent of an AI service.
+const scanRoot = path.join(run, 'scan-fixture')
+for (const name of ['ScanOne', 'ScanTwo']) {
+  const dir = directory(path.join(scanRoot, name)), exe = path.join(dir, 'app.exe')
+  stagePending(db, { name_zh: name, name_en: '', summary: 'temporary scan fixture', description: '', category: 'Old', tags: [], official_url: '',
+    source_dir: dir, is_portable: true, move_risk: 'safe', launchers: [{ path: exe, label: 'Main', kind: 'main', is_default: true }] },
+  { file_name: 'app.exe', file_description: '', company: '', version: '', file_size: fs.statSync(exe).size, external_active_at: 0 }, '', '')
+}
 db.close()
 
 const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL
@@ -231,6 +240,31 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
     await page.waitForFunction(() => !document.querySelector('.toast-host .toast'))
     await screenshot('organized-narrow')
+    assert.equal(errors.length, 0, errors.join('\n'))
+  })
+  await check('two executable scan, confirmation, detail category edit and removal use the real database', async () => {
+    const scan = await page.evaluate((dir: string) => window.baoyi.scan.run([dir]), scanRoot)
+    assert.equal(scan.found, 2); assert.equal(scan.added, 2)
+    const units = await page.evaluate(() => window.baoyi.scan.units())
+    assert.equal(units.filter((unit: any) => unit.root === scanRoot).length, 2)
+    await page.evaluate(() => { location.hash = '/confirm' })
+    await page.getByRole('button', { name: '全部确认', exact: true }).click()
+    await page.getByRole('heading', { name: '没有待确认的条目', exact: true }).waitFor()
+    const items = (await page.evaluate(() => window.baoyi.software.list())).filter((item: any) => ['ScanOne', 'ScanTwo'].includes(item.name_zh))
+    assert.equal(items.length, 2)
+    for (const item of items) {
+      await page.evaluate((id: string) => { location.hash = '/detail/' + id }, item.id)
+      await page.waitForFunction((name: string) => document.querySelector<HTMLInputElement>('.hero__name')?.value === name && !document.querySelector('.page-enter-active,.page-leave-active'), item.name_zh)
+      const category = page.locator('.hero__row > select'); await category.waitFor()
+      assert.equal(await category.inputValue(), 'Old')
+      await category.selectOption('AI相关')
+      await page.waitForFunction(() => !document.querySelector<HTMLSelectElement>('.hero__row > select')?.disabled)
+      assert.equal((await page.evaluate((id: string) => window.baoyi.software.get(id), item.id)).category, 'AI相关')
+      await page.getByRole('button', { name: '移除', exact: true }).click()
+      await page.waitForFunction(() => !location.hash.startsWith('#/detail/'))
+      assert.equal(await page.evaluate((id: string) => window.baoyi.software.get(id), item.id), null)
+      assert.ok(fs.existsSync(item.exe_path), 'removing a record must preserve the scanned file')
+    }
     assert.equal(errors.length, 0, errors.join('\n'))
   })
   fs.writeFileSync(path.join(run, 'verification.json'), JSON.stringify({ ok: true, runtime, results, errors, profile, root }, null, 2))

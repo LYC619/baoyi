@@ -1,3 +1,10 @@
+if (!process.versions.electron) {
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  const result = require('node:child_process').spawnSync(require('electron'), [__filename], { env, windowsHide: true, encoding: 'utf8' })
+  process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr || '')
+  if (result.error) console.error(result.error)
+  process.exit(result.status === 0 ? 0 : 1)
+}
 const { app, net, session } = require('electron')
 const fs = require('node:fs')
 const os = require('node:os')

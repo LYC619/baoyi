@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createWorkflowRendererFixture } from './verify-video-workflow-renderer.ts'
+import { createWorkflowRendererFixture } from './helpers/video-renderer.ts'
 
 const extension = String.raw`
 work.name_zh = '合集演示'; work.episode_total = 3; work.tags = ['作品标签']; contents.splice(3)

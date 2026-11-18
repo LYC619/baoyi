@@ -14,6 +14,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRefs, watch } fr
 import { useRouter } from 'vue-router'
 import { CheckSquare, CircleAlert, FolderPlus, ImageDown, Link, List, Search, X } from 'lucide-vue-next'
 import AudioLibrary from '@/components/video/AudioLibrary.vue'
+import {useMusic} from '@/composables/useMusic'
+import {useVideoUpdates} from '@/composables/useVideoUpdates'
 import Sidebar from '@/components/video/Sidebar.vue'
 import VideoBulkPanel from '@/components/video/VideoBulkPanel.vue'
 import VideoRemovalDialog from '@/components/video/VideoRemovalDialog.vue'
@@ -37,6 +39,10 @@ import { debounce, errorMessage, shortenPath } from '@/utils'
 import { zhSearchKey } from '@/utils/zh'
 
 const router = useRouter()
+const videoUpdates=useVideoUpdates()
+const music=useMusic()
+const audioView=ref<'cards'|'list'>(localStorage.getItem('baoyi.audio.view')==='cards'?'cards':'list')
+watch(audioView,value=>localStorage.setItem('baoyi.audio.view',value))
 const store = useVideoStore()
 const settings = useSettingsStore()
 // 海报墙格子宽度：拖的时候只改本地值（即时生效），松手才写设置
@@ -69,6 +75,12 @@ const pendingItems = computed(() => visibleItems.value.filter(item => pendingRea
 const shownItems = computed(() => pendingOnly.value ? pendingItems.value.filter(item => issue.value === 'any' || pendingReasons(item).includes(issue.value)) : visibleItems.value)
 const missingPosterIds = computed(() => store.missingPosters.filter(id => visibleItems.value.some(item => item.id === id)))
 const audioScope = computed(() => (store.selection.kind === 'type' && store.selection.value === 'audio') || (store.selection.kind === 'category' && (store.selection.value === '音频' || (shownItems.value.length > 0 && shownItems.value.every(item => item.media_kind === 'audio')))))
+const seriesScope = computed(() => !audioScope.value && (store.inHentaiScope || (store.selection.kind === 'group' && store.selection.value === 'all') || (store.selection.kind === 'type' && store.selection.value === 'series') || (store.selection.kind === 'category' && ['剧集','里番'].includes(store.selection.value))))
+const scopedUpdateRows = computed(() => store.queryPending ? [] : videoUpdates.state.value.rows.filter(row => shownItems.value.some(item => item.id === row.id)))
+const scopedUpdateCount = computed(() => scopedUpdateRows.value.filter(row => row.newEpisodes > 0 || row.missingFiles > 0).length)
+function showUpdateResults(){if(store.queryPending)return;videoUpdates.show(shownItems.value.map(item=>item.id))}
+watch(()=>store.activeKey,()=>{videoUpdates.open.value=false})
+onBeforeUnmount(()=>{videoUpdates.open.value=false})
 const selecting = ref(false)
 const selectedIds = ref<string[]>([])
 const bulkOpen = ref(false)
@@ -283,6 +295,7 @@ function clearKeyword(): void {
 function open(id: string, edit = false): void {
   void router.push({ name: 'video-detail', params: { id }, ...(edit ? { query: { edit: '1' } } : {}) })
 }
+function openAudio(item:VideoItem,episode?:string){void router.push({name:'video-detail',params:{id:item.id},query:episode?{track:episode}:{}})}
 
 function cancelScan(): void {
   try { operation.cancel() }
@@ -384,6 +397,7 @@ const emptyHint = computed(() => {
 
 
 
+          <button v-if="audioScope" class="btn btn--primary" @click="music.open.value=true"><Search :size="15"/>找音乐</button>
           <button v-if="!audioScope" class="btn btn--primary" title="切换来源，浏览海报墙并选择观看或保存" @click="router.push({ name: 'video-discover' })"><Link :size="15" />找视频</button>
           <button v-if="store.inHentaiScope && !privateHidden" class="btn btn--ghost" title="粘贴 Hanime 视频页链接，或到站内挑好再下载" @click="addFromLink">从 Hanime 添加</button>
 
@@ -394,12 +408,16 @@ const emptyHint = computed(() => {
 
 
           <LibraryToolbarMenu label="视图">
+          <template v-if="audioScope && !selecting"><button class="btn btn--subtle" :aria-pressed="audioView==='cards'" @click="audioView='cards'">音频卡片视图</button><button class="btn btn--subtle" :aria-pressed="audioView==='list'" @click="audioView='list'">音频曲目列表</button></template>
           <button v-if="!audioScope || selecting" class="btn btn--subtle" :title="compact ? '海报视图' : '紧凑列表'" :aria-label="compact ? '海报视图' : '紧凑列表'" :aria-pressed="compact" @click="compact = !compact">
             <List :size="16" />
           </button>
-<label>卡片大小<input v-if="!compact && (!audioScope || selecting)" v-model.number="cardSize" class="card-size" type="range" min="110" max="320" step="10" title="卡片大小" aria-label="卡片大小" @change="settings.patch({ video_card_size: cardSize })" /></label>
+<label v-if="audioScope && !selecting ? audioView==='cards' : !compact">卡片大小<input v-model.number="cardSize" class="card-size" type="range" min="110" max="320" step="10" title="卡片大小" aria-label="卡片大小" @change="settings.patch({ video_card_size: cardSize })" /></label>
           </LibraryToolbarMenu>
           <LibraryToolbarMenu label="更多">
+          <button v-if="seriesScope && store.selection.kind==='group' && store.selection.value==='all'" :disabled="videoUpdates.state.value.running" @click="videoUpdates.start()">检查全部系列更新</button>
+          <button v-if="seriesScope" :disabled="store.queryPending || videoUpdates.state.value.running || !(selecting ? selectedWorks : shownItems).length" @click="videoUpdates.start((selecting ? selectedWorks : shownItems).map(item=>item.id))">{{selecting?'检查所选系列更新':'检查当前范围系列更新'}}</button>
+          <button v-if="seriesScope" :disabled="store.queryPending" @click="showUpdateResults">查看当前范围检查结果</button>
           <!-- 都齐了就不出现：一个按下去只会说「无事可做」的按钮不如不在 -->
           <button
             v-if="!audioScope && missingPosterIds.length > 0"
@@ -419,6 +437,7 @@ const emptyHint = computed(() => {
       </header>
 
       <div class="library-summary">
+        <button v-if="seriesScope && scopedUpdateCount" class="btn btn--ghost" @click="showUpdateResults">{{scopedUpdateCount}} 部作品有新集或文件缺失</button>
         <template v-if="selecting">
           <span role="status" title="Shift 点击可连选，仅操作当前结果">已选 {{ selectedWorks.length }} 部作品</span>
 
@@ -453,7 +472,7 @@ const emptyHint = computed(() => {
       </Transition>
 
       <section ref="content" class="home__content" :aria-busy="store.loading">
-        <AudioLibrary v-if="audioScope && !selecting" :items="shownItems" @open="open($event.id)"/><div v-else-if="shownItems.length > 0" :class="compact ? 'list' : 'wall'">
+        <AudioLibrary v-if="audioScope && !selecting" :items="shownItems" :view="audioView" @open="openAudio"/><div v-else-if="shownItems.length > 0" :class="compact ? 'list' : 'wall'">
           <div v-for="v in shownItems" :key="v.id" class="work-group">
             <div class="work-card">
               <VideoCard :item="v" :show-published="store.sort === 'published' || store.sort === 'published-asc'" :status="itemStatus(v)" :recent="recentContent(v)" :selectable="selecting" :locked="store.queryPending || bulkBusy" :selected="selectedIds.includes(v.id)" @select="selectWork" @open="open" @poster-error="store.markPosterMissing" />

@@ -1,3 +1,4 @@
+import { parseJsonArray } from '../../services/json.ts'
 /**
  * 视频条目的落库出口。
  *
@@ -242,7 +243,7 @@ export function videoOwnerForFiles(d: SqlDb, files: string[]): { id: string; pat
     if (row) owners.set(id, row)
   }
   for (const row of d.prepare('SELECT id, path, parts FROM video').all() as Row[]) {
-    if (keys.has(String(row.path).toLowerCase()) || jsonArray<VideoPart>(row.parts).some(part => keys.has(String(part.path).toLowerCase()))) {
+    if (keys.has(String(row.path).toLowerCase()) || parseJsonArray<VideoPart>(row.parts).some(part => keys.has(String(part.path).toLowerCase()))) {
       addOwner(row.id)
     }
   }
@@ -561,20 +562,6 @@ export function videoCategoryOf(d: SqlDb, path: string): string {
 
 type Row = Record<string, any>
 
-/**
- * 库里的 JSON 列坏掉时退回空数组，而不是让整个列表页炸掉。
- * 和 game/db.ts 里那个同名函数同一个理由 —— 一行坏数据不该让整个视频库打不开。
- */
-function jsonArray<T>(raw: unknown): T[] {
-  if (typeof raw !== 'string' || raw.trim() === '') return []
-  try {
-    const v = JSON.parse(raw)
-    return Array.isArray(v) ? (v as T[]) : []
-  } catch {
-    return []
-  }
-}
-
 function rowToVideo(row: Row): VideoItem {
   return {
     id: String(row.id),
@@ -589,7 +576,7 @@ function rowToVideo(row: Row): VideoItem {
     summary: String(row.summary ?? ''),
     description: String(row.description ?? ''),
     category: String(row.category ?? ''),
-    tags: jsonArray<string>(row.tags),
+    tags: parseJsonArray<string>(row.tags),
     official_url: String(row.official_url ?? ''),
     notes: String(row.notes ?? ''),
     is_archived: Number(row.is_archived) === 1,
@@ -616,17 +603,17 @@ function rowToVideo(row: Row): VideoItem {
     video_codec: String(row.video_codec ?? ''),
     source: String(row.source ?? ''),
     release_group: String(row.release_group ?? ''),
-    audio_tracks: jsonArray<MediaTrack>(row.audio_tracks),
-    subtitle_tracks: jsonArray<MediaTrack>(row.subtitle_tracks),
-    parts: jsonArray<VideoPart>(row.parts),
-    linked_files: jsonArray<LinkedFile>(row.linked_files),
+    audio_tracks: parseJsonArray<MediaTrack>(row.audio_tracks),
+    subtitle_tracks: parseJsonArray<MediaTrack>(row.subtitle_tracks),
+    parts: parseJsonArray<VideoPart>(row.parts),
+    linked_files: parseJsonArray<LinkedFile>(row.linked_files),
     tmdb_id: String(row.tmdb_id ?? ''),
     imdb_id: String(row.imdb_id ?? ''),
     douban_id: String(row.douban_id ?? ''),
     douban_rating: Number(row.douban_rating) || 0,
     hanime_id: String(row.hanime_id ?? ''),
     original_description: String(row.original_description ?? ''),
-    hanime_tags: jsonArray<string>(row.hanime_tags),
+    hanime_tags: parseJsonArray<string>(row.hanime_tags),
     user_edited: parseUserEdited(row.user_edited),
     episode_total: Number(row.episode_total) || 0,
     episode_watched: Number(row.episode_watched) || 0,
@@ -644,7 +631,7 @@ function rowToEpisode(row: Row): Episode {
     episode: Number(row.episode) || 0,
     title: String(row.title ?? ''),
     display_label: String(row.display_label ?? ''),
-    tags: jsonArray<string>(row.tags),
+    tags: parseJsonArray<string>(row.tags),
     poster_source: String(row.poster_source ?? ""),
     original_title: String(row.original_title ?? ''),
     description: String(row.description ?? ''),

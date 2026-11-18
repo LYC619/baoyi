@@ -1,5 +1,7 @@
 const { spawnSync } = require('node:child_process')
 const path = require('node:path')
+const { assertWindowTestAvailable } = require('./run-tests.cjs')
+assertWindowTestAvailable({ kind: 'ui-dev' })
 const runtime = process.argv[2] ? path.resolve(process.argv[2]) : require('electron')
 const binding = process.argv[3] ? path.resolve(process.argv[3]) : require.resolve('better-sqlite3')
 const source = `const Database=require(${JSON.stringify(binding)});const db=new Database(':memory:');db.exec('CREATE TABLE sample(value TEXT)');db.prepare('INSERT INTO sample VALUES(?)').run('原生模块验证');if(db.prepare('SELECT value FROM sample').get().value!=='原生模块验证')throw Error('SQLite roundtrip failed');db.close();console.log('PASS Electron '+process.versions.electron+' / SQLite N-API '+process.versions.napi)`

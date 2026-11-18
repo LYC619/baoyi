@@ -1,12 +1,14 @@
+import { errorMessage } from '@/utils'
+import { useToast } from '@/composables/useToast'
 import { reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
 export function usePersonalView<T extends Record<string, string>>(key: string, defaults: T): T {
   let stored: Record<string, unknown> = {}
-  try { stored = JSON.parse(sessionStorage.getItem('personal-view-' + key) || '{}') || {} } catch { /* optional view state */ }
+  try { stored = JSON.parse(sessionStorage.getItem('personal-view-' + key) || '{}') || {} } catch { /* 偏好缺失或无法解析时使用当前默认视图。 */ }
   const values = { ...defaults }
   for (const field of Object.keys(defaults)) if (typeof stored[field] === 'string' && (stored[field] as string).length < 2000) values[field as keyof T] = stored[field] as T[keyof T]
   const state = reactive(values) as T
-  watch(state, () => { try { sessionStorage.setItem('personal-view-' + key, JSON.stringify(state)) } catch { /* storage may be full */ } }, { deep:true })
+  watch(state, () => { try { sessionStorage.setItem('personal-view-' + key, JSON.stringify(state)) } catch (cause) { useToast().error(errorMessage(cause)) } }, { deep:true })
   return state
 }
 

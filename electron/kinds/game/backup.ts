@@ -17,11 +17,12 @@
  * 整套备份就只能在应用跑起来之后才验证得了。而这是最不该靠手点来验证的一段。
  */
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { Stats } from 'node:fs'
-import type { SaveBackup, SaveBackupResult, SaveRestoreResult } from '../../../src/types'
+import type { SaveBackup, SaveBackupResult, SaveRestoreResult, SaveRestorePreview } from '../../../src/types'
 import type { SqlDb } from '../../services/schema.ts'
 import {
   exists,
@@ -208,7 +209,7 @@ async function shapeOf(backupDir: string, savePath: string): Promise<SaveShape> 
  * 凭空多出一个 backup.json，轻则用户困惑，重则某些游戏会把它当成损坏的存档。
  */
 async function writeManifest(dir: string, m: Manifest): Promise<void> {
-  await fsp.writeFile(path.join(dir, MANIFEST), JSON.stringify(m, null, 2), 'utf-8').catch(() => {
+  await fsp.writeFile(path.join(dir, MANIFEST), JSON.stringify(m, null, 2), 'utf-8').catch(() => { // best-effort
     /* 说明文件写不进去不该让备份算失败 —— 拷贝本身已经校验过了 */
   })
 }
@@ -225,12 +226,19 @@ async function verifyFile(from: string, to: string, expected: number): Promise<s
 
 /** 同一秒里备第二次时给目录名让个位，绝不合并进已有的备份目录 */
 async function freeDir(base: string): Promise<string> {
-  if (!(await exists(base))) return base
-  for (let i = 2; i < 100; i++) {
-    const candidate = `${base}-${i}`
-    if (!(await exists(candidate))) return candidate
+  await fsp.mkdir(path.dirname(base),{recursive:true})
+  for (let i = 1; i < 100; i++) {
+    const candidate = i===1?base:`${base}-${i}`
+    try { await fsp.mkdir(candidate); return candidate }
+    catch(e:any){if(e.code!=='EEXIST')throw e}
   }
   return ''
+}
+
+export async function backupScope(target:string):Promise<{path:string;files:number;bytes:number}> {
+  const stat=await fsp.stat(target)
+  const summary=stat.isDirectory()?tallyTree(await walkTree(target)):{files:1,bytes:stat.size}
+  return {path:target,...summary}
 }
 
 export interface BackupOptions {
@@ -240,6 +248,66 @@ export interface BackupOptions {
   note?: string
   /** 覆盖时间戳，只有自检需要 */
   now?: number
+  target?: string
+  expected?: string
+}
+
+/** Hash actual bytes: equal file sizes do not imply equal save progress. */
+async function saveSnapshot(target: string) {
+  let stat: Stats
+  try { stat = await fsp.lstat(target) } catch (e: any) {
+    if (e.code === 'ENOENT') return { shape: 'missing', entries: [] as Array<[string,string]>, bytes: 0 }
+    throw e
+  }
+  if (stat.isSymbolicLink()) throw new Error(`存档含链接，请先选择实际位置：${target}`)
+  const listing = stat.isDirectory() ? await walkTree(target) : new Map([['', stat.size]])
+  const entries: Array<[string,string]> = []
+  let bytes = 0
+  for (const [rel, size] of [...listing].sort(([a],[b])=>a.localeCompare(b))) {
+    if (size < 0) throw new Error(`存档含链接，请先移出链接再预览：${rel}`)
+    const hash = createHash('sha256')
+    for await (const chunk of createReadStream(stat.isDirectory()?path.join(target,rel):target)) hash.update(chunk)
+    entries.push([rel,hash.digest('hex')]); bytes += size
+  }
+  return { shape: stat.isDirectory()?'dir':'file', entries, bytes }
+}
+
+async function restoreOrigin(backup: SaveBackup, target: string) {
+  const payload = path.join(backup.backup_dir, PAYLOAD)
+  if (await shapeOf(backup.backup_dir, backup.save_path) === 'dir') return payload
+  const inner = path.join(payload, path.basename(target))
+  const origin = await exists(inner) ? inner : await soleFile(payload)
+  if (!origin) throw new Error('单文件备份载荷缺失或含多份文件，请先核对备份')
+  return origin
+}
+
+export async function previewRestore(d: SqlDb, id: string, opts: BackupOptions): Promise<SaveRestorePreview> {
+  const backup = getBackup(d,id)
+  if (!backup) throw new Error('找不到这条备份记录')
+  const requested = opts.target ?? backup.save_path
+  const blocked = restoreBlocked(requested,opts.backupRoot)
+  if (blocked) throw new Error(blocked)
+  const target = path.resolve(requested)
+  const backupGuard = backupBlocked(target,opts.backupRoot)
+  if(backupGuard)throw new Error(backupGuard)
+  let ancestor=target
+  while(true){
+    try{
+      const resolved=await fsp.realpath(ancestor)
+      if(path.resolve(resolved).toLowerCase()!==path.resolve(ancestor).toLowerCase())throw new Error('还原路径经过目录链接，请选择实际存档位置')
+      break
+    }catch(e:any){if(e.code!=='ENOENT')throw e;const parent=path.dirname(ancestor);if(parent===ancestor)throw e;ancestor=parent}
+  }
+  if (nestedInside(target,backup.backup_dir)||nestedInside(backup.backup_dir,target)) throw new Error('还原目标与备份载荷重叠，已拒绝')
+  const origin = await restoreOrigin(backup,target)
+  const [before,after] = await Promise.all([saveSnapshot(target),saveSnapshot(origin)])
+  if (after.shape==='missing'||!after.entries.length) throw new Error('备份载荷缺失或为空')
+  if (before.shape!=='missing'&&before.shape!==after.shape) throw new Error('当前目标与备份的文件/目录类型不同，请选择正确的存档目标')
+  const old = new Map(before.entries), next = new Map(after.entries)
+  const added = [...next.keys()].filter(k=>!old.has(k)), changed = [...next.keys()].filter(k=>old.has(k)&&old.get(k)!==next.get(k)), removed = [...old.keys()].filter(k=>!next.has(k))
+  const expected = createHash('sha256').update(JSON.stringify({backup,target,origin,before,after})).digest('hex')
+  const names = (list:string[])=>list.map(k=>k||path.basename(target))
+  return {target,expected,added:names(added),changed:names(changed),removed:names(removed),unchanged:next.size-added.length-changed.length,files:next.size,bytes:after.bytes}
 }
 
 /**
@@ -276,7 +344,7 @@ export async function createBackup(
 
   const shape: SaveShape = stat.isDirectory() ? 'dir' : 'file'
   if (shape === 'dir') {
-    const src = await walkTree(source).catch(() => null)
+    const src = await walkTree(source).catch(() => { return null /* 无法读取的存档不会判为有效备份；调用方报告不完整。 */ })
     if (!src) return noBackup(`读不到存档目录：${source}`)
     if (src.size === 0) {
       // 空目录备下来是一份「看起来有、其实没有」的备份，正是这个模块最该避免的东西
@@ -305,7 +373,7 @@ export async function createBackup(
     })
   } catch (err: any) {
     // 半成品必须清掉：留着它，下一次同名备份会被 freeDir 让位，用户则多一个空壳目录
-    await fsp.rm(dir, { recursive: true, force: true }).catch(() => {})
+    await fsp.rm(dir, { recursive: true, force: true }).catch(() => { /* best-effort */ })
     return noBackup(`复制失败：${err?.code ?? err?.message ?? '未知错误'}`)
   }
 
@@ -314,7 +382,7 @@ export async function createBackup(
       ? await verifyCopy(source, landing)
       : await verifyFile(source, landing, stat.size)
   if (bad) {
-    await fsp.rm(dir, { recursive: true, force: true }).catch(() => {})
+    await fsp.rm(dir, { recursive: true, force: true }).catch(() => { /* best-effort */ })
     return noBackup(bad)
   }
 
@@ -478,7 +546,11 @@ export async function restoreBackup(
     )
   }
 
-  const target = path.resolve(backup.save_path)
+  const target = path.resolve(opts.target ?? backup.save_path)
+  if (opts.expected) {
+    const current = await previewRestore(d,id,opts)
+    if (current.expected !== opts.expected) return fail('存档或备份在预览后有变化，请重新预览')
+  }
   const blocked = restoreBlocked(target, opts.backupRoot)
   if (blocked) return fail(blocked)
   // 备份载荷在目标里面：改名换位会把备份自己一起搬走
@@ -547,7 +619,7 @@ export async function restoreBackup(
       verbatimSymlinks: true
     })
   } catch (err: any) {
-    await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
+    await fsp.rm(staging, { recursive: true, force: true }).catch(() => { /* best-effort */ })
     return { ok: false, message: `复制备份失败：${err?.code ?? err?.message ?? '未知错误'}`, safety }
   }
 
@@ -556,8 +628,20 @@ export async function restoreBackup(
       ? await verifyCopy(origin, staging)
       : await verifyFile(origin, staging, (await fsp.stat(origin)).size)
   if (bad) {
-    await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
+    await fsp.rm(staging, { recursive: true, force: true }).catch(() => { /* best-effort */ })
     return { ok: false, message: `${bad}（原存档一个字没动）`, safety }
+  }
+
+  if (opts.expected) {
+    try {
+      const current = await previewRestore(d,id,opts)
+      if (current.expected !== opts.expected) throw new Error('存档或备份在复制期间有变化，请重新预览')
+      const copied = await saveSnapshot(staging), original = await saveSnapshot(origin)
+      if (JSON.stringify(copied) !== JSON.stringify(original)) throw new Error('复制内容校验失败')
+    } catch (err: any) {
+      await fsp.rm(staging,{recursive:true,force:true}).catch(()=>{}) // best-effort
+      return {ok:false,message:err.message,safety}
+    }
   }
 
   /* -------- 第 5 步：三次改名 -------- */
@@ -566,7 +650,7 @@ export async function restoreBackup(
     try {
       await fsp.rename(target, replaced)
     } catch (err: any) {
-      await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
+      await fsp.rm(staging, { recursive: true, force: true }).catch(() => { /* best-effort */ })
       return {
         ok: false,
         message:
@@ -581,8 +665,8 @@ export async function restoreBackup(
     await fsp.rename(staging, target)
   } catch (err: any) {
     // 换位失败：把旧的搬回来，回到操作前的状态
-    if (hadOld) await fsp.rename(replaced, target).catch(() => {})
-    await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
+    if (hadOld) await fsp.rename(replaced, target).catch(() => { /* best-effort */ })
+    await fsp.rm(staging, { recursive: true, force: true }).catch(() => { /* best-effort */ })
     return { ok: false, message: `就位失败：${err?.code ?? err?.message ?? '未知错误'}`, safety }
   }
 
@@ -622,7 +706,7 @@ async function hasContent(target: string): Promise<boolean> {
     return false
   }
   if (!stat.isDirectory()) return stat.size > 0
-  const listing = await walkTree(target).catch(() => null)
+  const listing = await walkTree(target).catch(() => { return null /* 无法读取的存档不会判为有效备份；调用方报告不完整。 */ })
   return listing !== null && listing.size > 0
 }
 

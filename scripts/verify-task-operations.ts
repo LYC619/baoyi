@@ -58,13 +58,14 @@ function harness() {
     'vue-router': { useRouter: () => ({ push: () => {}, replace: () => {}, currentRoute: Vue.ref({ query: {} }) }) },
     '@/composables/useModules': { recallScroll: () => 0, rememberScroll: () => {} },
     '@/composables/useToast': { useToast: () => ({ toast: (m: string) => notices.push(m), error: (m: string) => notices.push(m), success: (m: string) => notices.push(m) }) },
+    './useToast.ts': { useToast: () => ({ error: (m: string) => notices.push(m) }) },
     '@/stores/game': { useGameStore: () => store },
     '@/stores/video': { useVideoStore: () => store },
     '@/stores/settings': { useSettingsStore: () => ({ settings: { ai: { enabled: true, api_key: 'test' } } }) },
     '@/utils': utils
   }, {
     window: { baoyi, confirm: () => true, addEventListener: () => {}, removeEventListener: () => {} }, console: { info: () => {}, warn: () => {}, error: () => {} },
-    document: { hidden: false, addEventListener: () => {}, removeEventListener: () => {} }, setTimeout, clearTimeout
+    localStorage: { getItem: () => null, setItem() {} }, document: { hidden: false, addEventListener: () => {}, removeEventListener: () => {} }, setTimeout, clearTimeout
   })
   const center = load('src/composables/useTaskCenter.ts').useTaskCenter()
   return {
@@ -288,6 +289,28 @@ await test('video Detail: reidentify creates task and cannot overwrite a newly n
   job.resolve({ id: 'v1', name_zh: '更新后的旧条目' }); await run
   assert.equal(page.item.value.id, 'v2')
   assert.equal(h.latest().status, 'success')
+})
+await test('task history: read, rejected writes and synchronous IPC failures are visible without losing live tasks', async () => {
+  const notices: string[] = []
+  let syncFailure = false
+  const load = createRendererLoader({
+    vue: Vue, '@/utils': utils,
+    './useToast.ts': { useToast: () => ({ error: (text: string) => notices.push(text) }) }
+  }, {
+    window: { baoyi: { tasks: {
+      list: async () => { throw new Error('读取历史失败') },
+      save: () => { if (syncFailure) throw new Error('发送保存请求失败'); return Promise.reject(new Error('保存历史失败')) }
+    } } }
+  })
+  const center = load('src/composables/useTaskCenter.ts').useTaskCenter()
+  await new Promise(resolve => setTimeout(resolve, 0))
+  const first = center.start('software-scan', '第一项')
+  await new Promise(resolve => setTimeout(resolve, 0))
+  syncFailure = true
+  const second = center.start('software-scan', '第二项')
+  assert.deepEqual(notices, ['读取历史失败', '保存历史失败', '发送保存请求失败'])
+  assert.ok(center.tasks.value.some((task: TaskRecord) => task.id === first))
+  assert.ok(center.tasks.value.some((task: TaskRecord) => task.id === second))
 })
 console.log('Task operations: ' + passed + ' passed / ' + failed + ' failed')
 if (failed) process.exitCode = 1

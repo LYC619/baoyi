@@ -5,7 +5,7 @@ import {execFile} from 'node:child_process'
 import {promisify} from 'node:util'
 import {imageSize} from 'image-size'
 import {frameFfmpeg,generateFrames,frameFingerprint} from '../electron/kinds/video/frame-generator.ts'
-const exec=promisify(execFile),ffmpeg=process.argv[2];assert.ok(ffmpeg)
+const exec=promisify(execFile),ffmpeg=await frameFfmpeg(process.argv[2] || process.env.BAOYI_TEST_FFMPEG || '');assert.ok(ffmpeg)
 const output=path.resolve('output/p1-p2-video-2026-11-06/matrix');await fs.mkdir(output,{recursive:true});const root=await fs.mkdtemp(path.join(output,'run-'))
 const results:any[]=[]
 const cases=[

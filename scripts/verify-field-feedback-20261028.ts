@@ -10,8 +10,6 @@ import { KINDS } from '../electron/kinds/index.ts'
 import { ProjectLibrary } from '../electron/kinds/project/library.ts'
 import { createProjectAgent } from '../electron/kinds/project/agent.ts'
 import { projectAgentTools } from '../electron/workspace/project-agent-tools.ts'
-import { createWorkspaceAgent } from '../electron/workspace/agent.ts'
-import { DocumentLibrary } from '../electron/workspace/documents.ts'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
 import * as Vue from 'vue'
 import { createServer } from 'node:http'
@@ -152,64 +150,13 @@ test('R5：停止信号在扫描前生效，不执行 Git 或目录扫描', asyn
   assert.equal(reads.length, 0)
 })
 
-test('R3：长书名分页响应完整、所有编号可读取，详细长备注和 JSON 转义内容可完整续读', async t => {
-  const { root, db } = await fixture(t), docs = new DocumentLibrary(db), ids: string[] = []
-  for (let index = 0; index < 61; index++) {
-    const file = path.join(root, `book-${index}.txt`); await fs.writeFile(file, '第一章\n样本')
-    const item = await docs.register(file); docs.update(item.id, { name: '书'.repeat(290) + String(index).padStart(3, '0') }); ids.push(item.id)
-  }
-  const notes = '"\\\n备注'.repeat(3000); assert.ok(notes.length <= 20000); docs.update(ids[0], { notes })
-  let task!: (tools: any[]) => Promise<void>
-  const manager = createWorkspaceAgent({ db, config: () => config, run: async options => { await task(options.tools); return { stopReason: 'done', turns: 1, tokens: 0, error: '', text: '完成' } } })
-  t.after(() => manager.dispose())
-  task = async tools => {
-    const tool = tools.find(tool => tool.name === 'read_document_metadata'), seen: string[] = []
-    let args: any = { compact: true }
-    for (let count = 0; count < 100; count++) {
-      const raw = await tool.execute(args); assert.ok(raw.length <= tool.maxOutput, '完整 JSON 必须适配工具输出预算')
-      const page = JSON.parse(raw); seen.push(...page.items.map((item: any) => item.id))
-      if (!page.nextCursor && page.next === null) break
-      args = page.nextCursor ? { cursor: page.nextCursor } : { compact: true, start: page.next }
-    }
-    assert.equal(new Set(seen).size, 61); assert.equal(seen.length, 61)
-    args = { id: ids[0] }; let content = '', direct: any
-    for (let count = 0; count < 100; count++) {
-      const raw = await tool.execute(args); assert.ok(raw.length <= tool.maxOutput)
-      const page = JSON.parse(raw)
-      if (page.format === 'json-fragment') content += page.text
-      else direct = page
-      if (!page.nextCursor && page.next === null) break
-      args = { cursor: page.nextCursor }
-    }
-    assert.equal((content ? JSON.parse(content) : direct).items[0].notes, notes)
-  }
-  const result = await manager.send(manager.create('document', { documentIds: ids }).id, '读取资料')
-  assert.equal(result.status, 'idle', result.error)
-})
-
-test('R3：资料变化时拒绝旧游标，不能按偏移静默漏书', async t => {
-  const { root, db } = await fixture(t), docs = new DocumentLibrary(db), ids: string[] = []
-  for (let index = 0; index < 65; index++) {
-    const file = path.join(root, `short-${index}.txt`); await fs.writeFile(file, '样本'); ids.push((await docs.register(file)).id)
-  }
-  const manager = createWorkspaceAgent({ db, config: () => config, run: async options => {
-    const tool = options.tools.find(tool => tool.name === 'read_document_metadata')!
-    const first = JSON.parse(await tool.execute({ compact: true }))
-    assert.ok(first.nextCursor)
-    docs.update(ids[0], { name: '已更新的书名' })
-    await assert.rejects(tool.execute({ cursor: first.nextCursor }), /变化|失效/)
-    return { stopReason: 'done', turns: 1, tokens: 0, error: '', text: '完成' }
-  } }); t.after(() => manager.dispose())
-  const result = await manager.send(manager.create('document', { documentIds: ids }).id, '读取')
-  assert.equal(result.status, 'idle', result.error)
-})
-
 test('R6：标准网页请求区分验证页、拒绝、限流和服务器错误，不用 Range 代表网页可用', async () => {
   let code = 200, html = '<title>Just a moment</title>', init: RequestInit | undefined
   const load = createRendererLoader({ electron: { session: { fromPartition: () => ({
     setUserAgent: () => {}, setProxy: async () => {}, resolveProxy: async () => 'PROXY fixture:1234',
     fetch: async (_url: string, options: RequestInit) => { init = options; return new Response(html, { status: code, headers: { 'content-type': 'text/html' } }) }
-  }) } }, './database.ts': { getSettings: () => ({ video_online_proxy: 'system://' }) } }, { URL, Response, AbortSignal, TextDecoder, Uint8Array })
+  }) } }, './database.ts': { getDb: () => ({}) },
+    './settings-store.ts': { getSettings: () => ({ video_online_proxy: 'system://' }) } }, { URL, Response, AbortSignal, TextDecoder, Uint8Array })
   const network = load('electron/services/online-network.ts')
   for (const [status, body, outcome] of [[200, html, 'verification_required'], [403, 'Forbidden', 'restricted'], [429, 'Rate limited', 'rate_limited'], [500, 'Error', 'server_error'], [200, '<title>正常页面</title>', 'response_received']] as const) {
     code = status; html = body
@@ -250,29 +197,6 @@ test('R2：多仓库暂停后可显式选择，重建管理器仍使用同一仓
   assert.equal(page.available,true);assert.deepEqual(page.commits,[]);assert.equal(page.next,null)
 })
 
-test('R3：完整本机 HTTP 模型循环保留长名称分页的 JSON 和游标，检查点可恢复',async t=>{
-  const {root,db}=await fixture(t),docs=new DocumentLibrary(db),ids:string[]=[]
-  for(let i=0;i<61;i++){const file=path.join(root,`transport-${i}.txt`);await fs.writeFile(file,'正文');const item=await docs.register(file,'novel');docs.update(item.id,{name:`${i}-`+'长书名'.repeat(95)});ids.push(item.id)}
-  let calls=0;const seen:string[]=[],errors:string[]=[]
-  const server=createServer(async(req,res)=>{try{
-    let raw='';for await(const chunk of req)raw+=chunk
-    const body=JSON.parse(raw);calls++
-    const last=body.messages.at(-1),page=last.role==='tool'?JSON.parse(last.content):null
-    if(page)seen.push(...page.items.map((item:any)=>item.id))
-    const args=page?{cursor:page.nextCursor}:{compact:true}
-    const message=page&&!page.nextCursor?{role:'assistant',content:'列表完整读取'}:{role:'assistant',content:null,tool_calls:[{id:'page-'+calls,type:'function',function:{name:'read_document_metadata',arguments:JSON.stringify(args)}}]}
-    res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message}],usage:{total_tokens:1}}))
-  }catch(error){errors.push(String(error));res.writeHead(400);res.end(String(error))}})
-  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve))
-  t.after(()=>new Promise<void>(resolve=>{server.closeAllConnections();server.close(()=>resolve())}))
-  const manager=createWorkspaceAgent({db,config:()=>({...config,api_url:`http://127.0.0.1:${(server.address() as any).port}`})});t.after(()=>manager.dispose())
-  const session=manager.create('document',{documentIds:ids}),result=await manager.send(session.id,'仅分页查询，不修改分组')
-  assert.equal(result.status,'idle',result.error);assert.deepEqual(errors,[])
-  assert.equal(new Set(seen).size,61);assert.equal(seen.length,61);assert.ok(calls>=3)
-  assert.equal(manager.get(session.id)!.documentProgress!.position,61)
-  assert.equal(manager.get(session.id)!.documentProgress!.nextCursor,null)
-})
-
 test('R2 界面：选择后沿用同一会话继续，失败保留输入并解除忙碌',async()=>{
   const scope=Vue.effectScope(),calls:any[]=[],props=Vue.reactive({session:{id:'paused',workflow:{state:'paused'},repository:{status:'needs_selection',candidates:['app/backend'],message:'待选择',scan:{complete:false,visited:1000,reasons:['directory_limit']}}},busy:false})
   let fail=false
@@ -285,15 +209,6 @@ test('R2 界面：选择后沿用同一会话继续，失败保留输入并解�
     fail=true;state.choice.value='manual/path';await state.continueReview(true)
     assert.match(state.error.value,/不可读/);assert.equal(state.choice.value,'manual/path');assert.equal(state.working.value,false)
   }finally{scope.stop()}
-})
-
-test('R3 界面：继续整理沿用会话，保留尚未发送的草稿',async()=>{
-  const scope=Vue.effectScope(),sent:any[]=[],unmount:Array<()=>void>=[]
-  const load=createRendererLoader({vue:{...Vue,onBeforeUnmount:(fn:()=>void)=>unmount.push(fn)},'vue-router':{useRoute:()=>({}),useRouter:()=>({})}},{window:{baoyi:{workspace:{agent:{sessions:async()=>[],onSession:()=>()=>{},send:async(id:string,text:string)=>{sent.push([id,text]);return {id,status:'idle'}},changes:async()=>[]},documents:{customGroups:async()=>[]}}}}})
-  try{const state=scope.run(()=>load('src/components/workspace/WorkspaceAssistant.vue').default.setup({module:'document'},{expose(){},emit(){}}));await Vue.nextTick()
-    state.session.value={id:'existing',status:'interrupted'};state.draft.value='尚未发送的补充'
-    await state.continueDocuments();assert.equal(sent.length,1);assert.equal(sent[0][0],'existing');assert.match(sent[0][1],/续读/);assert.equal(state.draft.value,'尚未发送的补充')
-  }finally{unmount.forEach(fn=>fn());scope.stop()}
 })
 
 test('R6 界面：未保存配置禁止诊断，检查期间展示状态，HTTP 拒绝不显示成功',async()=>{

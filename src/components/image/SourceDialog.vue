@@ -18,7 +18,7 @@ function keys(event:KeyboardEvent){
   }
 }
 onMounted(async()=>{await nextTick();dialog.value?.querySelector<HTMLButtonElement>('button')?.focus()})
-onBeforeUnmount(()=>{void window.baoyi.comic.cancelBrowse().catch(()=>{});previous?.isConnected&&previous.focus()})
+onBeforeUnmount(()=>{void window.baoyi.comic.cancelBrowse().catch(() => { /* best-effort */ });previous?.isConnected&&previous.focus()})
 </script>
 <template><Teleport to="body"><div class="im-overlay" @click.self="close"><section ref="dialog" class="im-dialog source-hub" role="dialog" aria-modal="true" aria-label="在线漫画" @keydown="keys">
   <header><div><h2>在线漫画</h2><p>浏览来源，选好章节，保存到自己的书架。</p></div><button class="im-icon" aria-label="关闭在线漫画" @click="close"><X :size="20"/></button></header>

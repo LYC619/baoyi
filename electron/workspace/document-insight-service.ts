@@ -3,7 +3,7 @@ import {createReadStream} from 'node:fs'
 import {createHash,randomUUID} from 'node:crypto'
 import type {SqlDb} from '../services/schema.ts'
 import type {AIConfig} from '../../src/types/index.ts'
-import type {DocumentExtraction,DocumentFragment,DocumentInsightContent,DocumentInsightRun,DocumentInsightPreview,DocumentInsightDetail,DocumentInsightPolicy,DocumentInsightRange} from '../../src/types/document-insight.ts'
+import type {DocumentExtraction,DocumentFragment,DocumentInsightContent,DocumentInsightRun,DocumentInsightPreview,DocumentInsightDetail,DocumentInsightRange} from '../../src/types/document-insight.ts'
 import type {ArchiveAssistant} from '../archive/service.ts'
 import type {HermesTool} from '../archive/hermes.ts'
 import {DocumentLibrary} from './documents.ts'
@@ -79,29 +79,6 @@ export class DocumentInsightService {
     }catch(error){this.options.db.exec('ROLLBACK TO insight_cleanup');this.options.db.exec('RELEASE insight_cleanup');throw error}
     this.verified.clear();this.options.changed();return rows.filter(row=>!row.user_edited).length
   }
-  policy():DocumentInsightPolicy{
-    const raw=this.options.db.prepare("SELECT value FROM settings WHERE key='_document_insight_policy'").get() as any
-    const saved=raw?JSON.parse(raw.value):{automatic:false,categories:[],maxChars:48000,provider:''},currentProvider=provider(this.options.config())
-    return {...saved,provider:currentProvider,authorized:saved.provider===currentProvider}
-  }
-  savePolicy(value:DocumentInsightPolicy){
-    this.current();const currentProvider=provider(this.options.config()),categories=new DocumentLibrary(this.options.db).categories()
-    if(value.provider!==currentProvider)throw new Error('模型服务已变化，请重新查看发送范围')
-    if(typeof value.automatic!=='boolean'||!Array.isArray(value.categories)||value.categories.length>100||value.categories.some(id=>!categories.some(category=>category.id===id)))throw new Error('请选择有效分类')
-    if(!Number.isSafeInteger(value.maxChars)||value.maxChars<6000||value.maxChars>48000)throw new Error('读取预算应为 6,000–48,000 字符')
-    if(value.automatic&&!value.categories.length)throw new Error('自动精读需要选择适用分类')
-    const policy={automatic:value.automatic,categories:[...new Set(value.categories)],maxChars:value.maxChars,provider:currentProvider}
-    this.options.db.prepare("INSERT INTO settings(key,value) VALUES('_document_insight_policy',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(policy));return this.policy()
-  }
-  afterImport(ids:string[],explicitProvider?:string){
-    if(explicitProvider==='skip')return ''
-    this.current();const policy=this.policy(),currentProvider=provider(this.options.config()),docs=new DocumentLibrary(this.options.db)
-    if(explicitProvider&&explicitProvider!==currentProvider)return '资料已导入，但模型服务已变化；请重新确认精读范围'
-    const allowed=explicitProvider?ids:policy.automatic&&policy.authorized?ids.filter(id=>policy.categories.includes(docs.require(id).type)):[]
-    if(!allowed.length)return policy.automatic&&!policy.authorized?'资料已导入；模型变化后自动精读暂停，请在设置重新授权':''
-    const selected=allowed.slice(0,20),preview=this.preview(selected);this.start(preview.token)
-    return `已加入 ${selected.length} 份精读任务`+(allowed.length>20?'；超过本批 20 份上限的资料可稍后手动精读':'')
-  }
   private current(){if(this.stopped||!this.options.current())throw new Error('资料库或隐私范围已变化，请重新开始')}
   private row(id:string){const row=this.options.db.prepare('SELECT * FROM document_insight_runs WHERE id=?').get(id) as any;if(!row)throw new Error('精读任务不存在');if(JSON.parse(row.payload).scope!==this.options.scope)throw new Error('此任务在当前范围不可用');return row}
   private view(row:any):DocumentInsightRun{const payload=JSON.parse(row.payload);return {id:row.id,documentId:row.resource_id,name:payload.name,status:row.status,attempt:row.attempt,phase:row.phase,sessionId:row.session_id,createdAt:row.created_at,updatedAt:row.updated_at,error:row.error}}
@@ -114,7 +91,7 @@ export class DocumentInsightService {
   preview(ids:string[],range?:DocumentInsightRange):DocumentInsightPreview{
     this.current();if(!Array.isArray(ids)||!ids.length||ids.length>20||ids.some(id=>typeof id!=='string'))throw new Error('每批请选择 1–20 份资料')
     const config=this.options.config(),docs=new DocumentLibrary(this.options.db),items=[...new Set(ids)].map(id=>docs.require(id))
-    const maxChars=this.policy().maxChars
+    const maxChars=48000
     if(range){
       if(items.length!==1||typeof range!=='object'||Object.keys(range).some(key=>!['fromPage','toPage','start'].includes(key)))throw new Error('指定范围时请选择一份资料')
       if(items[0].format==='pdf'){

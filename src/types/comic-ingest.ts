@@ -14,12 +14,13 @@ export interface ComicIngestJob {
   catalog:ComicCatalog;root:string;directory:string;groupId:string|null;operationId:string;requestId:string;
   status:'queued'|'running'|'paused'|'success'|'failed'|'cancelled'|'interrupted';phase:ComicPhase;
   processed:number;total:number;completedChapters:number;current:string;error:string;errorCode:string;
-  resourceId:string;updatedAt:number;retryNotBefore:number;requiresRevalidation:boolean;
+  resourceId:string;createdAt?:number;updatedAt:number;retryNotBefore:number;requiresRevalidation:boolean;
   adapterVersion:string;catalogFingerprint:string;manifestDigest:string;
 }
 export interface ComicIngestPreview {token:string;catalog:ComicCatalog;directory:string;existingId:string;existingChapters:string[]}
 export type ComicJobView=Omit<ComicIngestJob,'catalog'>
-export interface ComicLogEntry {at:number;status:ComicIngestJob['status'];phase:ComicPhase;processed:number;total:number;completedChapters:number;errorCode:string}
+export interface JobLogEntry {at:number;status:ComicIngestJob['status'];phase:string;processed:number;total:number;completedChapters:number;errorCode:string}
+export interface ComicLogEntry extends JobLogEntry {phase:ComicPhase}
 export interface ComicIngestApi {
   defaults():Promise<{proxy:ComicProxy}>;
   browse(query:ComicBrowseQuery,proxy:ComicProxy):Promise<ComicBrowseResult>;

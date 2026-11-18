@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { errorMessage } from '@/utils'
 import {ref,watch,onBeforeUnmount,computed} from 'vue'
 import {useRouter} from 'vue-router'
 import {useDocumentInsights} from '@/composables/useDocumentInsights'
@@ -8,11 +9,11 @@ const props=defineProps<{id:string;categories:Array<{id:string;name:string}>}>()
 const queue=useDocumentInsights(),router=useRouter(),data=ref<DocumentInsightDetail|null>(null),error=ref(''),editing=ref(false),saving=ref(false),draft=ref<DocumentInsightContent|null>(null),tagText=ref(''),actionId=ref('')
 let generation=0
 const note=computed(()=>data.value?.active),run=computed(()=>queue.runs.value.find(run=>run.documentId===props.id)),running=computed(()=>run.value&&['queued','running'].includes(run.value.status))
-async function load(){const own=++generation,id=props.id;try{const next=await window.baoyi.archive.insights.detail(id);if(own===generation)data.value=next}catch(e){if(own===generation)error.value=(e as Error).message}}
+async function load(){const own=++generation,id=props.id;try{const next=await window.baoyi.archive.insights.detail(id);if(own===generation)data.value=next}catch(e){if(own===generation)error.value=errorMessage(e)}}
 watch(()=>props.id,()=>{editing.value=false;data.value=null;error.value='';actionId.value='';void load()},{immediate:true})
 const unsubscribe=window.baoyi.archive.insights.onChanged(()=>{if(!editing.value)void load()});onBeforeUnmount(()=>{generation++;unsubscribe()})
 function edit(){if(!note.value)return;const {coreValue,keyConclusions,suggestedCategoryId,suggestedTags,evidence,limitations}=JSON.parse(JSON.stringify(note.value));draft.value={coreValue,keyConclusions,suggestedCategoryId,suggestedTags,evidence,limitations};tagText.value=suggestedTags.join('，');editing.value=true}
-async function action(fn:()=>Promise<unknown>){if(saving.value)return;saving.value=true;error.value='';try{await fn();await load();emit('updated')}catch(e){error.value=(e as Error).message}finally{saving.value=false}}
+async function action(fn:()=>Promise<unknown>){if(saving.value)return;saving.value=true;error.value='';try{await fn();await load();emit('updated')}catch(e){error.value=errorMessage(e)}finally{saving.value=false}}
 async function save(){const content=draft.value;if(!content||!note.value)return;content.suggestedTags=tagText.value.split(/[,，]/).map(value=>value.trim()).filter(Boolean);await action(async()=>{await window.baoyi.archive.insights.edit(props.id,note.value!.revision,JSON.parse(JSON.stringify(content)));editing.value=false})}
 async function adopt(){await action(async()=>{const result=await window.baoyi.archive.insights.adopt(props.id,note.value!.revision);actionId.value=result.actionId})}
 async function undo(){await action(async()=>{const result=await window.baoyi.archive.undo(actionId.value);if(!result.undone)throw new Error(result.reason);actionId.value=''})}
@@ -46,8 +47,8 @@ async function history(){if(note.value?.sessionId){const assistant=useArchiveAss
       <button class="insight-history" @click="history">查看提炼会话</button>
       <details v-if="data&&data.history.length>1"><summary>版本记录（{{data.history.length}}）</summary><div v-for="version in data.history" :key="version.id" class="insight-version"><span>v{{version.revision}} · {{version.userEdited?'人工修订':'生成稿'}}</span><button class="ws-button" :disabled="version.active||saving" @click="activate(version.id)">{{version.active?'当前':'设为当前'}}</button></div></details>
     </template>
-    <p v-else class="ws-muted">提炼一句话价值与三条精要，保留可核对的原文证据。</p>
-    <button v-if="!editing" class="ws-button" :disabled="!!running||queue.busy.value" @click="queue.open([id])">{{note?'重新精读':'精读归档'}}</button>
+    <p v-else class="ws-muted">在归档助理中按你的问题研读原文，保留可核对的引用。旧精读版本可在这里查看和编辑。</p>
+    <button v-if="!editing" class="ws-button" :disabled="!!running||queue.busy.value" @click="queue.open([id])">在归档助理中精读</button>
     <p v-if="error||queue.error.value" class="ws-error" role="alert">{{error||queue.error.value}}</p>
   </section>
 </template>

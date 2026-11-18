@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { latestOnly, STALE } from '@/composables/latestOnly'
+import { useToast } from '@/composables/useToast'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Globe, Plus, Search, Heart, Play, Download, RefreshCw, Film, FolderOpen, Trash2, Upload } from 'lucide-vue-next'
@@ -10,11 +12,12 @@ import DiscoveryDetail from '@/components/video/DiscoveryDetail.vue'
 import DiscoveryPlayer from '@/components/video/DiscoveryPlayer.vue'
 import DownloadPanel from '@/components/video/DownloadPanel.vue'
 import WebSourceEntry from '@/components/video/WebSourceEntry.vue'
+import { errorMessage } from '@/utils'
 const router = useRouter(), settings = useSettingsStore(), api = window.baoyi.video.discovery
 const sources = ref<DiscoverySourceSummary[]>([]), sourceId = ref(''), cards = ref<DiscoveryCard[]>([])
 const query = ref(''), tag = ref(''), board = ref(''), status = ref('all'), sort = ref('source'), limit = ref(60)
 const detailError = ref('')
-const failureMessage = (cause: unknown) => String(cause instanceof Error ? cause.message : cause).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+const failureMessage = (cause: unknown) => errorMessage(cause).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
 const error = ref(''), busy = ref(false), importing = ref(false), marking = ref(false), removing = ref(false)
 const selected = ref<DiscoveryCard | null>(null), download = pendingDiscoveryDownload
 const playing = ref<DiscoveryCard | null>(null), onlineBusy = ref(false), detailBusy = ref(false)
@@ -33,21 +36,21 @@ const filtered = computed(() => {
   if (sort.value === 'rating') results.sort((a, b) => (b.entry.rating ? b.entry.rating.value / b.entry.rating.scale : -1) - (a.entry.rating ? a.entry.rating.value / a.entry.rating.scale : -1))
   return results
 })
-let round = 0, libraryUnsubscribe: (() => void) | undefined
-let detailRound = 0
+let sourceScope = new AbortController(), libraryUnsubscribe: (() => void) | undefined
+const readEntries = latestOnly((id:string|null)=>id?api.entries(id):Promise.resolve([]))
+const readDetail = latestOnly((id:string,entryId:string)=>api.online.detail({sourceId:id,entryId}))
 let markQueue = Promise.resolve()
 async function loadSources(prefer = sourceId.value) {
   sources.value = await api.sources()
   sourceId.value = sources.value.some(item => item.id === prefer) ? prefer : ''
 }
 async function loadEntries() {
-  const version = ++round; selected.value = null; playing.value = null; detailBusy.value = false; detailError.value = ''; detailRound++; removing.value = false; cards.value = []; error.value = ''
+  sourceScope.abort(); sourceScope = new AbortController(); selected.value = null; playing.value = null; detailBusy.value = false; detailError.value = ''; removing.value = false; cards.value = []; error.value = ''
   query.value = ''; tag.value = ''; board.value = ''; status.value = 'all'; limit.value = 60
-  if (!source.value) { busy.value = false; return }
   busy.value = true
-  try { const values = await api.entries(sourceId.value); if (round === version) cards.value = values }
-  catch (cause) { if (round === version) error.value = failureMessage(cause) }
-  finally { if (round === version) busy.value = false }
+  try { const values = await readEntries(source.value?sourceId.value:null); if (values===STALE)return; cards.value = values }
+  catch (cause) { error.value = failureMessage(cause) }
+  busy.value = false
 }
 watch(sourceId, loadEntries)
 watch(download, value => { if (value) { playing.value = null; selected.value = null } })
@@ -85,13 +88,14 @@ async function updateOnline(mode: 'refresh' | 'next') {
 }
 async function enrich(card: DiscoveryCard) {
   if (!source.value?.online) return
-  const id = sourceId.value, version = round, request = ++detailRound
+  const id = sourceId.value, {signal} = sourceScope
   detailBusy.value = true; detailError.value = ''
   try {
-    const updated = await api.online.detail({ sourceId: id, entryId: card.entry.id })
-    if (version === round) { card.entry = updated.entry; card.resourceId = updated.resourceId }
-  } catch (cause) { if (version === round && request === detailRound) detailError.value = failureMessage(cause) }
-  finally { if (version === round && request === detailRound) detailBusy.value = false }
+    const updated = await readDetail(id,card.entry.id)
+    if(updated===STALE||signal.aborted)return
+    card.entry = updated.entry; card.resourceId = updated.resourceId
+  } catch (cause) { if (!signal.aborted) detailError.value = failureMessage(cause) }
+  if (!signal.aborted) detailBusy.value = false
 }
 function showDetail(card: DiscoveryCard) { error.value = ''; playing.value = null; selected.value = card; void enrich(card) }
 async function save(card: DiscoveryCard) {
@@ -122,13 +126,13 @@ async function refreshLocal() {
     const values = await api.entries(id)
     if (sourceId.value !== id) return
     for (const card of cards.value) card.resourceId = values.find(value => value.entry.id === card.entry.id)?.resourceId || ''
-  } catch { /* A removed source is handled by the next explicit refresh. */ }
+  } catch (cause) { useToast().error(errorMessage(cause)) }
 }
 onMounted(async () => {
   await action(() => loadSources(download.value?.sourceId))
   libraryUnsubscribe = window.baoyi.video.onLibraryChanged(() => { void refreshLocal() })
 })
-onBeforeUnmount(() => { round++; libraryUnsubscribe?.() })
+onBeforeUnmount(() => { sourceScope.abort(); libraryUnsubscribe?.() })
 </script>
 <template>
   <div class="discovery-page">

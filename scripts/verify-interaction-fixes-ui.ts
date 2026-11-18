@@ -35,7 +35,7 @@ try{
   await page.waitForFunction(()=>!!window.baoyi?.comic)
   assert.equal((await page.evaluate(()=>window.baoyi.app.info())).version,JSON.parse(fs.readFileSync(path.resolve('package.json'),'utf8')).version)
   await app.evaluate(({ipcMain}:any,{project,video,sprite,fixture}:any)=>{
-    const stats={generated:[] as any[],previews:[] as any[],comicPreviews:[] as any[],starts:[] as any[],cleaned:[] as any[],browse:[] as any[],picaDownloads:[] as any[],policySaves:[] as any[],videoOpened:[] as any[]},tokens=new Map(),comicTokens=new Map();let seq=0
+    const stats={generated:[] as any[],previews:[] as any[],comicPreviews:[] as any[],starts:[] as any[],cleaned:[] as any[],browse:[] as any[],picaDownloads:[] as any[],videoOpened:[] as any[]},tokens=new Map(),comicTokens=new Map();let seq=0
     const handle=(channel:string,fn:Function)=>{ipcMain.removeHandler(channel);ipcMain.handle(channel,(_e:any,...args:any[])=>fn(...args))}
     ;(globalThis as any).__interactionFixture={stats}
     handle('archive:project-handoff-preview',(id:string,includeRules=false)=>{const token='preview-'+(++seq);tokens.set(token,includeRules);stats.previews.push({token,includeRules});return {token,stamp:token,includeRules,remembered:false,configured:true,provider:'合成模型',localPrompt:'本地模板',snapshot:{projectId:id,name:'合成项目',context:{current:'合成便签',next:'检查交互'},git:{},rules:includeRules?[{path:'README.md',content:'合成规则'}]:[],warnings:[]}}})
@@ -56,8 +56,6 @@ try{
     handle('comic:start',(token:string,chapters:string[],directory:string,group:string)=>{stats.starts.push({proxy:comicTokens.get(token),chapters,directory,group});return null})
     handle('comic:jobs',()=>[{id:'clean-test',name:'合成清理任务',status:'paused',phase:'downloading',processed:1,total:2,selectedChapters:['a'],current:'',error:'',retryNotBefore:0,requiresRevalidation:false}])
     handle('comic:clean',(id:string)=>{stats.cleaned.push(id)})
-    handle('archive:insight-policy',()=>({automatic:false,categories:[],maxChars:12000,provider:'合成模型',authorized:false}))
-    handle('archive:insight-save-policy',(value:any)=>{stats.policySaves.push(value);return value})
     const assets=['1080p','4k'].map(key=>({key,name:key,episodeId:'episode',label:key,quality:key,duration:8,format:'mp4'}))
     handle('video-preview:choices',()=>({resourceId:video.resourceId,title:'合成多版本影片',assets}))
     handle('video-preview:open',(_id:string,key:string)=>{stats.videoOpened.push(key);return {token:key,title:'合成多版本影片',url:'',asset:assets.find(a=>a.key===key)}})
@@ -109,10 +107,10 @@ try{
     await route('/video/'+video.resourceId);await page.getByRole('button',{name:'列表视图',exact:true}).click();const button=page.getByTitle('内嵌试看',{exact:true}).first();await button.waitFor();assert.equal(await button.locator('svg').getAttribute('width'),'15');assert.equal((await button.innerText()).trim(),'')
     const sizes=await page.locator('.video-item__actions').first().locator('button').evaluateAll(nodes=>nodes.map(n=>{const b=n.getBoundingClientRect();return {width:b.width,height:b.height,y:b.y}}));assert.equal(sizes.length,4);assert.ok(sizes.every(b=>b.width===sizes[0].width&&b.height===sizes[0].height&&b.y===sizes[0].y));await page.screenshot({path:path.join(output,'video-actions.png')})
   })
-  await check('自动精读空分类警告且不保存，选分类和手动模式可保存',async()=>{
-    await route('/document');await route('/settings?module=document&tab=reader');const settings=page.locator('.insight-settings');await settings.locator('summary').first().click();await settings.getByLabel('触发方式').selectOption('true');await settings.getByRole('button',{name:'授权并保存自动精读'}).click();await settings.getByRole('alert').waitFor();assert.equal((await stats()).policySaves.length,0)
-    await settings.locator('fieldset input').first().check();await settings.getByRole('button',{name:'授权并保存自动精读'}).click();await settings.getByRole('status').waitFor();assert.equal((await stats()).policySaves.length,1)
-    await settings.locator('fieldset input').first().uncheck();await settings.getByLabel('触发方式').selectOption('false');await settings.getByRole('button',{name:'保存精读设置'}).click();assert.equal((await stats()).policySaves.length,2)
+  await check('精读设置停用自动生成，历史数据维护入口保留',async()=>{
+    await route('/document');await route('/settings?module=document&tab=reader');const settings=page.locator('.insight-settings');await settings.locator('summary').first().click()
+    assert.equal(await settings.getByLabel('触发方式').count(),0);assert.match(await settings.innerText(),/旧自动触发设置已停用/)
+    assert.equal(await settings.getByRole('button',{name:'在归档助理中使用文档精读'}).isVisible(),true)
   })
   await check('JM四榜、综合作者标签搜索与Pica保留收藏；两源均显式目标直接下载',async()=>{
     await route('/image');await page.getByRole('button',{name:'在线漫画',exact:true}).click();await page.getByRole('button',{name:'JM',exact:true}).click()
@@ -132,6 +130,6 @@ try{
     await route('/video');await route('/settings?module=video&tab=online');await page.getByRole('heading',{name:'通用在线来源',exact:true}).waitFor();await page.getByRole('heading',{name:'Hanime 专用代理',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'找视频 · 网站与代理',exact:true}).count(),0)
     await route('/personal?section=todo');await page.getByRole('heading',{name:'待办',exact:true}).waitFor();assert.equal(await page.getByRole('heading',{name:'项目下一步',exact:true}).count(),0);assert.equal(await page.getByRole('heading',{name:'到期事项',exact:true}).count(),0)
   })
-  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({passed:checks.length,checks,errors,profile,stats:await stats(),boundary:'Actual Electron renderer; model, comic, frame and policy IPC are synthetic; no real download, model request or destructive cleanup.'},null,2))
+  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({passed:checks.length,checks,errors,profile,stats:await stats(),boundary:'Actual Electron renderer; model, comic, frame IPC are synthetic; no real download, model request or destructive cleanup.'},null,2))
 }catch(error){await page.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify({error:String(error),checks,errors,stats:await stats()},null,2));throw error}
 finally{await app.close()}

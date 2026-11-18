@@ -1,5 +1,6 @@
+import { getDb } from './database.ts'
 import { session } from 'electron'
-import { getSettings } from './database.ts'
+import { getSettings } from './settings-store.ts'
 import { parseProxyInput, serializeProxyInput, toElectronProxyConfig } from './proxy-rules.ts'
 import { ONLINE_SOURCE_PARTITION, ONLINE_BROWSER_PARTITION, ONLINE_USER_AGENT, onlineErrorMessage, onlineVerificationPage } from './online-network-rules.ts'
 import type { OnlineNetworkProbe } from '../../src/types/video-discovery.ts'
@@ -8,7 +9,7 @@ let queue: Promise<void> = Promise.resolve()
 
 /** A distinct setting for online sources; never changes the Hanime session. */
 export function ensureOnlineNetwork(): Promise<void> {
-  const raw = getSettings().video_online_proxy ?? 'system://'
+  const raw = getSettings(getDb()).video_online_proxy ?? 'system://'
   const input = parseProxyInput(raw), rules = serializeProxyInput(input)
   const next = queue.then(async () => {
     if (applied === rules) return
@@ -19,7 +20,7 @@ export function ensureOnlineNetwork(): Promise<void> {
     }
     applied = rules
   })
-  queue = next.catch(() => {})
+  queue = next.catch(() => { /* 原始 Promise 的错误已交给调用方；这里只释放队列或监听。 */ })
   return next
 }
 
@@ -75,7 +76,7 @@ export async function probeOnlineNetwork(url: string): Promise<OnlineNetworkProb
       if (onlineVerificationPage(new TextDecoder().decode(bytes))) result.outcome = 'verification_required'
     } catch (cause) {
       throw new Error(`代理路由：${resolved}。读取网页诊断内容失败：${onlineErrorMessage(cause)}`)
-    } finally {await reader.cancel().catch(()=>{});reader.releaseLock()}
-  } else await response.body?.cancel().catch(() => {})
+    } finally {await reader.cancel().catch(() => { /* best-effort */ });reader.releaseLock()}
+  } else await response.body?.cancel().catch(() => { /* best-effort */ })
   return result
 }

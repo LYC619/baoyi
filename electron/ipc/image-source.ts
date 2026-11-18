@@ -17,7 +17,7 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
   const source=new PicacomicSource({fetch:createImageSourceFetch(),token:()=>token})
   const changed=()=>{const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('image:changed')}
   const jobsChanged=()=>{const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('image:jobs-changed')}
-  const queue=createImageDownloads({db:getDb(),source,changed,jobsChanged})
+  const queue=createImageDownloads({db:getDb(),source,changed,jobsChanged,logDirectory:path.join(app.getPath('userData'),'comic-logs')})
   const updates=createImageUpdates({db:getDb(),source,queue})
   function handle(name:string,fn:(...args:any[])=>unknown){ipc.handle('image:'+name,(event:IpcMainInvokeEvent,...args)=>{const win=getWindow();if(!win||win.isDestroyed()||event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw new Error('只允许主窗口操作图片来源');return fn(...args)})}
   handle('source-status',()=>!!token)
@@ -73,6 +73,7 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
   })
   handle('jobs',()=>queue.list());handle('retry-job',(id:string)=>{if(!token)throw new Error('请先登录哔咔');return queue.retry(id)});handle('cancel-job',(id:string)=>queue.cancel(id));handle('dismiss-job',(id:string)=>queue.dismiss(id))
   handle('pause-job',(id:string)=>queue.pause(id))
+  handle('job-logs',(id:string)=>queue.logs(id))
   handle('resume-job',(id:string)=>{if(!token)throw new Error('请先登录哔咔');return queue.resume(id)})
   handle('move-job',(id:string,direction:'up'|'down')=>queue.move(id,direction))
   handle('download-options',value=>queue.options(value))

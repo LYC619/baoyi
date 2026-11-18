@@ -16,7 +16,7 @@ export function comicWorkId(input:unknown){
     if(url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&!url.search&&!url.hash&&JM_WEB_HOSTS.includes(host)){
       const match=/^\/album\/([1-9]\d{0,11})\/?$/.exec(url.pathname);if(match)return match[1]
     }
-  }catch{}
+  }catch{ /* 无法解析的链接交给后续输入校验报错。 */ }
   throw new Error('无法识别作品链接；可直接粘贴数字 ID 或 JM 编号')
 }
 export function comicName(value:string,max=70){
