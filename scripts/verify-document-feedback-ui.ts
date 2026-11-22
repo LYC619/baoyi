@@ -5,7 +5,7 @@ import http from 'node:http'
 import {DatabaseSync} from 'node:sqlite'
 import {_electron} from 'playwright'
 import {expect} from 'playwright/test'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {DocumentLibrary} from '../electron/workspace/documents.ts'
 import {outlinePdf} from './helpers/pdf-fixture.ts'
@@ -68,20 +68,21 @@ try{
   await page.screenshot({path:path.join(output,'details-dark.png')})
   await page.getByRole('button',{name:'批量管理',exact:true}).click()
   await page.getByLabel('选择资料 技术笔记',{exact:true}).check();await page.getByLabel('选择资料 长篇小说',{exact:true}).check()
-  await page.getByLabel('批量设置标签').fill('批量标签');await page.getByLabel('设置分组',{exact:true}).check()
-  await page.getByLabel('设置自定义分组',{exact:true}).selectOption('__new__');await page.getByLabel('新分组名称').fill('批量新组');await page.getByRole('button',{name:'新建',exact:true}).click()
-  await page.getByRole('button',{name:'应用到 2 份',exact:true}).click()
+  await page.getByRole('button',{name:/批量设置标签/}).click();await page.getByPlaceholder('输入新标签（按回车或点击添加）').fill('批量标签');await page.getByRole('button',{name:'添加',exact:true}).click();await page.getByRole('button',{name:'应用到 2 份资料',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'})
+  await page.getByLabel('设置分组',{exact:true}).check()
+  await page.locator('.document-bulk-toolbar').getByLabel('设置自定义分组',{exact:true}).selectOption('__new__');await page.locator('.document-bulk-toolbar').getByLabel('新分组名称').fill('批量新组');await page.locator('.document-bulk-toolbar').getByRole('button',{name:'新建',exact:true}).click()
+  await page.getByRole('button',{name:'应用修改',exact:true}).click()
   await expect.poll(()=>page.evaluate(id=>window.baoyi.workspace.documents.get(id).then(i=>i?.tags.includes('批量标签')),novel.id)).toBe(true)
-  await page.getByLabel('批量设置分类').selectOption('novel');await page.getByRole('button',{name:'应用到 2 份',exact:true}).click()
+  await page.getByLabel('批量设置分类').selectOption('novel');await page.getByRole('button',{name:'应用修改',exact:true}).click()
   await expect.poll(()=>page.evaluate(id=>window.baoyi.workspace.documents.get(id).then(i=>i?.type),book.id)).toBe('novel')
-  await page.getByRole('button',{name:'批量管理',exact:true}).click()
+  await page.getByRole('button',{name:'退出批量',exact:true}).click()
   await page.evaluate(id=>location.hash='/document/'+id,novel.id);await page.locator('.novel-paragraph').first().waitFor()
   await selectNovel();await page.locator('.header-book-title').click();await expect(page.getByRole('toolbar',{name:'选文操作'})).toHaveCount(0)
   await selectNovel();await page.getByRole('button',{name:'复制选文',exact:true}).click();await expect(page.locator('.reader-toast')).toContainText('已复制选文');await expect(page.locator('.reader-toast')).toHaveCount(0,{timeout:4500})
   await selectNovel();await page.getByRole('toolbar',{name:'选文操作'}).getByRole('button',{name:'书签',exact:true}).click()
   await expect(page.locator('.annotation-card')).toHaveCount(1);await expect(page.locator('.annotation-card blockquote')).not.toHaveText('')
   await selectNovel();await page.getByRole('button',{name:'高亮',exact:true}).click();await expect(page.locator('.annotation-card')).toHaveCount(2)
-  await page.getByLabel('全选标注').check();page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'删除所选标注'}).click();await expect(page.locator('.annotation-card')).toHaveCount(0)
+  await page.getByLabel('全选标注').check();await page.getByRole('button',{name:'删除所选标注'}).click();await page.locator('.app-dialog [data-dialog-confirm]').click();await expect(page.locator('.annotation-card')).toHaveCount(0)
   await page.getByLabel('切换阅读目录').click();await expect(page.locator('.toc-chapter-item')).toHaveCount(120)
   const heights=await page.locator('.toc-chapter-item').evaluateAll(items=>items.map(i=>i.getBoundingClientRect().height));assert.ok(heights.every(h=>h>=32))
   await page.getByLabel('搜索正文',{exact:true}).fill('跨章目标词');await page.getByLabel('查找下一处').click()
@@ -101,13 +102,13 @@ try{
   // A zoom can still be flushing its position; answer the existing leave guard as a user would.
   const leaveZoom = async (dialog:import('playwright').Dialog) => {assert.match(dialog.message(),/阅读位置尚未保存/);await dialog.accept()}
   page.on('dialog',leaveZoom)
-  await page.evaluate(id=>location.hash='/document/'+id,book.id);await page.locator('.document-prose').waitFor()
+  await page.evaluate(id=>location.hash='/document/'+id,book.id);await Promise.race([page.locator('.document-prose').waitFor(),page.locator('.app-dialog[open]').waitFor().then(async()=>{assert.match(await page.locator('.app-dialog__message').innerText(),/阅读位置尚未保存/);await page.locator('.app-dialog [data-dialog-confirm]').click();await page.locator('.document-prose').waitFor()})])
   page.off('dialog',leaveZoom)
   await page.getByLabel('搜索正文',{exact:true}).fill('搜索定位词');await page.getByLabel('查找下一处').click();await expect(page.locator('.reader-search-message')).toContainText('已找到')
   await page.getByLabel('搜索正文',{exact:true}).fill('不存在的词句');await page.getByLabel('查找下一处').click();await expect(page.locator('.reader-search-message')).toHaveText('未找到匹配内容')
   await home()
   await app.evaluate(({dialog},file)=>{(globalThis as any).__pickOptions=[];dialog.showOpenDialog=(async(_w:any,opts:any)=>{(globalThis as any).__pickOptions.push(opts);return {canceled:false,filePaths:[file]}}) as any},newFile)
-  await page.getByRole('button',{name:'导入资料',exact:true}).click();await page.getByRole('button',{name:'选择文件',exact:true}).click();await page.getByLabel('Agent 辅助识别分类、作者和标签').check();await page.getByRole('button',{name:'识别所选',exact:true}).click()
+  await page.getByRole('button',{name:'导入资料',exact:true}).click();await page.getByRole('button',{name:'选择文件',exact:true}).click();await page.getByLabel('智能辅助识别分类、作者和标签').check();await page.getByRole('button',{name:'识别所选',exact:true}).click()
   await expect(page.getByLabel('识别作者 待导入.md')).toHaveValue('作者甲');await page.getByLabel('识别作者 待导入.md').fill('人工修订作者')
   await page.screenshot({path:path.join(output,'agent-import-preview.png')})
   await page.getByRole('button',{name:/导入所选 1 份资料/}).click();await expect(page.getByRole('dialog',{name:'导入资料预览'})).toHaveCount(0)
@@ -117,13 +118,13 @@ try{
   await page.getByLabel('关闭对话框',{exact:true}).click()
   await page.getByRole('button',{name:'批量管理',exact:true}).click();await page.getByLabel('选择资料 识别后的论文',{exact:true}).check()
   await page.getByLabel('选择资料 长篇小说',{exact:true}).check()
-  await page.getByRole('button',{name:'删除所选',exact:true}).click();await page.getByLabel('同时删除源文件（移入回收站）').check();await page.getByRole('button',{name:'预览删除范围',exact:true}).click();await expect(page.locator('.batch-preview')).toContainText('回收站')
+  await page.getByRole('button',{name:'删除所选',exact:true}).click();await page.getByLabel('同时删除源文件（移入资料回收站）').check();await page.getByRole('button',{name:'预览删除范围',exact:true}).click();await expect(page.locator('.batch-preview')).toContainText('回收站')
   await page.getByRole('button',{name:'确认移入回收站',exact:true}).click();await expect(page.getByRole('dialog',{name:'批量删除资料'})).toHaveCount(0)
   await assert.rejects(fs.stat(newFile));assert.equal((await fs.readdir(path.join(dataRoot,'回收站'))).length,2)
   const recycled=await page.evaluate(()=>window.baoyi.workspace.recycle.list());assert.equal(recycled.length,2)
   for(const record of recycled)await page.evaluate(id=>window.baoyi.workspace.recycle.restore(id),record.id)
   assert.ok((await fs.stat(newFile)).isFile());assert.ok((await fs.stat(novelFile)).isFile())
-  await page.getByRole('button',{name:'批量管理',exact:true}).click()
+  await page.getByRole('button',{name:'退出批量',exact:true}).click()
   for(const width of [1280,800]){
     await app.evaluate(({BrowserWindow},w)=>BrowserWindow.getAllWindows()[0].setSize(w,900),width)
     await expect.poll(()=>page.evaluate(()=>innerWidth)).toBeLessThanOrEqual(width)

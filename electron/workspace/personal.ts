@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { SqlDb } from "../services/schema.ts";
+import type { SqlDb } from "../services/storage/schema.ts";
 import {
   PERSONAL_KINDS,
   type PersonalInput,

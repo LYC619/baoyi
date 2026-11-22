@@ -1,4 +1,4 @@
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 
 /** 占位集的判定和让出，单独一个文件：registration.ts 和 catalogue.ts 都要用，放任一边都成环 */
 export function placeholderEpisodeIds(d: SqlDb, code: string, exceptResourceId = ''): Array<{ episode_id: string; resource_id: string }> {

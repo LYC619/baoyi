@@ -1,5 +1,5 @@
 import { transaction } from '../../workspace/validation.ts'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 
 /** Include hidden groups: taxonomy edits must not leave stale tags behind. */
 export function imageTagCounts(db: SqlDb): Array<{ name: string; count: number }> {

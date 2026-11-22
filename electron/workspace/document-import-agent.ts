@@ -3,7 +3,7 @@ import path from 'node:path'
 import type {AIConfig} from '../../src/types/index.ts'
 import type {DocumentCandidate,DocumentCategory,DocumentImportSuggestion} from '../../src/types/workspace.ts'
 import {runAgent} from '../services/agent/loop.ts'
-import {readTextFilePage} from '../services/text-file.ts'
+import {readTextFilePage} from '../services/system/text-file.ts'
 import * as v from './validation.ts'
 
 async function sample(file:DocumentCandidate,assets:string):Promise<string> {
@@ -20,7 +20,7 @@ async function sample(file:DocumentCandidate,assets:string):Promise<string> {
 }
 
 export async function identifyDocumentImport(file:DocumentCandidate,categories:DocumentCategory[],config:AIConfig,options:{run?:typeof runAgent;assets?:string}={}):Promise<DocumentImportSuggestion> {
-  if(!config.enabled||!config.api_url||!config.api_key||!config.model)throw new Error('未配置可用的资料模型，请在资料设置中选择模型，或关闭 Agent 辅助后手动导入')
+  if(!config.enabled||!config.api_url||!config.api_key||!config.model)throw new Error('尚未配置可用的 AI 模型，请前往设置填写模型信息，或跳过智能识别直接导入')
   let evidence:string
   try{evidence=await sample(file,options.assets||path.resolve('dist/pdfjs'))}catch(e){evidence='正文读取失败，仅依据文件名：'+(e as Error).message}
   let suggestion:DocumentImportSuggestion|undefined
@@ -33,6 +33,6 @@ export async function identifyDocumentImport(file:DocumentCandidate,categories:D
       suggestion={path:file.path,categoryId:input.categoryId,name:v.name(input.name),author:v.text(input.author,'作者',300),tags:v.strings(input.tags,30),reason:v.text(input.reason,'识别依据',1000)}
       return '建议已提交'
     }}]})
-  if(!suggestion)throw new Error(result.error||'Agent 未返回有效识别结果，可手动设置后导入')
+  if(!suggestion)throw new Error(result.error||'未能识别出有效资料信息，请手动核对分类与标题后导入')
   return suggestion
 }

@@ -4,11 +4,11 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ProjectLibrary } from '../electron/kinds/project/library.ts'
 import { inspectProject } from '../electron/kinds/project/scanner.ts'
-import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/library-backup.ts'
+import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/storage/library-backup.ts'
 import {VIDEO_JOBS_SQL} from '../electron/kinds/video/download/jobs.ts'
 
 test('默认导入状态只作用于新项目，重复导入保留人工状态',async()=>{

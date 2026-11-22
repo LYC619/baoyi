@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import {createReadStream} from 'node:fs'
 import {createHash,randomUUID} from 'node:crypto'
-import type {SqlDb} from '../services/schema.ts'
+import type {SqlDb} from '../services/storage/schema.ts'
 import type {AIConfig} from '../../src/types/index.ts'
 import type {DocumentExtraction,DocumentFragment,DocumentInsightContent,DocumentInsightRun,DocumentInsightPreview,DocumentInsightDetail,DocumentInsightRange} from '../../src/types/document-insight.ts'
 import type {ArchiveAssistant} from '../archive/service.ts'

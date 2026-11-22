@@ -1,12 +1,12 @@
 /** URL and bookmark persistence verification; no website requests. */
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-const implementation: any = await import('../electron/services/web-browser-url.ts').catch(error => {
+const implementation: any = await import('../electron/services/network/web-browser-url.ts').catch(error => {
   if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error
   return {}
 })
 assert.equal(typeof implementation.normalizeWebUrl, 'function', 'Missing generic webpage URL normalizer')
-const storage: any = await import('../electron/services/web-browser-sources.ts').catch(error => {
+const storage: any = await import('../electron/services/network/web-browser-sources.ts').catch(error => {
   if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error
   return {}
 })
@@ -14,6 +14,13 @@ assert.equal(typeof storage.createWebBrowserSources, 'function', 'Missing generi
 const { normalizeWebUrl } = implementation, { createWebBrowserSources } = storage
 let passed = 0
 function test(name: string, run: () => void) { try { run(); passed++ } catch (error) { console.error('FAIL', name); throw error } }
+test('privileged navigation stays on the built entry or the exact development origin', () => {
+  const local = new URL('file:///fixture/dist/index.html'), dev = new URL('http://localhost:5714/')
+  for (const suffix of ['', '#/settings', '?reload=1#/video']) assert.ok(implementation.isMainNavigation(local.href + suffix, local))
+  assert.ok(implementation.isMainNavigation('http://localhost:5714/settings', dev))
+  for (const url of ['file:///fixture/other.html', dev.href, 'about:blank']) assert.equal(implementation.isMainNavigation(url, local), false)
+  for (const url of ['http://localhost:5715/', 'https://localhost:5714/', 'blob:http://localhost:5714/id', local.href]) assert.equal(implementation.isMainNavigation(url, dev), false)
+})
 test('ordinary addresses work without catalogue records', () => {
   assert.equal(normalizeWebUrl(' example.org/guide?q=1#part '), 'https://example.org/guide?q=1#part')
   assert.equal(normalizeWebUrl('https://EXAMPLE.org'), 'https://example.org/')

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { createDiscoveryCatalogue, parseCatalogue } from '../electron/kinds/video/discovery/catalogue.ts'
 

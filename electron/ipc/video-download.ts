@@ -3,7 +3,7 @@ import path from 'node:path'
 import { getVideoItem } from '../kinds/video/service.ts'
 import { loadVideoSeries, loadVideoSources } from '../kinds/video/download/sources.ts'
 import { createVideoDownloadService } from '../kinds/video/download/service.ts'
-import { transferHanimeMedia } from '../services/hanime-download.ts'
+import { transferHanimeMedia } from '../services/hanime/hanime-download.ts'
 import { videoTransferOptions } from '../kinds/video/download/options.ts'
 import type {
   VideoDownloadProgress,
@@ -13,8 +13,9 @@ import type {
 } from '../../src/types/video-download.ts'
 import { writeBundleFiles } from '../kinds/video/bundle.ts'
 import { registerVideoContent } from '../kinds/video/registration.ts'
-import { getDb } from '../services/database.ts'
-import { getSettings } from '../services/settings-store.ts'
+import { getDb } from '../services/storage/database.ts'
+import { getSettings } from '../services/storage/settings-store.ts'
+import { reqId, reqRecord } from './validate.ts'
 
 function isMainFrame(event: IpcMainInvokeEvent, getWindow: () => BrowserWindow | null): boolean {
   const win = getWindow()
@@ -28,7 +29,7 @@ function assertMainFrame(event: IpcMainInvokeEvent, getWindow: () => BrowserWind
 export function registerVideoDownloadIpc(
   getWindow: () => BrowserWindow | null,
   ipcMain: Pick<Electron.IpcMain, 'handle'>
-): void {
+) {
   const service = createVideoDownloadService({
     concurrency:()=>videoTransferOptions(getSettings(getDb())).concurrency,
     getItem: id => getVideoItem(id),
@@ -83,30 +84,32 @@ export function registerVideoDownloadIpc(
 
   ipcMain.handle('video-download:sources', (event, resourceId: string) => {
     assertMainFrame(event, getWindow)
-    return service.sources(resourceId)
+    return service.sources(reqId(resourceId, 'resourceId'))
   })
   ipcMain.handle('video-download:series', (event, resourceId: string) => {
     assertMainFrame(event, getWindow)
-    return service.series(resourceId)
+    return service.series(reqId(resourceId, 'resourceId'))
   })
   ipcMain.handle('video-download:run', (event, request: VideoDownloadRequest) => {
     assertMainFrame(event, getWindow)
-    return service.run(request, progress => sendProgress(event, progress))
+    return service.run(reqRecord(request, 'request') as unknown as VideoDownloadRequest, progress => sendProgress(event, progress))
   })
   ipcMain.handle('video-download:run-series', (event, request: VideoSeriesDownloadRequest) => {
     assertMainFrame(event, getWindow)
-    return service.runSeries(request, progress => sendProgress(event, progress))
+    return service.runSeries(reqRecord(request, 'request') as unknown as VideoSeriesDownloadRequest, progress => sendProgress(event, progress))
   })
   ipcMain.handle('video-download:cancel', (event, requestId: string) => {
     assertMainFrame(event, getWindow)
-    return service.cancel(requestId)
+    return service.cancel(reqId(requestId, 'requestId'))
   })
   ipcMain.handle('video-download:reveal', async (event, requestId: string) => {
     assertMainFrame(event, getWindow)
+    requestId = reqId(requestId, 'requestId')
     const path = service.completedPath(requestId)
     if (!path) return false
     if (service.completedIsDirectory(requestId)) return !(await shell.openPath(path))
     shell.showItemInFolder(path)
     return true
   })
+  return service.cancelAll
 }

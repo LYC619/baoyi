@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 /**
  * 识别结果确认面板。
  *
@@ -213,9 +214,11 @@ async function skip(ids: string[], ask: boolean): Promise<void> {
   if (ids.length === 0) return
   if (
     ask &&
-    !window.confirm(
-      `把选中的 ${ids.length} 个程序标记为不注册？\n它们会进入忽略名单，下次扫描不再出现。\n（名单可以在设置 → 扫描与识别里清空）`
-    )
+    !(await confirmDialog({
+      title: `忽略选中的 ${ids.length} 个程序？`,
+      message: '它们会加入忽略名单，后续扫描不再提示；可在「设置 → 扫描与识别」中清空忽略名单。本地程序文件不受影响。',
+      confirmText: '加入忽略名单'
+    }))
   ) {
     return
   }
@@ -232,9 +235,9 @@ async function skip(ids: string[], ask: boolean): Promise<void> {
   }
 }
 
-function confirmAll(): void {
-  if (!window.confirm(`按 AI 的判断直接收录全部 ${items.value.length} 个条目？`)) return
-  void confirm(items.value.map((i) => i.id))
+async function confirmAll(): Promise<void> {
+  if (!(await confirmDialog({ title: `收录全部 ${items.value.length} 个待确认条目？`, message: '将按当前识别结果直接加入软件库，收录后仍可随时修改分类与名称。', confirmText: '全部收录' }))) return
+  await confirm(items.value.map((i) => i.id))
 }
 </script>
 

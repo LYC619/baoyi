@@ -2,15 +2,13 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
-import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { stagePending } from '../electron/kinds/software/db.ts'
+import { loadPlaywright } from './helpers/playwright.ts'
 
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'))
+const { _electron } = loadPlaywright() as any
 // npm run verify-organize-ui -- <packaged.exe> [evidence-directory]
 const packagedExecutable = process.argv[2] ? path.resolve(process.argv[2]) : null
 const expectedVersion = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')).version
@@ -170,7 +168,7 @@ try {
     await row.getByRole('button', { name: '确认更改位置', exact: true }).waitFor()
     assert.ok(fs.existsSync(real)); assert.equal(fs.existsSync(path.join(root, 'AI相关', 'RealRenamed')), false)
     await screenshot('relocate-preview')
-    await row.getByRole('button', { name: '确认更改位置', exact: true }).click(); await ready()
+    await row.getByRole('button', { name: '确认更改位置', exact: true }).click(); await page.locator('.app-dialog [data-dialog-confirm]').click(); await ready()
     const item = await page.evaluate(() => window.baoyi.software.get('RealTool'))
     assert.equal(item.category, 'AI相关'); assert.equal(item.source_dir, path.join(root, 'AI相关', 'RealRenamed'))
     assert.equal(item.notes, 'preserve user notes'); assert.equal(item.launchers[0].path, item.exe_path)
@@ -185,10 +183,10 @@ try {
   await check('detail category cancellation keeps paths; confirmation moves the folder', async () => {
     await page.evaluate(() => { location.hash = '/detail/RealTool' })
     const select = page.locator('.hero__row > select'); await select.waitFor()
-    acceptDialogs = false; await select.selectOption('AI相关')
+    await select.selectOption('AI相关'); await page.locator('.app-dialog [data-dialog-cancel]').click()
     await page.waitForFunction(() => !document.querySelector<HTMLSelectElement>('.hero__row > select')?.disabled)
     assert.equal(await select.inputValue(), 'Old'); assert.ok(fs.existsSync(path.join(root, 'Old', 'RealRenamed')))
-    acceptDialogs = true; await select.selectOption('AI相关')
+    await select.selectOption('AI相关'); await page.locator('.app-dialog [data-dialog-confirm]').click()
     await page.waitForFunction(() => !document.querySelector<HTMLSelectElement>('.hero__row > select')?.disabled)
     assert.equal(await select.inputValue(), 'AI相关'); assert.ok(fs.existsSync(path.join(root, 'AI相关', 'RealRenamed')))
     await organize(); await page.getByRole('button', { name: /^已整理/ }).click()
@@ -196,7 +194,7 @@ try {
   await check('orphan cleanup UI removes only chosen junction', async () => {
     await page.locator('.orphan-links summary').click()
     await page.locator('.orphan-links input[type=checkbox]').check()
-    await page.getByRole('button', { name: /清理所选 1 个链接/ }).click(); await ready()
+    await page.getByRole('button', { name: /清理所选 1 个链接/ }).click(); await page.locator('.app-dialog [data-dialog-confirm]').click(); await ready()
     assert.equal(fs.existsSync(orphan), false); assert.ok(fs.existsSync(path.join(orphanTarget, 'app.exe')))
   })
   await check('unlink refreshes only its row, preserves search and filter, and restores pending visibility', async () => {
@@ -204,7 +202,7 @@ try {
     await page.getByRole('group', { name: '软件类型筛选' }).getByRole('button', { name: /^链接软件/ }).click()
     await page.getByLabel('搜索已整理软件').fill('LinkedTool')
     const row = page.locator('.organized-item').filter({ has: page.locator('.item-title', { hasText: 'LinkedTool' }) })
-    await row.getByRole('button', { name: '移除链接', exact: true }).click(); await ready()
+    await row.getByRole('button', { name: '移除链接', exact: true }).click(); await page.locator('.app-dialog [data-dialog-confirm]').click(); await ready()
     assert.equal(await page.getByLabel('搜索已整理软件').inputValue(), 'LinkedTool')
     assert.equal(await page.getByRole('group', { name: '软件类型筛选' }).getByRole('button', { name: /^链接软件/ }).getAttribute('aria-pressed'), 'true')
     assert.equal(await page.locator('.organized-item').count(), 0)
@@ -220,7 +218,7 @@ try {
     const report = await page.evaluate(() => window.baoyi.organize.run([{ software_id: 'LinkedTool', action: 'junction', category: 'Old', folder: 'Materialized' }]))
     assert.equal(report.linked, 1); await sync(); await page.getByRole('button', { name: /^已整理/ }).click()
     const row = page.locator('.organized-item').filter({ has: page.locator('.item-title', { hasText: 'LinkedTool' }) })
-    await row.getByRole('button', { name: '转为实体', exact: true }).click(); await ready()
+    await row.getByRole('button', { name: '转为实体', exact: true }).click(); await page.locator('.app-dialog [data-dialog-confirm]').click(); await ready()
     assert.equal(fs.lstatSync(materialized).isSymbolicLink(), false)
     assert.equal(fs.existsSync(installed), false); assert.ok(fs.existsSync(path.join(materialized, 'app.exe')))
     const item = await page.evaluate(() => window.baoyi.software.get('LinkedTool'))
@@ -248,7 +246,7 @@ try {
     const units = await page.evaluate(() => window.baoyi.scan.units())
     assert.equal(units.filter((unit: any) => unit.root === scanRoot).length, 2)
     await page.evaluate(() => { location.hash = '/confirm' })
-    await page.getByRole('button', { name: '全部确认', exact: true }).click()
+    await page.getByRole('button', { name: '全部确认', exact: true }).click(); await page.locator('.app-dialog [data-dialog-confirm]').click()
     await page.getByRole('heading', { name: '没有待确认的条目', exact: true }).waitFor()
     const items = (await page.evaluate(() => window.baoyi.software.list())).filter((item: any) => ['ScanOne', 'ScanTwo'].includes(item.name_zh))
     assert.equal(items.length, 2)
@@ -260,7 +258,7 @@ try {
       await category.selectOption('AI相关')
       await page.waitForFunction(() => !document.querySelector<HTMLSelectElement>('.hero__row > select')?.disabled)
       assert.equal((await page.evaluate((id: string) => window.baoyi.software.get(id), item.id)).category, 'AI相关')
-      await page.getByRole('button', { name: '移除', exact: true }).click()
+      await page.getByRole('button', { name: '移除', exact: true }).click(); await page.locator('.app-dialog [data-dialog-confirm]').click()
       await page.waitForFunction(() => !location.hash.startsWith('#/detail/'))
       assert.equal(await page.evaluate((id: string) => window.baoyi.software.get(id), item.id), null)
       assert.ok(fs.existsSync(item.exe_path), 'removing a record must preserve the scanned file')

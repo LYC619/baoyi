@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { errorMessage } from '@/utils'
 import { onBeforeUnmount,ref,watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -21,10 +22,10 @@ watch(()=>props.id,()=>{item.value=null;error.value='';edit.value=false;entryEdi
 const unsubscribe=projectApi.onChanged(()=>void load());onBeforeUnmount(()=>{disposed=true;loadRun++;unsubscribe()})
 async function action(fn:()=>Promise<unknown>){if(busy.value)return;busy.value=true;try{await fn();await load()}catch(e){toastError(errorMessage(e))}finally{busy.value=false}}
 function editEntry(e?:ProjectEntry){entry.value=e;entryEditor.value=true}
-async function removeEntry(e:ProjectEntry){if(!item.value||!confirm(`移除入口“${e.label}”？原文件保留。`))return;await action(()=>projectApi.removeEntry(props.id,e.id,JSON.parse(JSON.stringify(e))))}
+async function removeEntry(e:ProjectEntry){if(!item.value||!(await confirmDialog({ title: `移除入口「${e.label}」？`, message: '仅移除项目入口登记，本地原文件保留。', confirmText: '移除入口', tone: 'danger' })))return;await action(()=>projectApi.removeEntry(props.id,e.id,JSON.parse(JSON.stringify(e))))}
 async function setDefault(e:ProjectEntry){await action(()=>projectApi.update(props.id,{defaultEntryId:e.id}))}
 
-async function remove(){const target=item.value;if(!target||busy.value||!confirm(`从抱一中删除“${target.name}”及其项目登记与记录？项目文件保留在原位置。`))return;await action(async()=>{await projectApi.remove(target.id);await router.push('/project')})}
+async function remove(){const target=item.value;if(!target||busy.value||!(await confirmDialog({ title: `从项目库移除「${target.name}」？`, message: '仅移除抱一中的项目登记与日志记录，本地项目目录和原文件均保留在原位置。', confirmText: '仅移除记录', tone: 'danger' })))return;await action(async()=>{await projectApi.remove(target.id);await router.push('/project')})}
 async function rescan(){const id=props.id;await action(async()=>{const result=await projectApi.rescan(id);if(!disposed&&props.id===id)scan.value=result})}
 async function acceptScan(){if(!item.value||!scan.value)return;const paths=new Set(item.value.entries.map(e=>e.path.toLowerCase())),added=scan.value.entries.filter(e=>!paths.has(e.path.toLowerCase()));await action(()=>projectApi.update(props.id,JSON.parse(JSON.stringify({entries:[...item.value!.entries,...added].slice(0,100)}))));scan.value=null}
 function moved(warnings:string[]){if(warnings.length)toastError(warnings.join('\n'));else success('项目已移动，关联路径已更新');void load()}

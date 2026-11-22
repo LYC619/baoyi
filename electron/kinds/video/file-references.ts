@@ -1,5 +1,5 @@
 import path from 'node:path'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 
 export const videoFileKey = (file: string) => path.resolve(file).normalize('NFC').toLowerCase()
 

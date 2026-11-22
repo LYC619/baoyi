@@ -6,9 +6,9 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { loadVideoWork } from '../electron/kinds/video/download/sources.ts'
 import { setHanimeFetch } from '../electron/kinds/video/hentai/hanime.ts'
-import { normalizeProxyRules } from '../electron/services/proxy-rules.ts'
+import { normalizeProxyRules } from '../electron/services/network/proxy-rules.ts'
 import { catalogueIdentity } from '../electron/kinds/video/episode-identity.ts'
-import { buildHanimeHostResolverRules } from '../electron/services/hanime-network-rules.ts'
+import { buildHanimeHostResolverRules } from '../electron/services/hanime/hanime-network-rules.ts'
 
 const output = path.resolve('output/video-local-structure-20260912/source')
 fs.mkdirSync(output, { recursive: true })

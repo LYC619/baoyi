@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { _electron } from 'playwright'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 
 const executable = path.resolve(process.argv[2]), output = path.resolve('output/optimization-2026-10-29')

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { setImmediate as yieldToMainLoop } from 'node:timers/promises'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { AIConfig, VideoItem } from '../../../src/types/index.ts'
 import type { AgentRunOptions, AgentRunResult } from '../../services/agent/loop.ts'
 import type { VideoAgentActions, VideoAgentPlan, VideoAgentProgress, VideoAgentResult } from '../../../src/types/video-agent-organize.ts'
@@ -66,7 +66,7 @@ interface Options {
 export function createVideoAgentOrganizer(options: Options) {
   const plans = new Map<string, { plan: VideoAgentPlan; stamp: string; result?: VideoAgentResult }>()
   let controller: AbortController | null = null
-  function start() { if (controller) throw new Error('Agent 整理正在进行'); controller = new AbortController(); return controller }
+  function start() { if (controller) throw new Error('智能整理正在进行'); controller = new AbortController(); return controller }
   async function prepare(ids: string[], actions: VideoAgentActions): Promise<VideoAgentPlan> {
     if (!Array.isArray(ids) || !ids.length || ids.length > 500 || ids.some(id => typeof id !== 'string')) throw new Error('请选择 1–500 部作品')
     if (!actions || !['none', 'copy', 'move'].includes(actions.transfer) || !actions.merge && !actions.artwork && !actions.metadata) throw new Error('请至少选择一项整理内容')
@@ -93,12 +93,12 @@ export function createVideoAgentOrganizer(options: Options) {
         processed = works.length - candidates.size
         record(`已核对 ${works.length} 部作品；${candidates.size} 部单集有同系列候选，分为 ${batches.length} 批。其余作品仍保留所选的补封面、补资料操作。`)
         if (batches.length) plan.groupingStatus = 'complete'
-        else record('未找到片名和集数明确的同系列单集，无需请求 Agent。已有合集不参与单集合并。')
+        else record('未找到片名和集数明确的同系列单集，无需联网分析。已有合集不参与单集合并。')
         for (let index = 0; index < batches.length; index++) {
           if (run.signal.aborted) throw new Error('已停止分析，尚未修改作品')
           const batch = batches[index], byRef = new Map(batch.map(candidate => [candidate.ref, candidate]))
           current = `第 ${index + 1} / ${batches.length} 批`
-          progressMessage = `Agent 正在核对 ${batch.length} 部单集的分组`
+          progressMessage = `正在核对 ${batch.length} 部单集的分组`
           record(progressMessage)
           record('本批作品：\n' + batch.map(({ work, ref }) => `${ref} · ${work.name_zh || work.name_en || work.file_name}`).join('\n'))
           let submitted = false, lastText = ''
@@ -194,7 +194,7 @@ export function createVideoAgentOrganizer(options: Options) {
     } finally { controller = null }
   }
   async function run(id: string, groupIds: string[]): Promise<VideoAgentResult> {
-    if (controller) throw new Error('Agent 整理正在进行，请等待本次处理完成')
+    if (controller) throw new Error('智能整理正在进行，请等待本次处理完成')
     const saved = plans.get(id)
     if (!saved) throw new Error('整理预览已失效，请重新生成')
     if (saved.result) return structuredClone(saved.result)

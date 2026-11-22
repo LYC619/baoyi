@@ -8,7 +8,7 @@ const props = withDefaults(
   { showLabel: true, size: 6 }
 )
 
-const meta = computed(() => MASTERY_META[props.level])
+const meta = computed(() => MASTERY_META[props.level] ?? MASTERY_META.new)
 </script>
 
 <template>

@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {createHash} from 'node:crypto'
-import type {SqlDb} from '../services/schema.ts'
+import type {SqlDb} from '../services/storage/schema.ts'
 import {DocumentLibrary} from './documents.ts'
-import {readTextFilePage} from '../services/text-file.ts'
+import {readTextFilePage} from '../services/system/text-file.ts'
 import {extractDocument} from './document-extraction.ts'
 
 export type DocumentReadCursor={kind:'text';offset:number;line:number;version:string}|{kind:'pdf';page:number;start:number;version:string}

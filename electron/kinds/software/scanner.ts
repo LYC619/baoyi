@@ -1,13 +1,13 @@
-import { getDb } from '../../services/database'
+import { getDb } from '../../services/storage/database'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ScanProgress, ScanResult, SoftwareItem } from '../../../src/types'
 import { insertScanned, updateSoftware } from './db.ts'
-import { listCategories, upsertCategory } from '../../services/taxonomy-store.ts'
-import { upsertScanUnits } from '../../services/scan-units.ts'
-import { extractIcon } from '../../services/iconExtractor'
+import { listCategories, upsertCategory } from '../../services/taxonomy/taxonomy-store.ts'
+import { upsertScanUnits } from '../../services/storage/scan-units.ts'
+import { extractIcon } from '../../services/media/iconExtractor'
 import { readPeInfo } from './peReader'
-import { planRoot, type PlannedUnit } from './scanPlan'
+import { planDroppedDir, planRoot, type PlannedUnit } from './scanPlan'
 import { APP_CATEGORY, isMobilePackage, isSoftwareFile } from '../../../src/utils/software-package'
 
 /**
@@ -25,7 +25,8 @@ export function cancelScan(): void {
 
 export async function scanDirectories(
   dirs: string[],
-  onProgress: (p: ScanProgress) => void
+  onProgress: (p: ScanProgress) => void,
+  directDirs = false
 ): Promise<ScanResult> {
   cancelled = false
 
@@ -42,7 +43,7 @@ export async function scanDirectories(
 
   for (const dir of dirs) {
     if (cancelled) break
-    const plan = await planRoot(dir, { onDir, cancelled: () => cancelled })
+    const plan = directDirs ? await planDroppedDir(dir, { onDir, cancelled: () => cancelled }) : await planRoot(dir, { onDir, cancelled: () => cancelled })
     planned.push(...plan.units)
     loose.push(...plan.loose)
   }

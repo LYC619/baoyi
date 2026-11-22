@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import { getVideo } from './db.ts'
 import { listVideoAssets } from './library.ts'
 import { parseLyrics, type AudioLyrics } from '../../../src/utils/lyrics.ts'

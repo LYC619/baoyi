@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import { IMAGE_EXTENSIONS } from './scanner.ts'
 import { MAX_IMAGE_BYTES, readArchiveEntry } from './archive.ts'
 
@@ -18,11 +18,16 @@ export function imageMime(data: Uint8Array): string {
   if (b.toString('ascii',4,8) === 'ftyp' && /avif|avis/.test(b.toString('ascii',8,24))) return 'image/avif'
   throw new Error('不是受支持的图片数据')
 }
-/** Identity-based protocol: the renderer never supplies filesystem paths. */
-export async function readImagePage(db: SqlDb, id: string, includeMissing = false): Promise<{ data: Buffer; mime: string }> {
+/** Shared authorization for reads and completion of asynchronous thumbnail work. */
+export function imagePageSource(db: SqlDb, id: string, includeMissing = false) {
   const row = db.prepare(`SELECT p.file,p.entry,r.path FROM image_pages p JOIN resource r ON r.id=p.resource_id JOIN image_meta m ON m.resource_id=r.id
     WHERE p.id=? AND ${includeMissing ? '1=1' : 'p.missing=0'} AND (m.group_id IS NULL OR NOT EXISTS(SELECT 1 FROM image_groups g WHERE g.id=m.group_id AND g.hidden=1))`).get(id) as { file: string; entry: string; path: string } | undefined
   if (!row) throw new Error('页面不可用')
+  return row
+}
+/** Identity-based protocol: the renderer never supplies filesystem paths. */
+export async function readImagePage(db: SqlDb, id: string, includeMissing = false): Promise<{ data: Buffer; mime: string }> {
+  const row = imagePageSource(db, id, includeMissing)
   const file = await fs.realpath(row.file), root = await fs.realpath(row.path)
   const relative = path.relative(root, file)
   if (relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) throw new Error('图片已移到导入目录外，请重新定位')

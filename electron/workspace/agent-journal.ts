@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { SqlDb } from '../services/schema.ts'
+import type { SqlDb } from '../services/storage/schema.ts'
 import { TimelineLibrary } from './timeline.ts'
 import * as v from './validation.ts'
 
@@ -29,7 +29,7 @@ export class AgentJournal {
   }
   private protectedReason(projectId: string, eventId: string): string {
     const event = new TimelineLibrary(this.db).event(projectId, eventId)
-    if (!event.generated) throw new Error('此记录不是 agent 自动生成')
+    if (!event.generated) throw new Error('此记录不是自动生成的日志，请在时间线中手动编辑或删除')
     if (event.revised) return '记录已人工修订，已保留；可在时间线中自行编辑或删除'
     if (this.db.prepare('SELECT 1 FROM resource_links WHERE owner_event_id=? LIMIT 1').get(eventId)) return '记录已添加后续关联，已保留'
     if (event.generated.undone || event.status === 'dismissed') return '记录已撤销或忽略'

@@ -12,7 +12,7 @@
  * 品类模块（electron/kinds/<kind>/）管自己的私有表、提示词、工具、扫描方式。
  */
 
-import type { SqlDb } from '../services/schema.ts'
+import type { SqlDb } from '../services/storage/schema.ts'
 import type { Category } from '../../src/types'
 
 export interface KindSchema {

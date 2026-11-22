@@ -3,12 +3,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
-import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+import { loadPlaywright } from './helpers/playwright.ts'
+const { _electron } = loadPlaywright() as any
 const output = path.resolve('output/web-browser-ui'); fs.mkdirSync(output, { recursive: true })
 const profile = fs.mkdtempSync(path.join(output, 'profile-'))
 const db = new DatabaseSync(path.join(profile, 'baoyi.db')); initSchema(db, KINDS)

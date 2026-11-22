@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
 import {loadPlaywright,electronTestEnv} from './helpers/playwright.ts'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {registerVideoContent} from '../electron/kinds/video/registration.ts'
 const {_electron}=loadPlaywright(),packed=process.argv[2],output=path.resolve(process.argv[3]||'output/p1-p2-video-2026-11-06/native-preview')

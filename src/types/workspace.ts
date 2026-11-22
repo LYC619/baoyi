@@ -192,7 +192,7 @@ export interface WorkspaceApi {
     list(options?: { submodule?: DocumentSubmodule; uncategorized?: boolean; customGroupId?: string }): Promise<DocumentItem[]>
     get(id: string): Promise<DocumentItem | null>
     update(id: string, patch: DocumentPatch): Promise<DocumentItem>
-    prepareImport(directory: boolean, categoryId?: string): Promise<(DocumentScan & { token: string; categoryId: string }) | null>
+    prepareImport(directory: boolean, categoryId?: string, droppedPaths?: string[]): Promise<(DocumentScan & { token: string; categoryId: string }) | null>
     analyzeImport(token:string,path:string):Promise<DocumentImportSuggestion>
     confirmImport(token: string, paths: string[], categoryId?: string, submodule?: DocumentSubmodule | null, customGroupId?: string, choices?: DocumentImportChoice[]): Promise<{ imported: number; errors: string[];insightStatus?:string }>
     remove(id: string): Promise<void>; relocate(id: string): Promise<DocumentItem | null>; open(id: string): Promise<void>; reveal(id: string): Promise<void>

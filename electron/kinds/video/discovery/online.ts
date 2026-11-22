@@ -2,7 +2,7 @@ import type { DiscoveryCard, DiscoveryEntry, DiscoverySelection, DiscoverySource
 import type { DiscoveryCatalogue } from './catalogue.ts'
 import { canonicalOnlineUrl, onlineId, parseVideoObjectPage } from './adapters/video-object.ts'
 import { isJavdbUrl, parseJavdbDetail, parseJavdbList } from './adapters/javdb.ts'
-import { ONLINE_USER_AGENT, onlineConnectionClosed, onlineErrorMessage, onlineVerificationPage } from '../../../services/online-network-rules.ts'
+import { ONLINE_USER_AGENT, onlineConnectionClosed, onlineErrorMessage, onlineVerificationPage } from '../../../services/network/online-network-rules.ts'
 
 type AdapterId = 'video-object' | 'javdb'
 interface LoadedList { name: string; url: string; entries: DiscoveryEntry[]; nextPageUrl: string }

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import type {
   AIConfig,
@@ -68,7 +68,7 @@ const api: BaoyiApi = {
       moveToSubmodule:(id: string, targetSubmodule: any, targetCategoryId?: string)=>ipcRenderer.invoke('workspace:documents:move-to-submodule',id,targetSubmodule,targetCategoryId),
       list:(options?: any)=>ipcRenderer.invoke('workspace:documents:list',plain(options)),get:id=>ipcRenderer.invoke('workspace:documents:get',id),
       update:(id,patch)=>ipcRenderer.invoke('workspace:documents:update',id,plain(patch)),remove:id=>ipcRenderer.invoke('workspace:documents:remove',id),
-      prepareImport:(directory,categoryId)=>ipcRenderer.invoke('workspace:documents:prepare-import',directory,categoryId),confirmImport:(token,paths,categoryId,submodule,customGroupId,choices)=>ipcRenderer.invoke('workspace:documents:confirm-import',token,plain(paths),categoryId,submodule,customGroupId,choices && plain(choices)),
+      prepareImport:(directory,categoryId,droppedPaths)=>ipcRenderer.invoke('workspace:documents:prepare-import',directory,categoryId,droppedPaths&&plain(droppedPaths)),confirmImport:(token,paths,categoryId,submodule,customGroupId,choices)=>ipcRenderer.invoke('workspace:documents:confirm-import',token,plain(paths),categoryId,submodule,customGroupId,choices && plain(choices)),
       relocate:id=>ipcRenderer.invoke('workspace:documents:relocate',id),open:id=>ipcRenderer.invoke('workspace:documents:open',id),reveal:id=>ipcRenderer.invoke('workspace:documents:reveal',id),
       content:id=>ipcRenderer.invoke('workspace:documents:content',id),
       textIndex:(id,encoding)=>ipcRenderer.invoke('workspace:documents:text:index',id,encoding),
@@ -118,7 +118,7 @@ const api: BaoyiApi = {
     applyProposal:(id,message)=>ipcRenderer.invoke('project:apply-proposal',id,message),onSession:callback=>subscribe('project:session',callback),
     list:()=>ipcRenderer.invoke('project:list'),get:id=>ipcRenderer.invoke('project:get',id),
     update:(id,patch)=>ipcRenderer.invoke('project:update',id,plain(patch)),remove:id=>ipcRenderer.invoke('project:remove',id),
-    prepareImport:mode=>ipcRenderer.invoke('project:prepare-import',mode),confirmImport:(token,items)=>ipcRenderer.invoke('project:confirm-import',token,plain(items)),
+    prepareImport:(mode,droppedRoots)=>ipcRenderer.invoke('project:prepare-import',mode,droppedRoots&&plain(droppedRoots)),confirmImport:(token,items)=>ipcRenderer.invoke('project:confirm-import',token,plain(items)),
     rescan:id=>ipcRenderer.invoke('project:rescan',id),pickPath:directory=>ipcRenderer.invoke('project:pick-path',directory),
     addEntry:(id,directory)=>ipcRenderer.invoke('project:add-entry',id,directory),resources:()=>ipcRenderer.invoke('project:resources'),
     open:(id,entry)=>ipcRenderer.invoke('project:open',id,entry),reveal:id=>ipcRenderer.invoke('project:reveal',id),relocate:id=>ipcRenderer.invoke('project:relocate',id),
@@ -156,7 +156,7 @@ const api: BaoyiApi = {
     bulkUpdate: (ids, patch) => ipcRenderer.invoke('image:bulk-update', plain(ids), plain(patch)),
     remove: (id,deleteFiles) => ipcRenderer.invoke('image:remove', id,deleteFiles), groups: () => ipcRenderer.invoke('image:groups'),
     saveGroup: group => ipcRenderer.invoke('image:save-group', plain(group)), removeGroup: id => ipcRenderer.invoke('image:remove-group', id),
-    prepareImport: (type, multiple, archive) => ipcRenderer.invoke('image:prepare-import', type, multiple, archive),
+    prepareImport: (type, multiple, archive, droppedPaths) => ipcRenderer.invoke('image:prepare-import', type, multiple, archive, droppedPaths && plain(droppedPaths)),
     confirmImport: (token, selected, folderCategories) => ipcRenderer.invoke('image:confirm-import', token, plain(selected), folderCategories),
     rescan: id => ipcRenderer.invoke('image:rescan', id), relocate: id => ipcRenderer.invoke('image:relocate', id),
     reveal: id => ipcRenderer.invoke('image:reveal', id),
@@ -201,7 +201,17 @@ const api: BaoyiApi = {
   app: {
     info: () => ipcRenderer.invoke('app:info'),
     copyText: (text: string) => ipcRenderer.invoke('app:copy', String(text)),
-    openUrl: (url: string) => ipcRenderer.invoke('app:open-url', url)
+    openUrl: (url: string) => ipcRenderer.invoke('app:open-url', url),
+    pathForFile: (file: File) => {
+      try {
+        const p = webUtils?.getPathForFile(file)
+        if (p) return p
+      } catch {
+        /* best-effort */
+      }
+      return (file as File & { path?: string })?.path ?? ''
+    },
+    statPaths: (paths: string[]) => ipcRenderer.invoke('app:stat-paths', plain(paths))
   },
   win: {
     minimize: () => ipcRenderer.send('win:minimize'),
@@ -221,7 +231,7 @@ const api: BaoyiApi = {
       ipcRenderer.invoke('software:launch', id, launcherPath),
     revealInFolder: (id: string, launcherPath?: string) =>
       ipcRenderer.invoke('software:reveal', id, launcherPath),
-    addManual: () => ipcRenderer.invoke('software:add-manual'),
+    addManual: (files?: string[]) => ipcRenderer.invoke('software:add-manual', files && plain(files)),
     pickIcon: (id: string) => ipcRenderer.invoke('software:pick-icon', id),
     clearIcon: (id: string) => ipcRenderer.invoke('software:clear-icon', id),
     refreshIcons: () => ipcRenderer.invoke('software:refresh-icons')
@@ -239,7 +249,7 @@ const api: BaoyiApi = {
     linkStates: (id) => ipcRenderer.invoke('game:link-states', id),
     readLink: (id, target) => ipcRenderer.invoke('game:read-link', id, target),
     relocate: (id: string, mode: 'directory' | 'file' = 'directory') => ipcRenderer.invoke('game:relocate', id, mode),
-    addManual: () => ipcRenderer.invoke('game:add-manual'),
+    addManual: (filePath?: string) => ipcRenderer.invoke('game:add-manual', filePath),
     list: (query: GameQuery = {}) => ipcRenderer.invoke('game:list', plain(query)),
     get: (id: string) => ipcRenderer.invoke('game:get', id),
     update: (id: string, patch: Partial<GameItem>) =>
@@ -429,7 +439,7 @@ const api: BaoyiApi = {
   },
   scan: {
     pickDirectory: () => ipcRenderer.invoke('scan:pick-dir'),
-    run: (dirs: string[]) => ipcRenderer.invoke('scan:run', plain(dirs)),
+    run: (dirs: string[], directDirs?: boolean) => ipcRenderer.invoke('scan:run', plain(dirs), directDirs),
     cancel: () => ipcRenderer.send('scan:cancel'),
     onProgress: (cb) => subscribe('scan:progress', cb),
     units: () => ipcRenderer.invoke('scan:units'),

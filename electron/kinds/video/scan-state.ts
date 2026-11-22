@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoCandidate } from './scanner.ts'
 import { readVideoLocalMetadata } from './local-metadata.ts'
 import { resolveVideoOrganizeOwner, unchangedOrganizedFiles } from './organize-owner.ts'

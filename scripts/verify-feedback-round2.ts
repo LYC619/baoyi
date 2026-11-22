@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {registerVideoContent,bindVideoSource} from '../electron/kinds/video/registration.ts'
 import {createVideoWorkflow} from '../electron/kinds/video/download/workflow.ts'
@@ -93,8 +93,8 @@ test('archive IPC sends while downloads are busy, while writes and restore remai
   let restore=false,sent=0,operation:Function=()=>{}
   class Assistant{constructor(options:any){operation=options.operation}async send(){sent++;return {status:'running'}}}
   const load=createRendererLoader({'node:path':{default:path},electron:{app:{getPath:()=>os.tmpdir(),getAppPath:()=>process.cwd(),on:()=>{}},},
-    '../services/database.ts': { getDb:()=>db },
-    '../services/settings-store.ts': { getSettings:()=>({hide_hentai:false,ai:{},ai_profiles:[]}) },
+    '../services/storage/database.ts': { getDb:()=>db },
+    '../services/storage/settings-store.ts': { getSettings:()=>({hide_hentai:false,ai:{},ai_profiles:[]}) },
     '../kinds/game/service.ts':{},'../kinds/video/service.ts':{},'../kinds/project/handoff.ts':{},'../workspace/timeline.ts':{},
     '../workspace/document-insight-service.ts':{},'../workspace/document-insights.ts':{},'../workspace/documents.ts':{},'../workspace/preferences.ts':{},
     '../archive/service.ts':{ArchiveAssistant:Assistant},'../workspace/activity.ts':{workspaceOperation:(fn:Function)=>fn()},

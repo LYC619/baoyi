@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { errorMessage } from '@/utils'
 import { computed, onMounted, ref, watch } from 'vue'
 import PhotoViewControls from '@/components/image/PhotoViewControls.vue'
@@ -38,12 +39,12 @@ async function reorder(group: ImageGroup, delta: number) {
   })
 }
 async function removeGroup(group: ImageGroup) {
-  if (!confirm(`删除分类「${group.name}」？作品保留并回到未分类。`)) return
+  if (!(await confirmDialog({ title: `删除分类「${group.name}」？`, message: '作品记录与本地原文件均会保留，并归回未分类。', confirmText: '删除分类', tone: 'danger' }))) return
   await run(async () => { await api.removeGroup(group.id); if (store.query.groupId === group.id) store.query.groupId = undefined })
 }
 async function changeTag(from: string, to: string | null) {
   if (to !== null && (!to.trim() || to.trim() === from)) return
-  if (!confirm(to === null ? `从图片库所有作品移除「${from}」标签？` : `将图片库的「${from}」改为「${to.trim()}」？同名标签会合并。`)) return
+  if (!(await confirmDialog({ title: to === null ? `移除标签「${from}」？` : `重命名标签「${from}」？`, message: to === null ? '将从图片库所有作品上移除该标签，本地文件不受影响。' : `将改为「${to.trim()}」，同名标签会自动合并。`, confirmText: to === null ? '移除标签' : '确认修改', tone: to === null ? 'danger' : 'default' }))) return
   await run(async () => { const count = await api.renameTag(from, to); message.value = `已更新 ${count} 个作品`; if (store.query.tag === from) store.query.tag = to?.trim() || undefined })
 }
 async function rescan() {

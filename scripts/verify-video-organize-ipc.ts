@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { registerVideoContent } from '../electron/kinds/video/registration.ts'
 import { getVideo } from '../electron/kinds/video/db.ts'
@@ -47,8 +47,8 @@ try {
     }
   }
   const load = createRendererLoader({ electron,
-    '../services/database.ts': { getDb: () => db },
-    '../services/settings-store.ts': { getSettings: () => ({ hide_hentai: hidden }) },
+    '../services/storage/database.ts': { getDb: () => db },
+    '../services/storage/settings-store.ts': { getSettings: () => ({ hide_hentai: hidden }) },
     '../kinds/video/organize.ts': organize
   })
   load('electron/ipc/video-organize.ts').registerVideoOrganizeIpc(() => win, {

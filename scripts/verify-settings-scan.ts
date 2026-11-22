@@ -5,7 +5,7 @@ import path from 'node:path'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
 import * as Vue from 'vue'
 import * as utils from '../src/utils/index.ts'
-import * as proxyRules from '../electron/services/proxy-rules.ts'
+import * as proxyRules from '../electron/services/network/proxy-rules.ts'
 import type { GameScanProgress, VideoScanResult } from '../src/types/index.ts'
 
 const source = fs.readFileSync(path.resolve('src/components/settings/tabs/ScanTab.vue'), 'utf8')
@@ -92,7 +92,7 @@ function harness(kind: 'software' | 'game' | 'video' = 'game', tab = 'Scan') {
     '@/stores/game': { useGameStore: () => stores('game') },
     '@/stores/categories': { ICON_NAMES: [], useCategoriesStore: () => ({}) },
     '@/utils': utils,
-    '../../../../electron/services/proxy-rules': proxyRules
+    '../../../../electron/services/network/proxy-rules': proxyRules
   }
   const scope = Vue.effectScope()
   const load = createRendererLoader(mocks, {

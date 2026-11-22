@@ -1,4 +1,4 @@
-import type { SqlDb } from '../services/schema.ts'
+import type { SqlDb } from '../services/storage/schema.ts'
 import { ProjectLibrary } from '../kinds/project/library.ts'
 import { projectHistory } from './project-history.ts'
 interface Options { head?:(root:string)=>Promise<string>;busy:()=>boolean;start:(id:string,after:string)=>Promise<string> }

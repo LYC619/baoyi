@@ -5,7 +5,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ProjectLibrary } from '../electron/kinds/project/library.ts'
 import { createProjectAgent } from '../electron/kinds/project/agent.ts'
@@ -155,9 +155,9 @@ test('R6：标准网页请求区分验证页、拒绝、限流和服务器错误
   const load = createRendererLoader({ electron: { session: { fromPartition: () => ({
     setUserAgent: () => {}, setProxy: async () => {}, resolveProxy: async () => 'PROXY fixture:1234',
     fetch: async (_url: string, options: RequestInit) => { init = options; return new Response(html, { status: code, headers: { 'content-type': 'text/html' } }) }
-  }) } }, './database.ts': { getDb: () => ({}) },
-    './settings-store.ts': { getSettings: () => ({ video_online_proxy: 'system://' }) } }, { URL, Response, AbortSignal, TextDecoder, Uint8Array })
-  const network = load('electron/services/online-network.ts')
+  }) } }, '../storage/database.ts': { getDb: () => ({}) },
+    '../storage/settings-store.ts': { getSettings: () => ({ video_online_proxy: 'system://' }) } }, { URL, Response, AbortSignal, TextDecoder, Uint8Array })
+  const network = load('electron/services/network/online-network.ts')
   for (const [status, body, outcome] of [[200, html, 'verification_required'], [403, 'Forbidden', 'restricted'], [429, 'Rate limited', 'rate_limited'], [500, 'Error', 'server_error'], [200, '<title>正常页面</title>', 'response_received']] as const) {
     code = status; html = body
     const result = await network.probeOnlineNetwork('https://fixture.invalid/')

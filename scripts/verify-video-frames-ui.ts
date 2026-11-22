@@ -3,13 +3,15 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
 import {loadPlaywright,electronTestEnv} from './helpers/playwright.ts'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
+import {execFileSync} from 'node:child_process'
+import {frameFfmpeg} from '../electron/kinds/video/frame-generator.ts'
 import {registerVideoContent} from '../electron/kinds/video/registration.ts'
-const {_electron}=loadPlaywright(),ffmpeg=process.argv[2],source=process.argv[3],packed=process.argv[5]
-assert.ok(ffmpeg&&source,'显式提供FFmpeg及合成视频路径')
+const {_electron}=loadPlaywright(),ffmpeg=await frameFfmpeg(process.argv[2]||process.env.BAOYI_TEST_FFMPEG||''),packed=process.argv[5]
+assert.ok(ffmpeg,'显式提供FFmpeg路径（通过参数或 BAOYI_TEST_FFMPEG）')
 const output=path.resolve(process.argv[4]||'output/p1-p2-video-2026-11-06/native-hover');fs.mkdirSync(output,{recursive:true})
-const profile=fs.mkdtempSync(path.join(output,'profile-')),file=path.join(profile,'synthetic.mp4');fs.copyFileSync(source,file)
+const profile=fs.mkdtempSync(path.join(output,'profile-')),file=path.join(profile,'synthetic.mp4'),source=process.argv[3]?path.resolve(process.argv[3]):path.join(profile,'source.mp4');if(!process.argv[3])execFileSync(ffmpeg,['-nostdin','-hide_banner','-loglevel','error','-y','-f','lavfi','-i','testsrc2=size=640x360:rate=12','-t','8','-c:v','libx264','-preset','ultrafast','-threads','2','-pix_fmt','yuv420p',source],{windowsHide:true,timeout:30000});fs.copyFileSync(source,file)
 const db=new DatabaseSync(path.join(profile,'baoyi.db'));initSchema(db,KINDS)
 for(const [key,value]of Object.entries({onboarded:true,theme:'light',hide_hentai:false,hanime_builtin_hosts:false,ffmpeg_path:ffmpeg}))db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key,JSON.stringify(value))
 const registration=registerVideoContent(db,{title:'合成代表帧',category:'其他',videoType:'movie',items:[{title:'本地合成视频',order:1,durationSec:8,files:[{path:file}]}]});db.close()

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {ProjectLibrary} from '../electron/kinds/project/library.ts'
 import {inspectProject} from '../electron/kinds/project/scanner.ts'
@@ -16,7 +16,7 @@ import {ProjectApplications} from '../electron/kinds/project/applications.ts'
 const config={enabled:true,model:'fixture',api_url:'http://fixture.invalid/v1',api_key:'fixture-only'}
 async function fixture(t:test.TestContext){
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'baoyi-handoff-')),db=new DatabaseSync(':memory:');initSchema(db,KINDS)
-  t.after(async()=>{db.close();assert.ok(root.startsWith(path.join(os.tmpdir(),'baoyi-handoff-')));await fs.rm(root,{recursive:true,force:true})})
+  t.after(async()=>{db.close();assert.ok(root.startsWith(path.join(os.tmpdir(),'baoyi-handoff-')));await fs.rm(root,{recursive:true,force:true,maxRetries:8,retryDelay:50})})
   await fs.writeFile(path.join(root,'AGENTS.md'),'# 示例规则\n只做合成项目。');await fs.writeFile(path.join(root,'.env'),'DO_NOT_SEND_THIS=fixture')
   const project=new ProjectLibrary(db).register(await inspectProject(root)),timeline=new TimelineLibrary(db)
   timeline.updateContext(project.id,{...timeline.context(project.id),current:'已归档',next:'核对结果',rules:[{type:'path',label:'示例规则',value:'AGENTS.md'}]})

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { _electron } from 'playwright'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { DocumentLibrary } from '../electron/workspace/documents.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
@@ -14,6 +14,9 @@ await fs.mkdir(output, { recursive: true })
 const profile = await fs.mkdtemp(path.join(output, 'profile-'))
 const db = new DatabaseSync(path.join(profile, 'baoyi.db')); initSchema(db, KINDS); db.exec(VIDEO_JOBS_SQL)
 for (const [key, value] of Object.entries({ onboarded: true, theme: 'light', hanime_builtin_hosts: false, ai: { enabled: false, api_url: '', api_key: '', model: '' } })) db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, JSON.stringify(value))
+const secrets = { ai:'synthetic-old-ai', profile:'synthetic-old-profile', search:'synthetic-old-search', tmdb:'synthetic-old-tmdb' }
+for (const [key, value] of Object.entries({ai:{enabled:false,api_key:secrets.ai}, ai_profiles:[{id:'test',name:'测试',enabled:false,api_key:secrets.profile}],search:{enabled:false,api_key:secrets.search},tmdb:{enabled:false,api_key:secrets.tmdb}})) db.prepare('INSERT OR REPLACE INTO settings VALUES(?,?)').run(key,JSON.stringify(value))
+db.prepare("UPDATE settings SET value='31' WHERE key='_schema'").run()
 const fixtureFile = path.join(profile, '标签验收.txt'); await fs.writeFile(fixtureFile, '第一章\n隔离标签测试')
 const fixtureDoc = await new DocumentLibrary(db).register(fixtureFile, 'novel')
 db.close()
@@ -27,6 +30,17 @@ const navigate = async (route: string) => { await page.evaluate(route => { locat
 try {
   assert.equal(path.resolve(await app.evaluate(({ app }) => app.getPath('userData'))), profile)
   await page.waitForFunction(() => !!window.baoyi?.workspace)
+  const current = await page.evaluate(() => window.baoyi.settings.getAll())
+  assert.deepEqual([current.ai.api_key,current.ai_profiles[0].api_key,current.search.api_key,current.tmdb.api_key],Object.values(secrets))
+  await page.evaluate(ai=>window.baoyi.settings.patch({ai:{...ai,api_key:'synthetic-new-ai'}}),current.ai)
+  const disk = new DatabaseSync(path.join(profile,'baoyi.db'),{readOnly:true})
+  try {
+    const rows = disk.prepare("SELECT value FROM settings WHERE key IN ('ai','ai_profiles','search','tmdb')").all()
+    assert.equal(rows.length,4)
+    for (const row of rows) assert.ok(String(row.value).includes('safeStorageV1') && !String(row.value).includes('synthetic-'))
+  } finally { disk.close() }
+  assert.equal((await page.evaluate(()=>window.baoyi.settings.getAll())).ai.api_key,'synthetic-new-ai')
+  checks.push('existing and edited API keys round-trip with Windows encryption')
   for (const [module, route] of [['software', '/'], ['game', '/game'], ['video', '/video'], ['image', '/image'], ['document', '/document'], ['project', '/project'], ['personal', '/personal']]) {
     await navigate(route)
     await page.locator('.settings').waitFor({ state: 'hidden' })

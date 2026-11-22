@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildHanimeHostResolverRules, getHanimeHostsStatus, isHanimeHost } from '../electron/services/hanime-network-rules.ts'
+import { buildHanimeHostResolverRules, getHanimeHostsStatus, isHanimeHost } from '../electron/services/hanime/hanime-network-rules.ts'
 
 // The watch page is reachable while an older HLS CDN has poisoned system DNS.
 // Keep the original URL/Host/SNI, resolve its stable provider alias dynamically.

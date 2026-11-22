@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import { assertImageFilesIdle } from './management.ts'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { ImageDownloadJob, ImageDownloadOptions, ImageDownloadProgress, ImageSourceChapter, ImageSourcePage, ImageSourceWork, ImageTransferEvent } from '../../../src/types/image.ts'
 import { ImageLibrary } from './library.ts'
 import { PicacomicSource } from './source.ts'
@@ -345,5 +345,11 @@ export function createImageDownloads(deps: Dependencies) {
     return result
   }
   async function logs(id: string) { available(id); const entries = await log?.read(id) || []; available(id); return entries }
-  return { enqueue, enqueueBatch, repair, retry, pause, resume, cancel, move, options, dismiss, list, logs, idle: async () => { while (settling.size) {await Promise.allSettled([...settling.values()]); await Promise.resolve()} await log?.flush() } }
+  async function idle(){while(settling.size){await Promise.allSettled(settling.values());await Promise.resolve()}await log?.flush()}
+  async function stop(){
+    for(const job of jobs.values())if(job.status==='queued'){job.status='paused';save(job)}
+    for(const controller of controllers.values())controller.abort('paused')
+    await idle()
+  }
+  return { enqueue, enqueueBatch, repair, retry, pause, resume, cancel, move, options, dismiss, list, logs, idle, stop }
 }

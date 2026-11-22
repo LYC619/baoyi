@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { GameItem } from '../../../src/types/index.ts'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import { getGame, updateGame } from './db.ts'
 
 export function gamePathState(game: GameItem): GameItem {

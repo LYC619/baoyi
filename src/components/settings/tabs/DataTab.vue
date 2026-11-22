@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Download, Eraser, FolderOpen, Loader2, RotateCcw } from 'lucide-vue-next'
@@ -37,7 +38,7 @@ async function loadStats(): Promise<void> {
 }
 
 function openDataDir(): void {
-  void window.baoyi.data.openDir()
+  void window.baoyi.data.openDir().catch((cause) => error(errorMessage(cause)))
 }
 
 async function exportJson(): Promise<void> {
@@ -99,13 +100,13 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
   // 两边是对上的；现在改成清全部品类，文案不跟着改就成了一句谎话
   const shared =
     `会清掉：全部软件、游戏、影视、图片、资料、项目及内容记录（含摘录与项目日志），待识别目录、整理记录、任务和下载记录、图标缓存、游戏封面与影视海报。\n` +
-    `不会删除资源文件，软件、游戏和视频都还在原处。\n` +
+    `视频预览帧和漫画封面缓存也会清除，不会删除原始资源文件。\n` +
     `存档备份也一份不删，备份记录一并留着，不然你就再也找不到那些文件了。`
   const warning =
     mode === 'library'
-      ? `清空识别数据，重新开始识别。\n\n${shared}\n\n保留：个人记录及其引用快照、API Key、搜索配置、扫描目录、自定义分类、识别日志。\n已经整理过的文件夹会留在整理后的位置，整理记录清掉之后就无法再自动撤销了。\n\n确认继续？`
-      : `恢复出厂：连个人信息、背包、技能、经历、状态和待办，以及 API Key、搜索配置、扫描目录、自定义分类、识别日志、整理记录一起清空，并重新走一遍引导流程。\n\n${shared}\n整理记录清掉之后就无法再自动撤销整理了。\n\n确认继续？`
-  if (!window.confirm(warning)) return
+      ? `清空识别数据，重新开始识别。\n\n${shared}\n\n保留：归档助理的对话、记忆和方法，漫画登录和偏好，个人记录及其引用快照、API Key、搜索配置、扫描目录、自定义分类、识别日志。\n已经整理过的文件夹会留在整理后的位置，整理记录清掉之后就无法再自动撤销了。\n\n确认继续？`
+      : `恢复出厂：归档助理的对话、记忆和方法，漫画登录、偏好和授权，以及个人记录、API Key、搜索配置、扫描目录、自定义分类、识别日志、整理记录都会清空，并重新走一遍引导流程。\n\n${shared}\n整理记录清掉之后就无法再自动撤销整理了。\n\n确认继续？`
+  if (!(await confirmDialog({ title: mode === 'library' ? '清空识别数据？' : '恢复初始设置？', message: warning, confirmText: mode === 'library' ? '清空识别数据' : '确认重置', tone: 'danger' }))) return
 
   resetting.value = true
   try {

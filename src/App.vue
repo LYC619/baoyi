@@ -15,7 +15,7 @@ import VideoPreviewDrawer from '@/components/video/VideoPreviewDrawer.vue'
 import {useVideoPreview} from '@/composables/useVideoPreview'
 import {activeModule} from '@/composables/useModules'
 import ReturnToSource from '@/components/workspace/ReturnToSource.vue'
-import ToastHost from '@/components/ui/ToastHost.vue'
+import ToastHost from '@/components/ui/ToastHost.vue'; import AppDialogHost from '@/components/ui/AppDialogHost.vue'
 import VideoImportPanel from '@/components/video/VideoImportPanel.vue'
 import AgentOrganizePanel from '@/components/video/AgentOrganizePanel.vue'
 import ImageReader from '@/components/image/ImageReader.vue'
@@ -55,7 +55,7 @@ watch(workflow.hideHentai, hidden => { videoImport.setPrivacy(hidden); if (hidde
     <AudioMiniPlayer />
     <VideoUpdatesPanel />
     <MusicSearchPanel v-if="music.open.value" />
-    <ToastHost />
+    <AppDialogHost /><ToastHost />
     <SourceDialog v-if="comicIngest.open.value&&comicIngest.visible.value"/>
     <ProjectLauncher />
     <VideoPreviewDrawer v-if="videoPreview.visible.value" />

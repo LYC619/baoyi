@@ -53,10 +53,10 @@ onMounted(async()=>{field.value?.focus();const stamp=generation;try{const defaul
 onUnmounted(()=>{generation++;void window.baoyi.comic.cancelPreview().catch(() => { /* best-effort */ });previous?.focus()})
 </script>
 <template><Teleport to="body" :disabled="embedded"><div :class="embedded?'comic-embedded':'comic-shade'" @click.self="close"><section ref="dialog" :role="embedded?undefined:'dialog'" :aria-modal="embedded?undefined:true" aria-labelledby="comic-title" class="comic-dialog" @keydown="keys">
-  <header><div><p>漫画摄入</p><h2 id="comic-title">{{recovery?'核验并继续原任务':'从 JM 添加作品'}}</h2></div><button class="im-button" :aria-label="embedded?'返回 JM 列表':'关闭漫画摄入'" :disabled="saving" @click="close"><X :size="20"/></button></header>
+  <header><div><p>在线下载</p><h2 id="comic-title">{{recovery?'核验并继续原任务':'从 JM 添加作品'}}</h2></div><button class="im-button" :aria-label="embedded?'返回 JM 列表':'关闭在线下载'" :disabled="saving" @click="close"><X :size="20"/></button></header>
   <div class="comic-body"><form @submit.prevent="resolve"><label class="im-field">作品编号或链接<input ref="field" v-model="input" :disabled="busy||saving" placeholder="数字 ID、JM 编号或作品链接"/></label>
     <div class="comic-proxy"><label class="im-field">连接方式<select v-model="mode" :disabled="busy||saving"><option value="system">跟随系统代理</option><option value="custom">指定代理</option><option value="builtin">使用当前内置代理</option></select></label><label v-if="mode==='custom'" class="im-field">代理地址<input v-model="custom" :disabled="busy||saving" placeholder="127.0.0.1:7890"/></label></div>
-    <p class="comic-hint">{{mode==='builtin'?'沿用设置中的代理；设置为空时直连。':'仅用于漫画摄入，记住最近成功的选择。支持 HTTP 与 SOCKS5。'}}</p>
+    <p class="comic-hint">{{mode==='builtin'?'沿用设置中的代理；设置为空时直连。':'仅用于在线漫画下载，会自动记住最近成功的连接方式。支持 HTTP 与 SOCKS5。'}}</p>
     <p v-if="recovery" class="comic-hint">重新读取来源后，选择原存放根目录。已保存的页面通过核验后继续使用。</p>
     <button class="im-button im-primary" :disabled="!input.trim()||busy||saving"><Loader2 v-if="busy" class="spin" :size="17"/>{{busy?'正在读取作品与章节…':'解析作品'}}</button>
   </form><p v-if="error" class="im-error" role="alert">{{error}}</p>

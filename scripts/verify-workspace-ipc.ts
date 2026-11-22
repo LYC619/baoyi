@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
 import { DocumentLibrary } from '../electron/workspace/documents.ts'
@@ -26,8 +26,8 @@ test('workspace IPC rejects other windows/frames and imports only approved previ
   const load = createRendererLoader({
     'node:fs/promises':{...fs.promises,default:fs.promises},'node:path':{...path,default:path},
     electron:{app:{on(){},getPath:(name:string)=>{assert.equal(name,'userData');return root}},dialog:{showOpenDialog:async()=>({canceled:controls.cancelled,filePaths:[selected]}),showSaveDialog:async()=>({canceled:false,filePath:selected})},shell:{}},
-    '../services/database.ts': { getDb:()=>db },
-    '../services/settings-store.ts': { getSettings:()=>({hide_hentai:true,ai:{}}) },
+    '../services/storage/database.ts': { getDb:()=>db },
+    '../services/storage/settings-store.ts': { getSettings:()=>({hide_hentai:true,ai:{}}) },
     './library-backup.ts':{assertLibraryIdle:()=>{if(controls.busy||workspaceBusy())throw new Error('busy')}},
     './archive.ts':{startImportedInsights:async()=>''},
     '../workspace/documents.ts':{DocumentLibrary},'../workspace/links.ts':{WorkspaceLinks},
@@ -35,7 +35,7 @@ test('workspace IPC rejects other windows/frames and imports only approved previ
     '../workspace/activity.ts':{workspaceOperation},
     '../workspace/assistant.ts':{generateTimeline:async()=>null,cancelTimeline:()=>{}},
     '../workspace/evidence.ts':{collectEvidence:async()=>null},
-    '../services/window-focus.ts':{restoreWindowFocus:()=>{}}
+    '../services/system/window-focus.ts':{restoreWindowFocus:()=>{}}
   },{setInterval:()=>({unref(){}}),clearInterval(){},Buffer,Uint8Array,Date,Set,URL,structuredClone})
   const organized:string[]=[]
   load('electron/ipc/workspace.ts').registerWorkspaceIpc(()=>win,{handle:(name:string,fn:Function)=>handlers.set(name,fn)}, {organize:(id:string)=>{organized.push(id);return {id:'persistent-session'}},cancelProject:()=>{}})

@@ -1,6 +1,6 @@
 import type {ComicProxy} from '../../../src/types/comic-ingest.ts'
 import {comicProxy,JM_API_HOSTS,JM_IMAGE_HOSTS} from './comic-source-rules.ts'
-import {parseProxyInput,toElectronProxyConfig,type ElectronProxyConfig} from '../../services/proxy-rules.ts'
+import {parseProxyInput,toElectronProxyConfig,type ElectronProxyConfig} from '../../services/network/proxy-rules.ts'
 export function curlProxy(route:string){
   const first=route.split(';')[0].trim()
   if(first==='DIRECT')return ''

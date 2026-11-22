@@ -7,7 +7,7 @@
  * 它报 `failed to receive handshake` 有可能是后端自己的毛病，而应用真正用的是
  * Chromium 的栈。两者结论可能不同，所以要在真栈上问一次。
  *
- * 探到就把页面存进 `doc/fixtures/`，那是待确认 H 想要的真实语料。
+ * 探到就把页面存进 `docs/notes/fixtures/`，供解析器核对真实语料。
  */
 const { app, session, net } = require('electron')
 const fs = require('node:fs')
@@ -24,7 +24,7 @@ const TARGETS = [
   ['control', 'https://example.com/']
 ]
 
-const OUT = path.join(__dirname, '..', 'doc', 'fixtures')
+const OUT = path.join(__dirname, '..', 'docs', 'notes', 'fixtures')
 
 let hanimeSession
 
@@ -104,7 +104,7 @@ app.whenReady().then(async () => {
      *
      * 第一版只判 `name !== 'control'` 就写盘，于是代理换节点之后 Cloudflare 回的
      * 那三个 403「Sorry, you have been blocked」被当成真页面存进了
-     * `doc/fixtures/` —— 文件名叫 `hanime-search.html`、5485 字节、看着齐全。
+     * `docs/notes/fixtures/` —— 文件名叫 `hanime-search.html`、5485 字节、看着齐全。
      *
      * 那比不存更糟：fixture 是要长期当回归语料用的，存一份盾页进去，
      * 以后拿它验选择器会得到「所有选择器都失效了」的假结论，而真正的原因是

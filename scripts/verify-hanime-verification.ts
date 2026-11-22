@@ -12,9 +12,9 @@ import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { parse } from 'node-html-parser'
 import * as hanime from '../electron/kinds/video/hentai/hanime.ts'
-import * as proxyRules from '../electron/services/proxy-rules.ts'
-import * as networkRules from '../electron/services/hanime-network-rules.ts'
-import * as hanimeDirect from '../electron/services/hanime-direct.ts'
+import * as proxyRules from '../electron/services/network/proxy-rules.ts'
+import * as networkRules from '../electron/services/hanime/hanime-network-rules.ts'
+import * as hanimeDirect from '../electron/services/hanime/hanime-direct.ts'
 import * as downloadLimiter from '../electron/kinds/video/download/limiter.ts'
 
 const URL_A = 'https://hanime1.me/search?query=fixture-a'
@@ -147,7 +147,7 @@ class FakeWindow extends EventEmitter {
 
 // Transpile, do not copy/extract/rewrite the functions under test. Loading this
 // module cannot import real Electron or reach the network: unexpected imports fail.
-const source = readFileSync(new URL('../electron/services/proxy.ts', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../electron/services/network/proxy.ts', import.meta.url), 'utf8')
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 async function harness(onLoad: FakeWindow['onLoad'] = (win, url) => {
   win.webContents.navigate(url, CHALLENGE)
@@ -173,18 +173,18 @@ async function harness(onLoad: FakeWindow['onLoad'] = (win, url) => {
       constructor(options: WindowOptions) { super(options, onLoad); windows.push(this) }
     }
   }
-  const exports = {} as typeof import('../electron/services/proxy.ts')
+  const exports = {} as typeof import('../electron/services/network/proxy.ts')
   const dependencies: Record<string, unknown> = {
     electron,
-    '../kinds/video/hentai/hanime.ts': {
+    '../../kinds/video/hentai/hanime.ts': {
       ...hanime,
       setHanimeChallengeHandler: (value: typeof handler) => { handler = value },
       setHanimeFetch: (value: typeof injectedFetch) => { injectedFetch = value }
     },
     './proxy-rules.ts': proxyRules,
-    './hanime-network-rules.ts': networkRules,
-    './hanime-direct.ts': hanimeDirect,
-    '../kinds/video/download/limiter.ts': downloadLimiter
+    '../hanime/hanime-network-rules.ts': networkRules,
+    '../hanime/hanime-direct.ts': hanimeDirect,
+    '../../kinds/video/download/limiter.ts': downloadLimiter
   }
   runInNewContext(compiled, {
     exports, URL, console,
@@ -192,7 +192,7 @@ async function harness(onLoad: FakeWindow['onLoad'] = (win, url) => {
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
     require: (id: string) => { assert.ok(id in dependencies, 'Unexpected dependency: ' + id); return dependencies[id] }
-  }, { filename: 'electron/services/proxy.ts' })
+  }, { filename: 'electron/services/network/proxy.ts' })
   await exports.applyProxy('')
   return { clock, windows, open: handler, verify: exports.openHanimeVerification, partitions, isolatedSession, fetchCalls, fetch: injectedFetch,
     recover:exports.recoverHanimeConnections,connectionCounts:()=>({closedConnections,clearedDns}) }

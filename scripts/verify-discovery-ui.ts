@@ -3,20 +3,19 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
-import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
 import { spawnSync } from 'node:child_process'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { createDiscoveryCatalogue } from '../electron/kinds/video/discovery/catalogue.ts'
 import { pngImage } from './helpers/test-images.ts'
 import { locateFfmpeg } from '../electron/kinds/video/download/ffmpeg.ts'
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+import { loadPlaywright } from './helpers/playwright.ts'
+const { _electron } = loadPlaywright() as any
 const output = path.resolve('output/discovery-ui'); fs.mkdirSync(output, { recursive: true })
 const profile = fs.mkdtempSync(path.join(output, 'profile-')), mediaRoot = path.join(profile, 'videos'); fs.mkdirSync(mediaRoot)
 // A hidden desktop does not reliably produce canvas capture frames.
-const ffmpeg = locateFfmpeg('')
+const ffmpeg = locateFfmpeg(process.env.BAOYI_TEST_FFMPEG || '')
 assert.ok(ffmpeg, 'A real local FFmpeg executable is required')
 const videoFile = path.join(profile, 'source.webm')
 const encoded = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin',

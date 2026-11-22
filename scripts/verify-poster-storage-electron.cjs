@@ -30,8 +30,8 @@ const repository = path.resolve(__dirname, '..')
 const moduleFile = path.join(repository, 'output/video-field-retest-20260913/native-storage-module.cjs')
 require('esbuild').buildSync({
   stdin: { contents: [
-    "export { getDb, closeDb, postersDir } from './electron/services/database.ts'",
-    "export { initSchema } from './electron/services/schema.ts'",
+    "export { getDb, closeDb, postersDir } from './electron/services/storage/database.ts'",
+    "export { initSchema } from './electron/services/storage/schema.ts'",
     "export { KINDS } from './electron/kinds/index.ts'",
     "export { setVideoPoster, getVideoItem } from './electron/kinds/video/service.ts'"
   ].join('\n'), resolveDir: repository, loader: 'ts' }, outfile: moduleFile,

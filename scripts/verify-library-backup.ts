@@ -10,13 +10,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema, SCHEMA_VERSION, type SqlDb } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_VERSION, type SqlDb } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { createVideoJobStore, VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
 import { applyVideoOrganize, listVideoOrganizeJournal, previewVideoOrganize } from '../electron/kinds/video/organize.ts'
 import type { VideoDownloadJob } from '../src/types/video-workflow.ts'
 import { LIBRARY_BACKUP_LIMITS, type LibraryBackup } from '../src/types/library-backup.ts'
-import { buildLibraryBackup, previewLibraryBackup, restoreLibraryBackup } from '../electron/services/library-backup.ts'
+import { buildLibraryBackup, previewLibraryBackup, restoreLibraryBackup } from '../electron/services/storage/library-backup.ts'
 
 const expectedTables = [
   'document_files','document_file_operations','document_recycle','document_insights',
@@ -212,8 +212,8 @@ await test('export covers exactly the real metadata tables without settings or c
   assert.equal(backup.schema_version, SCHEMA_VERSION)
   assert.ok(Number.isSafeInteger(backup.exported_at))
   assert.deepEqual(Object.keys(backup.tables).sort(), [...expectedTables].sort())
-  // Local extraction queue is runtime state, intentionally excluded from metadata snapshots.
-  assert.deepEqual(source.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('settings', 'sqlite_sequence', 'document_insight_runs') ORDER BY name").all()
+  // Extraction runs and local discovery cover paths are disposable machine-local state.
+  assert.deepEqual(source.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('settings', 'sqlite_sequence', 'document_insight_runs', 'video_discovery_artwork') ORDER BY name").all()
     .map(r => (r as { name: string }).name), [...expectedTables].sort(), 'the current schema must have no uncovered metadata table')
   for (const table of expectedTables) assert.deepEqual(backup.tables[table], rows(source, table), table)
   assert.ok(!JSON.stringify(backup).includes('source-secret-NEVER-EXPORT'))

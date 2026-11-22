@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -25,6 +26,9 @@ import { useAI } from '@/composables/useAI'
 import { useFilter } from '@/composables/useFilter'
 import { recallScroll, rememberScroll } from '@/composables/useModules'
 import { useScan } from '@/composables/useScan'
+import { useFileDrop } from '@/composables/useFileDrop'
+import DropZoneOverlay from '@/components/ui/DropZoneOverlay.vue'
+import { SOFTWARE_EXTENSIONS } from '@/utils/software-package'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSettingsStore } from '@/stores/settings'
@@ -161,17 +165,68 @@ async function rescan(): Promise<void> {
     return
   }
 
-  const ok = window.confirm(
-    result.added > 0
-      ? `发现 ${result.added} 个新目录，当前共 ${result.pending} 个待识别。\n是否现在进入识别？`
-      : `没有新增目录，但还有 ${result.pending} 个目录待识别。\n是否现在进入识别？`
-  )
+  const ok = await confirmDialog({
+    title: result.added > 0 ? `发现 ${result.added} 个新目录` : '仍有待识别目录',
+    message: `当前共 ${result.pending} 个目录等待识别，是否现在开始识别？`,
+    confirmText: '开始识别'
+  })
   if (!ok) {
     toast(`已记录 ${result.pending} 个待识别目录，随时可到设置里处理`)
     return
   }
   void router.push({ name: 'settings', query: { tab: 'scan', focus: 'pending' } })
 }
+
+const softwareExtSet = new Set(SOFTWARE_EXTENSIONS.map((ext) => ext.toLowerCase()))
+const { dragging: dropActive, dropHandlers } = useFileDrop(async (paths) => {
+  if (busy.value) return
+  try {
+    const stats = await window.baoyi.app.statPaths(paths)
+    const exeFiles: string[] = []
+    const folders: string[] = []
+    const unsupported: string[] = []
+    for (const entry of stats) {
+      if (entry.kind === 'directory') {
+        folders.push(entry.path)
+      } else if (entry.kind === 'file') {
+        const m = /\.([a-z0-9]+)$/i.exec(entry.path)
+        if (m && softwareExtSet.has(m[1].toLowerCase())) exeFiles.push(entry.path)
+        else unsupported.push(entry.path.split(/[\\/]/).pop() || entry.path)
+      } else if (entry.kind === 'symlink') {
+        unsupported.push((entry.path.split(/[\\/]/).pop() || entry.path) + '（链接）')
+      }
+    }
+    if (unsupported.length > 0 && exeFiles.length === 0 && folders.length === 0) {
+      toast('软件库支持拖入可执行程序、安装包或解压后的软件文件夹')
+      return
+    }
+    if (exeFiles.length > 0) {
+      const added = await store.addManual(exeFiles)
+      if (added.length > 0) {
+        success(`已添加 ${added.length} 个程序`)
+        await completeAi(added.map((a) => a.id))
+      }
+    }
+    if (folders.length > 0) {
+      const result = await scan.run(folders, true)
+      await store.reload()
+      if (result.pending > 0) {
+        const ok = await confirmDialog({
+          title: result.added > 0 ? `发现 ${result.added} 个新目录` : '仍有待识别目录',
+          message: `当前共 ${result.pending} 个目录等待识别，是否现在开始识别？`,
+          confirmText: '开始识别'
+        })
+        if (ok) void router.push({ name: 'settings', query: { tab: 'scan', focus: 'pending' } })
+      } else if (result.found === 0) {
+        toast('未在拖入的文件夹中发现可执行程序')
+      } else {
+        toast(`已完成目录扫描（共检查 ${result.found} 个程序，此前均已收录）`)
+      }
+    }
+  } catch (err) {
+    error(errorMessage(err))
+  }
+}, { disabled: () => busy.value })
 
 async function addManual(): Promise<void> {
   const added = await store.addManual()
@@ -238,7 +293,8 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
 </script>
 
 <template>
-  <div class="home" @keydown="selection.key">
+  <div class="home" v-on="dropHandlers" @keydown="selection.key">
+    <DropZoneOverlay :active="dropActive" title="松开以加入软件库" hint="支持直接拖入程序安装包（.exe / .msi / .apk 等）或软件文件夹" />
     <Sidebar />
 
     <main class="home__main">

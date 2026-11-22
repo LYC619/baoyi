@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
-import { isHanimeHost } from '../electron/services/hanime-network-rules.ts'
+import { isHanimeHost } from '../electron/services/hanime/hanime-network-rules.ts'
 
 let passed=0, failed=0
 function harness() {
@@ -20,7 +20,7 @@ function harness() {
   }
   const main=new FakeWindow({})
   const load=createRendererLoader({electron:{BrowserWindow:FakeWindow,Menu:{buildFromTemplate:(items:unknown[])=>({items})},clipboard:{writeText:()=>{}}}}, {URL,Buffer,setTimeout,clearTimeout})
-  const module=load('electron/services/hanime-browser.ts') as typeof import('../electron/services/hanime-browser.ts')
+  const module=load('electron/services/hanime/hanime-browser.ts') as typeof import('../electron/services/hanime/hanime-browser.ts')
   const browser=module.createHanimeBrowser({getSession:()=>session as any,getMainWindow:()=>main as any,isHidden:()=>hidden})
   return {browser,main,session,windows,sent,hide:()=>{hidden=true}}
 }

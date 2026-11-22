@@ -1,5 +1,5 @@
 import { net, session } from 'electron'
-import { createChromiumDownloadFetch } from '../../services/chromium-download-fetch.ts'
+import { createChromiumDownloadFetch } from '../../services/network/chromium-download-fetch.ts'
 
 export function createImageSourceFetch(): (url:string,init?:RequestInit)=>Promise<Response> {
   const media=createChromiumDownloadFetch(options=>net.request(options),session.defaultSession)

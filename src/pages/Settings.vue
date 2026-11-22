@@ -184,7 +184,7 @@ const tabProps = computed(() => tab.value === 'categories' || tab.value === 'tag
   color: var(--text-sub);
   padding: 2px 8px;
   border-radius: var(--radius-tag);
-  background: var(--bg-overlay);
+  background: var(--hover-surface);
 }
 
 .layout {

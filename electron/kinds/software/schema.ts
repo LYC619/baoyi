@@ -6,8 +6,8 @@
  * 公共层只负责在建库时按注册表把每个品类的这几段 SQL 执行一遍。
  */
 
-import type { SqlDb } from '../../services/schema.ts'
-import { backfillExternalActive, columnsOf, objectType } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
+import { backfillExternalActive, columnsOf, objectType } from '../../services/storage/schema.ts'
 import type { KindSchema } from '../types.ts'
 
 /**

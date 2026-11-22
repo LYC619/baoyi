@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { latestOnly, STALE } from '@/composables/latestOnly'
 /**
  * 识别日志：把 agent 每一轮做了什么原样摊开。
@@ -130,7 +131,7 @@ async function copyLog(log: IdentifyLog): Promise<void> {
 }
 
 async function clearAll(): Promise<void> {
-  if (!window.confirm('清空所有识别日志和汇总报告？只删记录，软件条目和识别结果都不受影响。')) return
+  if (!(await confirmDialog({ title: '清空识别日志与报告？', message: '仅清空日志记录，已收录的条目与本地原文件均不受影响。', confirmText: '清空日志', tone: 'danger' }))) return
   const n = await window.baoyi.logs.clear(props.resourceKind)
   await load()
   reports.value = await window.baoyi.logs.reports(props.resourceKind)
@@ -223,7 +224,7 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
     </div>
     <p v-if="taskScoped" class="sec-desc">本次任务的识别过程。展开记录可查看来源查询、返回资料和入库结果。</p>
     <p v-else class="sec-desc">
-      每跑一次识别留一条，记下 agent 调了哪些工具、看到了什么、最后怎么判断。
+      每跑一次识别留一条记录，记下 AI 调用了哪些工具、读到了什么信息、最后如何判断。
       识别结果不对时，翻这里比猜要快 —— 你能直接看到它是在哪一步走偏的。
       只保留最近 300 条。
     </p>
@@ -331,7 +332,7 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
           </div>
 
           <p v-if="log.stop_reason === 'max_turns'" class="trace__stop">
-            达到轮数上限，被强制结束 —— agent 当时还没下结论。
+            已达最大分析轮数，识别提前结束 —— AI 尚未给出最终结论，可调整设置或手动确认。
           </p>
 
           <div v-if="log.kind === 'unit' && log.status !== 'success'" class="trace__act">

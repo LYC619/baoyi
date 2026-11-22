@@ -1,6 +1,6 @@
 import { app, session, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'electron'
-import { clearBrowserCacheSessions, readStorageUsage } from '../services/storage-usage.ts'
-import { ONLINE_SOURCE_PARTITION, ONLINE_BROWSER_PARTITION } from '../services/online-network-rules.ts'
+import { clearBrowserCacheSessions, readStorageUsage } from '../services/storage/storage-usage.ts'
+import { ONLINE_SOURCE_PARTITION, ONLINE_BROWSER_PARTITION } from '../services/network/online-network-rules.ts'
 import type { BrowserCacheClearResult, StorageUsage } from '../../src/types/storage.ts'
 
 export function registerStorageIpc(getWindow: () => BrowserWindow | null, ipc: Pick<IpcMain, 'handle'>): void {

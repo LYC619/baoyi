@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { ProjectLaunchProfile,ProjectLaunchInput } from '../../../src/types/project-launch.ts'
 import { keys } from '../../workspace/validation.ts'
 import { ProjectLibrary } from './library.ts'

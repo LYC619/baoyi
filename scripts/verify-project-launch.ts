@@ -1,11 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
 import { ProjectLaunchProfiles,validateLaunchInput } from '../electron/kinds/project/launch-profiles.ts'
-import { buildLibraryBackup,restoreLibraryBackup } from '../electron/services/library-backup.ts'
+import { buildLibraryBackup,restoreLibraryBackup } from '../electron/services/storage/library-backup.ts'
 import { ProjectRunLog,detectPreviewUrl } from '../electron/kinds/project/run-log.ts'
 import type { ProjectLaunchInput } from '../src/types/project-launch.ts'
 

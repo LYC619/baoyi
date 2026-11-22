@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS project_automation (
 `
 
 /** This migration also runs in minimal fixtures and after metadata reset. */
-export function migrateProjectContext(db:import('../services/schema.ts').SqlDb):void {
+export function migrateProjectContext(db:import('../services/storage/schema.ts').SqlDb):void {
   const columns=new Set((db.prepare('PRAGMA table_info(project_context)').all() as Array<{name:string}>).map(r=>r.name))
   const additions:Record<string,string>={prompt_text:"TEXT NOT NULL DEFAULT ''",rules:"TEXT NOT NULL DEFAULT '[]'",version:'INTEGER NOT NULL DEFAULT 1',revision:'INTEGER NOT NULL DEFAULT 0',updated_at:'INTEGER NOT NULL DEFAULT 0'}
   db.exec('SAVEPOINT project_context_migration')

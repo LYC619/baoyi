@@ -1,4 +1,5 @@
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const { spawn, spawnSync } = require('node:child_process')
 
@@ -6,6 +7,66 @@ const root = path.resolve(__dirname, '..')
 const manifest = require('./test-manifest.json')
 const uiPauseFile = path.join(root, 'output', 'test-ui-paused.txt')
 const readableRuntimes = new Set()
+
+function parseOptions(args, env = process.env) {
+  const strict = args.includes('--strict') || /^(?:true|1)$/i.test(env.CI || '')
+  const unitOnly = args.includes('--unit')
+  const positional = []
+  for (const arg of args) {
+    if (arg === '--all' || arg === '--strict' || arg === '--unit') continue
+    if (arg.startsWith('--')) throw new Error('未知测试选项：' + arg)
+    positional.push(arg)
+  }
+  const [mode, executable] = positional
+  if (positional.length > (mode === 'e2e' ? 2 : 1)) throw new Error('多余的测试参数：' + positional.slice(1).join(' '))
+  return { mode, executable, all: strict || args.includes('--all'), strict, unitOnly }
+}
+
+function selectSuites(entries, options) {
+  const { mode, all, unitOnly } = options
+  const modules = new Set(entries.map(suite => suite.module))
+  if (mode && mode !== 'e2e' && !modules.has(mode)) throw new Error('未知测试模块：' + mode)
+  const allowedKinds = unitOnly ? ['unit'] : ['unit', 'ui-dev']
+  const inScope = suite => mode === 'e2e' ? suite.kind === 'e2e-packaged' || suite.packaged : allowedKinds.includes(suite.kind) && (!mode || suite.module === mode)
+  const scoped = entries.filter(inScope)
+  return {
+    suites: scoped.filter(suite => all || suite.status === 'pass'),
+    excluded: scoped.filter(suite => !all && suite.status !== 'pass'),
+    outOfScope: entries.filter(suite => !inScope(suite))
+  }
+}
+
+function suiteEnvironment(suite, output, inherited = process.env) {
+  const dataRoot = path.join(output, 'data')
+  fs.mkdirSync(dataRoot, { recursive: true })
+  const directory = fs.mkdtempSync(path.join(dataRoot, 's-'))
+  const env = { ...inherited }
+  delete env.ELECTRON_RUN_AS_NODE
+  delete env.VITE_DEV_SERVER_URL
+  if (!env.PLAYWRIGHT_BROWSERS_PATH) {
+    const cacheRoot = process.platform === 'win32'
+      ? inherited.LOCALAPPDATA
+      : inherited.XDG_CACHE_HOME || (inherited.HOME ? path.join(inherited.HOME, '.cache') : '')
+    if (cacheRoot) env.PLAYWRIGHT_BROWSERS_PATH = path.join(cacheRoot, 'ms-playwright')
+  }
+  if (env.BAOYI_TEST_FFMPEG) {
+    const pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') || 'PATH'
+    env[pathKey] = path.dirname(path.resolve(env.BAOYI_TEST_FFMPEG)) + path.delimiter + (env[pathKey] || '')
+  }
+  for (const [key, name] of Object.entries({
+    BAOYI_TEST_DATA_DIR: 'profile', USERPROFILE: 'home', HOME: 'home',
+    APPDATA: 'home/AppData/Roaming', LOCALAPPDATA: 'home/AppData/Local',
+    TEMP: 'tmp', TMP: 'tmp', XDG_CONFIG_HOME: 'config', XDG_DATA_HOME: 'data', XDG_CACHE_HOME: 'cache'
+  })) {
+    env[key] = path.join(directory, name)
+    fs.mkdirSync(env[key], { recursive: true })
+  }
+  return env
+}
+
+function resultExitCode(results, excluded, stale, strict) {
+  return results.some(result => !result.passed) || (strict && (excluded.length || stale.length)) ? 1 : 0
+}
 
 // Agent-managed runs renew this lease while the turn is active. An interrupted
 // turn stops renewing it, even if its terminal process survives cancellation.
@@ -46,9 +107,8 @@ async function runSuite(suite, executable, output) {
   const python = suite.file.endsWith('.py')
   const runtime = python ? path.join(root, 'output', 'hermes-runtime', 'python', 'python.exe') : process.execPath
   const args = [...(python ? ['-I', '-S', '-X', 'utf8', '-u'] : suite.file.endsWith('.ts') ? ['--experimental-strip-types', '--no-warnings'] : []), path.join(__dirname, suite.file)]
-  const env = { ...process.env }
-  delete env.ELECTRON_RUN_AS_NODE
-  delete env.VITE_DEV_SERVER_URL
+  const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bt-'))
+  const env = suiteEnvironment(suite, sandboxRoot)
   if (executable) {
     args.push(path.resolve(executable))
     env.BAOYI_TEST_EXE = path.resolve(executable)
@@ -102,18 +162,20 @@ async function runSuite(suite, executable, output) {
     process.removeListener('SIGINT', interrupted)
     process.removeListener('SIGTERM', interrupted)
     if (!hiddenDesktop) fs.closeSync(log)
+    try { fs.rmSync(sandboxRoot, { recursive: true, force: true }) } catch { /* best-effort */ }
   }
 }
 
 async function main() {
-  const [mode, executable] = process.argv.slice(2)
-  const modules = [...new Set(manifest.map(suite => suite.module))]
-  if (mode && mode !== 'e2e' && !modules.includes(mode)) throw new Error('未知测试模块：' + mode)
+  const [major, minor] = process.versions.node.split('.').map(Number)
+  if (major < 22 || (major === 22 && minor < 12)) throw new Error('测试需要 Node 22.12.0 或更高版本')
+  const options = parseOptions(process.argv.slice(2))
+  const { mode, executable, strict } = options
   if (mode === 'e2e' && (!executable || !fs.existsSync(executable))) throw new Error('用法：npm run test:e2e -- <抱一.exe 路径>')
-  const inScope = suite => mode === 'e2e' ? suite.kind === 'e2e-packaged' || suite.packaged : ['unit', 'ui-dev'].includes(suite.kind) && (!mode || suite.module === mode)
-  const suites = manifest.filter(suite => inScope(suite) && suite.status === 'pass')
-  const excluded = manifest.filter(suite => inScope(suite) && suite.status !== 'pass')
-  if (!suites.length) throw new Error('没有已通过的测试可运行')
+  const { suites, excluded, outOfScope } = selectSuites(manifest, options)
+  for (const suite of excluded) console.warn(`SKIP ${suite.file}: ${suite.status}; ${suite.reason || '清单未提供原因'}；使用 --all 运行`)
+  for (const suite of outOfScope.filter(suite => suite.status !== 'pass')) console.warn(`OUT_OF_SCOPE ${suite.file}: ${suite.kind}/${suite.module}; ${suite.reason || suite.status}`)
+  if (!suites.length) throw new Error('没有测试可运行')
   for (const suite of suites) assertWindowTestAvailable(suite, mode === 'e2e' ? executable : undefined)
   const date = new Date().toLocaleDateString('sv-SE')
   const output = path.join(root, 'output', `test-${date}`, `${Date.now()}-${mode || 'all'}`)
@@ -124,10 +186,12 @@ async function main() {
     console.log(`${result.passed ? 'PASS' : 'FAIL'} ${suite.file}${result.reason ? ': ' + result.reason : ''}`)
   }
   const failed = results.filter(result => !result.passed).length
-  fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ version: require('../package.json').version, results, excluded }, null, 2))
-  console.log(`${results.length - failed}/${results.length} 通过；清单中 ${excluded.length} 项已知失败未运行。日志：${path.relative(root, output)}`)
-  process.exitCode = failed ? 1 : 0
+  const stale = suites.filter((suite, index) => suite.status !== 'pass' && results[index].passed)
+  for (const suite of stale) console.warn(`STALE ${suite.file}: 本次通过，请核对后更新清单状态 ${suite.status}`)
+  fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ version: require('../package.json').version, options, results, excluded, outOfScope, stale }, null, 2))
+  console.log(`${results.length - failed}/${results.length} 通过；${excluded.length} 项跳过；${outOfScope.length} 项不在本次范围；${stale.length} 项清单待更新${strict ? '（严格模式）' : ''}。日志：${path.relative(root, output)}`)
+  process.exitCode = resultExitCode(results, excluded, stale, strict)
 }
 
-module.exports = { runSuite, assertWindowTestAvailable }
+module.exports = { runSuite, assertWindowTestAvailable, parseOptions, selectSuites, suiteEnvironment, resultExitCode }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })

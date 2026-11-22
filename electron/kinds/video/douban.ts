@@ -42,7 +42,7 @@
  */
 
 import type { SearchConfig } from '../../../src/types'
-import { search, searchAvailable, type SearchHit } from '../../services/searchService.ts'
+import { search, searchAvailable, type SearchHit } from '../../services/network/searchService.ts'
 import { normTitle } from './tmdb.ts'
 
 export interface DoubanCandidate {

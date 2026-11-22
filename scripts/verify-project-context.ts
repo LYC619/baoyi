@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema, SCHEMA_VERSION } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_VERSION } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { TimelineLibrary } from '../electron/workspace/timeline.ts'
-import { buildLibraryBackup, restoreLibraryBackup } from '../electron/services/library-backup.ts'
+import { buildLibraryBackup, restoreLibraryBackup } from '../electron/services/storage/library-backup.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
 
 function fixture(t:test.TestContext) {

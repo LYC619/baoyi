@@ -3,8 +3,8 @@
  *
  *   npm run build-save-manifest
  *
- * 输入是 `参考/ludusavi-manifest-master/data/manifest.yaml`（16.7 MB，53000 条记录，
- * 数据源是 PCGamingWiki）。**输入本身不在仓库里** —— `参考/` 是 gitignore 的，
+ * 输入是 `reference/ludusavi-manifest-master/data/manifest.yaml`（16.7 MB，53000 条记录，
+ * 数据源是 PCGamingWiki）。**输入本身不在仓库里** —— `reference/` 是 gitignore 的，
  * 要重新编译得先去 https://github.com/mtkennerly/ludusavi-manifest 抓一份放到那个位置。
  * 编译产物 `resources/save-manifest.json` 才是提交进仓库、随应用分发的那一份，
  * 所以平常没人需要跑这个脚本 —— 只有想跟上上游更新时才跑。
@@ -29,7 +29,7 @@ import { normalizeGameName, truncateTemplate } from '../electron/kinds/game/save
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..')
-const SOURCE = path.join(ROOT, '参考', 'ludusavi-manifest-master', 'data', 'manifest.yaml')
+const SOURCE = path.join(ROOT, 'reference', 'ludusavi-manifest-master', 'data', 'manifest.yaml')
 const OUT = path.join(ROOT, 'resources', 'save-manifest.json')
 
 /** ludusavi 的条目形状，只声明我们真正读的那几个字段 */
@@ -65,7 +65,7 @@ function onWindows(when?: Array<{ os?: string }>): boolean {
 
 if (!fs.existsSync(SOURCE)) {
   console.error(`找不到源文件：${SOURCE}`)
-  console.error('参考/ 是 gitignore 的。从 https://github.com/mtkennerly/ludusavi-manifest')
+  console.error('reference/ 是 gitignore 的。从 https://github.com/mtkennerly/ludusavi-manifest')
   console.error('下载 manifest.yaml 放到那个位置，或直接用仓库里已编译好的 resources/save-manifest.json。')
   process.exit(1)
 }

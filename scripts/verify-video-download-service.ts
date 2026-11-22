@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
+import os from 'node:os'; import fs from 'node:fs'
 import path from 'node:path'
+const tmpDownloads = fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-dl-svc-'))
+process.on('exit', () => { try { fs.rmSync(tmpDownloads, { recursive: true, force: true }) } catch {} })
 import { setHanimeFetch } from '../electron/kinds/video/hentai/hanime.ts'
 
 const sources: any = await import('../electron/kinds/video/download/sources.ts').catch(e => {
@@ -33,7 +36,7 @@ function deferred<T>() {
 function harness(extra: Record<string, unknown> = {}) {
   const chosen: any[] = []; const transfers: any[] = []; const logs: string[] = []
   const svc = createVideoDownloadService({
-    getItem: async () => item, resolveSources: async () => info(), downloadsDirectory: () => path.resolve('test-downloads'),
+    getItem: async () => item, resolveSources: async () => info(), downloadsDirectory: () => tmpDownloads,
     chooseFile: async (o: any) => { chosen.push(o); return o.defaultPath },
     transfer: async (o: any) => { transfers.push(o); o.onProgress({ phase: 'downloading', receivedBytes: 20, totalBytes: 40, bytesPerSecond: 10 });
       return { destination: o.destination, receivedBytes: 40, totalBytes: 40, bytesPerSecond: 10, warnings: [] } },
@@ -180,7 +183,7 @@ await test('single active transfer and cancellation during native selection', as
   const other = await h.svc.run({ requestId: 'second', resourceId: 'v1', sourceId: catalog.sources[0].id }, () => {})
   assert.equal(other.status, 'failed'); assert.match(other.message, /进行|下载/)
   assert.equal(h.svc.cancel('wrong').ok, false); assert.equal(h.svc.cancel('first').ok, true)
-  pick.resolve(path.resolve('test-downloads/file.mp4'))
+  pick.resolve(path.join(tmpDownloads, 'file.mp4'))
   assert.equal((await run).status, 'cancelled'); assert.equal(h.transfers.length, 0)
 })
 await test('transfer errors retain reason and release lock for retry', async () => {
@@ -200,7 +203,7 @@ await test('late cancel cannot relabel an already published result', async () =>
 })
 await test('unsafe final extension rejected, missing extension appended', async () => {
   for (const ext of ['exe', '']) {
-    const h = harness({ chooseFile: async () => path.resolve('test-downloads/output' + (ext ? '.' + ext : '')) })
+    const h = harness({ chooseFile: async () => path.join(tmpDownloads, 'output' + (ext ? '.' + ext : '')) })
     const catalog = await h.svc.sources('v1')
     const r = await h.svc.run({ requestId: 'ext-' + (ext || 'none'), resourceId: 'v1', sourceId: catalog.sources[0].id }, () => {})
     assert.equal(r.status, ext ? 'failed' : 'success')

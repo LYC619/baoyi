@@ -1,4 +1,4 @@
-import type { SqlDb } from '../services/schema.ts'
+import type { SqlDb } from '../services/storage/schema.ts'
 import type { ReadingLocation,TextAnchor } from '../../src/types/workspace.ts'
 export function text(value: unknown, label: string, max = 4000): string {
   if (typeof value !== 'string' || value.length > max || value.includes('\0')) throw new Error(label + '无效')

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import type { SqlDb } from '../services/schema.ts'
+import type { SqlDb } from '../services/storage/schema.ts'
 import { HENTAI_CATEGORY } from '../kinds/video/taxonomy.ts'
 import type { LinkOwner, ResourceLink, ResourceOption, DocumentProjectReference } from '../../src/types/workspace.ts'
 import * as v from './validation.ts'

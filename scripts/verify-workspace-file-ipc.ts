@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {ProjectLibrary} from '../electron/kinds/project/library.ts'
 import {DocumentFiles} from '../electron/workspace/document-files.ts'
@@ -21,8 +21,8 @@ test('项目文件 IPC 只接受原生选择和绑定预览，确认后沿用资
   const project=new ProjectLibrary(db).register({path:projectDir,name:'附件测试',summary:'',category:'其他',source:'self',version:'',entries:[],evidence:'',suggested:true,warnings:[]})
   const source=path.join(root,'source.txt');fs.writeFileSync(source,'已选择的资料')
   const handlers=new Map<string,Function>(),contents={mainFrame:{},send:()=>{}},win={isDestroyed:()=>false,webContents:contents}
-  const load=createRendererLoader({'../workspace/activity.ts':{workspaceOperation},'node:path':{...path,default:path},'../workspace/assistant.ts':{generateTimeline},'../workspace/evidence.ts':{collectEvidence},electron:{app:{on(){},getPath:()=>root},dialog:{showOpenDialog:async()=>({canceled:false,filePaths:[source]})},shell:{}},'../services/database.ts': { getDb:()=>db },
-    '../services/settings-store.ts': { getSettings:()=>({hide_hentai:true,ai:{}}) },'./library-backup.ts':{assertLibraryIdle:()=>{}},'../workspace/document-files.ts':{DocumentFiles},'../workspace/documents.ts':{DocumentLibrary},'../services/window-focus.ts':{restoreWindowFocus:()=>{}}},{setInterval:()=>({unref(){}}),clearInterval(){},Buffer,Uint8Array,Date,Set,URL})
+  const load=createRendererLoader({'../workspace/activity.ts':{workspaceOperation},'node:path':{...path,default:path},'../workspace/assistant.ts':{generateTimeline},'../workspace/evidence.ts':{collectEvidence},electron:{app:{on(){},getPath:()=>root},dialog:{showOpenDialog:async()=>({canceled:false,filePaths:[source]})},shell:{}},'../services/storage/database.ts': { getDb:()=>db },
+    '../services/storage/settings-store.ts': { getSettings:()=>({hide_hentai:true,ai:{}}) },'./library-backup.ts':{assertLibraryIdle:()=>{}},'../workspace/document-files.ts':{DocumentFiles},'../workspace/documents.ts':{DocumentLibrary},'../services/system/window-focus.ts':{restoreWindowFocus:()=>{}}},{setInterval:()=>({unref(){}}),clearInterval(){},Buffer,Uint8Array,Date,Set,URL})
   load('electron/ipc/workspace.ts').registerWorkspaceIpc(()=>win,{handle:(name:string,fn:Function)=>handlers.set(name,fn)})
   const readyBy=Date.now()+5000
   while(workspaceBusy()&&Date.now()<readyBy)await new Promise(resolve=>setTimeout(resolve,5))

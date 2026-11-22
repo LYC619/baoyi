@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
 import { createVideoImportManager } from '../electron/kinds/video/import-preview.ts'
@@ -39,11 +39,11 @@ function fixture() {
   const load = createRendererLoader({
     'node:fs': { ...fs, default: fs }, 'node:path': { ...path, default: path },
     electron: { app: { getPath: () => root }, net: {}, shell: {} },
-    '../../services/database.ts': { getDb: () => db, postersDir: () => root },
-    '../../services/settings-store.ts': { getSettings: () => ({ ai: { enabled: true, api_key: 'synthetic' }, search: {}, tmdb: {} }) },
-    '../../services/taxonomy-store.ts': { listCategories: () => VIDEO_CATEGORIES, tagPool: () => [] },
-    '../../services/identify-records.ts': { saveIdentifyLog: () => { logWrites++; throw new Error('Preview wrote a live identification log') } },
-    '../../services/searchService.ts': { searchAvailable: () => false }, './tmdb.ts': { tmdbAvailable: () => false },
+    '../../services/storage/database.ts': { getDb: () => db, postersDir: () => root },
+    '../../services/storage/settings-store.ts': { getSettings: () => ({ ai: { enabled: true, api_key: 'synthetic' }, search: {}, tmdb: {} }) },
+    '../../services/taxonomy/taxonomy-store.ts': { listCategories: () => VIDEO_CATEGORIES, tagPool: () => [] },
+    '../../services/storage/identify-records.ts': { saveIdentifyLog: () => { logWrites++; throw new Error('Preview wrote a live identification log') } },
+    '../../services/network/searchService.ts': { searchAvailable: () => false }, './tmdb.ts': { tmdbAvailable: () => false },
     './hentai/hanime.ts': { newBudget: () => ({}) }, './mediainfo.ts': { readContainerInfo: async () => null }, './db.ts': videoDb,
     '../../services/agent/loop.ts': { runAgent: async (options: any) => {
       agentCalls++

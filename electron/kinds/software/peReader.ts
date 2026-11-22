@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import * as ResEdit from 'resedit'
-import { timeSync } from '../../services/timing.ts'
+import { timeSync } from '../../services/system/timing.ts'
 
 export interface PeInfo {
   product_name: string

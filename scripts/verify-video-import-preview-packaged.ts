@@ -6,7 +6,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { registerVideoContent } from '../electron/kinds/video/registration.ts'
 import { videoImportLibraryStamp } from '../electron/kinds/video/import-command.ts'
@@ -118,7 +118,7 @@ try {
     await expect(panel.locator('.import-list input:checked')).toHaveCount(3)
     const before = stamp(), originals = (await getDraft()).entries.filter((entry: any) => entry.id !== unknownId).map((entry: any) => [entry.id,entry.title])
     await panel.locator('.import-list li').filter({ hasText: 'Unknown' }).getByRole('button').click()
-    await panel.getByRole('button', { name: 'Agent 复查此项', exact: true }).click()
+    await panel.getByRole('button', { name: '智能复查此项', exact: true }).click()
     await expect(panel.getByLabel('名称', { exact: true })).toHaveValue('Native reviewed entry')
     assert.deepEqual((await getDraft()).entries.filter((entry: any) => entry.id !== unknownId).map((entry: any) => [entry.id,entry.title]), originals)
     assert.equal(stamp(), before)
@@ -142,7 +142,7 @@ try {
   await check('restart recovers the same draft, edits, row IDs and logs', async () => {
     const restored = await getDraft(); assert.equal(restored.entries.length, 3)
     assert.equal(restored.entries.find((entry: any) => entry.id === unknownId).title, '人工确认样例')
-    assert.ok(restored.entries.find((entry: any) => entry.id === unknownId).log.includes('Agent'))
+    assert.ok(restored.entries.find((entry: any) => entry.id === unknownId).log.includes('智能复查'))
     await page.getByRole('button', { name: /^导入待确认/ }).click()
     await expect(page.getByRole('dialog', { name: '视频导入确认' }).locator('.import-list li')).toHaveCount(3)
     await page.keyboard.press('Escape')
@@ -206,8 +206,8 @@ try {
     }, { portrait: pngImage(180, 270).toString('base64'), landscape: pngImage(320, 180).toString('base64') })
     await route('/video'); await page.getByRole('button', { name: '批量管理', exact: true }).click()
     for (const title of ['Morning E01', 'Morning E02']) await page.getByRole('button', { name: '选择作品：' + title, exact: true }).click()
-    await page.getByRole('button', { name: 'Agent 整理', exact: true }).click()
-    const panel = page.getByRole('dialog', { name: 'Agent 整理', exact: true }), before = stamp()
+    await page.getByRole('button', { name: '智能整理', exact: true }).click()
+    const panel = page.getByRole('dialog', { name: '智能整理', exact: true }), before = stamp()
     await panel.getByRole('button', { name: '生成整理预览', exact: true }).click()
     await expect(panel.locator('.agent-group > label > strong')).toHaveText('Morning 1-2')
     assert.equal(stamp(), before)

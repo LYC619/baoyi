@@ -62,7 +62,9 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   function applyTheme(): void {
+    if (typeof document === 'undefined') return
     document.documentElement.dataset.theme = settings.value.theme
+    document.querySelector?.('meta[name="color-scheme"]')?.setAttribute('content', settings.value.theme)
   }
 
   async function load(): Promise<AppSettings> {

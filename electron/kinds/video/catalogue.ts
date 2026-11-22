@@ -1,4 +1,4 @@
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoContentInput } from '../../../src/types/video-library.ts'
 import type { VideoWorkSource } from './download/workflow.ts'
 import { getVideo, listEpisodes } from './db.ts'

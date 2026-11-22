@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { migrateArtworkIntoLibrary } from '../electron/services/artwork-migration.ts'
+import { migrateArtworkIntoLibrary } from '../electron/services/media/artwork-migration.ts'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-storage-perf-'))
 const library = path.join(root, 'library'), cache = path.join(root, 'posters'), db = new DatabaseSync(':memory:')

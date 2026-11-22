@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoRegistration, VideoRegistrationResult, VideoSourceRef } from '../../../src/types/video-library.ts'
 import { insertVideo, getVideo, listEpisodes, videoOwnerForFiles, type VideoPayload } from './db.ts'
 import { ensureBundleId, resolveVideoOwnership } from './identity.ts'

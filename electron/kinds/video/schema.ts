@@ -37,7 +37,7 @@
 import { VIDEO_SCAN_STATE_SQL } from './scan-state.ts'
 import { VIDEO_DISCOVERY_SQL } from './discovery/catalogue.ts'
 import type { KindSchema } from '../types.ts'
-import { columnsOf, objectType, type SqlDb } from '../../services/schema.ts'
+import { columnsOf, objectType, type SqlDb } from '../../services/storage/schema.ts'
 import { HENTAI_CATEGORY_ID, VIDEO_CATEGORIES } from './taxonomy.ts'
 
 /**
@@ -468,6 +468,12 @@ export function migrateVideo(d: SqlDb, from: number): void {
   if (!episodeColumns.has('tags')) d.exec(`ALTER TABLE episode ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`)
   for (const column of ['studio', 'poster_source', 'thumbnail_path', 'thumbnail_source', 'original_title', 'description', 'original_description', 'poster_path', 'source_url', 'notes']) {
     if (!episodeColumns.has(column)) d.exec(`ALTER TABLE episode ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`)
+  }
+
+  if (from < 33) for (const table of ['video_meta', 'episode']) {
+    for (const column of ['poster', 'thumbnail']) {
+      d.exec(`CREATE INDEX IF NOT EXISTS idx_${table}_${column}_nocase ON ${table}(${column}_path COLLATE NOCASE)`)
+    }
   }
 
   // 视图缺任何一个新列就撤掉，让 initSchema 紧接着按新定义重建。

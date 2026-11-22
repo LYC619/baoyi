@@ -7,7 +7,6 @@ import {
   ArchiveRestore,
   ArrowLeft,
   ExternalLink,
-  FolderInput,
   FolderOpen,
   Image,
   ImageOff,
@@ -15,13 +14,15 @@ import {
   Play,
   Sparkles,
   Trash2,
-  Unlink
 } from 'lucide-vue-next'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import EditableField from '@/components/ui/EditableField.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
-import SoftwareTypeSelect from '@/components/software/SoftwareTypeSelect.vue'
+import SoftwareNotesTab from '@/components/software/SoftwareNotesTab.vue'
+import SoftwareFilesTab from '@/components/software/SoftwareFilesTab.vue'
+import ResourceBacklinksPanel from '@/components/workspace/ResourceBacklinksPanel.vue'
 import { useAI } from '@/composables/useAI'
+import { confirmDialog } from '@/composables/useDialog'
 import { useResourceDetail } from '@/composables/useResourceDetail'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
@@ -35,18 +36,28 @@ import {
   activityOf,
   displayName,
   errorMessage,
-  formatBytes,
-  formatDate
+  formatDate,
 } from '@/utils'
 
 const props = defineProps<{ id: string }>()
-
 const router = useRouter()
 const route = useRoute()
-const detailTabs = [{"id":"overview","label":"简介"},{"id":"notes","label":"使用心得"},{"id":"files","label":"文件与启动"}]
-const activeTab = ref(detailTabs.some(tab=>tab.id===route.query.tab) ? String(route.query.tab) : 'overview')
-watch(activeTab, tab=>{ void router.replace({query:{...route.query,tab}}) })
-watch(()=>route.query.tab,tab=>{activeTab.value=detailTabs.some(t=>t.id===tab)?String(tab):'overview'})
+const detailTabs = [
+  { id: 'overview', label: '简介' },
+  { id: 'notes', label: '使用心得' },
+  { id: 'files', label: '文件与启动' },
+]
+const activeTab = ref(detailTabs.some((tab) => tab.id === route.query.tab) ? String(route.query.tab) : 'overview')
+watch(activeTab, (tab) => {
+  void router.replace({ query: { ...route.query, tab } })
+})
+watch(
+  () => route.query.tab,
+  (tab) => {
+    activeTab.value = detailTabs.some((t) => t.id === tab) ? String(tab) : 'overview'
+  }
+)
+
 const store = useSoftwareStore()
 const categories = useCategoriesStore()
 const { success, error, toast } = useToast()
@@ -70,15 +81,12 @@ async function load(): Promise<void> {
 onMounted(load)
 
 const name = computed(() => (item.value ? displayName(item.value) : ''))
-
-/** 上次活跃：抱一记的启动时间，或退回从软件目录推出来的外部活跃时间 */
 const activity = computed(() =>
   item.value
     ? activityOf(item.value)
     : ({ at: 0, source: 'none', label: '—', hint: '' } as ReturnType<typeof activityOf>)
 )
 
-/** 分类下拉里要能显示 AI 给出的、但用户分类表里还没有的分类名 */
 const categoryOptions = computed(() => {
   const names = categories.list.map((c) => c.name)
   const current = item.value?.category
@@ -86,23 +94,23 @@ const categoryOptions = computed(() => {
   return names
 })
 
-/**
- * 所有保存路径的唯一收口。失焦即存的调用点散在模板各处，逐个包 try/catch 必漏，
- * 错误在这里统一接住 —— 保存失败返回 null，调用方靠它决定要不要报成功。
- */
 const categoryBusy = ref(false)
 const typeBusy = ref(false)
 function typeUpdated(updated: SoftwareItem): void {
   if (item.value?.id === updated.id) item.value = updated
 }
 function parseList(raw: string): string[] {
-  return raw.split(/[,，、\n]/).map(value => value.trim()).filter(Boolean)
+  return raw
+    .split(/[,，、\n]/)
+    .map((value) => value.trim())
+    .filter(Boolean)
 }
+
 const { save, commitTags, toggleArchive, reveal, copyPath } = useResourceDetail({
   item,
-  reveal: id => window.baoyi.software.revealInFolder(id),
+  reveal: (id) => window.baoyi.software.revealInFolder(id),
   parseTags: parseList,
-  archivedMessage: archived => archived ? '已归档，卡片墙不再显示' : '已取消归档',
+  archivedMessage: (archived) => (archived ? '已归档，主列表不再默认展示' : '已取消归档'),
   async update(current, patch) {
     let holdsCategoryLock = false
     try {
@@ -112,7 +120,12 @@ const { save, commitTags, toggleArchive, reveal, copyPath } = useResourceDetail(
         holdsCategoryLock = true
         const moves = await previewSoftwareCategoryChanges([current.id], patch.category)
         if (moves.length) {
-          if (!window.confirm(categoryMoveConfirmation(moves))) return null
+          const ok = await confirmDialog({
+            title: '同步整理目录分类',
+            message: categoryMoveConfirmation(moves),
+            confirmText: '确认迁移',
+          })
+          if (!ok) return null
           const p = moves[0].preview
           const result = await window.baoyi.organize.relocate(current.id, p.category, p.folder, p.from)
           if (!result.ok) throw new Error(result.message)
@@ -123,14 +136,14 @@ const { save, commitTags, toggleArchive, reveal, copyPath } = useResourceDetail(
     } finally {
       if (holdsCategoryLock) categoryBusy.value = false
     }
-  }
+  },
 })
+
 function commitList(field: 'tags' | 'alternatives', raw: string): void {
   if (field === 'tags') commitTags(raw)
   else void save({ alternatives: parseList(raw) })
 }
 
-/** 从启动端列表里点某一个启动，不改默认端 */
 async function launchWith(launcherPath: string): Promise<void> {
   if (!item.value) return
   try {
@@ -148,17 +161,14 @@ async function launchWith(launcherPath: string): Promise<void> {
 
 async function launch(): Promise<void> {
   if (!item.value) return
-  // 默认启动端的路径就是 exe_path（设为默认时两者一起改），主进程按
-  // launchers 白名单匹配，等价于不带参数
   await launchWith(item.value.exe_path)
 }
 
-/** 默认启动端同时也是这条记录的唯一键，所以要和 exe_path 一起改 */
 async function setDefaultLauncher(launcherPath: string): Promise<void> {
   if (!item.value || launcherPath === item.value.exe_path) return
   const launchers = item.value.launchers.map((l) => ({
     ...l,
-    is_default: l.path === launcherPath
+    is_default: l.path === launcherPath,
   }))
   try {
     const updated = await store.update(item.value.id, { launchers, exe_path: launcherPath })
@@ -167,20 +177,21 @@ async function setDefaultLauncher(launcherPath: string): Promise<void> {
       success('已切换默认启动端')
     }
   } catch {
-    error('切换失败：这个程序已经被登记在另一个条目下了')
+    error('切换失败：该程序已登记在另一个条目下')
   }
 }
-
 
 async function removeItem(): Promise<void> {
   if (!item.value) return
   const linked = item.value.link_target !== ''
-  const ok = window.confirm(
-    `确认从抱一移除「${name.value}」？\n` +
-      (linked
-        ? '这一条是整理目录里的链接：链接会一并删除，真实文件不动。'
-        : '只删除记录，不会删除实际文件。')
-  )
+  const ok = await confirmDialog({
+    title: `从软件库移除「${name.value}」？`,
+    message: linked
+      ? '此条目在整理目录中存有目录链接：链接会一并清理，真实软件文件保留不动。'
+      : '仅移除抱一中的库记录，不会删除本地软件文件。',
+    confirmText: '移除记录',
+    tone: 'danger',
+  })
   if (!ok) return
   try {
     const result = await store.remove(item.value.id)
@@ -202,16 +213,15 @@ async function reidentify(): Promise<void> {
     const result = await ai.complete([item.value.id])
     await load()
     if (result.registered > 0) success('已重新识别')
-    else error('识别失败，检查设置里的 API 配置')
+    else error('未能完成识别，请检查设置中的模型连接')
   } catch (err) {
     error(`识别失败：${errorMessage(err)}`)
   }
 }
 
 function openOfficial(): void {
-  if (item.value?.official_url) window.open(item.value.official_url, '_blank')
+  if (item.value?.official_url) void window.baoyi.app.openUrl(item.value.official_url).catch((err) => error(errorMessage(err)))
 }
-
 
 function setMastery(level: MasteryLevel): void {
   void save({ mastery_level: level })
@@ -223,41 +233,27 @@ async function setCategory(e: Event): Promise<void> {
   select.value = item.value?.category ?? ''
 }
 
-
-/* -------------------------------- 图标 -------------------------------- */
-
 const iconBusy = ref(false)
-
-/**
- * 换图标。主进程把图拷进 userData 再落库，所以拿回来的条目就是最终形态，
- * 不用自己再 load 一次。
- *
- * 这条路的存在理由是自动提取会失败：`app.getFileIcon` 拿不到图时
- * iconExtractor 静默返回空串，界面退回首字占位。命令行工具、老程序、
- * 被壳套过的 exe 都常见这一路，对它们来说手动选图是唯一的出路。
- */
 async function pickIcon(): Promise<void> {
   if (!item.value || iconBusy.value) return
   iconBusy.value = true
   try {
     const r = await window.baoyi.software.pickIcon(item.value.id)
-    if (!r) return // 用户取消了对话框
+    if (!r) return
     if (!r.ok) {
       error(r.message)
       return
     }
     if (r.item) item.value = r.item
-    // 卡片墙那边也要跟着换，否则退回去还是旧的
     void store.load()
     success(r.message)
   } catch (err) {
-    error(`换图标失败：${errorMessage(err)}`)
+    error(`更换图标失败：${errorMessage(err)}`)
   } finally {
     iconBusy.value = false
   }
 }
 
-/** 重新从 exe 里提取图标。提不到就落到首字占位 —— 那本来就是它该有的样子 */
 async function refetchIcon(): Promise<void> {
   if (!item.value || iconBusy.value) return
   iconBusy.value = true
@@ -265,7 +261,7 @@ async function refetchIcon(): Promise<void> {
     const updated = await window.baoyi.software.clearIcon(item.value.id)
     if (updated) item.value = updated
     void store.load()
-    toast(updated?.icon_path ? '已重新提取图标' : '这个程序里提不出图标，已退回首字占位')
+    toast(updated?.icon_path ? '已重新提取程序图标' : '程序内未包含可用图标，已使用文字占位')
   } catch (err) {
     error(`重新提取失败：${errorMessage(err)}`)
   } finally {
@@ -273,27 +269,20 @@ async function refetchIcon(): Promise<void> {
   }
 }
 
-/* ------------------------------ 位置与链接 ------------------------------ */
-
-/**
- * 条目「所在的那个目录」。用 source_dir 而不是 exe 所在目录 ——
- * 那是整理时真正被搬动/被链接的单位，exe 可能躺在它的 bin\ 里。
- */
 const locationDir = computed(() => {
   if (!item.value) return ''
   return item.value.source_dir || item.value.exe_path.replace(/\\[^\\]*$/, '')
 })
 
 const linkBusy = ref(false)
-
 async function toEntity(): Promise<void> {
   if (!item.value) return
-  const ok = window.confirm(
-    `把真实文件搬到链接所在的位置？\n\n${item.value.link_target}\n  →  ${locationDir.value}\n\n` +
-      '搬完原位置就空了，这一条从此是实体目录。确认继续？'
-  )
+  const ok = await confirmDialog({
+    title: '将真实文件搬入整理目录？',
+    message: `${item.value.link_target}\n→ ${locationDir.value}\n\n搬移完成后原目录将腾空，此条目变为实体目录。`,
+    confirmText: '确认搬移',
+  })
   if (!ok) return
-
   linkBusy.value = true
   try {
     const r = await window.baoyi.organize.materialize(item.value.id)
@@ -308,8 +297,12 @@ async function toEntity(): Promise<void> {
 
 async function dropLink(): Promise<void> {
   if (!item.value) return
-  if (!window.confirm('只删除链接，不动真实文件。条目路径会退回实际位置。确认继续？')) return
-
+  const ok = await confirmDialog({
+    title: '移除整理目录链接？',
+    message: '仅移除整理目录中的链接，真实文件保持不动，条目路径退回原安装目录。',
+    confirmText: '移除链接',
+  })
+  if (!ok) return
   linkBusy.value = true
   try {
     const r = await window.baoyi.organize.unlink(item.value.id)
@@ -328,27 +321,28 @@ async function dropLink(): Promise<void> {
     <div v-if="loading" class="detail__state">载入中…</div>
     <div v-else-if="!item" class="detail__state">
       <p>这条记录不存在或已被移除。</p>
-      <button class="btn btn--ghost" @click="router.push({ name: 'home' })">返回卡片墙</button>
+      <button type="button" class="btn btn--ghost" @click="router.push({ name: 'home' })">返回软件库</button>
     </div>
 
     <template v-else>
       <header class="head">
-        <button class="btn btn--subtle" @click="router.push({ name: 'home' })">
+        <button type="button" class="btn btn--subtle" @click="router.push({ name: 'home' })">
           <ArrowLeft :size="16" />
           返回
         </button>
 
         <div class="head__actions">
-          <button class="btn btn--primary" @click="launch">
+          <button type="button" class="btn btn--primary" @click="launch">
             <FolderOpen v-if="isMobilePackage(item.exe_path)" :size="14" />
             <Play v-else :size="14" fill="currentColor" />
             {{ isMobilePackage(item.exe_path) ? '定位安装包' : '启动' }}
           </button>
-          <button class="btn btn--ghost" @click="reveal">
+          <button type="button" class="btn btn--ghost" @click="reveal">
             <FolderOpen :size="14" />
             打开所在文件夹
           </button>
           <button
+            type="button"
             class="btn btn--ghost"
             :disabled="!item.official_url"
             :title="item.official_url || '暂无官网'"
@@ -357,15 +351,15 @@ async function dropLink(): Promise<void> {
             <ExternalLink :size="14" />
             官网
           </button>
-          <button class="btn btn--ghost" :disabled="ai.running.value" @click="reidentify">
+          <button type="button" class="btn btn--ghost" :disabled="ai.running.value" @click="reidentify">
             <Sparkles :size="14" />
             重新识别
           </button>
-          <button class="btn btn--ghost" @click="toggleArchive">
+          <button type="button" class="btn btn--ghost" @click="toggleArchive">
             <component :is="item.is_archived ? ArchiveRestore : Archive" :size="14" />
             {{ item.is_archived ? '取消归档' : '归档' }}
           </button>
-          <button class="btn btn--danger" @click="removeItem">
+          <button type="button" class="btn btn--danger" @click="removeItem">
             <Trash2 :size="14" />
             移除
           </button>
@@ -373,90 +367,94 @@ async function dropLink(): Promise<void> {
       </header>
 
       <div class="body detail-body">
-<section class="hero panel">
-            <!--
-              图标本身就是换图标的入口，藏在别处等于没有。悬停才显形，
-              不占静态视觉重量。只有 64px，放不下游戏那边的文字按钮，所以只留图标
-            -->
-            <div class="hero__icon">
-              <AppIcon :item="item" :size="64" />
-              <div class="hero__iconActs">
-                <button
-                  class="hero__iconBtn"
-                  :disabled="iconBusy"
-                  :title="item.icon_path ? '换一张图标' : '选一张图标图片'"
-                  @click="pickIcon"
-                >
-                  <Loader2 v-if="iconBusy" :size="13" class="spin" />
-                  <Image v-else :size="13" />
-                </button>
-                <!--
-                  不区分「当前这张是手动的还是提取的」：那个判断的权威在主进程
-                  （kinds/software/icons.ts 的 isManualIcon），在渲染进程再写一份
-                  迟早走岔。「重新提取」两种情况下都说得通，也都是同一个动作
-                -->
-                <button
-                  v-if="item.icon_path"
-                  class="hero__iconBtn"
-                  :disabled="iconBusy"
-                  title="重新从程序里提取图标（会覆盖你手动选的那张）"
-                  @click="refetchIcon"
-                >
-                  <ImageOff :size="13" />
-                </button>
-              </div>
+        <section class="hero panel">
+          <div class="hero__icon">
+            <AppIcon :item="item" :size="64" />
+            <div class="hero__iconActs">
+              <button
+                type="button"
+                class="hero__iconBtn"
+                :disabled="iconBusy"
+                :title="item.icon_path ? '更换图标' : '选择图标图片'"
+                @click="pickIcon"
+              >
+                <Loader2 v-if="iconBusy" :size="13" class="spin" />
+                <Image v-else :size="13" />
+              </button>
+              <button
+                v-if="item.icon_path"
+                type="button"
+                class="hero__iconBtn"
+                :disabled="iconBusy"
+                title="重新从程序文件提取默认图标"
+                @click="refetchIcon"
+              >
+                <ImageOff :size="13" />
+              </button>
             </div>
-            <div class="hero__text">
-              <div class="hero__names">
-                <input
-                  class="hero__name"
-                  :value="item.name_zh"
-                  placeholder="中文名称"
-                  spellcheck="false"
-                  @blur="save({ name_zh: ($event.target as HTMLInputElement).value })"
-                  @keydown.enter="($event.target as HTMLInputElement).blur()"
-                />
-                <input
-                  class="hero__en"
-                  :value="item.name_en"
-                  placeholder="英文原名"
-                  spellcheck="false"
-                  @blur="save({ name_en: ($event.target as HTMLInputElement).value })"
-                  @keydown.enter="($event.target as HTMLInputElement).blur()"
-                />
-              </div>
+          </div>
 
+          <div class="hero__text">
+            <div class="hero__names">
               <input
-                class="hero__summary"
-                :value="item.summary"
-                placeholder="一句话说明（20 字以内）"
+                class="hero__name"
+                :value="item.name_zh"
+                placeholder="中文名称"
                 spellcheck="false"
-                @blur="save({ summary: ($event.target as HTMLInputElement).value })"
+                @blur="save({ name_zh: ($event.target as HTMLInputElement).value })"
                 @keydown.enter="($event.target as HTMLInputElement).blur()"
               />
+              <input
+                class="hero__en"
+                :value="item.name_en"
+                placeholder="英文原名"
+                spellcheck="false"
+                @blur="save({ name_en: ($event.target as HTMLInputElement).value })"
+                @keydown.enter="($event.target as HTMLInputElement).blur()"
+              />
+            </div>
 
-              <div class="hero__row">
-                <select class="select" :value="item.category" :disabled="categoryBusy" @change="setCategory">
-                  <option v-for="c in categoryOptions" :key="c" :value="c">{{ c }}</option>
-                </select>
+            <input
+              class="hero__summary"
+              :value="item.summary"
+              placeholder="一句话说明（20 字以内）"
+              spellcheck="false"
+              @blur="save({ summary: ($event.target as HTMLInputElement).value })"
+              @keydown.enter="($event.target as HTMLInputElement).blur()"
+            />
 
-                <div class="mastery-pick">
-                  <button
-                    v-for="lv in MASTERY_ORDER"
-                    :key="lv"
-                    class="chip"
-                    :class="{ on: item.mastery_level === lv }"
-                    @click="setMastery(lv)"
-                  >
-                    {{ MASTERY_META[lv].label }}
-                  </button>
-                </div>
+            <div class="hero__row">
+              <select class="select" :value="item.category" :disabled="categoryBusy" @change="setCategory">
+                <option v-for="c in categoryOptions" :key="c" :value="c">{{ c }}</option>
+              </select>
+
+              <div class="mastery-pick">
+                <button
+                  v-for="lv in MASTERY_ORDER"
+                  :key="lv"
+                  type="button"
+                  class="chip"
+                  :class="{ on: item.mastery_level === lv }"
+                  @click="setMastery(lv)"
+                >
+                  {{ MASTERY_META[lv].label }}
+                </button>
               </div>
             </div>
-          </section>
-<DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="software" label="软件详情"/>
-<div id="software-panel-overview" v-show="activeTab === 'overview'" role="tabpanel" aria-labelledby="software-tab-overview" tabindex="0" class="detail-panel detail-panel--overview">
-<section class="panel">
+          </div>
+        </section>
+
+        <DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="software" label="软件详情" />
+
+        <div
+          id="software-panel-overview"
+          v-show="activeTab === 'overview'"
+          role="tabpanel"
+          aria-labelledby="software-tab-overview"
+          tabindex="0"
+          class="detail-panel detail-panel--overview"
+        >
+          <section class="panel">
             <h2 class="sec-title">功能说明</h2>
             <EditableField
               :model-value="item.description"
@@ -465,7 +463,7 @@ async function dropLink(): Promise<void> {
               @commit="save({ description: $event })"
             />
           </section>
-<section class="panel">
+          <section class="panel">
             <h2 class="sec-title">标签</h2>
             <div v-if="item.tags.length" class="tag-row">
               <TagBadge v-for="t in item.tags" :key="t" :label="t" />
@@ -476,7 +474,7 @@ async function dropLink(): Promise<void> {
               @commit="commitList('tags', $event)"
             />
           </section>
-<section class="panel">
+          <section class="panel">
             <h2 class="sec-title">使用统计</h2>
             <dl class="kv">
               <dt>上次使用</dt>
@@ -493,180 +491,51 @@ async function dropLink(): Promise<void> {
               <dt>识别状态</dt>
               <dd>
                 <TagBadge
-                  :label="{ done: '已识别', pending: '待识别', failed: '识别失败' }[item.ai_status]"
+                  :label="{ done: '已识别', pending: '待识别', failed: '未完成' }[item.ai_status]"
                   :tone="item.ai_status === 'done' ? 'success' : item.ai_status === 'failed' ? 'warning' : 'muted'"
                 />
               </dd>
             </dl>
             <p v-if="activity.source === 'external'" class="sec-note sec-note--foot">
-              抱一还没记到过你启动它。这个时间来自软件目录里配置文件的最后修改时间 ——
-              是个近似值，只用来区分「装了没碰过」和「最近还在用」。
+              尚未通过抱一启动过该软件；此处时间取自软件目录下配置文件的最近修改时间，用于辅助区分近期常用与长期闲置。
             </p>
           </section>
-<section v-if="item.official_url" class="panel">
+          <section v-if="item.official_url" class="panel">
             <h2 class="sec-title">官网</h2>
-            <a :href="item.official_url" target="_blank" class="mono truncate link">
+            <a :href="item.official_url" target="_blank" rel="noopener noreferrer" class="mono truncate link">
               {{ item.official_url }}
             </a>
           </section>
-</div>
-<div id="software-panel-notes" v-show="activeTab === 'notes'" role="tabpanel" aria-labelledby="software-tab-notes" tabindex="0" class="detail-panel detail-panel--notes">
-<section class="panel">
-            <h2 class="sec-title">为什么选它</h2>
-            <EditableField
-              :model-value="item.why_choose"
-              multiline
-              placeholder="同类里为什么留下这一个"
-              @commit="save({ why_choose: $event })"
-            />
-          </section>
-<section class="panel">
-            <h2 class="sec-title">使用场景</h2>
-            <EditableField
-              :model-value="item.use_cases"
-              multiline
-              placeholder="什么时候会打开它"
-              @commit="save({ use_cases: $event })"
-            />
-          </section>
-<section class="panel">
-            <h2 class="sec-title">个人笔记</h2>
-            <EditableField
-              :model-value="item.notes"
-              multiline
-              placeholder="快捷键、配置位置、踩过的坑…"
-              @commit="save({ notes: $event })"
-            />
-          </section>
-<section class="panel">
-            <h2 class="sec-title">淘汰的同类</h2>
-            <div v-if="item.alternatives.length" class="tag-row">
-              <TagBadge v-for="a in item.alternatives" :key="a" :label="a" tone="muted" />
-            </div>
-            <EditableField
-              :model-value="item.alternatives.join('、')"
-              placeholder="被它替代掉的软件"
-              @commit="commitList('alternatives', $event)"
-            />
-          </section>
-</div>
-<div id="software-panel-files" v-show="activeTab === 'files'" role="tabpanel" aria-labelledby="software-tab-files" tabindex="0" class="detail-panel detail-panel--files">
-<section class="panel">
-            <h2 class="sec-title">
-              启动端
-              <span v-if="item.launchers.length > 1" class="sec-title__count">
-                {{ item.launchers.length }}
-              </span>
-            </h2>
-            <p class="sec-note">
-              同一个软件的 32/64 位和附属程序都归在这里。点一行直接启动它，
-              点「设为默认」换掉卡片墙上那个按钮启动的目标。
-            </p>
-            <ul class="launchers">
-              <li
-                v-for="l in item.launchers"
-                :key="l.path"
-                :class="{ 'launchers__row--extra': l.kind === 'extra' }"
-              >
-                <button class="launchers__go" :title="`${isMobilePackage(l.path) ? '定位安装包' : '启动'} ${l.path}`" @click="launchWith(l.path)">
-                  <FolderOpen v-if="isMobilePackage(l.path)" :size="13" />
-                  <Play v-else :size="13" />
-                </button>
-                <div class="launchers__body">
-                  <div class="launchers__line">
-                    <span class="launchers__name mono">{{ l.path.split('\\').pop() }}</span>
-                    <TagBadge v-if="l.label" :label="l.label" tone="muted" />
-                    <TagBadge v-if="l.is_default" label="默认" tone="success" />
-                    <TagBadge v-else-if="l.kind === 'extra'" label="附属" tone="muted" />
-                  </div>
-                  <button class="launchers__path mono" :title="l.path" @click="copyPath(l.path)">
-                    {{ l.path }}
-                  </button>
-                </div>
-                <button
-                  v-if="!l.is_default"
-                  class="launchers__set"
-                  @click="setDefaultLauncher(l.path)"
-                >
-                  设为默认
-                </button>
-              </li>
-            </ul>
-          </section>
-<section class="panel">
-            <h2 class="sec-title">位置信息</h2>
-            <dl class="kv">
-              <dt>当前位置</dt>
-              <dd>
-                <button class="link-btn mono" :title="locationDir" @click="copyPath(locationDir)">
-                  {{ locationDir }}
-                </button>
-              </dd>
-              <dt>位置类型</dt>
-              <dd>
-                <TagBadge
-                  :label="item.link_target ? 'junction 链接' : '实体目录'"
-                  :tone="item.link_target ? 'alt' : 'muted'"
-                />
-              </dd>
-              <template v-if="item.link_target">
-                <dt>实际指向</dt>
-                <dd>
-                  <button
-                    class="link-btn mono"
-                    :title="item.link_target"
-                    @click="copyPath(item.link_target)"
-                  >
-                    {{ item.link_target }}
-                  </button>
-                </dd>
-              </template>
-              <dt>安装类型</dt>
-              <dd>
-                <SoftwareTypeSelect :id="item.id" :model-value="item.is_portable" :disabled="categoryBusy || linkBusy || typeBusy" @busy="typeBusy = $event" @updated="typeUpdated" />
-              </dd>
-              <dt>移动风险</dt>
-              <dd>
-                <TagBadge
-                  :label="{ safe: '可安全移动', risky: '有风险', unknown: '未知' }[item.move_risk]"
-                  :tone="item.move_risk === 'safe' ? 'success' : item.move_risk === 'risky' ? 'warning' : 'muted'"
-                />
-              </dd>
-            </dl>
+        </div>
 
-            <p v-if="item.link_target" class="sec-note sec-note--foot">
-              整理目录里放的是一个链接，软件本体还在原安装位置没有动过。
-              「转为实体」会把真实文件搬到链接这个位置来；「移除链接」只删链接，
-              条目路径退回实际位置。两者都不会删除你的软件。
-            </p>
+        <SoftwareNotesTab
+          v-show="activeTab === 'notes'"
+          :item="item"
+          @save="save"
+          @commit-alternatives="(raw) => commitList('alternatives', raw)"
+        />
 
-            <div v-if="item.link_target" class="row row--foot">
-              <button class="btn btn--ghost" :disabled="linkBusy" @click="toEntity">
-                <Loader2 v-if="linkBusy" :size="14" class="spin" />
-                <FolderInput v-else :size="14" />
-                转为实体
-              </button>
-              <button class="btn btn--subtle" :disabled="linkBusy" @click="dropLink">
-                <Unlink :size="14" />
-                移除链接
-              </button>
-            </div>
-          </section>
-<section class="panel">
-            <h2 class="sec-title">文件信息</h2>
-            <dl class="kv">
-              <dt>文件名</dt>
-              <dd class="mono">{{ item.file_name }}</dd>
-              <dt>开发商</dt>
-              <dd>{{ item.company || '—' }}</dd>
-              <dt>版本</dt>
-              <dd class="mono">{{ item.version || '—' }}</dd>
-              <dt>大小</dt>
-              <dd>{{ formatBytes(item.file_size) }}</dd>
-            </dl>
-          </section>
-</div>
-</div>
+        <ResourceBacklinksPanel
+          v-show="activeTab === 'overview' || activeTab === 'notes'"
+          :resource-id="item.id"
+        />
+
+        <SoftwareFilesTab
+          v-show="activeTab === 'files'"
+          :item="item"
+          :location-dir="locationDir"
+          :category-busy="categoryBusy"
+          :link-busy="linkBusy"
+          :type-busy="typeBusy"
+          @launch-with="launchWith"
+          @set-default="setDefaultLauncher"
+          @copy-path="copyPath"
+          @update:type-busy="(v) => (typeBusy = v)"
+          @type-updated="typeUpdated"
+          @to-entity="toEntity"
+          @drop-link="dropLink"
+        />
+      </div>
     </template>
   </div>
 </template>
@@ -679,7 +548,6 @@ async function dropLink(): Promise<void> {
   min-height: 0;
   overflow-y: auto;
 }
-
 .detail__state {
   display: flex;
   flex-direction: column;
@@ -689,7 +557,6 @@ async function dropLink(): Promise<void> {
   height: 100%;
   color: var(--text-sub);
 }
-
 .head {
   position: sticky;
   top: 0;
@@ -701,7 +568,6 @@ async function dropLink(): Promise<void> {
   background: var(--bg-main);
   border-bottom: 1px solid var(--divider);
 }
-
 .head__actions {
   display: flex;
   align-items: center;
@@ -710,38 +576,51 @@ async function dropLink(): Promise<void> {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-
 .body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
-  gap: 16px;
   padding: 20px 24px 32px;
-  align-items: start;
 }
-
-.col {
+.detail-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  min-width: 0;
+  gap: 18px;
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
 }
-
-/* ------------------------------- 头部卡片 ------------------------------- */
+.detail-body > .hero,
+.detail-body > .detail-tabs {
+  width: 100%;
+}
+:deep(.detail-panel) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  width: 100%;
+  align-items: start;
+}
+:deep(.detail-panel--overview > .panel:first-child) {
+  grid-column: 1 / -1;
+}
+:deep(.detail-panel--files) {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (max-width: 800px) {
+  :deep(.detail-panel) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .hero {
   display: flex;
   gap: 18px;
   align-items: flex-start;
   padding: 20px;
 }
-
-/* 悬停才出现：图标区平时该是图标，不是一块按钮面板 */
 .hero__icon {
   position: relative;
   flex: none;
   border-radius: 14px;
   overflow: hidden;
 }
-
 .hero__iconActs {
   position: absolute;
   inset: auto 0 0 0;
@@ -759,7 +638,6 @@ async function dropLink(): Promise<void> {
 .hero__iconActs:focus-within {
   opacity: 1;
 }
-
 .hero__iconBtn {
   display: flex;
   align-items: center;
@@ -771,7 +649,6 @@ async function dropLink(): Promise<void> {
 .hero__iconBtn:disabled {
   opacity: 0.5;
 }
-
 .hero__text {
   flex: 1;
   min-width: 0;
@@ -779,14 +656,12 @@ async function dropLink(): Promise<void> {
   flex-direction: column;
   gap: 8px;
 }
-
 .hero__names {
   display: flex;
   align-items: baseline;
   gap: 10px;
   flex-wrap: wrap;
 }
-
 .hero__name,
 .hero__en,
 .hero__summary {
@@ -800,10 +675,7 @@ async function dropLink(): Promise<void> {
 }
 .hero__name:hover,
 .hero__en:hover,
-.hero__summary:hover,
-.hero__name:focus,
-.hero__en:focus,
-.hero__summary:focus {
+.hero__summary:hover {
   border-color: var(--divider);
 }
 .hero__name:focus,
@@ -811,26 +683,22 @@ async function dropLink(): Promise<void> {
 .hero__summary:focus {
   border-color: var(--accent);
 }
-
 .hero__name {
   font-size: 21px;
   font-weight: 500;
   min-width: 120px;
   flex: 1;
 }
-
 .hero__en {
   font-size: var(--fs-body);
   color: var(--text-faint);
   width: 180px;
 }
-
 .hero__summary {
   font-size: var(--fs-body);
   color: var(--text-sub);
   width: 100%;
 }
-
 .hero__row {
   display: flex;
   align-items: center;
@@ -838,7 +706,6 @@ async function dropLink(): Promise<void> {
   flex-wrap: wrap;
   margin-top: 2px;
 }
-
 .select {
   height: 26px;
   padding: 0 8px;
@@ -849,12 +716,10 @@ async function dropLink(): Promise<void> {
   font-size: var(--fs-tag);
   outline: none;
 }
-
 .mastery-pick {
   display: flex;
   gap: 6px;
 }
-
 .chip {
   height: 24px;
   padding: 0 10px;
@@ -862,10 +727,7 @@ async function dropLink(): Promise<void> {
   font-size: var(--fs-tag);
   color: var(--text-sub);
   border: 1px solid var(--divider);
-  transition:
-    background var(--t-fast) ease,
-    color var(--t-fast) ease,
-    border-color var(--t-fast) ease;
+  transition: background var(--t-fast) ease, color var(--t-fast) ease, border-color var(--t-fast) ease;
 }
 .chip:hover {
   color: var(--text-main);
@@ -875,23 +737,19 @@ async function dropLink(): Promise<void> {
   border-color: transparent;
   color: var(--accent);
 }
-
-/* ------------------------------- 区块 ------------------------------- */
 .sec-title {
   font-size: var(--fs-tag);
-  font-weight: 400;
-  letter-spacing: 1px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
   color: var(--text-faint);
   margin-bottom: 10px;
 }
-
 .tag-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 10px;
 }
-
 .kv {
   display: grid;
   grid-template-columns: 68px 1fr;
@@ -899,56 +757,25 @@ async function dropLink(): Promise<void> {
   margin: 0;
   font-size: var(--fs-body);
 }
-
 .kv dt {
   color: var(--text-faint);
   font-size: var(--fs-tag);
 }
-
 .kv dd {
   margin: 0;
   color: var(--text-sub);
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.path {
-  display: block;
-  width: 100%;
-  margin-top: 12px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: var(--bg-main);
-  border: 1px solid var(--divider);
-  color: var(--text-faint);
-  text-align: left;
-  word-break: break-all;
-  line-height: 1.6;
-  transition: color var(--t-fast) ease;
-}
-.path:hover {
-  color: var(--text-sub);
-}
-
-.sec-title__count {
-  margin-left: 6px;
-  font-family: var(--font-mono);
-  letter-spacing: 0;
-}
-
 .sec-note {
   font-size: 11px;
   line-height: 1.7;
   color: var(--text-faint);
   margin: -4px 0 10px;
 }
-
-/* 同一段说明放在区块末尾时，上下留白要反过来 */
 .sec-note--foot {
   margin: 10px 0 0;
 }
-
-/* 时间是抱一亲眼见过的启动，还是从磁盘 mtime 推出来的 */
 .src {
   margin-left: 6px;
   font-size: 11px;
@@ -959,138 +786,16 @@ async function dropLink(): Promise<void> {
 .src--external {
   color: var(--text-faint);
 }
-
-.launchers {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.launchers li {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: var(--bg-main);
-  border: 1px solid var(--divider);
-}
-
-.launchers__row--extra {
-  opacity: 0.72;
-}
-
-.launchers__go {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  color: var(--text-sub);
-  background: var(--hover-surface);
-  transition:
-    background var(--t-fast) ease,
-    color var(--t-fast) ease;
-}
-.launchers__go:hover {
-  background: var(--active-surface);
-  color: var(--accent);
-}
-
-.launchers__body {
-  flex: 1;
-  min-width: 0;
-}
-
-.launchers__line {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.launchers__name {
-  font-size: var(--fs-tag);
-  color: var(--text-main);
-}
-
-.launchers__path {
-  display: block;
-  width: 100%;
-  margin-top: 3px;
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--text-faint);
-  text-align: left;
-  word-break: break-all;
-  transition: color var(--t-fast) ease;
-}
-.launchers__path:hover {
-  color: var(--text-sub);
-}
-
-.launchers__set {
-  flex-shrink: 0;
-  align-self: center;
-  font-size: 11px;
-  color: var(--text-faint);
-  white-space: nowrap;
-  transition: color var(--t-fast) ease;
-}
-.launchers__set:hover {
-  color: var(--accent);
-}
-
 .link {
   display: block;
   color: var(--accent-2);
 }
-
-/* kv 表格里可点击复制的路径。它不是链接，所以不用 a 的样式 */
-.link-btn {
-  display: block;
-  width: 100%;
-  text-align: left;
-  color: var(--text-sub);
-  word-break: break-all;
-  line-height: 1.6;
-  transition: color var(--t-fast) ease;
-}
-.link-btn:hover {
-  color: var(--accent);
-}
-
-/* 区块末尾的一排按钮 */
-.row--foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-
 .spin {
   animation: spin 900ms linear infinite;
 }
-
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
 }
-
-@media (max-width: 1080px) {
-  .body {
-    grid-template-columns: 1fr;
-  }
-}
-</style>
-
-<style scoped>
-.detail-body{display:flex;flex-direction:column;gap:18px;max-width:1280px;width:100%;margin:0 auto}.detail-body>.hero{width:100%}.detail-body>.detail-tabs{width:100%}.detail-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;width:100%;align-items:start}.detail-panel--overview>.panel:first-child{grid-column:1/-1}.detail-panel--saves,.detail-panel--files{grid-template-columns:minmax(0,1fr)}@media(max-width:800px){.detail-panel{grid-template-columns:minmax(0,1fr)}}
 </style>

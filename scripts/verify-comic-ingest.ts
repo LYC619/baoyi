@@ -8,11 +8,11 @@ import {DatabaseSync} from 'node:sqlite'
 import {ComicIngestService} from '../electron/kinds/image/comic-ingest.ts'
 import {comicCatalog,JM_ADAPTER_VERSION} from '../electron/kinds/image/comic-source-rules.ts'
 import {createComicVerifier} from '../electron/kinds/image/comic-verifier.ts'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {VIDEO_JOBS_SQL} from '../electron/kinds/video/download/jobs.ts'
 import {ImageLibrary} from '../electron/kinds/image/library.ts'
-import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/library-backup.ts'
+import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/storage/library-backup.ts'
 import {pngImage} from './helpers/test-images.ts'
 const base=path.resolve('output/p1-p2-comic-2026-11-06/service');await fs.mkdir(base,{recursive:true})
 async function fixture(t:test.TestContext){

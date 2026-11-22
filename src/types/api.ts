@@ -299,6 +299,8 @@ export interface BaoyiApi {
      */
     copyText(text: string): Promise<void>
     openUrl(url: string): Promise<void>
+    pathForFile(file: File): string
+    statPaths(paths: string[]): Promise<Array<{ path: string; kind: 'file' | 'directory' | 'symlink' | 'missing' }>>
   }
   win: {
     minimize(): void
@@ -317,7 +319,7 @@ export interface BaoyiApi {
     /** launcherPath 为空时启动默认启动端 */
     launch(id: string, launcherPath?: string): Promise<boolean>
     revealInFolder(id: string, launcherPath?: string): Promise<void>
-    addManual(): Promise<SoftwareItem[]>
+    addManual(files?: string[]): Promise<SoftwareItem[]>
     /** 用户取消对话框时返回 null，和 game.pickCover 一个约定 */
     pickIcon(
       id: string
@@ -346,7 +348,7 @@ export interface BaoyiApi {
     linkStates(id: string): Promise<import('./game-project').GameLinkState[]>
     readLink(id: string, target: string): Promise<import('./game-project').GameLinkText>
     relocate(id: string, mode?: 'directory' | 'file'): Promise<GameItem | null>
-    addManual(): Promise<{ ok: boolean; message: string; item?: GameItem } | null>
+    addManual(filePath?: string): Promise<{ ok: boolean; message: string; item?: GameItem } | null>
     list(query?: GameQuery): Promise<GameItem[]>
     get(id: string): Promise<GameItem | null>
     update(id: string, patch: Partial<GameItem>): Promise<GameItem | null>
@@ -354,7 +356,7 @@ export interface BaoyiApi {
     remove(id: string): Promise<void>
     counts(): Promise<GameCounts>
     /** 在资源管理器里选中主程序 */
-    revealInFolder(id: string): Promise<void>
+    revealInFolder(id: string): Promise<boolean | void>
     /** 选游戏目录，可多选。取消返回空数组 */
     pickDirectories(): Promise<string[]>
     /** 扫描 + 识别一条龙，结果直接落库（游戏不走确认面板） */
@@ -461,7 +463,7 @@ export interface BaoyiApi {
     remove(id: string): Promise<void>
     counts(): Promise<VideoCounts>
     /** 剧集选中目录，电影选中文件 */
-    revealInFolder(id: string): Promise<void>
+    revealInFolder(id: string): Promise<boolean | void>
     /**
      * 在资源管理器里选中一个外挂字幕文件。
      *
@@ -633,7 +635,7 @@ export interface BaoyiApi {
   }
   scan: {
     pickDirectory(): Promise<string | null>
-    run(dirs: string[]): Promise<ScanResult>
+    run(dirs: string[], directDirs?: boolean): Promise<ScanResult>
     cancel(): void
     onProgress(cb: (p: ScanProgress) => void): Unsubscribe
     /** 待识别单元列表，设置页用来展示进度 */

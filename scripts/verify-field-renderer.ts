@@ -29,3 +29,20 @@ test('method loading preserves an unsent question, attaches documents and never 
   assert.equal(assistant.context.value[0].id,'doc');assert.equal(sends,0)
   await assistant.loadMethod('document-deep-reader',['doc']);assert.equal(assistant.draft.value.match(/document-deep-reader/g).length,1)
 })
+
+test('privacy watchers survive unmount of their first component and stay single on remount', async () => {
+  const settings = Vue.reactive({loaded:true,settings:{hide_hentai:false}})
+  let cancels=0, comicEvents=0, videoEvents=0
+  const api={comic:{jobs:async()=>[{id:'comic'}]},image:{onJobsChanged:()=>{comicEvents++},onChanged:()=>{}},video:{
+    onUpdateCheck:()=>{videoEvents++}, cancelUpdateCheck:async()=>{cancels++},
+    updateCheckStatus:async()=>({rows:settings.settings.hide_hentai?[]:[{id:'video'}]})}}
+  const load=createRendererLoader({vue:Vue,'@/stores/settings':{useSettingsStore:()=>settings}},{window:{baoyi:api},localStorage:{getItem:()=>null},setTimeout,clearTimeout})
+  const comic=load('src/composables/useComicIngest.ts'), video=load('src/composables/useVideoUpdates.ts')
+  const renderer=Vue.createRenderer<any,any>({createElement:()=>({}),createText:()=>({}),createComment:()=>({}),insert(){},remove(){},patchProp(){},setText(){},setElementText(){},parentNode:()=>null,nextSibling:()=>null})
+  let c:any,v:any
+  function mount(){const app=renderer.createApp({setup(){c=comic.useComicIngest();v=video.useVideoUpdates();return ()=>Vue.h('span')}});app.mount({});return app}
+  const first=mount();await tick();assert.equal(c.jobs.value.length,1);assert.equal(v.state.value.rows.length,1);first.unmount()
+  settings.settings.hide_hentai=true;await tick();assert.equal(c.jobs.value.length,0);assert.equal(v.state.value.rows.length,0);assert.equal(cancels,1)
+  const second=mount();settings.settings.hide_hentai=false;await tick();assert.equal(c.jobs.value.length,1);assert.equal(v.state.value.rows.length,1)
+  assert.equal(comicEvents,1);assert.equal(videoEvents,1);second.unmount()
+})

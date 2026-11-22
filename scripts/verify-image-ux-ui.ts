@@ -2,15 +2,14 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
+import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ImageLibrary } from '../electron/kinds/image/library.ts'
 import { scanImageImport } from '../electron/kinds/image/scanner.ts'
 import { pngImage } from './helpers/test-images.ts'
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const { _electron } = loadPlaywright()
 const packed = process.argv[2]
 const output = path.resolve('output/image-ux' + (packed ? '-packaged' : '')); fs.mkdirSync(output, { recursive: true })
 const profile = fs.mkdtempSync(path.join(output, 'profile-'))
@@ -26,7 +25,7 @@ for (let c = 1; c <= 2; c++) {
 const library = new ImageLibrary(db)
 const item = library.register((await scanImageImport(path.join(profile, 'media'), 'comic', false))[0])
 const pages = library.pages(item.id); db.close()
-const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL
+const env = electronTestEnv()
 const app = await _electron.launch({ executablePath: path.resolve(packed || 'node_modules/electron/dist/electron.exe'), args: [...(packed ? [] : [path.resolve('.')]), '--user-data-dir=' + profile, '--disable-gpu'], env })
 const checks: string[] = [], failures: string[] = [], errors: string[] = []
 try {
@@ -42,7 +41,7 @@ try {
     assert.equal(await page.locator('.image-reader').count(), 0, 'chapter selection must only change preview')
     assert.equal(await page.locator('.detail-pages .image-cover').count(), 4)
     assert.equal(await page.locator('.detail-pages button[aria-label="打开第 5 页"]').count(), 1)
-    assert.equal((await page.evaluate((id: string) => window.baoyi.image.get(id), item.id)).progress, null)
+    assert.equal((await page.evaluate((id: string) => window.baoyi.image.get(id), item.id))?.progress, null)
     await page.getByRole('button', { name: '打开第 5 页', exact: true }).click()
     await page.waitForFunction(() => document.querySelector('.reader-bottom span')?.textContent?.includes('5 / 8'))
     await page.getByLabel('关闭阅读器', { exact: true }).click()
@@ -50,6 +49,7 @@ try {
   })
   if (await page.locator('.image-reader').count()) await page.getByLabel('关闭阅读器', { exact: true }).click()
   await test('compact-tools', async () => {
+    await page.getByRole('tab', { name: '文件管理', exact: true }).click()
     const tool = page.getByRole('button', { name: '检查完整性', exact: true })
     const box = await tool.boundingBox(), row = await page.locator('.detail-utilities').boundingBox()
     assert.ok(box && row && row.height <= 60, 'idle tools occupy one compact row')
@@ -66,6 +66,7 @@ try {
     const current = (n: number) => page.waitForFunction((n: number) => document.querySelector('.reader-bottom span')?.textContent?.includes(n + ' / 8'), n)
     await current(1)
     const viewport = await page.locator('.reader-viewport').boundingBox()
+    assert.ok(viewport)
     await page.mouse.move(viewport.x + viewport.width / 2, viewport.y + viewport.height / 2)
     await page.mouse.wheel(0, 120); await current(2)
     await page.mouse.wheel(0, 240); await page.waitForTimeout(80); await current(2)
@@ -77,6 +78,7 @@ try {
     await page.getByLabel('放大图片', { exact: true }).click()
     await page.mouse.move(viewport.x + viewport.width / 2, viewport.y + viewport.height / 2)
     const originalPan = await page.locator('.reader-spread').boundingBox()
+    assert.ok(originalPan)
     await page.mouse.wheel(0, 120)
     await page.waitForFunction((y: number) => document.querySelector('.reader-spread')!.getBoundingClientRect().y < y - 10, originalPan.y)
     await current(8)
@@ -84,7 +86,7 @@ try {
     await page.getByLabel('阅读设置', { exact: true }).click()
     await page.getByLabel('阅读方向', { exact: true }).selectOption('rtl')
     await page.getByLabel('阅读设置', { exact: true }).click()
-    await page.getByRole('button', { name: '后一页', exact: true }).click(); await current(7)
+    await page.getByRole('button', { name: '前一页', exact: true }).click(); await current(7)
     await page.mouse.move(viewport.x + 200, viewport.y + 200); await page.mouse.down(); await page.mouse.move(viewport.x + 260, viewport.y + 180, { steps: 5 }); await page.mouse.up(); await current(7)
     await page.getByLabel('连续阅读', { exact: true }).click()
     await page.locator('.reader-viewport').evaluate((el: HTMLElement) => { el.scrollTop = 0 })

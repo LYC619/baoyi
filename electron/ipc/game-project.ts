@@ -1,6 +1,6 @@
-import { app, dialog, ipcMain, nativeImage, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { app, dialog, nativeImage, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import path from 'node:path'
-import { coversDir, getDb } from '../services/database.ts'
+import { coversDir, getDb } from '../services/storage/database.ts'
 import { getGame } from '../kinds/game/db.ts'
 import { previewGameProjects, importGameProjects, checkGameProjects } from '../kinds/game/project-catalog.ts'
 import { gameLinkStates, readGameLink } from '../kinds/game/link-reader.ts'
@@ -8,8 +8,9 @@ import { assertLibraryIdle } from './library-backup.ts'
 import type { GameProjectPreview, GameArtworkChoices } from '../../src/types/game-project'
 import { restoreProjectArtwork } from '../kinds/game/project-artwork.ts'
 import { validateCoverFile, invalidateGameCoverRequests } from '../kinds/game/service.ts'
+import { optRecord, reqId, reqString, reqStringArray } from './validate.ts'
 
-export function registerGameProjectIpc(getWindow: () => BrowserWindow | null): void {
+export function registerGameProjectIpc(getWindow: () => BrowserWindow | null, ipcMain: Pick<Electron.IpcMain, 'handle'>): void {
   let preview: { value: GameProjectPreview; at: number } | null = null
   const artworkContext = () => ({coversDir: coversDir(), recoveryDir: path.join(app.getPath('userData'), 'project-artwork-recovery'), validate: validateCoverFile})
   const assertMain = (event: IpcMainInvokeEvent) => {
@@ -35,7 +36,7 @@ export function registerGameProjectIpc(getWindow: () => BrowserWindow | null): v
   })
   ipcMain.handle('game:import-projects', (event,token:string,selected:string[],artwork:GameArtworkChoices = {}) => {
     assertMain(event); assertLibraryIdle()
-    if (!preview || token !== preview.value.token || Date.now()-preview.at > 30*60_000) throw new Error('导入预览已失效，请重新选择项目清单')
+    token = reqString(token, 'token', { max: 256 }); selected = reqStringArray(selected, 'selected'); artwork = (optRecord(artwork, 'artwork') ?? {}) as GameArtworkChoices; if (!preview || token !== preview.value.token || Date.now()-preview.at > 30*60_000) throw new Error('导入预览已失效，请重新选择项目清单')
     const result = importGameProjects(getDb(),preview.value,selected,artwork,artworkContext())
     for (const item of result.items) if (artwork[item.key]?.length) invalidateGameCoverRequests(item.id)
     preview = null
@@ -58,12 +59,12 @@ export function registerGameProjectIpc(getWindow: () => BrowserWindow | null): v
   ipcMain.handle('game:check-projects',event=>{assertMain(event);return checkGameProjects(getDb())})
   ipcMain.handle('game:link-states', (event,id:string) => {
     assertMain(event)
-    return gameLinkStates(getGame(getDb(),id)?.linked_files || [])
+    return gameLinkStates(getGame(getDb(),reqId(id))?.linked_files || [])
   })
   ipcMain.handle('game:read-link', (event,id:string,target:string) => {
     assertMain(event)
-    const game = getGame(getDb(),id)
+    const game = getGame(getDb(),reqId(id))
     if (!game) throw new Error('游戏不存在')
-    return readGameLink(game.linked_files,target)
+    return readGameLink(game.linked_files,reqString(target,'target',{max:4096}))
   })
 }

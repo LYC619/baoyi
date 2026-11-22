@@ -1,11 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { SkillProfiles } from '../electron/workspace/skill-profiles.ts'
 import { PersonalLibrary } from '../electron/workspace/personal.ts'
-import { buildLibraryBackup, restoreLibraryBackup } from '../electron/services/library-backup.ts'
+import { buildLibraryBackup, restoreLibraryBackup } from '../electron/services/storage/library-backup.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
 
 test('技能草案必须确认，追加记录幂等且校验指标口径', t => {

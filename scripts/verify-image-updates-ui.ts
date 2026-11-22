@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
+import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ImageLibrary } from '../electron/kinds/image/library.ts'
 import { createImageDownloads } from '../electron/kinds/image/downloads.ts'
 import { PicacomicSource } from '../electron/kinds/image/source.ts'
 import { pngImage } from './helpers/test-images.ts'
 
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const { _electron } = loadPlaywright()
 const packedExecutable = process.argv[2]
 const executable = path.resolve(packedExecutable || 'node_modules/electron/dist/electron.exe')
 const output = path.resolve('output/image-optimization/updates-ui' + (packedExecutable ? '-packaged' : '')); fs.mkdirSync(output, { recursive: true })
@@ -28,7 +27,7 @@ await queue.enqueue({ id: 'work', title: '本地保留的名称', author: '', de
 await queue.idle(); assert.equal(queue.list()[0].status, 'success')
 const library = new ImageLibrary(db), item = library.list()[0], pages = library.pages(item.id)
 fs.unlinkSync(pages[0].file); db.close()
-const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL
+const env = electronTestEnv()
 const app = await _electron.launch({ executablePath: executable, args: [...(packedExecutable ? [] : [path.resolve('.')]), '--user-data-dir=' + profile, '--disable-gpu'], env, timeout: 30000 })
 try {
   assert.equal(path.resolve(await app.evaluate(({ app }: any) => app.getPath('userData'))), profile)
@@ -57,6 +56,7 @@ try {
   const errors: string[] = []; page.on('pageerror', (error: Error) => errors.push(error.message))
   await page.waitForFunction(() => !!window.baoyi?.image)
   await page.evaluate((id: string) => { location.hash = '/image/' + id }, item.id)
+  await page.getByRole('tab', { name: '文件管理', exact: true }).click()
   await page.getByRole('button', { name: '检查连载更新', exact: true }).waitFor()
   assert.deepEqual(await app.evaluate(() => (globalThis as any).__updateCalls), [], '进入作品页不自动请求来源')
   await page.getByRole('button', { name: '检查连载更新', exact: true }).click()
@@ -79,6 +79,7 @@ try {
   await page.getByRole('button', { name: '下载所选新章节', exact: true }).click()
   await page.getByText('新增章节已入库', { exact: true }).waitFor()
   const updated = await page.evaluate((id: string) => window.baoyi.image.get(id), item.id)
+  assert.ok(updated)
   assert.equal(updated.name, item.name); assert.equal(updated.description, item.description); assert.deepEqual(updated.tags, item.tags)
   assert.equal(updated.path, item.path); assert.equal(updated.chapterCount, 2)
   const calls = await app.evaluate(() => (globalThis as any).__updateCalls)

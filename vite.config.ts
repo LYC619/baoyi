@@ -34,7 +34,7 @@ export default defineConfig({
     },
     electron({
       main: {
-        entry: {main:'electron/main.ts','document-worker':'electron/workspace/document-extract-worker.ts','video-frame-worker':'electron/kinds/video/frame-worker.ts','video-frame-generation-worker':'electron/kinds/video/frame-generation-worker.ts','comic-verify-worker':'electron/kinds/image/comic-verify-worker.ts'},
+        entry: {main:'electron/main.ts','document-worker':'electron/workspace/document-extract-worker.ts','video-frame-worker':'electron/kinds/video/frame-worker.ts','video-frame-generation-worker':'electron/kinds/video/frame-generation-worker.ts','comic-verify-worker':'electron/kinds/image/comic-verify-worker.ts','image-thumbnail-worker':'electron/kinds/image/thumbnail-worker.ts'},
         vite: {
           build: {
             outDir: 'dist-electron',
@@ -48,8 +48,7 @@ export default defineConfig({
         vite: {
           build: {
             outDir: 'dist-electron',
-            minify: true,
-            rolldownOptions: { external: nativeDeps }
+            minify: true
           }
         }
       }

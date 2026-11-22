@@ -1,5 +1,5 @@
 import path from 'node:path'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoSourceRef } from '../../../src/types/video-library.ts'
 
 /** Detached files remain excluded from their former collection, but retain their own scan path. */

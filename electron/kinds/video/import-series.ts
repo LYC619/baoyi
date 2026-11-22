@@ -1,5 +1,5 @@
 import path from 'node:path'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoCandidate } from './scanner.ts'
 import { videoOwnerForFiles } from './db.ts'
 import { readVideoLocalMetadata } from './local-metadata.ts'

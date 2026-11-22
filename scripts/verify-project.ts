@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema, SCHEMA_VERSION } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_VERSION } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
 
@@ -107,7 +107,7 @@ test('跨卷核验保留符号链接且回收后建立旧入口', async()=>{
 test('项目备份恢复包含入口，兼容 v13 且重置级联清空项目元数据',async()=>{
   const {ProjectLibrary}=await import('../electron/kinds/project/library.ts')
   const {scanProjects}=await import('../electron/kinds/project/scanner.ts')
-  const {buildLibraryBackup,restoreLibraryBackup}=await import('../electron/services/library-backup.ts')
+  const {buildLibraryBackup,restoreLibraryBackup}=await import('../electron/services/storage/library-backup.ts')
   const db=new DatabaseSync(':memory:');initSchema(db,KINDS);db.exec(VIDEO_JOBS_SQL)
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'baoyi-project-backup-'))
   try{

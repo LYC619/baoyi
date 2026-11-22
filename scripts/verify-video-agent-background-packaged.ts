@@ -6,7 +6,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { registerVideoContent } from '../electron/kinds/video/registration.ts'
 import { captureHiddenElectron } from './helpers/electron-capture.ts'
@@ -90,7 +90,7 @@ function readState() {
   try { return { active: reader.prepare("SELECT COUNT(*) AS n FROM resource WHERE kind='video' AND is_archived=0").get()?.n,
     journal: reader.prepare('SELECT status FROM video_organize_journal').all(),
     episodes: reader.prepare('SELECT path,description,position_sec FROM episode').all(), foreignKeys: reader.prepare('PRAGMA foreign_key_check').all(),
-    task: reader.prepare("SELECT status,message,processed,total,percent FROM task_records WHERE title='Agent 整理 · 执行所选操作' ORDER BY started_at DESC LIMIT 1").get() }
+    task: reader.prepare("SELECT status,message,processed,total,percent FROM task_records WHERE title='智能整理 · 执行所选操作' ORDER BY started_at DESC LIMIT 1").get() }
   } finally { reader.close() }
 }
 try {
@@ -163,8 +163,8 @@ try {
     const after = await app.evaluate(() => (globalThis as any).__backgroundMetrics.listCalls)
     assert.ok(after - before <= 2)
   })
-  await click('批量管理'); await click('全选当前范围'); await click('Agent 整理')
-  await page.getByRole('dialog', { name: 'Agent 整理', exact: true }).locator('select').selectOption('move')
+  await click('批量管理'); await click('全选当前范围'); await click('智能整理')
+  await page.getByRole('dialog', { name: '智能整理', exact: true }).locator('select').selectOption('move')
   await page.getByLabel('刮削缺失封面', { exact: false }).evaluate((input: HTMLInputElement) => { if (input.checked) input.click() })
   await click('生成整理预览')
   await until(() => page.evaluate(() => document.querySelectorAll('.agent-group').length === 29 && !document.querySelector('.agent-progress')), '29-group preview')
@@ -183,7 +183,7 @@ try {
     await captureHiddenElectron(app, path.join(evidence, 'restored-during-organization.png'))
   })
   await check('leaving the video route during organization and returning preserves its state', async () => {
-    await click('关闭 Agent 整理')
+    await click('关闭智能整理')
     await page.evaluate(() => { location.hash = '/settings' })
     await until(() => page.evaluate(() => location.hash === '#/settings' && !!document.querySelector('.app__view') && !document.querySelector('.page-enter-active,.page-leave-active')), 'settings navigation')
     await app.evaluate(({ BrowserWindow }: any) => BrowserWindow.getAllWindows()[0].hide())

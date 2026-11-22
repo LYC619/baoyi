@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { withImageCollections } from './collections.ts'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { ImageBulkPatch, ImageChapter, ImageGroup, ImageItem, ImagePage, ImagePatch, ImageQuery, ScannedImage } from '../../../src/types/image.ts'
 
 type Row = Record<string, any>

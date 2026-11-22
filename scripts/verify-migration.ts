@@ -15,7 +15,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { SCHEMA_VERSION, initSchema, objectType, schemaVersion } from '../electron/services/schema.ts'
+import { SCHEMA_VERSION, initSchema, objectType, schemaVersion } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 
 type Row = Record<string, any>

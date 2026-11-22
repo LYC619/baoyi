@@ -1,12 +1,13 @@
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/utils'
-import {computed,ref,watch} from 'vue'
+import {computed,effectScope,ref,watch} from 'vue'
 import {useSettingsStore} from '@/stores/settings'
 import type {ComicJobView} from '@/types/comic-ingest'
 const jobs=ref<ComicJobView[]>([]),open=ref(false),request=ref(''),recovery=ref<ComicJobView|null>(null),showRecords=ref(false),error=ref('')
 const provider=ref<'pica'|'jm'>('pica')
 try{if(localStorage.getItem('baoyi.comic.source')==='jm')provider.value='jm'}catch { /* 无法读取上次来源时使用哔咔。 */ }
-watch(provider,value=>{try{localStorage.setItem('baoyi.comic.source',value)}catch (cause) { useToast().error(errorMessage(cause)) }})
+const scope = effectScope(true)
+scope.run(() => watch(provider,value=>{try{localStorage.setItem('baoyi.comic.source',value)}catch (cause) { useToast().error(errorMessage(cause)) }}))
 let initialized=false,generation=0,timer:ReturnType<typeof setTimeout>|undefined
 let refreshing:Promise<void>|undefined,pending=false
 function reconcile(value:ComicJobView[]){
@@ -34,11 +35,11 @@ export function useComicIngest(){
     })().finally(()=>{refreshing=undefined;if(pending)void refresh()})
     return refreshing
   }
-  if(!initialized&&window.baoyi?.comic){
+  if(!initialized&&window.baoyi?.comic) scope.run(() => {
     initialized=true;watch(visible,show=>{generation++;jobs.value=[];open.value=false;request.value='';recovery.value=null;if(show)void refresh()},{immediate:true})
     const schedule=()=>{if(!timer)timer=setTimeout(()=>{timer=undefined;void refresh()},150)}
     window.baoyi.image.onJobsChanged(schedule);window.baoyi.image.onChanged(schedule)
-  }
+  })
   const active=computed(()=>jobs.value.filter(j=>['queued','running'].includes(j.status))),attention=computed(()=>jobs.value.filter(j=>!['queued','running','success'].includes(j.status)))
   function show(input='',job:ComicJobView|null=null){request.value=input;recovery.value=job;if(input||job)provider.value='jm';open.value=true}
   return {jobs,open,provider,request,recovery,error,showRecords,active,attention,visible,refresh,show}

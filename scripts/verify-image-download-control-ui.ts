@@ -1,22 +1,21 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
+import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { setTimeout as delay } from 'node:timers/promises'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { pngImage } from './helpers/test-images.ts'
 import type { ImageDownloadJob } from '../src/types/image.ts'
 
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const { _electron } = loadPlaywright()
 const output = path.resolve('output/image-optimization/control-ui' + (process.argv[2] ? '-packaged' : '')); fs.mkdirSync(output, { recursive: true })
 const profile = fs.mkdtempSync(path.join(output, 'profile-')), downloadRoot = path.join(profile, 'downloads'); fs.mkdirSync(downloadRoot)
 const db = new DatabaseSync(path.join(profile, 'baoyi.db')); db.exec('PRAGMA foreign_keys=ON'); initSchema(db, KINDS)
 for (const [key, value] of Object.entries({ onboarded: true, theme: 'dark', hanime_builtin_hosts: false })) db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, JSON.stringify(value))
 db.close()
-const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL
+const env = electronTestEnv()
 const application = await _electron.launch({ executablePath: path.resolve(process.argv[2] || 'node_modules/electron/dist/electron.exe'), args: [...(process.argv[2] ? [] : [path.resolve('.')]), '--user-data-dir=' + profile, '--disable-gpu'], env, timeout: 30000 })
 try {
   assert.equal(path.resolve(await application.evaluate(({ app }: any) => app.getPath('userData'))), profile)
@@ -48,13 +47,18 @@ try {
     }
   }, { downloadRoot, png: pngImage(14, 20).toString('base64') })
   await page.evaluate(() => { location.hash = '/image' })
-  await page.getByRole('button', { name: '从哔咔添加', exact: true }).click()
+  await page.getByRole('button', { name: '在线漫画', exact: true }).click()
+  await page.getByRole('button', { name: '哔咔 Pica', exact: true }).click()
   await page.getByLabel('用户名', { exact: true }).fill('fixture')
   await page.getByLabel('密码', { exact: true }).fill('fixture')
   await page.getByRole('button', { name: '登录哔咔', exact: true }).click()
   await page.getByRole('button', { name: '我的收藏', exact: true }).waitFor()
   const enqueue = (id: string) => page.evaluate((id: string) => window.baoyi.image.download(id, ['c1'], null), id) as Promise<ImageDownloadJob>
   const alpha = await enqueue('alpha')
+  await page.getByRole('button', { name: '下载任务与记录', exact: true }).click()
+  await page.locator('.download-options summary').click()
+  const jobInput = page.getByRole('spinbutton', { name: '同时下载漫画数', exact: true })
+  await jobInput.fill('1'); await jobInput.press('Tab')
   const input = page.getByRole('spinbutton', { name: '图片下载并发', exact: true })
   await input.waitFor()
   await input.fill('3'); await input.press('Tab')
@@ -87,7 +91,7 @@ try {
   const calls: string[] = await application.evaluate(() => (globalThis as any).__controlFixture.calls)
   assert.equal(calls.filter(url => url === '/static/alpha/1').length, 1)
   assert.ok(completed.filter(j => j.id !== alpha.id).every(j => j.status === 'paused'))
-  await page.getByRole('button', { name: '关闭哔咔', exact: true }).click()
+  await page.getByRole('button', { name: '关闭在线漫画', exact: true }).click()
   await page.locator('.task-trigger').click()
   await page.locator('.task-tabs button').filter({ hasText: '下载记录' }).click()
   const panel = page.locator('.task-panel__downloads')

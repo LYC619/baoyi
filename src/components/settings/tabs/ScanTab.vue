@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { computed, onMounted, ref, watch, toRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { activeModule } from '@/composables/useModules'
@@ -128,9 +129,11 @@ function cancelScan(): void {
 }
 
 async function resetUnits(): Promise<void> {
-  const ok = window.confirm(
-    '把所有已识别 / 已跳过的目录退回待识别，下次补全会重新跑一遍 AI。\n已有的软件条目不会被删除，你写过的备注也会保留。确认继续？'
-  )
+  const ok = await confirmDialog({
+    title: '重置待识别状态？',
+    message: '已识别与已跳过的目录将退回待识别，下次补全时重新识别；已有软件条目、手动备注与本地文件均会保留。',
+    confirmText: '确认重置'
+  })
   if (!ok) return
   const n = await window.baoyi.scan.reset()
   await Promise.all([loadUnits(), store.refreshCounts()])
@@ -279,7 +282,7 @@ async function loadSkipped(): Promise<void> {
 }
 
 async function clearSkipped(): Promise<void> {
-  if (!window.confirm(`清空忽略名单（${skippedCount.value} 项）？\n这些程序下次识别会重新出现在确认面板里。`)) return
+  if (!(await confirmDialog({ title: `清空忽略名单（${skippedCount.value} 项）？`, message: '清空后，这些程序在下次识别时会重新出现在待确认列表中。', confirmText: '清空名单' }))) return
   const n = await window.baoyi.pending.clearSkipped()
   await loadSkipped()
   success(`已清空 ${n} 项`)
@@ -309,7 +312,7 @@ function openAi(): void { void router.replace({ name: 'settings', query: { tab: 
   </p>
   <p v-else-if="activeModule === 'video'" class="sec-desc">
     影视扫描先读取本地文件名、NFO 和 HanimeViewer 资料，生成预览，确认后才入库；本地扫描不消耗模型或搜索额度。
-    资料不足的作品会列入待处理，可选中后使用「Agent 复查所选」。
+    资料不足的作品会列入待处理，可选中后使用「智能复查所选」。
   </p>
   <p v-else class="sec-desc">
     扫描会查找本地游戏目录，随后交给 AI 识别并入库。
@@ -344,14 +347,14 @@ function openAi(): void { void router.replace({ name: 'settings', query: { tab: 
 
 <section v-if="activeModule === 'video'" class="panel">
   <h2 class="sec-head">视频导入与文件整理</h2>
-  <p class="sec-desc">扫描结果先进入导入确认窗口，核对后再录入。关掉窗口后，影视墙上会有「导入待确认」入口，这里也能重新打开。需要联网补充资料时，可以启用 Agent。</p>
-  <div class="row"><label class="hint"><input type="checkbox" :checked="videoImport.useAgent.value" @change="videoImport.setAgent(($event.target as HTMLInputElement).checked)" /> 导入时启用 Agent</label><button class="btn btn--ghost" @click="videoImport.show()">打开导入确认</button></div>
+  <p class="sec-desc">扫描结果先进入导入确认窗口，核对后再录入。关掉窗口后，影视墙上会有「导入待确认」入口，这里也能重新打开。需要联网补充资料时，可开启智能复查。</p>
+  <div class="row"><label class="hint"><input type="checkbox" :checked="videoImport.useAgent.value" @change="videoImport.setAgent(($event.target as HTMLInputElement).checked)" /> 导入时启用智能复查</label><button class="btn btn--ghost" @click="videoImport.show()">打开导入确认</button></div>
 
 </section>
 <section v-if="activeModule === 'software'" class="panel">
   <h2 class="sec-head">AI 识别</h2>
   <p class="sec-desc">
-    把每个待识别目录交给 agent 自主探索：它自己列目录、读 exe 的 PE 信息、
+    把每个待识别目录交给 AI 自主查看：它自己列目录、读取程序版本信息、
     读目录里的说明文档，判断哪个是主程序，再把 32 位和 64 位合并成同一个条目。
     识别不对时到「识别日志」翻它当时的判断过程。
   </p>

@@ -1,11 +1,12 @@
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
-import { getDb } from '../services/database.ts'
-import { getSettings } from '../services/settings-store.ts'
+import { getDb } from '../services/storage/database.ts'
+import { getSettings } from '../services/storage/settings-store.ts'
 import { runAgent } from '../services/agent/loop.ts'
 import { createVideoAgentOrganizer } from '../kinds/video/agent-organize.ts'
 import { enrichVideoWithAgent } from '../kinds/video/service.ts'
 import type { VideoAgentActions } from '../../src/types/video-agent-organize.ts'
 import { cloneVideoDatabase } from '../kinds/video/snapshot.ts'
+import { reqId, reqRecord, reqStringArray } from './validate.ts'
 let running: (() => boolean) | undefined
 export const videoAgentOrganizationBusy = () => running?.() || false
 export function registerVideoAgentOrganizeIpc(getWindow: () => BrowserWindow | null, ipcMain: Pick<Electron.IpcMain, 'handle'>) {
@@ -25,11 +26,11 @@ export function registerVideoAgentOrganizeIpc(getWindow: () => BrowserWindow | n
   }
   function guard(event: IpcMainInvokeEvent, ids: string[] = []) {
     const win = getWindow()
-    if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('只允许主窗口操作 Agent 整理')
+    if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('只允许主窗口操作智能整理')
     if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string')) throw new Error('作品范围无效')
     if (getSettings(getDb()).hide_hentai && ids.some(id => (getDb().prepare('SELECT category FROM resource WHERE id=?').get(id) as { category: string } | undefined)?.category === '里番')) throw new Error('所选作品包含隐藏内容，请调整显示设置')
   }
-  ipcMain.handle('video-agent:prepare', (event, ids: string[], actions: VideoAgentActions) => { guard(event, ids); return current().prepare(ids, actions) })
-  ipcMain.handle('video-agent:run', (event, id: string, groups: string[]) => { guard(event, current().get(id)?.works.map(work => work.id) || []); return current().run(id, groups) })
+  ipcMain.handle('video-agent:prepare', (event, ids: string[], actions: VideoAgentActions) => { guard(event, ids); return current().prepare(ids, reqRecord(actions, 'actions') as unknown as VideoAgentActions) })
+  ipcMain.handle('video-agent:run', (event, id: string, groups: string[]) => { const safeId = reqId(id), safeGroups = reqStringArray(groups, 'groups'); guard(event, current().get(safeId)?.works.map(work => work.id) || []); return current().run(safeId, safeGroups) })
   ipcMain.handle('video-agent:cancel', event => { guard(event); return current().cancel() })
 }

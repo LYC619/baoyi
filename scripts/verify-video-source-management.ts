@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import * as video from '../electron/kinds/video/db.ts'
 import { registerVideoContent, bindVideoSource } from '../electron/kinds/video/registration.ts'
@@ -25,11 +25,11 @@ function fixture() {
   const load = createRendererLoader({
     'node:fs': { ...fs, default: fs }, 'node:path': { ...path, default: path },
     electron: { app: { getPath: () => root }, shell: {}, net: {} },
-    '../../services/database.ts': { getDb: () => db, postersDir: () => root },
-    '../../services/settings-store.ts': { getSettings: () => ({}) },
+    '../../services/storage/database.ts': { getDb: () => db, postersDir: () => root },
+    '../../services/storage/settings-store.ts': { getSettings: () => ({}) },
     './download/sources.ts': { loadVideoWork: () => pending },
     './hentai/hanime.ts': {}, './mediainfo.ts': {}, './db.ts': video,
-    '../../services/agent/loop.ts': {}, '../../services/searchService.ts': {}, './tmdb.ts': {}, './tools.ts': {}, './prompts.ts': {}, './facts.ts': {}
+    '../../services/agent/loop.ts': {}, '../../services/network/searchService.ts': {}, './tmdb.ts': {}, './tools.ts': {}, './prompts.ts': {}, './facts.ts': {}
   }, { Buffer, URL, AbortController, AbortSignal, setTimeout, clearTimeout })
   const service = load('electron/kinds/video/service.ts') as typeof import('../electron/kinds/video/service.ts')
   const file = path.join(root, 'episode.mp4'); fs.writeFileSync(file, '')

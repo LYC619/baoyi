@@ -250,6 +250,29 @@ interface RawFile {
 
 /** 一层一层走下去，把文件按扩展名分类收好。深度护栏 8 层 —— 再深就不是片库了 */
 function collect(root: string, maxDepth = 8): RawFile[] {
+  try {
+    const stat = fs.statSync(root)
+    if (stat.isFile()) {
+      const name = path.basename(root)
+      const ext = path.extname(name).toLowerCase()
+      const single: RawFile[] = [{ path: root, name, base: name.slice(0, name.length - ext.length), ext, size: stat.size, segs: [] }]
+      const parent = path.dirname(root)
+      try {
+        for (const e of fs.readdirSync(parent, { withFileTypes: true })) {
+          if (!e.isFile()) continue
+          const sExt = path.extname(e.name).toLowerCase()
+          if (sExt === '.nfo' || IMAGE_EXTS.has(sExt) || SUBTITLE_EXTS.has(sExt)) {
+            single.push({ path: path.join(parent, e.name), name: e.name, base: e.name.slice(0, e.name.length - sExt.length), ext: sExt, size: 0, segs: [] })
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
+      return single
+    }
+  } catch {
+    return []
+  }
   const out: RawFile[] = []
   const walk = (dir: string, segs: string[]): void => {
     if (segs.length > maxDepth) return
@@ -298,6 +321,9 @@ function collect(root: string, maxDepth = 8): RawFile[] {
  * 而按目录结构先判的话，目录结构本身就是用户整理时的意图表达，比文件名可信。
  */
 export function scanVideoRoot(root: string): VideoCandidate[] {
+  let singleFile = false
+  try { singleFile = fs.statSync(root).isFile() } catch { return [] }
+  const baseRoot = singleFile ? path.dirname(root) : root
   const raws = collect(root)
   const videos = raws.filter((r) => VIDEO_EXTS.has(r.ext) || isAudioFile(r.path))
   if (videos.length === 0) return []
@@ -338,7 +364,7 @@ export function scanVideoRoot(root: string): VideoCandidate[] {
   // 按「条目根目录」分组。条目根 = 从 root 往下走，遇到第一个不是季目录的那一层
   const groups = new Map<string, typeof parsed>()
   for (const item of parsed) {
-    const key = entryRoot(root, item.raw.segs)
+    const key = entryRoot(baseRoot, item.raw.segs)
     const arr = groups.get(key)
     if (arr) arr.push(item)
     else groups.set(key, [item])
@@ -349,11 +375,11 @@ export function scanVideoRoot(root: string): VideoCandidate[] {
     const audio = items.filter(item=>isAudioFile(item.raw.path)).sort((a,b)=>a.raw.name.localeCompare(b.raw.name,'zh-CN',{numeric:true}))
     if (audio.length) {
       const files=audio.map(({raw,p})=>({path:raw.path,name:raw.name,size:raw.size,parsed:p,part:null}))
-      const shared=audio.length!==items.length
+      const shared=singleFile||audio.length!==items.length
       out.push({video_type:audio.length>1?'series':'movie',path:shared?files[0].path:dir,directory:dir,shared_directory:shared,
         title_zh:audio.length>1?path.basename(dir):audio[0].raw.base,title_en:'',year:0,
         files:audio.length>1?[]:files,episodes:audio.length>1?files.map((file,i)=>({season:1,episode:i+1,title:audio[i].raw.base,files:[file]})):[],
-        sidecars:mergeSidecars(dir,sidecarsByDir),extras:[],evidence:['音频文件，按目录管理曲目']})
+        sidecars:singleFile?narrowSidecars(dir,audio[0].raw.base,sidecarsByDir):mergeSidecars(dir,sidecarsByDir),extras:[],evidence:['音频文件，按目录管理曲目']})
       items.splice(0,items.length,...items.filter(item=>!isAudioFile(item.raw.path)))
       if (!items.length) continue
     }
@@ -373,12 +399,12 @@ export function scanVideoRoot(root: string): VideoCandidate[] {
       continue
     }
     const { series, movies } = partitionWorks(dir, items)
-    const shared = audio.length > 0 || series.size + movies.length > 1
+    const shared = singleFile || audio.length > 0 || series.size + movies.length > 1
     const candidates: VideoCandidate[] = []
     for (const episodes of series.values()) {
-      candidates.push(buildSeries(root, dir, episodes, ['按文件标题与季集标记归并'], extras, sidecarsByDir, shared))
+      candidates.push(buildSeries(baseRoot, dir, episodes, ['按文件标题与季集标记归并'], extras, sidecarsByDir, shared))
     }
-    candidates.push(...buildMovies(dir, movies, extras, sidecarsByDir, audio.length > 0 || series.size > 0))
+    candidates.push(...buildMovies(dir, movies, extras, sidecarsByDir, singleFile || audio.length > 0 || series.size > 0))
     const titles = [...new Set(candidates.map(c => c.title_zh || c.title_en).filter(Boolean))]
     for (const candidate of candidates) {
       candidate.sibling_titles = titles

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema, SCHEMA_VERSION } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_VERSION } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
 assert.ok(fs.existsSync('electron/ipc/library-snapshots.ts'), 'snapshot information requires guarded IPC')
@@ -14,7 +14,7 @@ const event = { sender: contents, senderFrame: contents.mainFrame }, opened: str
 class TestDatabase extends DatabaseSync { constructor(file: string, options: { readonly: boolean }) { super(file, { readOnly: options.readonly }) } }
 const load = createRendererLoader({
   electron: { app: { getPath: () => root, getVersion: () => '0.10.0' }, shell: { openPath: async (file: string) => { opened.push(file); return '' } } },
-  'better-sqlite3': { default: TestDatabase }, '../services/database.ts': { getDb: () => db },
+  'better-sqlite3': { default: TestDatabase }, '../services/storage/database.ts': { getDb: () => db },
   'node:fs': { ...fs, default: fs }, 'node:path': { ...path, default: path }
 }, { Buffer, Date })
 load('electron/ipc/library-snapshots.ts').registerLibrarySnapshotIpc(() => win, { handle: (name: string, callback: (...args: any[]) => any) => events.set(name, callback) })

@@ -2,7 +2,7 @@
  * hanime1.me 刮削通道的 IO 层。取页面、缓存、超时、错误分档。
  *
  * 解析一行都不在这儿 —— 全在 `selectors.ts`，那份是纯函数。这个分工照
- * `tmdb.ts` / `douban.ts` 的既有约定（doc/hanime-api-notes.md 第八节第 5 条）。
+ * `tmdb.ts` / `douban.ts` 的既有约定（docs/notes/hanime-api-notes.md 第八节第 5 条）。
  *
  * ## 必须带正常 User-Agent
  *

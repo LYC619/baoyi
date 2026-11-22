@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import {createHash,randomUUID} from 'node:crypto'
-import type {SqlDb} from '../services/schema.ts'
+import type {SqlDb} from '../services/storage/schema.ts'
 import {DocumentLibrary} from '../workspace/documents.ts'
 import {PersonalLibrary,validatePersonal} from '../workspace/personal.ts'
 import {ProjectLibrary} from '../kinds/project/library.ts'
@@ -10,6 +10,7 @@ import {DocumentFiles} from '../workspace/document-files.ts'
 import {readDocumentText} from '../workspace/document-text.ts'
 import {readProjectTextPage,listProjectFilesPage,searchProjectText} from '../kinds/project/workspace.ts'
 import {HENTAI_CATEGORY} from '../kinds/video/taxonomy.ts'
+import {zhSearchKey} from '../../src/utils/zh.ts'
 import * as v from '../workspace/validation.ts'
 import {ensureArchiveSchema} from './schema.ts'
 import type {ArchiveSource,ArchiveAction} from '../../src/types/archive.ts'
@@ -74,10 +75,10 @@ export class ArchiveLibrary {
   }
   search(options:{query?:string;kinds?:string[];offset?:number;limit?:number}={}){
     const query=v.text(options.query||'','搜索内容',300),offset=v.number(options.offset??0,'起点',0,1e7),limit=v.number(options.limit??30,'数量',1,100)
-    const tokens=query.toLocaleLowerCase().split(/\s+/).filter(Boolean),kinds=options.kinds||[]
+    const tokens=zhSearchKey(query).split(/\s+/).filter(Boolean),kinds=options.kinds||[]
     const raw=this.db.prepare(`SELECT r.*,d.author,d.counterpart,(SELECT group_concat(a.quote||' '||a.note,' ') FROM document_annotations a WHERE a.resource_id=r.id) AS annotationText FROM resource r LEFT JOIN document_meta d ON d.resource_id=r.id WHERE ${visibility} ORDER BY r.updated_at DESC,r.id`).all(HENTAI_CATEGORY,Number(this.options.hideHentai())) as Row[]
     const personal:Row[]=this.personal.list().map(p=>({...p,kind:'personal',subtype:p.kind,path:'',updated_at:p.updatedAt}))
-    const items=[...raw,...personal].filter(r=>!kinds.length||kinds.includes(r.kind)).filter(r=>{const value=[r.name,r.name_zh,r.name_en,r.file_name,r.path,r.summary,r.description,r.notes,r.tags,r.body,r.author,r.counterpart,r.annotationText,JSON.stringify(r.data||{})].join(' ').toLocaleLowerCase();return tokens.every(t=>value.includes(t))}).sort((a,b)=>b.updated_at-a.updated_at||a.id.localeCompare(b.id))
+    const items=[...raw,...personal].filter(r=>!kinds.length||kinds.includes(r.kind)).filter(r=>{const value=zhSearchKey([r.name,r.name_zh,r.name_en,r.file_name,r.path,r.summary,r.description,r.notes,r.tags,r.body,r.author,r.counterpart,r.annotationText,JSON.stringify(r.data||{})].join(' '));return tokens.every(t=>value.includes(t))}).sort((a,b)=>b.updated_at-a.updated_at||a.id.localeCompare(b.id))
     return {items:items.slice(offset,offset+limit).map(r=>this.source(r)),preview:true,total:items.length,next:offset+limit<items.length?offset+limit:null}
   }
   get(id:string){
@@ -138,7 +139,7 @@ export class ArchiveLibrary {
       // Search across chunk boundaries while retaining the starting line of the evidence.
       return pages.map((p,i)=>({...p,text:p.text+(pages[i+1]?.text.slice(0,300)||'')}))
     }
-    if(doc.format!=='pdf')throw new Error('此格式暂无正文提取；元数据和摘录仍可查找')
+    if(doc.format!=='pdf')throw new Error('此格式暂不支持提取正文；标题、标签与摘录仍可正常检索')
     if(stat.size>128*1024*1024)throw new Error('PDF 超过 128 MB，未提取正文')
     const pdfjs=await import('pdfjs-dist/legacy/build/pdf.mjs'),worker=await import('pdfjs-dist/legacy/build/pdf.worker.mjs')
     ;(globalThis as any).pdfjsWorker||={WorkerMessageHandler:worker.WorkerMessageHandler}
@@ -151,7 +152,7 @@ export class ArchiveLibrary {
     if(patch.name!==undefined)patch.name=['software','game','video'].includes(row.kind)?v.text(patch.name,'名称',300):v.name(patch.name)
     if(patch.tags!==undefined)patch.tags=v.strings(patch.tags,50)
     for(const field of ['summary','description','category','notes'])if(patch[field]!==undefined)patch[field]=v.text(patch[field],field,field==='category'?80:field==='description'?50000:20000)
-    for(const field of ['favorite','read','pinned'])if(patch[field]!==undefined&&typeof patch[field]!=='boolean')throw new Error('状态需要使用布尔值')
+    for(const field of ['favorite','read','pinned'])if(patch[field]!==undefined&&typeof patch[field]!=='boolean')throw new Error('状态开关格式不正确')
     if(patch.publication!==undefined&&!['unknown','ongoing','completed'].includes(patch.publication))throw new Error('连载状态无效')
     if(row.kind==='document')this.docs.update(id,patch)
     else if(row.kind==='personal'){const old=this.personal.get(id)!;this.personal.save({id,kind:old.kind,name:patch.name??old.name,body:patch.body??old.body,data:patch.data||old.data})}

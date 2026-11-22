@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import type { SqlDb } from '../../electron/services/schema.ts'
+import type { SqlDb } from '../../electron/services/storage/schema.ts'
 import { pngImage } from './test-images.ts'
 import { zipFixture } from './test-zip.ts'
 

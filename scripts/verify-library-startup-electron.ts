@@ -4,7 +4,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema, SCHEMA_KEY } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_KEY } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 const output = path.resolve('output/image-optimization/startup-safety'); fs.mkdirSync(output, { recursive: true })

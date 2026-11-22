@@ -99,7 +99,7 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
 
       <footer class="card__foot">
         <div class="card__tags">
-          <TagBadge v-if="item.category" :label="item.category" tone="accent" />
+          <TagBadge v-if="item.category" class="card__cat" :label="item.category" tone="accent" />
           <TagBadge
             v-for="tag in item.tags.slice(0, view === 'grid' ? 2 : 3)"
             :key="tag"
@@ -152,10 +152,15 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
     background var(--t-fast) ease;
 }
 
-.card:hover {
+.card:hover,
+.card:focus-within {
   background: var(--bg-card-hover);
   transform: translateY(-2px);
   box-shadow: var(--shadow-card-hover);
+}
+@media (prefers-reduced-motion: reduce) {
+  .card, .card__play, .card__leaf { transition: none; }
+  .card:hover, .card:focus-within { transform: none; }
 }
 
 .card--archived {
@@ -246,9 +251,13 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
 
 .card__tags {
   display: flex;
+  align-items: center;
   gap: 6px;
   min-width: 0;
   overflow: hidden;
+}
+.card__cat {
+  flex-shrink: 0;
 }
 
 .card__meta {

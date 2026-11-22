@@ -29,7 +29,7 @@ async function collect(file: string, warnings: string[], depth = 0): Promise<Sca
 }
 async function scanOne(input: string, type: ImageType): Promise<ScannedImage> {
   const file = await fs.realpath(input), stat = await fs.stat(file)
-  if([input,file].some(value=>path.resolve(value).split(/[\\/]/).some(part=>part.toLowerCase()==='.baoyi-ingest')))throw new Error('摄入暂存目录尚未完成，不能导入图库')
+  if([input,file].some(value=>path.resolve(value).split(/[\\/]/).some(part=>part.toLowerCase()==='.baoyi-ingest')))throw new Error('下载暂存目录尚未完成，暂时不能导入图库')
   const result: ScannedImage = { path: file, type, name: path.basename(file, isArchive(file) ? path.extname(file) : ''), sourceDir: path.dirname(file), chapters: [], warnings: [] }
   const manifest=stat.isDirectory()?await readImageManifest(file):null
   if(manifest?.version===2){

@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { registerVideoContent } from '../electron/kinds/video/registration.ts'
 import { listEpisodes } from '../electron/kinds/video/db.ts'
@@ -328,9 +328,9 @@ try {
   await check('Settings reset clears SQLite, runtime jobs and renderer state; originals remain', async () => {
     await go('/settings')
     await page.getByRole('button', { name: '数据管理', exact: true }).click()
-    page.once('dialog', (dialog: any) => dialog.accept())
     const reloaded = page.waitForEvent('domcontentloaded')
     await page.getByRole('button', { name: '清空识别数据', exact: true }).click()
+    await page.locator('.app-dialog [data-dialog-confirm]').click()
     await reloaded
     await expect.poll(() => read(d => d.prepare('SELECT COUNT(*) AS n FROM resource').get()!.n)).toBe(0)
     await expect.poll(async () => { try { return (await page.evaluate(() => (window as any).baoyi.video.downloadJobs())).length } catch { return -1 } }).toBe(0)

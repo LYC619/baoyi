@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 import type {LinkedFile} from '../../../src/types'
 import {getGame,updateGame} from './db.ts'
 export function linkExtras(file:LinkedFile):Partial<LinkedFile>{

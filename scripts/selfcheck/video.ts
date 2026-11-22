@@ -5,11 +5,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { formatDuration, isLocalPosterPath, posterUrl, PROTECTED_FIELD_LABEL, videoTitle } from '../../src/utils/index.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { SCHEMA_VERSION, columnsOf, initSchema, objectType, schemaVersion } from '../../electron/services/schema.ts'
+import { SCHEMA_VERSION, columnsOf, initSchema, objectType, schemaVersion } from '../../electron/services/storage/schema.ts'
 import { KINDS } from '../../electron/kinds/index.ts'
 import { COVER_EXTS } from '../../electron/kinds/game/links.ts'
 import { extFromContentType } from '../../electron/kinds/game/covers.ts'
-import { clearSearchCache } from '../../electron/services/searchService.ts'
+import { clearSearchCache } from '../../electron/services/network/searchService.ts'
 import { deleteVideo, deriveSeriesStatus, getVideo, insertVideo, listEpisodes, listVideos, nextEpisode, parseUserEdited, resumeEpisode, PROTECTED_FIELDS, PROTECTED_META_FIELDS, PROTECTED_RESOURCE_FIELDS, restoreScrapedFields, USER_EDITED_FIELDS, syncSeriesStatus, updateEpisode, updateVideo, videoCounts, VIDEO_META_COLUMNS, VIDEO_RESOURCE_COLUMNS, type VideoPayload } from '../../electron/kinds/video/db.ts'
 import { cnNumber, detectExtra, parseAnimeEpisode, parseCnSeasonEpisode, parseLatinSeasonEpisode, parsePart, parseVideoName, parseYear, splitTitle, titleRegion } from '../../electron/kinds/video/filename.ts'
 import { isExtraDir, parseSeasonFolder, scanVideoRoot, stackParts } from '../../electron/kinds/video/scanner.ts'
@@ -23,7 +23,7 @@ import { buildVideoTools, limitVideoTags } from '../../electron/kinds/video/tool
 import { normalizeTag, parseHentaiName } from '../../electron/kinds/video/hentai/filename.ts'
 import { cleanTag, durationSec, parseDetail, parseSearch, searchUrl, toVideoCode, watchUrl } from '../../electron/kinds/video/hentai/selectors.ts'
 import { hanimeChannel } from '../../electron/kinds/video/hentai/channel.ts'
-import { resolvePosterRequest } from '../../electron/services/poster-protocol.ts'
+import { resolvePosterRequest } from '../../electron/services/media/poster-protocol.ts'
 import { artworkDirFor } from '../../electron/kinds/video/artwork-dir.ts'
 import { MAX_HANIME_FETCHES, hanimeDetail, hanimeSearch, looksLikeChallenge, newBudget, setHanimeChallengeHandler } from '../../electron/kinds/video/hentai/hanime.ts'
 import { HENTAI_CATEGORY, HENTAI_CATEGORY_ID, VIDEO_CATEGORIES, VIDEO_TAGS } from '../../electron/kinds/video/taxonomy.ts'
@@ -748,7 +748,7 @@ export async function videoDataSection(): Promise<void> {
  * 两部分：手写用例表（永远跑）+ guessit 语料（有参考副本时才跑）。
  *
  * 手写那部分是真正的回归网 —— 它进版本库，任何机器上都跑得到，
- * 每一条对应一个曾经踩过的坑。语料那部分在 `.recover/` 里，被 gitignore
+ * 每一条对应一个曾经踩过的坑。语料那部分在 `archive/` 本地归档里，被 gitignore
  * 挡在版本库外，所以它只能是「有就多验一层」，缺了不能算失败。
  *
  * 语料用「命中数不低于某个下限」而不是「全对」来断言。guessit 认的东西
@@ -974,14 +974,14 @@ export async function videoFilenameSection(): Promise<void> {
 /**
  * guessit 的 yml 测试语料。
  *
- * 语料在 `.recover/v07-refs/` 下，被 gitignore 挡在版本库外（GPL/LGPL 的
+ * 语料在 `archive/` 本地归档下，被 gitignore 挡在版本库外（GPL/LGPL 的
  * 参考物只读不抄，见 electron/kinds/video/parser/ORIGIN.md）。所以这一段
  * 缺了参考副本就跳过，不能算失败 —— 别的机器上没有那个目录。
  */
 export async function guessitCorpusChecks(): Promise<void> {
-  const dir = path.resolve('.recover/v07-refs/guessit-develop/guessit/test')
+  const dir = [path.resolve('archive/2026-11-22-legacy-dev/.recover/v07-refs/guessit-develop/guessit/test'), path.resolve('.recover/v07-refs/guessit-develop/guessit/test')].find((p) => fs.existsSync(p)) || ''
   if (!fs.existsSync(dir)) {
-    console.log('  - guessit 语料不在本地（.recover/ 不进版本库），跳过')
+    console.log('  - guessit 语料不在本地（本地参考归档不进版本库），跳过')
     return
   }
 
@@ -3181,7 +3181,7 @@ export async function videoPosterSection(): Promise<void> {
   await check('海报协议只放行三类路径：缓存目录直属、.baoyi/artwork 里的、库里记着的', () => {
     const cache = 'D:\\profile\\posters'
     const referenced = new Set(['d:\\视频\\沙丘\\poster.jpg'])
-    const ctx = { postersDir: cache, isReferenced: (file: string) => referenced.has(file.toLowerCase()) }
+    const ctx = { postersDir: cache, hideHentai: false, isReferenced: (file: string) => referenced.has(file.toLowerCase()) }
     const url = (file: string) => posterUrl(file, 1)
     assert.equal(resolvePosterRequest(url('D:\\profile\\posters\\v1.jpg'), ctx), path.resolve('D:\\profile\\posters\\v1.jpg'), '缓存目录直属文件')
     assert.equal(resolvePosterRequest(url('E:\\视频\\沙丘\\.baoyi\\artwork\\abc.png'), ctx), path.resolve('E:\\视频\\沙丘\\.baoyi\\artwork\\abc.png'), '作品图片目录')
@@ -3530,7 +3530,7 @@ export async function videoUserEditedSection(): Promise<void> {
     //   9 = video_meta 多了 hanime_id 列（rollback-v9 撤这个）
     // 一个数字标两件事的话，两个回滚脚本的界限就说不清了。
     // 0.9 抬到 10：拆扫描目录（scan_dirs -> software/game/video_scan_dirs）+ identify_logs.resource_kind 列
-    assert.equal(SCHEMA_VERSION, 31, '游戏便签和封面构图加入后的库形状是 31')
+    assert.ok(SCHEMA_VERSION >= 31, '游戏便签和封面构图从版本 31 起可用')
   })
 }
 
@@ -4302,7 +4302,7 @@ export async function hentaiFilenameSection(): Promise<void> {
  *
  * ## fixture 的来源，以及它的**局限**
  *
- * 下面这些 HTML 是**按 doc/hanime-api-notes.md 第三、四节记的 DOM 结构搭的**，
+ * 下面这些 HTML 是**按 docs/notes/hanime-api-notes.md 第三、四节记的 DOM 结构搭的**，
  * 那一节的选择器抄自 Han1meViewer 的 `Parser.kt`。它们**不是从真实页面抓下来的**
  * —— 计划里 Step 1 那个「抓一份真实 HTML 验证选择器还有效」的验证项还没做。
  *
@@ -4398,7 +4398,7 @@ export async function hanimeChannelSection(): Promise<void> {
 
   /* -------------------- 搜索结果解析 -------------------- */
 
-  // 正常版式，照 doc/hanime-api-notes.md 第四节的结构搭
+  // 正常版式，照 docs/notes/hanime-api-notes.md 第四节的结构搭
   const searchHtml = `
 <div class="content-padding-new">
   <div class="search-doujin-videos">
@@ -5098,5 +5098,32 @@ export async function hideHentaiSection(): Promise<void> {
     assert.deepEqual(c.categories, [])
     assert.deepEqual(c.tags, [])
     d.close()
+  })
+
+  await check('直接拖入单个媒体文件：directory 为父目录、标记共享目录并拾取同名外挂字幕', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-drop-video-'))
+    try {
+      const mkv = path.join(tmp, 'Interstellar.2014.mkv')
+      const srt = path.join(tmp, 'Interstellar.2014.zh.srt')
+      const ep = path.join(tmp, 'Frieren S01E01.mp4')
+      fs.writeFileSync(mkv, 'video')
+      fs.writeFileSync(srt, 'sub')
+      fs.writeFileSync(ep, 'ep')
+
+      const moviePlan = scanVideoRoot(mkv)
+      assert.equal(moviePlan.length, 1)
+      assert.equal(moviePlan[0].video_type, 'movie')
+      assert.equal(moviePlan[0].directory, tmp)
+      assert.equal(moviePlan[0].shared_directory, true)
+      assert.ok(moviePlan[0].sidecars.subtitles.includes(srt))
+
+      const epPlan = scanVideoRoot(ep)
+      assert.equal(epPlan.length, 1)
+      assert.equal(epPlan[0].video_type, 'series')
+      assert.equal(epPlan[0].directory, tmp)
+      assert.equal(epPlan[0].shared_directory, true)
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
   })
 }

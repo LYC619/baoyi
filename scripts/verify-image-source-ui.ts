@@ -2,15 +2,14 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
+import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { setTimeout as delay } from 'node:timers/promises'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { pngImage } from './helpers/test-images.ts'
 import type { ImageDownloadJob, ImageItem } from '../src/types/image.ts'
-const require=createRequire(import.meta.url)
-const {_electron}=require(process.env.BAOYI_PLAYWRIGHT||'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const {_electron}=loadPlaywright()
 const output=path.resolve(process.env.BAOYI_IMAGE_SOURCE_OUTPUT||'output/pica-browse-verification');fs.mkdirSync(output,{recursive:true})
 const packed=!!process.argv[2],suffix=packed?'-packaged':''
 const executable=path.resolve(process.argv[2]||'node_modules/electron/dist/electron.exe')
@@ -18,7 +17,7 @@ const profile=fs.mkdtempSync(path.join(output,'profile-')),downloadRoot=path.joi
 const db=new DatabaseSync(path.join(profile,'baoyi.db'));db.exec('PRAGMA foreign_keys=ON');initSchema(db,KINDS)
 for(const [key,value] of Object.entries({onboarded:true,theme:'dark',hanime_builtin_hosts:false}))db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key,JSON.stringify(value))
 db.close()
-const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;delete env.VITE_DEV_SERVER_URL
+const env = electronTestEnv()
 const application=await _electron.launch({executablePath:executable,args:[...(packed?[]:[path.resolve('.')]),'--user-data-dir='+profile,'--disable-gpu'],env,timeout:30000})
 try{
   assert.equal(path.resolve(await application.evaluate(({app}:any)=>app.getPath('userData'))),profile)
@@ -57,7 +56,8 @@ try{
   const errors:string[]=[];page.on('pageerror',(error:Error)=>errors.push(error.message))
   await page.waitForFunction(()=>!!window.baoyi?.image)
   await page.evaluate(()=>{location.hash='/image'})
-  await page.getByRole('button',{name:'从哔咔添加',exact:true}).click()
+  await page.getByRole('button',{name:'在线漫画',exact:true}).click()
+  await page.getByRole('button',{name:'哔咔 Pica',exact:true}).click()
   await page.getByLabel('用户名',{exact:true}).fill('fixture')
   await page.getByLabel('密码',{exact:true}).fill('synthetic')
   await page.getByRole('button',{name:'登录哔咔',exact:true}).click()
@@ -76,13 +76,14 @@ try{
   await page.screenshot({path:path.join(output,'ranking-desktop'+suffix+'.png')})
   await application.evaluate(({BrowserWindow}:any)=>BrowserWindow.getAllWindows()[0].setSize(960,640))
   await page.screenshot({path:path.join(output,'ranking'+suffix+'.png')})
-  assert.equal(await page.locator('.source-dialog').evaluate((el:HTMLElement)=>el.scrollWidth>el.clientWidth),false)
+  assert.equal(await page.getByRole('dialog',{name:'在线漫画',exact:true}).evaluate((el:HTMLElement)=>el.scrollWidth>el.clientWidth),false)
   await page.getByRole('button',{name:/D30榜单作品/}).click()
   await page.getByLabel('全选章节',{exact:true}).uncheck()
   await page.getByLabel('第2话',{exact:true}).check()
   await page.waitForFunction(()=>{const img=document.querySelector('.source-detail-heading img') as HTMLImageElement;return img?.naturalWidth>0})
   await page.screenshot({path:path.join(output,'chapter-selection'+suffix+'.png')})
-  await page.getByRole('button',{name:'选择目录并下载',exact:true}).click()
+  await page.locator('.source-target').getByRole('button',{name:'更改',exact:true}).click()
+  await page.getByRole('button',{name:'加入下载',exact:true}).click()
   let jobs:ImageDownloadJob[]=[]
   const deadline=Date.now()+15000
   while(Date.now()<deadline){

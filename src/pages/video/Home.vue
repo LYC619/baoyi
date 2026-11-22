@@ -30,6 +30,8 @@ import { recallScroll, rememberScroll } from '@/composables/useModules'
 import { useToast } from '@/composables/useToast'
 import { reidentifyVideo, useMediaScan } from '@/composables/useMediaScan'
 import { useVideoImport } from '@/composables/useVideoImport'
+import { useFileDrop } from '@/composables/useFileDrop'
+import DropZoneOverlay from '@/components/ui/DropZoneOverlay.vue'
 import { useVideoAgentOrganize } from '@/composables/useVideoAgentOrganize'
 import { rangeSelection } from '@/utils/range-selection'
 import { useVideoWorkflow, videoLibraryView, videoJobRetryStages } from '@/composables/useVideoWorkflow'
@@ -51,6 +53,18 @@ watch(() => settings.settings.video_card_size, size => { if (size) cardSize.valu
 const { toast, success, error } = useToast()
 
 const content = ref<HTMLElement | null>(null)
+const searchInput = ref<HTMLInputElement | null>(null)
+function onSearchShortcut(e: KeyboardEvent): void {
+  if (e.isComposing || document.querySelector?.('dialog[open]')) return
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    searchInput.value?.focus()
+    searchInput.value?.select()
+  } else if (e.key === 'Escape' && searchInput.value && document.activeElement === searchInput.value) {
+    clearKeyword()
+    searchInput.value.blur()
+  }
+}
 
 const operation = useMediaScan('video')
 const videoImport = useVideoImport()
@@ -252,6 +266,7 @@ onMounted(async () => {
   if (store.selection.kind === 'status' || (store.selection.kind === 'category' && ['其他', '其他分类'].includes(store.selection.value))) store.select({ kind: 'group', value: 'all' })
   unlistenLibrary = window.baoyi.video.onLibraryChanged?.(requestLibraryRefresh)
   document.addEventListener('visibilitychange', resumeLibraryRefresh)
+  window.addEventListener?.('keydown', onSearchShortcut)
   void workflow.refresh()
   await store.reload()
   if (pageDisposed) return
@@ -266,6 +281,7 @@ onBeforeUnmount(() => {
   unlistenLibrary?.()
   if (libraryRefreshTimer) clearTimeout(libraryRefreshTimer)
   document.removeEventListener('visibilitychange', resumeLibraryRefresh)
+  window.removeEventListener?.('keydown', onSearchShortcut)
 })
 
 const busyText = computed(() => {
@@ -301,6 +317,11 @@ function cancelScan(): void {
   try { operation.cancel() }
   catch (err) { error('停止扫描失败：' + errorMessage(err)) }
 }
+
+const { dragging: dropActive, dropHandlers } = useFileDrop(async (paths) => {
+  if (scanning.value || importing.value || videoImport.open.value) return
+  await videoImport.begin(paths)
+}, { disabled: () => scanning.value || importing.value || videoImport.open.value })
 
 async function importBundle(): Promise<void> {
   if (scanning.value || importing.value) return
@@ -361,7 +382,8 @@ const emptyHint = computed(() => {
 </script>
 
 <template>
-  <div class="home" :style="{ '--card-min': cardSize + 'px' }" @keydown="selectionKey">
+  <div class="home" :style="{ '--card-min': cardSize + 'px' }" v-on="dropHandlers" @keydown="selectionKey">
+    <DropZoneOverlay :active="dropActive" title="松开以预览导入影视与音频" hint="支持拖入视频、音频文件或作品文件夹，确认后再正式入库" />
     <Sidebar :pending-active="pendingOnly" :pending-count="pendingItems.length" :private-hidden="privateHidden" @pending="togglePending" />
 
     <main class="home__main">
@@ -375,6 +397,7 @@ const emptyHint = computed(() => {
         <div class="search">
           <Search :size="15" class="search__icon" />
           <input
+            ref="searchInput"
             v-model="store.keyword"
             class="search__input"
             type="text"
@@ -382,6 +405,7 @@ const emptyHint = computed(() => {
             aria-label="搜索作品、内容标题或文件名"
             @input="onKeyword"
           />
+          <kbd v-if="!store.keyword" class="search__kbd">Ctrl K</kbd>
           <button v-if="store.keyword" class="search__clear" title="清空搜索" aria-label="清空搜索" @click="clearKeyword">
             <X :size="14" />
           </button>
@@ -429,7 +453,7 @@ const emptyHint = computed(() => {
             <ImageDown :size="15" />
             {{ filling ? '补海报…' : `补海报 ${missingPosterIds.length}` }}
           </button>
-          <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || !(selecting ? selectedWorks : shownItems).length" @click="requestAgent">Agent 整理</button>
+          <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || !(selecting ? selectedWorks : shownItems).length" @click="requestAgent">智能整理</button>
           <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || scanning || !(selecting ? selectedWorks : shownItems).length" @click="requestLayout">统一移动</button>
           </LibraryToolbarMenu>
 
@@ -451,7 +475,7 @@ const emptyHint = computed(() => {
           <button type="button" @click="pendingOnly = false">返回全部作品</button>
         </template>
         <div class="library-summary__actions">
-          <button v-if="selecting && bulkOpen && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || scanning || reviewingSelected || !selectedWorks.length" @click="reviewSelected">{{ reviewingSelected ? '正在复查…' : 'Agent 复查所选' }}</button>
+          <button v-if="selecting && bulkOpen && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || scanning || reviewingSelected || !selectedWorks.length" @click="reviewSelected">{{ reviewingSelected ? '正在复查…' : '智能复查所选' }}</button>
           <button v-if="pendingOnly && !selecting" type="button" :disabled="store.queryPending || bulkBusy" @click="selectReview">选择待复查作品</button>
           <button v-if="selecting && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || !selectedWorks.length" @click="organize('organize')">创建合集</button>
 
@@ -570,7 +594,11 @@ const emptyHint = computed(() => {
   border: 1px solid var(--card-border);
   color: var(--text-main);
   font-size: var(--fs-body);
+  text-overflow: ellipsis;
   outline: none;
+}
+.search__input:placeholder-shown {
+  padding-right: 58px;
 }
 .search__input:focus {
   border-color: var(--accent);
@@ -584,6 +612,17 @@ const emptyHint = computed(() => {
 .search__clear:hover {
   color: var(--text-main);
 }
+.search__kbd {
+  position: absolute;
+  right: 10px;
+  font: 10px var(--font-mono);
+  color: var(--text-faint);
+  border: 1px solid var(--divider);
+  border-radius: 4px;
+  padding: 2px 4px;
+  pointer-events: none;
+}
+
 
 .toolbar__actions {
   display: flex;

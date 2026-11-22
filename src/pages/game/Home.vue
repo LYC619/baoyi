@@ -22,6 +22,8 @@ import type { GameQuery } from '@/types'
 import { recallScroll, rememberScroll } from '@/composables/useModules'
 import { useToast } from '@/composables/useToast'
 import { useMediaScan } from '@/composables/useMediaScan'
+import { useFileDrop } from '@/composables/useFileDrop'
+import DropZoneOverlay from '@/components/ui/DropZoneOverlay.vue'
 import { useTaskCenter } from '@/composables/useTaskCenter'
 import { useSettingsStore } from '@/stores/settings'
 import { useGameStore } from '@/stores/game'
@@ -37,7 +39,7 @@ const { toast, success, error } = useToast()
 const content = ref<HTMLElement | null>(null)
 const searchInput=ref<HTMLInputElement>(),pathDismissed=ref(false)
 const resumeGame=computed(()=>store.selection.kind==='group'&&store.selection.value==='all'&&!store.keyword.trim()&&store.sort==='played'&&!selecting.value?store.items.find(g=>isWindowsGameEntry(g.path)&&g.play_status==='playing'&&g.last_played_at>0):undefined)
-function searchKey(e:KeyboardEvent){if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();searchInput.value?.focus()}}
+function searchKey(e:KeyboardEvent){if(e.isComposing||document.querySelector?.('dialog[open]'))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();searchInput.value?.focus()}}
 const launching=ref(false)
 async function resumeLaunch(withTools=false){if(!resumeGame.value||launching.value)return;launching.value=true;try{const result=await window.baoyi.game.launch(resumeGame.value.id,withTools?{trainers:resumeGame.value.linked_files.filter(f=>f.type==='trainer'&&f.role!=='usage'&&/\.(exe|bat|cmd|lnk)$/i.test(f.path)).map(f=>f.path)}:{});if(result.ok)toast(result.message);else error(result.message)}catch(cause){error(errorMessage(cause))}finally{launching.value=false}}
 onMounted(()=>window.addEventListener('keydown',searchKey));onBeforeUnmount(()=>window.removeEventListener('keydown',searchKey))
@@ -58,7 +60,7 @@ async function previewProjects() {
   catch(cause){error(errorMessage(cause))}finally{previewingProjects.value=false}
 }
 async function projectsImported(message:string){projectPreview.value=null;success(message);await store.checkProjects()}
-async function restoreProjectArtwork(){try{const count=await window.baoyi.game.restoreProjectArtwork();if(count){success(`已恢复 ${count} 款游戏的图片`);await store.checkProjects()}}catch(cause){error(errorMessage(cause))}}
+async function restoreProjectArtwork(){try{const count=await window.baoyi.game.restoreProjectArtwork();if(count){success(`已恢复 ${count} 款游戏的图片`);await store.checkProjects()}else{toast('当前没有可恢复的项目图片')}}catch(cause){error(errorMessage(cause))}}
 const bulkBusy = ref(false), savedCategories = ref<string[]>([])
 const selection = useLibrarySelection(() => store.items, () => bulkBusy.value || coversBusy.value)
 const { selecting, selectedIds } = selection
@@ -108,7 +110,7 @@ onBeforeUnmount(() => {
 
 const busyText = computed(() => {
   const p = progress.value
-  if (operation.stopping.value && operation.running.value) return '正在停止，等待当前 agent 收尾…'
+  if (operation.stopping.value && operation.running.value) return '正在停止，等待当前识别步骤收尾…'
   if (!p) return '准备中'
   if (p.phase === 'done') return '正在刷新资源库…'
   if (p.phase === 'scanning') return `正在扫描 ${shortenPath(p.current, 40)}`
@@ -200,6 +202,90 @@ async function fillMissingCovers(): Promise<void> {
  * 没有 AI 就不要往下走。扫描本身能跑，但扫出来的候选没人识别，
  * 结果是「点了加游戏，什么也没发生」—— 那比明说一句更让人困惑。
  */
+async function scanGameDirectories(dirs: string[]): Promise<void> {
+  if (scanning.value || dirs.length === 0) return
+  preparing.value = true
+  let started = false
+  const recordAttempt = (status: 'failed' | 'cancelled', message: string): void => {
+    const id = tasks.start('game-scan', '游戏扫描预检')
+    tasks.finish(id, status, message, status === 'failed' ? message : undefined)
+  }
+  try {
+    if (!settings.settings.ai.enabled || !settings.settings.ai.api_key.trim()) {
+      const message = '扫描游戏文件夹需要先在设置中配置 AI 模型；也可直接拖入 .exe 启动文件手动登记'
+      recordAttempt('failed', message)
+      toast(message)
+      void router.push({ name: 'settings', query: { tab: 'ai' } })
+      return
+    }
+    started = true
+    const r = await operation.run(dirs)
+    const stopped = operation.stopping.value
+    await store.reload()
+    if (stopped) {
+      toast('扫描已停止：已收录 ' + r.registered + ' 个，已完成的结果已保留')
+    } else if (r.candidates === 0) {
+      toast('未在这些文件夹中发现可识别的游戏程序')
+    } else if (r.registered > 0) {
+      const message = '识别出 ' + r.registered + ' 个游戏' + (r.skipped > 0 ? '，跳过 ' + r.skipped + ' 个' : '') + (r.failed > 0 ? '，' + r.failed + ' 个失败' : '')
+      if (r.failed > 0) toast(message)
+      else success(message)
+    } else if (r.failed > 0) {
+      error('扫描到 ' + r.candidates + ' 个候选，但未能完成收录，请查看识别日志')
+    } else {
+      toast('扫描到 ' + r.candidates + ' 个候选，均已存在或已跳过')
+    }
+  } catch (err) {
+    if (!started) recordAttempt('failed', errorMessage(err))
+    error('扫描未能完成：' + errorMessage(err))
+  } finally {
+    preparing.value = false
+  }
+}
+
+const { dragging: dropActive, dropHandlers } = useFileDrop(async (paths) => {
+  if (scanning.value || registering.value) return
+  try {
+    const stats = await window.baoyi.app.statPaths(paths)
+    const entries: string[] = []
+    const folders: string[] = []
+    const unsupported: string[] = []
+    for (const entry of stats) {
+      if (entry.kind === 'directory') {
+        folders.push(entry.path)
+      } else if (entry.kind === 'file' && /\.(exe|lnk|bat|cmd)$/i.test(entry.path)) {
+        entries.push(entry.path)
+      } else {
+        unsupported.push(entry.path.split(/[\\/]/).pop() || entry.path)
+      }
+    }
+    if (unsupported.length > 0 && entries.length === 0 && folders.length === 0) {
+      toast('游戏库支持直接拖入 .exe / .lnk / .bat / .cmd 启动文件，或拖入解压后的游戏文件夹')
+      return
+    }
+    if (entries.length > 0) {
+      registering.value = true
+      try {
+        for (const file of entries) {
+          const result = await window.baoyi.game.addManual(file)
+          if (result && !result.ok) error(result.message)
+          else if (result) success(result.message)
+        }
+        await store.reload()
+      } catch (err) {
+        error('登记游戏失败：' + errorMessage(err))
+      } finally {
+        registering.value = false
+      }
+    }
+    if (folders.length > 0) {
+      await scanGameDirectories(folders)
+    }
+  } catch (err) {
+    error(errorMessage(err))
+  }
+}, { disabled: () => scanning.value || registering.value })
+
 async function addGames(): Promise<void> {
   if (scanning.value) return
   preparing.value = true
@@ -260,7 +346,8 @@ const emptyHint = computed(() => {
 
 <template>
   <ProjectImportDialog v-if="projectPreview" :preview="projectPreview" @close="projectPreview=null" @completed="projectsImported"/>
-  <div class="home" @keydown="selection.key">
+  <div class="home" v-on="dropHandlers" @keydown="selection.key">
+    <DropZoneOverlay :active="dropActive" title="松开以加入游戏库" hint="支持拖入游戏启动文件（.exe / .lnk / .bat）直接登记，或拖入游戏目录扫描识别" />
     <Sidebar />
 
     <main class="home__main">
@@ -528,5 +615,5 @@ const emptyHint = computed(() => {
   font-size: var(--fs-body);
   color: var(--text-faint);
 }
-.search kbd{position:absolute;right:10px;font:10px var(--font-mono);color:var(--text-faint);border:1px solid var(--divider);border-radius:4px;padding:2px 4px}.search__input{padding-right:55px}.toolbar{gap:14px;padding:18px 24px}.toolbar__title{min-width:90px}.toolbar__actions{gap:8px}.home__content{padding:8px 24px 30px}.wall{gap:24px 18px}.view-section{padding:8px;display:grid;gap:8px;font-size:11px;color:var(--text-faint)}.view-seg{display:flex;background:var(--hover-surface);padding:2px;border-radius:7px}.view-seg button{flex:1;padding:5px 8px;border-radius:5px;color:var(--text-sub)}.view-seg [aria-pressed=true]{background:var(--bg-card);color:var(--text-main);box-shadow:var(--shadow-card)}.path-alert{display:flex;align-items:center;gap:10px;margin:0 24px 10px;background:var(--warning-bg);color:var(--warning);padding:10px 14px;border-radius:8px;font-size:12px}.path-alert p{flex:1}.resume{display:flex;gap:18px;align-items:center;background:var(--bg-card);border-radius:12px;padding:16px 20px;margin-bottom:24px;border:1px solid var(--card-border)}.resume__cover{width:50px;flex:none}.resume>div:nth-child(2){flex:1}.resume small,.resume p{font-size:11px;color:var(--text-sub)}.resume h2{font-size:17px;margin:6px 0}
+.search kbd{position:absolute;right:10px;font:10px var(--font-mono);color:var(--text-faint);border:1px solid var(--divider);border-radius:4px;padding:2px 4px;pointer-events:none}.search__input{padding-right:58px;text-overflow:ellipsis}.toolbar{gap:14px;padding:18px 24px}.toolbar__title{min-width:90px}.toolbar__actions{gap:8px}.home__content{padding:8px 24px 30px}.wall{gap:24px 18px}.view-section{padding:8px;display:grid;gap:8px;font-size:11px;color:var(--text-faint)}.view-seg{display:flex;background:var(--hover-surface);padding:2px;border-radius:7px}.view-seg button{flex:1;padding:5px 8px;border-radius:5px;color:var(--text-sub)}.view-seg [aria-pressed=true]{background:var(--bg-card);color:var(--text-main);box-shadow:var(--shadow-card)}.path-alert{display:flex;align-items:center;gap:10px;margin:0 24px 10px;background:var(--warning-bg);color:var(--warning);padding:10px 14px;border-radius:8px;font-size:12px}.path-alert p{flex:1}.resume{display:flex;gap:18px;align-items:center;background:var(--bg-card);border-radius:12px;padding:16px 20px;margin-bottom:24px;border:1px solid var(--card-border)}.resume__cover{width:50px;flex:none}.resume>div:nth-child(2){flex:1}.resume small,.resume p{font-size:11px;color:var(--text-sub)}.resume h2{font-size:17px;margin:6px 0}
 </style>

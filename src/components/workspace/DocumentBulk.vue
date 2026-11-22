@@ -309,7 +309,7 @@ async function remove() {
 
 .count-badge {
   font-size: 13px;
-  color: var(--text-normal);
+  color: var(--text-main);
 }
 
 .count-badge strong {
@@ -377,7 +377,7 @@ async function remove() {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px;
-  background: var(--bg-sub);
+  background: var(--bg-side);
 }
 
 .batch-preview > div {

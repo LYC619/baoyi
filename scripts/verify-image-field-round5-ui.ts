@@ -2,16 +2,15 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
+import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { setTimeout as delay } from 'node:timers/promises'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ImageLibrary } from '../electron/kinds/image/library.ts'
 import { scanImageImport } from '../electron/kinds/image/scanner.ts'
 import { pngImage } from './helpers/test-images.ts'
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const { _electron } = loadPlaywright()
 const packed = process.argv[2]
 const output = path.resolve('output/image-field-round5' + (packed ? '-packaged' : '')); fs.mkdirSync(output, { recursive: true })
 const profile = fs.mkdtempSync(path.join(output, 'profile-'))
@@ -39,7 +38,7 @@ for (let n = 1; n <= 2; n++) fs.writeFileSync(path.join(archivedRoot, n + '.png'
 const archivedItem = library.register((await scanImageImport(archivedRoot, 'comic', false))[0])
 db.prepare('UPDATE resource SET path=? WHERE id=?').run(archive, archivedItem.id)
 db.close()
-const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL
+const env = electronTestEnv()
 const app = await _electron.launch({ executablePath: path.resolve(packed || 'node_modules/electron/dist/electron.exe'), args: [...(packed ? [] : [path.resolve('.')]), '--user-data-dir=' + profile, '--disable-gpu'], env, timeout: 30000 })
 const checks: string[] = [], errors: string[] = []
 try {
@@ -76,6 +75,7 @@ try {
     shell.showItemInFolder = (target: string) => { (globalThis as any).__shellFixture.reveal.push(target) }
   })
   await page.evaluate((id: string) => { location.hash = '/image/' + id }, item.id)
+  await page.getByRole('tab', { name: '文件管理', exact: true }).click()
   await page.locator('.detail-utilities').waitFor()
   assert.equal(await page.evaluate((id: string) => window.baoyi.image.reveal(id), archivedItem.id), true)
   assert.deepEqual(await app.evaluate(() => (globalThis as any).__shellFixture.reveal), [archive], '归档要在资源管理器里选中')

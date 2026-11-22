@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import {projectGitCache} from './git-status.ts'
 import type {ProjectOverview,ProjectScript} from '../../../src/types/project.ts'
-import {inspectTextFile,readTextFilePage,type TextCursor} from '../../services/text-file.ts'
+import {inspectTextFile,readTextFilePage,type TextCursor} from '../../services/system/text-file.ts'
 
 const excluded=/^(?:\.git|node_modules|\.venv|venv|__pycache__|dist|build|release|\.next|\.cache)$/i
 const sensitive=/(?:^\.env(?:\.|$)|credential|secret|password|cookie|token|密钥|密码|私钥|^id_(?:rsa|ed25519)|\.(?:pem|key|p12|pfx)$)/i

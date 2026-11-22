@@ -173,7 +173,7 @@ const countLabel = computed(() => {
   align-items: center;
   justify-content: center;
   padding: 6px;
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-sub));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-side));
   border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
   border-radius: var(--radius-md, 8px);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
@@ -182,7 +182,7 @@ const countLabel = computed(() => {
 }
 
 .document-group-card:hover .group-cover-quad {
-  background: color-mix(in srgb, var(--accent) 14%, var(--bg-sub));
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-side));
   border-color: var(--accent);
 }
 
@@ -282,7 +282,7 @@ const countLabel = computed(() => {
   height: 48px;
   flex-shrink: 0;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-sub));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-side));
   border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
   padding: 3px;
   box-sizing: border-box;
@@ -375,7 +375,7 @@ const countLabel = computed(() => {
 .category-badge {
   font-size: 10px;
   padding: 1px 5px;
-  background: var(--bg-sub);
+  background: var(--bg-side);
   color: var(--text-muted);
   border-radius: 4px;
   flex-shrink: 0;

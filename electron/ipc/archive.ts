@@ -1,7 +1,7 @@
 import {app,type BrowserWindow,type IpcMain} from 'electron'
 import path from 'node:path'
-import { getDb } from '../services/database.ts'
-import { getSettings } from '../services/settings-store.ts'
+import { getDb } from '../services/storage/database.ts'
+import { getSettings } from '../services/storage/settings-store.ts'
 import { updateSoftware } from '../kinds/software/db.ts'
 import {updateGameItem} from '../kinds/game/service.ts'
 import {updateVideoItem} from '../kinds/video/service.ts'
@@ -15,6 +15,8 @@ import type {ProjectHandoffResult} from '../../src/types/project-handoff.ts'
 import {ArchiveAssistant} from '../archive/service.ts'
 import {workspaceOperation} from '../workspace/activity.ts'
 import {assertLibraryIdle,libraryRestoreInProgress} from './library-backup.ts'
+import { assertMainWindowSender } from './main-window.ts'
+import { optId, optString, reqId, reqNumber, reqRecord, reqString } from './validate.ts'
 
 let activeAssistant:ArchiveAssistant|undefined
 let insightService:DocumentInsightService|undefined,insightAssistant:ArchiveAssistant|undefined
@@ -47,7 +49,10 @@ export function registerArchiveIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
     }
     return activeAssistant
   }
-  const handle=(name:string,action:(assistant:ArchiveAssistant,...args:any[])=>unknown)=>ipc.handle('archive:'+name,async(event,...args)=>{const win=getWindow();if(!win||win.isDestroyed()||event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw new Error('只允许主窗口使用归档助理');return action(await assistant(),...args)})
+  const handle=(name:string,action:(assistant:ArchiveAssistant,...args:any[])=>unknown)=>ipc.handle('archive:'+name,async(event,...args)=>{
+    assertMainWindowSender(event,getWindow)
+    return action(await assistant(),...args)
+  })
   const handoffs=new WeakMap<ArchiveAssistant,ProjectHandoffs>(),generating=new WeakMap<ArchiveAssistant,string>()
   const handoff=(a:ArchiveAssistant)=>{let value=handoffs.get(a);if(!value){value=new ProjectHandoffs(getDb());handoffs.set(a,value)}return value}
   const projectConfig=()=>new ModulePreferences(getDb(),() => getSettings(getDb())).config('project')
@@ -71,28 +76,28 @@ export function registerArchiveIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
   const retiredInsight=()=>{throw new Error('精读已改为归档助理的方法，请主动加载“文档精读”')}
   handle('insight-preview',retiredInsight)
   handle('insight-cleanup-preview',()=>insights().cleanupPreview())
-  handle('insight-cleanup',(_a,token)=>{assertLibraryIdle();return insights().cleanup(token)})
+  handle('insight-cleanup',(_a,token)=>{assertLibraryIdle();return insights().cleanup(reqString(token,'token',{max:256}))})
   handle('insight-clear-cache',()=>insights().clearCache())
   handle('insight-start',retiredInsight)
   handle('insight-list',()=>insights().list())
-  handle('insight-detail',(_a,id)=>insights().detail(id))
-  handle('insight-cancel',(_a,id)=>insights().cancel(id))
-  handle('insight-edit',(_a,id,revision,content)=>{if(libraryRestoreInProgress())throw new Error('资料库正在恢复');const result=new DocumentInsights(getDb()).edit(id,revision,content);changed();return result})
-  handle('insight-activate',(_a,id,versionId,revision)=>{if(libraryRestoreInProgress())throw new Error('资料库正在恢复');const result=new DocumentInsights(getDb()).activate(id,versionId,revision);changed();return result})
+  handle('insight-detail',(_a,id)=>insights().detail(reqId(id)))
+  handle('insight-cancel',(_a,id)=>insights().cancel(reqId(id)))
+  handle('insight-edit',(_a,id,revision,content)=>{if(libraryRestoreInProgress())throw new Error('资料库正在恢复');const result=new DocumentInsights(getDb()).edit(reqId(id),reqNumber(revision,'revision',{min:0,integer:true}),reqRecord(content,'content') as any);changed();return result})
+  handle('insight-activate',(_a,id,versionId,revision)=>{if(libraryRestoreInProgress())throw new Error('资料库正在恢复');const result=new DocumentInsights(getDb()).activate(reqId(id),reqId(versionId,'versionId'),reqNumber(revision,'revision',{min:0,integer:true}));changed();return result})
   handle('insight-adopt',(a,id,revision)=>{
-    assertLibraryIdle();const note=new DocumentInsights(getDb()).active(id),item=new DocumentLibrary(getDb()).require(id)
+    assertLibraryIdle();id=reqId(id);revision=reqNumber(revision,'revision',{min:0,integer:true});const note=new DocumentInsights(getDb()).active(id),item=new DocumentLibrary(getDb()).require(id)
     if(!note||note.revision!==revision)throw new Error('精读版本已变化，请重新查看建议')
     const detail=a.library.get(id),patch={tags:[...new Set([...item.tags,...note.suggestedTags])],...(note.suggestedCategoryId&&note.suggestedCategoryId!==item.type?{type:note.suggestedCategoryId,customGroupId:null}:{})}
     const result=a.library.update('insight-'+note.id,[{id,patch,version:detail.version}],'用户采用精读分类和标签建议')
     changed();return {actionId:result.changes[0]?.id||''}
   })
   handle('project-handoff-preview',(a,id,includeRules)=>{
-    if(a.library.sourceById(id).kind!=='project')throw new Error('请选择项目')
+    id=reqId(id);if(a.library.sourceById(id).kind!=='project')throw new Error('请选择项目')
     if(includeRules!==undefined&&typeof includeRules!=='boolean')throw new Error('读取范围无效')
     return handoff(a).preview(id,projectConfig(),includeRules)
   })
   handle('project-handoff-generate',async(a,input)=>{
-    assertLibraryIdle();if(a.running)throw new Error('归档助理正在处理任务，请等待完成或先停止')
+    assertLibraryIdle();if(a.running)throw new Error('归档助理正在处理任务，请等待完成或先停止');input=reqRecord(input,'input')
     const config=projectConfig(),snapshot=await handoff(a).consume(input.token,input.stamp,config,input.remember===true)
     a.library.sourceById(snapshot.projectId)
     let submitted:ReturnType<typeof validateProjectPrompt>|undefined
@@ -108,25 +113,24 @@ export function registerArchiveIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
       return {...submitted,sessionId:result.sessionId,projectId:snapshot.projectId,contextRevision:snapshot.context.revision} satisfies ProjectHandoffResult
     }finally{generating.delete(a)}
   })
-  handle('project-handoff-cancel',(a,id)=>{if(generating.get(a)===id)return a.cancel()})
+  handle('project-handoff-cancel',(a,id)=>{if(generating.get(a)===reqId(id))return a.cancel()})
   handle('project-handoff-adopt',(a,id,revision,prompt)=>{
-    assertLibraryIdle();a.library.sourceById(id)
+    assertLibraryIdle();id=reqId(id);revision=reqNumber(revision,'revision',{min:0,integer:true});prompt=reqString(prompt,'prompt',{max:200_000,allowEmpty:true});a.library.sourceById(id)
     const timeline=new TimelineLibrary(getDb()),current=timeline.context(id)
     if(current.revision!==revision)throw new Error('便签已更新。请复制结果后手动合并，避免覆盖新内容')
     const result=timeline.updateContext(id,{...current,prompt});changed();const win=getWindow();if(win&&!win.isDestroyed())win.webContents.send('project:changed');return result
   })
   handle('status',a=>{const s=getSettings(getDb());return {engine:'Hermes v0.22.7',configured:!!(s.ai.enabled&&s.ai.model&&s.ai.api_url&&s.ai.api_key),model:s.ai.model,active:a.running,profiles:s.ai_profiles.map(p=>({id:p.id,name:p.name,model:p.model}))}})
-  handle('sessions',(a,query)=>a.sessions(query));handle('session',(a,id)=>a.session(id))
-  handle('send',(a,input)=>{if(libraryRestoreInProgress())throw new Error('资料库正在恢复，请等待重启');return a.send(input)})
+  handle('sessions',(a,query)=>a.sessions(optString(query,'query',{max:512})));handle('session',(a,id)=>a.session(reqId(id)))
+  handle('send',(a,input)=>{if(libraryRestoreInProgress())throw new Error('资料库正在恢复，请等待重启');return a.send(reqRecord(input,'input') as any)})
   handle('cancel',a=>a.cancel())
-  handle('steer',(a,text)=>a.runtime.request('steer',{text}))
-  handle('rename',(a,id,title)=>a.rename(id,title))
-  handle('archive',(a,id)=>a.archive(id))
+  handle('steer',(a,text)=>a.runtime.request('steer',{text:reqString(text,'text',{max:20_000})}))
+  handle('rename',(a,id,title)=>a.rename(reqId(id),reqString(title,'title',{max:300})))
+  handle('archive',(a,id)=>a.archive(reqId(id)))
   handle('memory',a=>a.runtime.request('memory'))
-  handle('memory-edit',(a,input)=>a.runtime.request('memory_edit',input))
+  handle('memory-edit',(a,input)=>a.runtime.request('memory_edit',reqRecord(input,'input')))
   handle('skills',a=>a.runtime.request('skills'))
-  handle('actions',(a,id)=>a.library.actions(id))
-  handle('undo',(a,id)=>{assertLibraryIdle();const result=a.library.undo(id);changed();return result})
-  handle('source',(a,id)=>a.library.sourceById(id))
-  app.on('will-quit',closeArchiveAssistant)
+  handle('actions',(a,id)=>a.library.actions(optId(id)))
+  handle('undo',(a,id)=>{assertLibraryIdle();const result=a.library.undo(reqId(id));changed();return result})
+  handle('source',(a,id)=>a.library.sourceById(reqId(id)))
 }

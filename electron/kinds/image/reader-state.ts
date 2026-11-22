@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { ImageBookmark, ImagePreferences, ImageReaderPreferences } from '../../../src/types/image.ts'
 import { DEFAULT_IMAGE_PREFERENCES, normalizeImagePreferences } from '../../../src/utils/image-preferences.ts'
 import { ImageLibrary } from './library.ts'

@@ -8,15 +8,16 @@ import ProjectDialog from './ProjectDialog.vue'
 import { type ProjectImportPreview,type ProjectSource,type ProjectItem } from '@/types/project'
 const store=useProjectStore()
 const { success } = useToast()
+const props=defineProps<{initialPaths?:string[]}>()
 const emit=defineEmits<{close:[];imported:[]}>(),busy=ref(false),error=ref(''),preview=ref<ProjectImportPreview|null>(null),result=ref('')
 const selected=ref<Array<{index:number;checked:boolean;name:string;category:string;source:ProjectSource;mergeInto:string}>>([])
 const count=computed(()=>selected.value.filter(s=>s.checked).length)
 const existing=ref<ProjectItem[]>([])
-onMounted(async()=>{void store.refresh();try{existing.value=await window.baoyi.project.list()}catch (cause) { useToast().error(errorMessage(cause)) }})
+onMounted(async()=>{void store.refresh();try{existing.value=await window.baoyi.project.list()}catch (cause) { useToast().error(errorMessage(cause)) };if(props.initialPaths?.length)await scan('single',props.initialPaths)})
 function toggleAll(){const value=!selected.value.every(s=>s.checked);selected.value.forEach(s=>s.checked=value)}
-async function scan(mode:'single'|'discover'|'file'){
+async function scan(mode:'single'|'discover'|'file',droppedRoots?:string[]){
   busy.value=true;error.value='';result.value=''
-  try{const preferences=await window.baoyi.project.preferences();const value=await window.baoyi.project.prepareImport(mode);if(value){preview.value=value;selected.value=value.items.map((i,index)=>({index,checked:mode!=='discover'||i.suggested,name:i.name,category:i.category,source:i.source==='unknown'?preferences.defaultSource:i.source,mergeInto:''}))}}catch(e){error.value=errorMessage(e)}finally{busy.value=false}
+  try{const preferences=await window.baoyi.project.preferences();const value=await window.baoyi.project.prepareImport(mode,droppedRoots);if(value){preview.value=value;selected.value=value.items.map((i,index)=>({index,checked:mode!=='discover'||i.suggested,name:i.name,category:i.category,source:i.source==='unknown'?preferences.defaultSource:i.source,mergeInto:''}))}}catch(e){error.value=errorMessage(e)}finally{busy.value=false}
 }
 async function save(){if(busy.value||!preview.value||!count.value)return;busy.value=true;error.value='';try{
   const value=await window.baoyi.project.confirmImport(preview.value!.token,selected.value.filter(s=>s.checked).map(s=>({index:s.index,name:s.name,category:s.category,source:s.source,...(s.mergeInto.startsWith('existing:')?{existingId:s.mergeInto.slice(9)}:s.mergeInto!==''?{mergeInto:Number(s.mergeInto)}:{})})))

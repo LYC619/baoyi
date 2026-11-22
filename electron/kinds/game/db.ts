@@ -1,4 +1,4 @@
-import { parseJsonArray } from '../../services/json.ts'
+import { parseJsonArray } from '../../services/system/json.ts'
 /**
  * 游戏条目的落库出口。
  *
@@ -10,7 +10,7 @@ import { parseJsonArray } from '../../services/json.ts'
  */
 
 import { randomUUID } from 'node:crypto'
-import { ensureResourceCategory } from '../../services/resource-taxonomy.ts'
+import { ensureResourceCategory } from '../../services/taxonomy/resource-taxonomy.ts'
 import path from 'node:path'
 import type {
   GameCounts,
@@ -21,7 +21,7 @@ import type {
   SavePath,
   SaveStatus
 } from '../../../src/types'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 
 export interface GamePayload {
   /** 主程序绝对路径，同时是 resource.path 这个全局唯一键 */

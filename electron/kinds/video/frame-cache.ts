@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {randomUUID} from 'node:crypto'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 import type {VideoFrameState} from '../../../src/types/video-preview.ts'
 import {frameFingerprint,frameFfmpeg,generateFrames,type FrameGenerated} from './frame-generator.ts'
 interface Options {

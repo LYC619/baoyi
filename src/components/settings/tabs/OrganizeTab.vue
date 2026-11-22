@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { activeModule } from '@/composables/useModules'
@@ -65,10 +66,11 @@ function planTally(p: OrganizePlan) {
 
 async function undoPlan(p: OrganizePlan): Promise<void> {
   const t = planTally(p)
-  const ok = window.confirm(
-    `撤销这次整理？\n\n移动过的 ${t.moved} 个文件夹会搬回原来的位置，` +
-      `建立的 ${t.linked} 个链接会被删除（不影响真实文件）。\n\n确认继续？`
-  )
+  const ok = await confirmDialog({
+    title: '撤销这次整理？',
+    message: `移动过的 ${t.moved} 个文件夹将搬回原位置，建立的 ${t.linked} 个目录链接将被移除（真实文件不受影响）。`,
+    confirmText: '确认撤销'
+  })
   if (!ok) return
 
   undoing.value = p.id

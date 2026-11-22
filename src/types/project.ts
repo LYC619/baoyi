@@ -67,7 +67,7 @@ export interface ProjectApi {
   onSession(callback:(session:ProjectSession)=>void):()=>void
   list(): Promise<ProjectItem[]>; get(id: string): Promise<ProjectItem|null>
   update(id: string, patch: ProjectPatch): Promise<ProjectItem>; remove(id: string): Promise<void>
-  prepareImport(mode:'single'|'discover'|'file'): Promise<ProjectImportPreview|null>
+  prepareImport(mode:'single'|'discover'|'file', droppedRoots?: string[]): Promise<ProjectImportPreview|null>
   confirmImport(token:string, items:Array<{index:number;name:string;category:string;source:ProjectSource;mergeInto?:number;existingId?:string}>): Promise<{imported:number;errors:string[];warnings?:string[]}>
   rescan(id:string): Promise<ProjectCandidate>; pickPath(directory:boolean):Promise<string|null>
   addEntry(id:string,directory:boolean):Promise<ProjectItem|null>; resources():Promise<Array<{id:string;name:string;path:string;kind:string}>>

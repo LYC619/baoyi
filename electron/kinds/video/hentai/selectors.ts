@@ -3,13 +3,13 @@
  * URL 拼装、videoCode 提取、DOM 选择、标签清洗全是纯函数，自检拿固定 fixture 跑。
  *
  * 选择器抄自 Han1meViewer 的 `util/Parser.kt`（`hanimeVideoVer2` / `hanimeSearch`），
- * 对应关系记在 doc/hanime-api-notes.md 第三、四节。
+ * 对应关系记在 docs/notes/hanime-api-notes.md 第三、四节。
  *
  * ## 为什么所有选择器集中在这一个文件里
  *
  * 站方改版会让它们全线失效，而失效的表现是「刮不到东西」而不是报错。
  * 散进业务逻辑的话，改版那天要在四五个文件里找 class 名；集中在这里，
- * 改版只改一个文件。这是 doc/hanime-api-notes.md 第八节第 3 条定下的。
+ * 改版只改一个文件。这是 docs/notes/hanime-api-notes.md 第八节第 3 条定下的。
  *
  * ## 为什么是 node-html-parser
  *
@@ -34,7 +34,7 @@ import { parse, type HTMLElement } from 'node-html-parser'
 
 /* ============================== 常量 ============================== */
 
-/** 默认站点。四个镜像同源内容，见 doc/hanime-api-notes.md 第二节 */
+/** 默认站点。四个镜像同源内容，见 docs/notes/hanime-api-notes.md 第二节 */
 export const HANIME_BASE = 'https://hanime1.me/'
 
 /** 四个镜像域名。`toVideoCode` 认它们，别的域名一律不认 */
@@ -212,7 +212,7 @@ export interface HanimeHit {
  * 靠 class 名的，改版时它和条目选择器会一起失效 —— 多一层判断只多一个失效点。
  *
  * 解不出来返回空数组，不抛。站方改版时正确的行为是「这次刮不到」，
- * 不是让整次识别炸掉（doc/hanime-api-notes.md 第八节第 2 条）。
+ * 不是让整次识别炸掉（docs/notes/hanime-api-notes.md 第八节第 2 条）。
  */
 export function parseSearch(html: string, base = HANIME_BASE): HanimeHit[] {
   const root = parse(String(html ?? ''))

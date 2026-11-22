@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS archive_runs (
  scope TEXT NOT NULL DEFAULT 'all' CHECK(scope IN ('public','all'))
 );
 `
-import type {SqlDb} from '../services/schema.ts'
+import type {SqlDb} from '../services/storage/schema.ts'
 
 
 export function ensureArchiveSchema(db:SqlDb){

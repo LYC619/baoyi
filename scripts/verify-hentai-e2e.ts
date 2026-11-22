@@ -19,14 +19,14 @@
  * 缓存命中时算不算一次、工具返回的文本模型看不看得懂、id 有没有真落到库里。
  * 这个脚本验的就是那一段。
  *
- * 它**不能**证明的事，说清楚免得误读：fixture 是按 doc/hanime-api-notes.md
+ * 它**不能**证明的事，说清楚免得误读：fixture 是按 docs/notes/hanime-api-notes.md
  * 第三、四节的结构搭的，不是真页面。所以「选择器和 2026 年的 hanime1.me 一致」
  * 这件事这里照样证明不了 —— 那要等待确认 H 有答案。
  */
 
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { listVideos, updateVideo, videoCounts, videoCategoryOf } from '../electron/kinds/video/db.ts'
 import { emptyFacts } from '../electron/kinds/video/facts.ts'

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { SqlDb } from '../services/schema.ts'
+import type { SqlDb } from '../services/storage/schema.ts'
 import type { TimelineEvent, EventInput, EventSuggestion, ProjectContext } from '../../src/types/workspace.ts'
 import * as v from './validation.ts'
 import { WorkspaceLinks } from './links.ts'

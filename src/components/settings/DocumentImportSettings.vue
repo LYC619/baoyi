@@ -35,7 +35,7 @@ async function confirmImport() { await run(async () => {
 </script>
 <template>
   <section class="ws-card ws-form">
-    <h3>扫描与识别</h3><p class="ws-muted">扫描本地文件后预览导入。可单独运行 Agent 识别所选资料，识别建议在确认后写入。</p>
+    <h3>扫描与识别</h3><p class="ws-muted">扫描本地文件后先生成导入预览。可对所选资料运行智能识别，核对建议后再写入资料库。</p>
     <label>此次导入分类<select v-model="category" :disabled="busy"><option value="">根据文件初步识别</option><option v-for="row in store.categories" :key="row.id" :value="row.id">{{ row.submodule === 'reading' ? '阅读' : '资料' }} · {{ row.name }}</option></select></label>
     <div class="ws-toolbar"><button class="ws-button" :disabled="busy" @click="scan(false)">选择文件</button><button class="ws-button" :disabled="busy" @click="scan(true)">扫描目录</button></div>
     <template v-if="preview">
@@ -45,7 +45,7 @@ async function confirmImport() { await run(async () => {
         <select v-model="choices[item.path]" :disabled="busy || item.existing" aria-label="导入分类"><option v-for="row in store.categories" :key="row.id" :value="row.id">{{ row.name }}</option></select>
         <div v-if="suggestions[item.path]" class="suggestion"><label>名称<input v-model="suggestions[item.path].name" :disabled="busy" /></label><label>作者<input v-model="suggestions[item.path].author" :disabled="busy" /></label><label>标签<input :value="suggestions[item.path].tags.join('、')" :disabled="busy" @change="suggestions[item.path].tags = ($event.target as HTMLInputElement).value.split(/[、,，]/).map(tag => tag.trim()).filter(Boolean)" /></label></div>
       </article></div>
-      <div class="ws-toolbar"><button class="ws-button" :disabled="busy || !selected.length" @click="analyze">Agent 识别所选</button><button class="ws-button primary" :disabled="busy || !selected.length" @click="confirmImport">确认导入所选</button><button class="ws-button" :disabled="busy" @click="preview = null">取消导入</button></div>
+      <div class="ws-toolbar"><button class="ws-button" :disabled="busy || !selected.length" @click="analyze">智能识别所选</button><button class="ws-button primary" :disabled="busy || !selected.length" @click="confirmImport">确认导入所选</button><button class="ws-button" :disabled="busy" @click="preview = null">取消导入</button></div>
     </template>
     <p v-if="error" class="ws-error" role="alert">{{ error }}</p><p v-if="message" role="status">{{ message }}</p>
   </section>

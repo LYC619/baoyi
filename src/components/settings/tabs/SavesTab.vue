@@ -4,9 +4,10 @@ import { FolderOpen, FolderPlus } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { useSettingsStore } from '@/stores/settings'
 
+import { errorMessage } from '@/utils'
 const settings = useSettingsStore()
 
-const { success } = useToast()
+const { success, error } = useToast()
 
 /**
  * 备份根的**实际生效值**，从主进程取而不是读 settings.save_backup_root ——
@@ -18,7 +19,7 @@ async function loadBackupRoot(): Promise<void> {
   backupRoot.value = await window.baoyi.data.saveBackupRoot()
 }
 
-const openBackupRoot = (): Promise<string> => window.baoyi.data.openSaveBackupRoot()
+const openBackupRoot = async (): Promise<void> => { try { await window.baoyi.data.openSaveBackupRoot() } catch (cause) { error(errorMessage(cause)) } }
 
 /**
  * 换备份根。已有的备份**不搬** —— 库里每条记录存的是完整路径，搬走等于让

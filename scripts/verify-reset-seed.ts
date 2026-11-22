@@ -13,21 +13,23 @@
 import { DatabaseSync } from 'node:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
+import assert from 'node:assert/strict'
+import { initSchema } from '../electron/services/storage/schema.ts'
+import { KINDS } from '../electron/kinds/index.ts'
 
-const profile = process.argv[2]
-if (!profile) {
-  console.error('用法: node --experimental-strip-types scripts/verify-reset-seed.ts <profile 目录>')
-  process.exit(1)
-}
+const standalone = !process.argv[2]
+const profile = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-reset-seed-'))
 
 const dbFile = path.join(profile, 'baoyi.db')
-if (!fs.existsSync(dbFile)) {
+if (!standalone && !fs.existsSync(dbFile)) {
   console.error(`找不到 ${dbFile} —— 先空跑一次应用让它建表，再来铺数据`)
   process.exit(1)
 }
 
 const db = new DatabaseSync(dbFile)
 db.exec('PRAGMA foreign_keys = ON')
+if (standalone) initSchema(db, KINDS)
 
 const iconsDir = path.join(profile, 'icons')
 const coversDir = path.join(profile, 'covers')
@@ -92,6 +94,10 @@ for (let i = 0; i < 2; i++) {
 }
 
 const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n
+assert.equal(n('SELECT COUNT(*) n FROM software'), 3)
+assert.equal(n('SELECT COUNT(*) n FROM game'), 2)
+assert.equal(n('SELECT COUNT(*) n FROM save_backups'), 2)
+assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
 console.log(
   JSON.stringify(
     {
@@ -108,3 +114,4 @@ console.log(
   )
 )
 db.close()
+if (standalone) fs.rmSync(profile, { recursive: true, force: true })

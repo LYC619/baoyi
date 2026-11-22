@@ -11,7 +11,7 @@ const version = JSON.parse(await fs.readFile('package.json', 'utf8')).version
 const output = path.resolve(`output/release-${version}/ffmpeg-local`)
 await fs.mkdir(output, { recursive: true })
 const root = await fs.mkdtemp(path.join(output, 'run-'))
-const ffmpeg = locateFfmpeg(process.argv[2] || '')
+const ffmpeg = locateFfmpeg(process.argv[2] || process.env.BAOYI_TEST_FFMPEG || '')
 assert.ok(ffmpeg, 'A real local FFmpeg executable is required')
 function run(args: string[], cwd = root) {
   const result = spawnSync(ffmpeg!, ['-hide_banner', '-loglevel', 'error', '-nostdin', ...args], {

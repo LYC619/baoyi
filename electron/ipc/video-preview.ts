@@ -3,18 +3,29 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import {spawn} from 'node:child_process'
 import Database from 'better-sqlite3'
-import { getDb } from '../services/database.ts'
-import { getSettings } from '../services/settings-store.ts'
+import { getDb } from '../services/storage/database.ts'
+import { getSettings } from '../services/storage/settings-store.ts'
 import {libraryRestoreInProgress} from './library-backup.ts'
 import {VideoPreviewService} from '../kinds/video/preview.ts'
 import {VideoFrameCache} from '../kinds/video/frame-cache.ts'
 import {openFrameIndex} from '../kinds/video/frame-index.ts'
+import {removeProfileEntry} from '../services/storage/reset-files.ts'
+import { optBool, optId, optString, reqId, reqString } from './validate.ts'
 
 let service:VideoPreviewService|undefined
 let frames:VideoFrameCache|undefined,frameDb:Database.Database|undefined,closing=Promise.resolve()
 let frameGeneration=0
 let closed:()=>void=()=>{}
-export function closeVideoPreview(discard=false){frameGeneration++;service?.close();closed();const previous=frames,db=frameDb;frames=undefined;frameDb=undefined;closing=Promise.all([closing,previous?.close()]).then(async()=>{try{if(discard)await previous?.clear()}finally{db?.close()}});return closing}
+export function closeVideoPreview(discard=false){
+  frameGeneration++;service?.close();closed()
+  const previous=frames,db=frameDb;frames=undefined;frameDb=undefined
+  const cleanup=async()=>{
+    try{await previous?.close()}finally{db?.close()}
+    if(discard)await removeProfileEntry(app.getPath('userData'),'cache/video-frames')
+  }
+  // The caller receives the error; a later close can retry even after a failed removal.
+  closing=closing.then(cleanup,cleanup);return closing
+}
 export const videoPreviewResponse=(request:Request)=>service?.response(request)??Promise.resolve(new Response(null,{status:404}))
 export async function videoFrameResponse(request:Request){
   try{if(request.method!=='GET')return new Response(null,{status:405});const bytes=await frames?.readImage(new URL(request.url).pathname.slice(1));if(!bytes)return new Response(null,{status:404});return new Response(bytes,{headers:{'Content-Type':'image/jpeg','Cache-Control':'no-store'}})}catch{return new Response(null,{status:404})}
@@ -40,15 +51,15 @@ export function registerVideoPreviewIpc(getWindow:()=>BrowserWindow|null,ipc:Pic
     const win=getWindow();if(!win||win.isDestroyed()||event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw new Error('只允许主窗口使用视频试看')
     return action(...args)
   })
-  handle('choices',(id,episodeId)=>service!.choices(id,episodeId))
-  handle('open',(id,key)=>service!.open(id,key))
-  handle('release',token=>service!.release(token))
-  handle('frames',async(token,retry)=>(await frameService()).subscribe(token,retry===true))
-  handle('release-frames',id=>frames?.unsubscribe(id))
+  handle('choices',(id,episodeId)=>service!.choices(reqId(id),optId(episodeId,'episodeId')))
+  handle('open',(id,key)=>service!.open(reqId(id),optString(key,'key',{max:512})??''))
+  handle('release',token=>service!.release(reqString(token,'token',{max:256})))
+  handle('frames',async(token,retry)=>(await frameService()).subscribe(reqString(token,'token',{max:256}),optBool(retry,'retry')===true))
+  handle('release-frames',id=>frames?.unsubscribe(reqId(id)))
   handle('frame-cache',async()=>(await frameService()).stats())
   handle('clear-frames',async()=>{await (await frameService()).clear()})
-  handle('copy',async token=>clipboard.writeText(await service!.file(token)))
-  handle('reveal',async token=>shell.showItemInFolder(await service!.file(token)))
+  handle('copy',async token=>clipboard.writeText(await service!.file(reqString(token,'token',{max:256}))))
+  handle('reveal',async token=>shell.showItemInFolder(await service!.file(reqString(token,'token',{max:256}))))
   handle('pick-player',async()=>{
     const result=await dialog.showOpenDialog(getWindow()!,{title:'选择 PotPlayer 或 VLC',properties:['openFile'],filters:[{name:'播放器',extensions:['exe']}]})
     if(result.canceled||!result.filePaths[0])return null
@@ -57,7 +68,7 @@ export function registerVideoPreviewIpc(getWindow:()=>BrowserWindow|null,ipc:Pic
     getDb().prepare("INSERT INTO settings(key,value) VALUES('_video_preview_player',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(file));return path.basename(file)
   })
   handle('external',async(token,custom)=>{
-    const file=await service!.file(token),saved=getDb().prepare("SELECT value FROM settings WHERE key='_video_preview_player'").get() as {value:string}|undefined
+    const file=await service!.file(reqString(token,'token',{max:256})),saved=getDb().prepare("SELECT value FROM settings WHERE key='_video_preview_player'").get() as {value:string}|undefined; custom=optBool(custom,'custom')
     if(custom&&saved){
       const executable=JSON.parse(saved.value)
       try{
@@ -67,7 +78,4 @@ export function registerVideoPreviewIpc(getWindow:()=>BrowserWindow|null,ipc:Pic
     }
     const error=await shell.openPath(file);if(error)throw new Error('播放器打开失败；可使用“在文件夹中显示”定位文件')
   })
-  app.on('will-quit',()=>{void closeVideoPreview()})
-  let quitting=false
-  app.on('before-quit',event=>{if(frames&&!quitting){event.preventDefault();quitting=true;void closeVideoPreview().finally(()=>app.quit())}})
 }

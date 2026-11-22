@@ -4,11 +4,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { KINDS } from '../electron/kinds/index.ts'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { pngImage } from './helpers/test-images.ts'
 import { zipFixture } from './helpers/test-zip.ts'
 import { listArchive } from '../electron/kinds/image/archive.ts'
-import { buildLibraryBackup, restoreLibraryBackup } from '../electron/services/library-backup.ts'
+import { buildLibraryBackup, restoreLibraryBackup } from '../electron/services/storage/library-backup.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
 
 assert.ok(KINDS.some(kind => kind.kind === 'image'), '图片品类必须注册')

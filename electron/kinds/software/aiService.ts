@@ -1,4 +1,4 @@
-import { getDb } from '../../services/database'
+import { getDb } from '../../services/storage/database'
 /**
  * AI 识别的编排层。
  *
@@ -22,12 +22,12 @@ import type {
 import { runAgent, probeToolCalling, apiBase, parseModelList, type AgentEvent } from '../../services/agent/loop'
 import { fillIdentifySystem, itemPrompt, unitPrompt } from './prompts'
 import { buildTools, type ToolContext } from './tools'
-import { getSettings } from '../../services/settings-store.ts'
+import { getSettings } from '../../services/storage/settings-store.ts'
 import { listBySourceDir, listForAi, updateSoftware } from './db.ts'
-import { listCategories, tagPool } from '../../services/taxonomy-store.ts'
-import { listUnfinishedUnits, markScanUnit } from '../../services/scan-units.ts'
-import { saveIdentifyLog, saveIdentifyReport } from '../../services/identify-records.ts'
-import { searchAvailable } from '../../services/searchService'
+import { listCategories, tagPool } from '../../services/taxonomy/taxonomy-store.ts'
+import { listUnfinishedUnits, markScanUnit } from '../../services/storage/scan-units.ts'
+import { saveIdentifyLog, saveIdentifyReport } from '../../services/storage/identify-records.ts'
+import { searchAvailable } from '../../services/network/searchService'
 
 /** 同时跑几个目录。三个够把等待时间压下来，又不至于撞上模型的并发限流 */
 const CONCURRENCY = 3

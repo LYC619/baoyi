@@ -50,7 +50,7 @@ function savePreferences() {
   preferenceWrites = preferenceWrites.then(async () => {
     const result = await window.baoyi.image.readerPreferences(props.item.id, value)
     customized.value = result.customized
-  }).catch(cause => { error.value = cause.message })
+  }).catch(cause => { error.value = errorMessage(cause) })
   return preferenceWrites
 }
 function destroyPan() { pan?.destroy(); pan?.resetStyle(); pan = undefined }

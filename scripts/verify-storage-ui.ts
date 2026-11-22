@@ -7,10 +7,10 @@ import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { _electron } from 'playwright'
 import { expect } from 'playwright/test'
-import { initSchema, SCHEMA_VERSION } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_VERSION } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { DocumentLibrary } from '../electron/workspace/documents.ts'
-import { createLibrarySnapshot, APP_VERSION_KEY } from '../electron/services/library-snapshots.ts'
+import { createLibrarySnapshot, APP_VERSION_KEY } from '../electron/services/storage/library-snapshots.ts'
 import { textPdf } from './helpers/pdf-fixture.ts'
 
 const packaged = process.argv[2], output = path.resolve('output/optimization-2026-10-29')
@@ -46,6 +46,8 @@ let browserBefore = 0, browserAfter = 0
 try {
   page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(15000)
   assert.equal(await application.evaluate(({ app }) => app.getPath('userData')), profile)
+  const documents = path.join(profile, 'documents'); await fs.mkdir(documents, {recursive:true})
+  await application.evaluate(({app}, directory) => app.setPath('documents', directory), documents)
   assert.equal(await application.evaluate(({ app }) => app.getVersion()), version)
   if (packaged) assert.equal(await application.evaluate(({ app }) => app.isPackaged), true)
   assert.equal(await application.evaluate(({ app }) => app.commandLine.getSwitchValue('disk-cache-size')), String(64 * 1024 * 1024))

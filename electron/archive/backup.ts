@@ -8,7 +8,7 @@ function command(method:'export'|'stage',input?:unknown){
   const python=path.join(app.isPackaged?process.resourcesPath:app.getAppPath(),app.isPackaged?'hermes-runtime':'output/hermes-runtime','python/python.exe')
   const script=path.join(app.isPackaged?process.resourcesPath:app.getAppPath(),app.isPackaged?'hermes/state.py':'resources/hermes/state.py')
   try{return JSON.parse(execFileSync(python,['-X','utf8',script,method,assistantDirectory()],{windowsHide:true,encoding:'utf8',timeout:60000,maxBuffer:180*1024*1024,input:input?JSON.stringify(input):undefined}))}
-  catch(e){throw new Error('归档助理备份操作失败：'+(String((e as any).stderr||'请检查运行组件和可用空间').slice(0,600)))}
+  catch(e){throw new Error('归档助理备份未能完成：'+(String((e as any).stderr||'请检查运行组件和可用空间').slice(0,600)))}
 }
 export function exportAssistantState(){return fs.existsSync(assistantDirectory())?command('export'):undefined}
 export function stageAssistantState(input:unknown):string{

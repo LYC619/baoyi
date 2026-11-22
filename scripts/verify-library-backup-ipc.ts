@@ -3,17 +3,31 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
 import { LIBRARY_BACKUP_TABLE_NAMES } from '../src/types/library-backup.ts'
-import * as backup from '../electron/services/library-backup.ts'
+import * as backup from '../electron/services/storage/library-backup.ts'
 import { atomicWrite } from '../electron/kinds/video/bundle.ts'
 import { registerVideoContent } from '../electron/kinds/video/registration.ts'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
-import { librarySafetyInfo } from '../electron/services/library-snapshots.ts'
+import { librarySafetyInfo } from '../electron/services/storage/library-snapshots.ts'
+import { mainWindowIpc } from '../electron/ipc/main-window.ts'
 
 assert.ok(fs.existsSync('electron/ipc/library-backup.ts'), 'Full metadata backups need a reviewed restore entry point')
+{
+  const contents = { mainFrame: {} }, valid = { sender: contents, senderFrame: contents.mainFrame }
+  let destroyed = false, windowPresent = true, calls = 0
+  const registered = new Map<string, (...args: any[]) => any>()
+  const register = (channel: string, action: (...args: any[]) => any) => registered.set(channel, action)
+  const ipc = mainWindowIpc({handle: register, on: register} as any, () => windowPresent ? {webContents: contents, isDestroyed: () => destroyed} as any : null)
+  ipc.handle('read', (_event, value) => { calls++; return value }); ipc.on('notify', () => { calls++ })
+  const read = registered.get('read')!, notify = registered.get('notify')!
+  assert.equal(read(valid, 'fixture'), 'fixture'); notify(valid)
+  function denied(event: unknown) { assert.throws(() => read(event), /主窗口/); notify(event); assert.equal(calls, 2) }
+  denied({...valid, sender: {mainFrame: {}}}); denied({...valid, senderFrame: {}}); denied({...valid, senderFrame: null})
+  destroyed = true; denied(valid); windowPresent = false; denied(valid)
+}
 let passed = 0, failed = 0
 async function test(name: string, action: (f: ReturnType<typeof fixture>) => Promise<void>) {
   const f = fixture()
@@ -54,8 +68,8 @@ function fixture() {
       }
     },
     'node:fs': { ...fs, default: fs }, 'node:path': { ...path, default: path },
-    '../services/database.ts': { getDb: () => db, exportAll: () => backup.buildLibraryBackup(db) },
-    '../services/library-backup.ts': backup,
+    '../services/storage/database.ts': { getDb: () => db, exportAll: () => backup.buildLibraryBackup(db) },
+    '../services/storage/library-backup.ts': backup,
     '../kinds/video/bundle.ts': { atomicWrite },
     './video-organize.ts': { videoOrganizationBusy: () => controls.busy },
     './video-agent-organize.ts': { videoAgentOrganizationBusy: () => false },

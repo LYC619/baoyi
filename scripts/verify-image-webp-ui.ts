@@ -2,14 +2,14 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ImageLibrary } from '../electron/kinds/image/library.ts'
 import { scanImageImport } from '../electron/kinds/image/scanner.ts'
 import { pngImage } from './helpers/test-images.ts'
-const require=createRequire(import.meta.url),{_electron}=require(process.env.BAOYI_PLAYWRIGHT||'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+import { loadPlaywright } from './helpers/playwright.ts'
+const { _electron } = loadPlaywright() as any
 const output=path.resolve('output/webp-hotfix'+(process.argv[2]?'-packaged':''));fs.mkdirSync(output,{recursive:true})
 const profile=fs.mkdtempSync(path.join(output,'profile-')),media=path.join(profile,'synthetic-webp');fs.mkdirSync(media)
 const webp=Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA','base64')
@@ -27,7 +27,7 @@ try{
  const fetchPage=async(id:string,thumb:boolean)=>app.evaluate(async({net}:any,{id,thumb}:{id:string;thumb:boolean})=>{const response=await net.fetch(`baoyi://image/${id}${thumb?'?thumb=1':''}`);return {status:response.status,mime:response.headers.get('content-type'),bytes:(await response.arrayBuffer()).byteLength}},{id,thumb})
  for(const p of pages.slice(0,2)){
   assert.equal((await fetchPage(p.id,false)).status,200)
-  const thumb=await fetchPage(p.id,true);assert.equal(thumb.status,200,'valid WebP thumbnail must not become a 404');assert.equal(thumb.mime,'image/webp')
+  const thumb=await fetchPage(p.id,true);assert.equal(thumb.status,200,'valid WebP thumbnail must not become a 404');assert.equal(thumb.mime,'image/jpeg')
  }
  const pngThumb=await fetchPage(pages[2].id,true);assert.equal(pngThumb.status,200);assert.equal(pngThumb.mime,'image/jpeg')
  await page.evaluate(()=>{location.hash='/image'})
@@ -42,6 +42,6 @@ try{
  assert.equal((await fetchPage(pages[0].id,true)).status,404,'hidden works must remain protected after fallback')
  assert.equal((await fetchPage(pages[2].id,true)).status,404,'cached JPEG thumbnails must also stay protected')
  assert.deepEqual(errors,[])
- const checks=['WebP and mislabeled-JPG full images','native-decoder thumbnail fallback','PNG JPEG thumbnail unchanged','shelf/detail/preview/reader decoded','hidden group authorization after cache']
+ const checks=['WebP and mislabeled-JPG full images','worker decodes WebP to JPEG thumbnail','PNG JPEG thumbnail unchanged','shelf/detail/preview/reader decoded','hidden group authorization after cache']
  fs.writeFileSync(path.join(output,'report.json'),JSON.stringify({checks,errors,profile},null,2));console.log('PASS '+checks.join(', '))
 }finally{await app.close()}

@@ -1,5 +1,5 @@
 import type { ResourceKindModule } from '../types.ts'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import { DEFAULT_DOCUMENT_CATEGORIES } from '../../../src/types/workspace.ts'
 export const DOCUMENT_TABLES_SQL = `
 CREATE TABLE IF NOT EXISTS document_categories (

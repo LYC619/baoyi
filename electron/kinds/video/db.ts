@@ -1,4 +1,4 @@
-import { parseJsonArray } from '../../services/json.ts'
+import { parseJsonArray } from '../../services/system/json.ts'
 /**
  * 视频条目的落库出口。
  *
@@ -23,7 +23,7 @@ import type {
   VideoType,
   WatchStatus
 } from '../../../src/types'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoContentInput } from '../../../src/types/video-library.ts'
 import { HENTAI_CATEGORY } from './taxonomy.ts'
 import { resolveVideoOrganizeOwner, resolveVideoOrganizePathOwner } from './organize-owner.ts'

@@ -87,7 +87,7 @@ export interface ImageApi {
   gallery(ids:string[],offset:number,limit:number):Promise<{ pages: Array<ImagePage & { name:string; folder:string }>; total:number }>;
   bulkUpdate(ids: string[], patch: ImageBulkPatch): Promise<number>;
   groups(): Promise<ImageGroup[]>; saveGroup(group: Partial<ImageGroup> & { name: string }): Promise<ImageGroup>; removeGroup(id: string): Promise<void>;
-  prepareImport(type: ImageType, multiple: boolean, archive: boolean): Promise<ImageImportPreview | null>;
+  prepareImport(type: ImageType, multiple: boolean, archive: boolean, droppedPaths?: string[]): Promise<ImageImportPreview | null>;
   confirmImport(token: string, selected: Array<{ index: number; name: string }>, folderCategories?:boolean): Promise<{ imported: number; errors: string[] }>;
   rescan(id: string): Promise<ImageItem>; relocate(id: string): Promise<ImageItem | null>; reveal(id: string): Promise<boolean>;
   saveProgress(id: string, pageId: string, offset: number): Promise<void>;

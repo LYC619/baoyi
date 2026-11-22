@@ -48,7 +48,7 @@ figure {
 }
 
 a {
-  color: var(--accent);
+  color: var(--accent-ink, var(--accent));
   text-decoration: none;
 }
 a:hover {
@@ -150,6 +150,9 @@ select optgroup {
 }
 .btn--primary:hover {
   background: color-mix(in srgb, var(--accent) 86%, #fff);
+}
+:root[data-theme='light'] .btn--primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
 }
 
 .btn--ghost {

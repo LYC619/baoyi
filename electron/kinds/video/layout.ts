@@ -19,7 +19,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoLayoutEntry, VideoLayoutPreview, VideoLayoutResult, VideoOrganizeJournal, VideoOrganizePreview } from '../../../src/types/video-organize.ts'
 import type { VideoWorkLibrary } from '../../../src/types/video-workflow.ts'
 import { getVideo } from './db.ts'

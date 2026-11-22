@@ -1,5 +1,5 @@
 import path from 'node:path'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import { LIBRARY_BACKUP_COLUMNS } from '../../../src/types/library-backup.ts'
 
 export const samePath=(a:string,b:string)=>path.resolve(a).toLocaleLowerCase()===path.resolve(b).toLocaleLowerCase()

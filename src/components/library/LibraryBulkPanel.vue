@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { useBulkOperation, type BulkItem } from '@/composables/useBulkOperation'
@@ -38,7 +39,7 @@ async function apply() {
     preparing.value = true
     try {
       moves = await previewSoftwareCategoryChanges(batch.map(item => item.id), text)
-      if (moves.length && !window.confirm(categoryMoveConfirmation(moves))) return
+      if (moves.length && !(await confirmDialog({ title: '确认同步调整整理目录？', message: categoryMoveConfirmation(moves), confirmText: '确认调整' }))) return
     } catch (cause) { toast(errorMessage(cause)); return }
     finally { preparing.value = false }
   }

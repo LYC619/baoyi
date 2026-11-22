@@ -1,5 +1,5 @@
 import { transaction } from '../../workspace/validation.ts'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import { updateEpisode, updateVideo } from './db.ts'
 import type { VideoTaxonomy, VideoTaxonomyEdit } from '../../../src/types/video-taxonomy.ts'
 

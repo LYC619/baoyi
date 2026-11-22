@@ -1,7 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoScanResult, VideoScanProgress } from '../../../src/types/index.ts'
 import type { VideoImportBatch, VideoImportEdits, VideoImportEntry, VideoImportSummary } from '../../../src/types/video-import.ts'
 import type { VideoImportRuntime } from './service.ts'
@@ -125,7 +125,7 @@ export function createVideoImportManager(options: Options) {
         const base: VideoImportEntry = { id, path: resultEntry.path, status, action: existing ? 'update' : 'new', title: path.basename(resultEntry.path),
           originalTitle: '', category: '其他', description: '', tags: [], fileCount: new Set(captured.flatMap(commandFiles)).size,
           episodeCount: 0, publishedStart: 0, publishedEnd: 0, resourceId: existing ? existing.id : '',
-          message: canRegister ? status === 'review' ? '本地资料不足，可编辑或让 Agent 复查' : '识别完成，等待确认入库' : resultEntry.message,
+          message: canRegister ? status === 'review' ? '本地资料不足，可手动编辑或做智能复查' : '识别完成，等待确认入库' : resultEntry.message,
           log: (logs.get(file) || [resultEntry.message]).join('\n').slice(-150000), tokens: 0, selected: canRegister && (previous?.selected ?? status === 'ready') }
         entries.push(edited(resultEntry.resourceId ? proposal(scratch.db, resultEntry.resourceId, base) : base, edits))
         rows[id] = { commands: captured, files: videoImportFiles(captured), fingerprints: fingerprints(captured), edits,
@@ -196,13 +196,13 @@ export function createVideoImportManager(options: Options) {
           tokens = result.tokens
           if (controller.signal.aborted) throw new Error('复查已停止，保留原识别结果')
           const outcome = result.entries?.find(value => value.resourceId && value.status !== 'failed' && value.status !== 'skipped')
-          if (result.failed || !outcome?.resourceId || !commands.length) throw new Error(result.entries?.find(value => value.status === 'failed')?.message || 'Agent 未给出可用结果，保留原识别结果')
+          if (result.failed || !outcome?.resourceId || !commands.length) throw new Error(result.entries?.find(value => value.status === 'failed')?.message || '智能复查未返回可用结果，已保留原识别结果')
           verifyRowFiles(row)
           const next = edited(proposal(scratch.db, outcome.resourceId, entry), row.edits)
-          Object.assign(entry, next, { status: 'ready', message: 'Agent 复查完成，等待确认入库' })
+          Object.assign(entry, next, { status: 'ready', message: '智能复查完成，等待确认入库' })
           row.commands = commands; row.files = videoImportFiles(commands); row.fingerprints = fingerprints(commands)
         } catch (error) { entry.message = messageOf(error); entry.reviewError = entry.message; lines.push(entry.message) }
-        finally { scratch.close(); entry.tokens += tokens; draft.batch.tokens += tokens; entry.log = (entry.log + '\n\nAgent 复查\n' + lines.join('\n')).slice(-150000); save(draft) }
+        finally { scratch.close(); entry.tokens += tokens; draft.batch.tokens += tokens; entry.log = (entry.log + '\n\n智能复查\n' + lines.join('\n')).slice(-150000); save(draft) }
       }
     } finally { active.delete(id); draft.batch.activeEntryId = ''; draft.batch.status = controller.signal.aborted ? 'interrupted' : 'ready' }
     return save(draft)

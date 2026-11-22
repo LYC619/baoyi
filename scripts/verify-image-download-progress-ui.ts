@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { normalizeDownloadProgress } from '../electron/kinds/image/download-progress.ts'
 import { randomUUID } from 'node:crypto'
@@ -13,9 +12,9 @@ import { scanImageImport } from '../electron/kinds/image/scanner.ts'
 import { pngImage } from './helpers/test-images.ts'
 import type { ComicIngestJob } from '../src/types/comic-ingest.ts'
 import type { ImageDownloadJob } from '../src/types/image.ts'
+import { loadPlaywright } from './helpers/playwright.ts'
 
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const { _electron } = loadPlaywright() as any
 const output = path.resolve('output/image-optimization/progress-ui' + (process.argv[2] ? '-packaged' : ''))
 fs.mkdirSync(output, { recursive: true })
 const profile = fs.mkdtempSync(path.join(output, 'profile-'))
@@ -123,9 +122,9 @@ try {
   await article(jm.id).getByLabel('重试连接方式').selectOption('custom');await article(jm.id).getByLabel('重试代理地址').fill('127.0.0.1:7891')
   await click(jm.id,'保存并重试',['comic:retry',jm.id,{mode:'custom',url:'127.0.0.1:7891'}])
   const before=(await calls()).length
-  page.once('dialog',(dialog:any)=>dialog.dismiss());await article(jm.id).getByRole('button',{name:'停止并清理暂存',exact:true}).click()
+  await article(jm.id).getByRole('button',{name:'停止并清理暂存',exact:true}).click();await page.locator('.app-dialog [data-dialog-cancel]').click()
   assert.equal((await calls()).length,before)
-  page.once('dialog',(dialog:any)=>dialog.accept());await click(jm.id,'停止并清理暂存',['comic:clean',jm.id])
+  await article(jm.id).getByRole('button',{name:'停止并清理暂存',exact:true}).click();await page.locator('.app-dialog [data-dialog-confirm]').click();assert.deepEqual((await calls()).at(-1),['comic:clean',jm.id])
   await click(jm.id,'移除记录',['comic:dismiss',jm.id])
   await mutate('jm',{status:'running'});await click(jm.id,'暂停下载',['comic:stop',jm.id,false]);await click(jm.id,'停止下载',['comic:stop',jm.id,true])
   await mutate('jm',{status:'failed',requiresRevalidation:true})

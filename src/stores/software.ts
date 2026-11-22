@@ -137,8 +137,8 @@ export const useSoftwareStore = defineStore('software', () => {
     return ok
   }
 
-  async function addManual(): Promise<SoftwareItem[]> {
-    const added = await window.baoyi.software.addManual()
+  async function addManual(files?: string[]): Promise<SoftwareItem[]> {
+    const added = await window.baoyi.software.addManual(files)
     if (added.length > 0) await reload()
     return added
   }

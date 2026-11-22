@@ -2,15 +2,14 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ProjectLibrary } from '../electron/kinds/project/library.ts'
 import { scanProjects } from '../electron/kinds/project/scanner.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
-const require=createRequire(import.meta.url)
-const {_electron}=require(process.env.BAOYI_PLAYWRIGHT||'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+import { loadPlaywright } from './helpers/playwright.ts'
+const { _electron } = loadPlaywright() as any
 const output=path.resolve('output/project-verification');fs.mkdirSync(output,{recursive:true})
 const profile=fs.mkdtempSync(path.join(output,'profile-')),fixture=fs.mkdtempSync(path.join(os.tmpdir(),'baoyi-project-ui-')),destinationParent=path.join(fixture,'整理后');fs.mkdirSync(destinationParent)
 const db=new DatabaseSync(path.join(profile,'baoyi.db'));initSchema(db,KINDS);db.exec(VIDEO_JOBS_SQL)
@@ -26,9 +25,13 @@ db.prepare("INSERT INTO image_groups(id,name,hidden) VALUES('hidden-group','隐�
 db.prepare("INSERT INTO resource(id,kind,created_at,updated_at,path,file_name) VALUES('hidden-image','image',1,1,?,'hidden')").run(path.join(fixture,'hidden'))
 db.prepare("INSERT INTO image_meta(resource_id,item_type,group_id) VALUES('hidden-image','comic','hidden-group')").run()
 db.close()
-const realRoots=[String.raw`D:\8.Project\0_0_维护\抱一`,String.raw`D:\8.Project\1_1_小说相关\character-arc`,String.raw`D:\8.Project\Work\260726 要报`,String.raw`D:\8.Project\Claude`]
+// Exercise both scan modes using only the projects created for this run.
 const pilot=[]
-for(const [i,root] of realRoots.entries())if(fs.existsSync(root)){const candidates=await scanProjects(root,i===3?'discover':'single');pilot.push({root,mode:i===3?'discover':'single',candidates:candidates.length,suggested:candidates.filter(c=>c.suggested).length,categories:[...new Set(candidates.map(c=>c.category))],entries:candidates.reduce((n,c)=>n+c.entries.length,0)})}
+for (const [index, root] of ['自己的开发项目','第三方工具','工作调研报告',''].map(name => path.join(fixture, name)).entries()) {
+  const mode = index === 3 ? 'discover' : 'single'
+  const candidates = await scanProjects(root, mode)
+  pilot.push({root,mode,candidates:candidates.length,suggested:candidates.filter(c=>c.suggested).length,categories:[...new Set(candidates.map(c=>c.category))],entries:candidates.reduce((n,c)=>n+c.entries.length,0)})
+}
 const packed=!!process.argv[2],executable=path.resolve(process.argv[2]||'node_modules/electron/dist/electron.exe'),env={...process.env};delete env.ELECTRON_RUN_AS_NODE;delete env.VITE_DEV_SERVER_URL
 const args=[...(packed?[]:[path.resolve('.')]),'--user-data-dir='+profile,'--disable-gpu']
 let application=await _electron.launch({executablePath:executable,args,env,timeout:30000})

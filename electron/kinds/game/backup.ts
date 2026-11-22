@@ -23,7 +23,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { Stats } from 'node:fs'
 import type { SaveBackup, SaveBackupResult, SaveRestoreResult, SaveRestorePreview } from '../../../src/types'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import {
   exists,
   isDriveRoot,
@@ -32,7 +32,7 @@ import {
   tallyTree,
   verifyCopy,
   walkTree
-} from '../../services/fstree.ts'
+} from '../../services/system/fstree.ts'
 
 /** 备份目录里存放存档拷贝的子目录名 */
 export const PAYLOAD = 'save'
@@ -277,7 +277,7 @@ async function restoreOrigin(backup: SaveBackup, target: string) {
   if (await shapeOf(backup.backup_dir, backup.save_path) === 'dir') return payload
   const inner = path.join(payload, path.basename(target))
   const origin = await exists(inner) ? inner : await soleFile(payload)
-  if (!origin) throw new Error('单文件备份载荷缺失或含多份文件，请先核对备份')
+  if (!origin) throw new Error('单文件备份内容缺失或包含多份文件，请先核对备份目录')
   return origin
 }
 
@@ -298,10 +298,10 @@ export async function previewRestore(d: SqlDb, id: string, opts: BackupOptions):
       break
     }catch(e:any){if(e.code!=='ENOENT')throw e;const parent=path.dirname(ancestor);if(parent===ancestor)throw e;ancestor=parent}
   }
-  if (nestedInside(target,backup.backup_dir)||nestedInside(backup.backup_dir,target)) throw new Error('还原目标与备份载荷重叠，已拒绝')
+  if (nestedInside(target,backup.backup_dir)||nestedInside(backup.backup_dir,target)) throw new Error('还原目标与备份目录不能互相包含，已拒绝还原；请重新选择存档位置')
   const origin = await restoreOrigin(backup,target)
   const [before,after] = await Promise.all([saveSnapshot(target),saveSnapshot(origin)])
-  if (after.shape==='missing'||!after.entries.length) throw new Error('备份载荷缺失或为空')
+  if (after.shape==='missing'||!after.entries.length) throw new Error('备份内容缺失或为空，无法还原')
   if (before.shape!=='missing'&&before.shape!==after.shape) throw new Error('当前目标与备份的文件/目录类型不同，请选择正确的存档目标')
   const old = new Map(before.entries), next = new Map(after.entries)
   const added = [...next.keys()].filter(k=>!old.has(k)), changed = [...next.keys()].filter(k=>old.has(k)&&old.get(k)!==next.get(k)), removed = [...old.keys()].filter(k=>!next.has(k))
@@ -588,7 +588,7 @@ export async function restoreBackup(
       if (!only) {
         return {
           ok: false,
-          message: `这份备份记的是单个存档文件，但载荷里找不到它：${inner}`,
+          message: `这份备份记录的是单个存档文件，但在备份目录中找不到它：${inner}`,
           safety: null
         }
       }

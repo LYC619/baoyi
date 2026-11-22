@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 import {ImageLibrary} from './library.ts'
 import {writeComicJson} from './comic-files.ts'
 

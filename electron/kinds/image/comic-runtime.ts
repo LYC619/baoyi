@@ -25,7 +25,7 @@ export class ComicRuntime {
       let buffer='',lastAt=Date.now(),sequence=0,complete=false,failure:Error|undefined,stderr='',grace:ReturnType<typeof setTimeout>|undefined
       const started=Date.now(),pages=new Map<string,number>(),decoder=new StringDecoder('utf8')
       const fail=(error:Error)=>{failure??=error;child.kill()}
-      const cancel=()=>{failure??=signal.reason instanceof Error?signal.reason:new Error('漫画摄入已停止');child.stdin.write('{}\n',()=>{});grace??=setTimeout(()=>child.kill(),5000)}
+      const cancel=()=>{failure??=signal.reason instanceof Error?signal.reason:new Error('漫画下载已停止');child.stdin.write('{}\n',()=>{});grace??=setTimeout(()=>child.kill(),5000)}
       const watchdog=setInterval(()=>{
         if(Date.now()-lastAt>45000)fail(new ComicSourceError('timeout','来源进程没有响应，请重试'))
         if(request.action==='resolve'&&Date.now()-started>300000)fail(new ComicSourceError('timeout','解析作品超过 5 分钟，请稍后重试'))

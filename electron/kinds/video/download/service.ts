@@ -360,6 +360,7 @@ export function createVideoDownloadService(deps: Dependencies) {
     run,
     runSeries,
     cancel,
+    cancelAll: () => { for (const id of active.keys()) cancel(id) },
     completedPath: (requestId: string): string | null => completed.get(requestId) ?? null,
     completedIsDirectory: (requestId: string): boolean => completedDirectories.has(requestId)
   }

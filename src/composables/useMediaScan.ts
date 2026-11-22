@@ -68,7 +68,7 @@ export function useMediaScan<K extends MediaKind>(kind: K) {
       const review = entries.filter(entry => entry.status === 'review').length
       const message = `${result.candidates} 个候选，${result.registered} 个注册${episodes}，${result.skipped} 个跳过，${result.failed} 个失败` + (review ? `，${review} 个待确认` : '')
       if (result.failed > 0) tasks.log(id, 'warn', '存在识别失败项，可在识别日志中查看原因')
-      if (review > 0) tasks.log(id, 'warn', `${review} 个条目的资料或归属待确认，可打开作品修正，或选中后使用 Agent 复查`)
+      if (review > 0) tasks.log(id, 'warn', `${review} 个条目的资料或归属待确认，可打开作品修正，或选中后使用智能复查`)
       tasks.log(id, 'info', `本轮消耗 ${result.tokens.toLocaleString()} tokens`)
       tasks.finish(id, state.stopping.value ? 'cancelled' : 'success', (state.stopping.value ? '扫描已停止，已完成结果保留：' : '扫描完成：') + message)
       return result

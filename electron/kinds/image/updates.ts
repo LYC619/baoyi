@@ -1,5 +1,5 @@
 import path from 'node:path'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { ImageChapterUpdate, ImageUpdateCheck } from '../../../src/types/image.ts'
 import type { createImageDownloads } from './downloads.ts'
 import { PicacomicSource } from './source.ts'

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { errorMessage } from '@/utils'
 import { computed, ref, watch } from 'vue'
 import { Check } from 'lucide-vue-next'
@@ -29,7 +30,7 @@ async function apply() {
   if (group.value !== 'unchanged') patch.groupId = group.value || null
   if (props.type === 'comic' && read.value !== 'unchanged') patch.read = read.value === 'read'
   if (tagText.value.trim() || tagMode.value === 'replace') patch.tags = { mode: tagMode.value as 'add' | 'remove' | 'replace', values: tagText.value.split(/[,，]/).map(t => t.trim()).filter(Boolean) }
-  if (patch.tags?.mode === 'replace' && !confirm(`替换所选 ${props.ids.length} 项的全部标签？`)) return
+  if (patch.tags?.mode === 'replace' && !(await confirmDialog({ title: `替换所选 ${props.ids.length} 项的全部标签？`, message: '原有标签将被本次输入的标签覆盖。', confirmText: '确认替换', tone: 'danger' }))) return
   busy.value = true; emit('busy', true); error.value = ''
   try { const count = await window.baoyi.image.bulkUpdate([...props.ids], patch); emit('applied', count) }
   catch (cause) { error.value = errorMessage(cause) }

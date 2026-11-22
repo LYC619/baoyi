@@ -1,6 +1,6 @@
 import { app, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
-import { getDb } from '../services/database.ts'
-import { getSettings } from '../services/settings-store.ts'
+import { getDb } from '../services/storage/database.ts'
+import { getSettings } from '../services/storage/settings-store.ts'
 import {
   applyVideoOrganize, listVideoOrganizeJournal, previewVideoOrganize,
   previewVideoRelocate, relocateVideoDirectory, retryVideoOrganize, rollbackVideoOrganize
@@ -11,6 +11,7 @@ import type {
   VideoOrganizeApplyRequest, VideoOrganizeJournal, VideoOrganizeRequest,
   VideoRelocateApplyRequest, VideoRelocateRequest
 } from '../../src/types/video-organize.ts'
+import { optId, reqId, reqRecord } from './validate.ts'
 
 let activeOperations = 0
 export function videoOrganizationBusy(): boolean { return activeOperations > 0 }
@@ -45,30 +46,30 @@ export function registerVideoOrganizeIpc(getWindow: () => BrowserWindow | null, 
     }
   }
   ipcMain.handle('video-organize:preview', (event, request: VideoOrganizeRequest) => {
-    assertMain(event); assertVisible(request?.resourceIds || [])
+    assertMain(event); reqRecord(request, 'request'); assertVisible(request?.resourceIds || [])
     return previewVideoOrganize(getDb(), request)
   })
   ipcMain.handle('video-organize:apply', (event, request: VideoOrganizeApplyRequest) => {
     assertMain(event)
-    return mutate(request?.preview?.request?.resourceIds || [], () => applyVideoOrganize(getDb(), request))
+    return mutate(reqRecord(request, 'request') && request?.preview?.request?.resourceIds || [], () => applyVideoOrganize(getDb(), request))
   })
   ipcMain.handle('video-organize:list', (event, resourceId?: string) => {
     assertMain(event)
-    return listVideoOrganizeJournal(getDb(), resourceId).filter(entry => visible(idsOf(entry)))
+    return listVideoOrganizeJournal(getDb(), optId(resourceId, 'resourceId')).filter(entry => visible(idsOf(entry)))
   })
   ipcMain.handle('video-organize:retry', (event, id: string) => {
-    assertMain(event); return mutate(idsOf(journal(id)), () => retryVideoOrganize(getDb(), id))
+    assertMain(event); const safeId = reqId(id); return mutate(idsOf(journal(safeId)), () => retryVideoOrganize(getDb(), safeId))
   })
   ipcMain.handle('video-organize:rollback', (event, id: string) => {
-    assertMain(event); return mutate(idsOf(journal(id)), () => rollbackVideoOrganize(getDb(), id))
+    assertMain(event); const safeId = reqId(id); return mutate(idsOf(journal(safeId)), () => rollbackVideoOrganize(getDb(), safeId))
   })
   ipcMain.handle('video-organize:preview-relocate', (event, request: VideoRelocateRequest) => {
-    assertMain(event); assertVisible([request?.resourceId])
+    assertMain(event); reqRecord(request, 'request'); assertVisible([request?.resourceId])
     return previewVideoRelocate(getDb(), request)
   })
   ipcMain.handle('video-organize:relocate', (event, request: VideoRelocateApplyRequest) => {
     assertMain(event)
-    return mutate([request?.preview?.resourceId], () => relocateVideoDirectory(getDb(), request))
+    return mutate(reqRecord(request, 'request') && [request?.preview?.resourceId], () => relocateVideoDirectory(getDb(), request))
   })
   const layoutRoot = () => {
     const root = getSettings(getDb()).video_organize_root || ''

@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import type { SqlDb } from '../../../services/schema.ts'
+import type { SqlDb } from '../../../services/storage/schema.ts'
 import type { DiscoveryCatalogue } from './catalogue.ts'
 import type { DiscoveryEntry, DiscoverySelection } from '../../../../src/types/video-discovery.ts'
 import type { VideoDownloadDraft, VideoDownloadJob, VideoEnqueueRequest, VideoJobRetry } from '../../../../src/types/video-workflow.ts'

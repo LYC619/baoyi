@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto'
-import type {SqlDb} from '../services/schema.ts'
+import type {SqlDb} from '../services/storage/schema.ts'
 import type {DocumentCoverage,DocumentExtraction,DocumentInsight,DocumentInsightContent} from '../../src/types/document-insight.ts'
 import {DocumentLibrary} from './documents.ts'
 import * as v from './validation.ts'

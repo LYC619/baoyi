@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { getVideo, listEpisodes, listVideos } from '../electron/kinds/video/db.ts'
 import * as videoDb from '../electron/kinds/video/db.ts'
@@ -24,11 +24,11 @@ function localService(f: ReturnType<typeof fixture>, enabled = true) {
   const load = createRendererLoader({
     'node:fs': { ...fs, default: fs }, 'node:path': { ...path, default:path },
     electron: { app: { getPath: () => f.root }, net: {}, shell: {} },
-    '../../services/database.ts': { getDb: () => f.db, postersDir: () => f.root },
-    '../../services/settings-store.ts': { getSettings: () => ({ ai:{enabled,api_key:enabled?'fixture':''},search:{},tmdb:{} }) },
-    '../../services/taxonomy-store.ts': { listCategories: () => VIDEO_CATEGORIES, tagPool: () => [] },
-    '../../services/identify-records.ts': { saveIdentifyLog: (_db: unknown, log:Record<string,any>) => logs.push(log) },
-    '../../services/searchService.ts': { searchAvailable: () => false }, './tmdb.ts': { tmdbAvailable: () => false },
+    '../../services/storage/database.ts': { getDb: () => f.db, postersDir: () => f.root },
+    '../../services/storage/settings-store.ts': { getSettings: () => ({ ai:{enabled,api_key:enabled?'fixture':''},search:{},tmdb:{} }) },
+    '../../services/taxonomy/taxonomy-store.ts': { listCategories: () => VIDEO_CATEGORIES, tagPool: () => [] },
+    '../../services/storage/identify-records.ts': { saveIdentifyLog: (_db: unknown, log:Record<string,any>) => logs.push(log) },
+    '../../services/network/searchService.ts': { searchAvailable: () => false }, './tmdb.ts': { tmdbAvailable: () => false },
     './hentai/hanime.ts': {}, './mediainfo.ts': { readContainerInfo: async () => null }, './db.ts': videoDb,
     './tools.ts': { buildVideoTools: () => [] },
     '../../services/agent/loop.ts': { runAgent: async () => { agentCalls++; return {stopReason:'error',tokens:12,turns:1} } }

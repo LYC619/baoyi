@@ -8,7 +8,7 @@
 
 import path from 'node:path'
 import type { MoveRisk, OrganizeAction, SoftwareItem } from '../../../../src/types'
-import { nestedInside, samePath, sanitizeFolder } from '../../../services/fstree.ts'
+import { nestedInside, samePath, sanitizeFolder } from '../../../services/system/fstree.ts'
 import { isMobilePackage } from '../../../../src/utils/software-package.ts'
 
 /**

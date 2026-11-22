@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto'
 import type {ComicCatalog,ComicProxy} from '../../../src/types/comic-ingest.ts'
-import {parseProxyInput,serializeProxyInput} from '../../services/proxy-rules.ts'
+import {parseProxyInput,serializeProxyInput} from '../../services/network/proxy-rules.ts'
 
 // Pinned to jmcomic 2.7.11. Changes to upstream domains need an adapter update.
 export const JM_API_HOSTS=['www.cdnhjk.net','www.cdngwc.cc','www.cdngwc.net','www.cdngwc.club']

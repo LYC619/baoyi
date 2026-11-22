@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { SkillProfiles } from '../electron/workspace/skill-profiles.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
@@ -36,6 +36,7 @@ try {
   await page.getByRole('dialog').waitFor({state:'hidden'})
   const asset = (await page.evaluate(()=>window.baoyi.workspace.personal.list('asset')))[0]
   assert.equal(asset.data.cost,undefined);assert.equal(asset.data.currency,'CNY')
+  await page.getByRole('button',{name:'返回背包列表',exact:true}).click()
   await page.getByLabel('搜索背包',{exact:true}).fill('不存在')
   assert.equal(await page.locator('.asset-card').count(),0)
   await page.getByLabel('搜索背包',{exact:true}).fill('护照')

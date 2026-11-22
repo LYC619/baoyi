@@ -4,7 +4,7 @@ import path from 'node:path'
 import http from 'node:http'
 import {createRequire} from 'node:module'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {DocumentLibrary} from '../electron/workspace/documents.ts'
 

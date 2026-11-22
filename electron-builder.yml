@@ -18,6 +18,9 @@ files:
   - docs/third-party/*.txt
   # Pure JS/PDF dependencies are bundled at build time. SQLite source/header
   # files are not needed by the prebuilt N-API runtime.
+  - '!node_modules/**/*'
+  - 'node_modules/better-sqlite3/**/*'
+  - 'node_modules/@napi-rs/**/*'
   - '!node_modules/better-sqlite3/deps/**/*'
   - '!node_modules/better-sqlite3/src/**/*'
   - '!node_modules/node-addon-api/**/*'

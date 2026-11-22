@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { createVideoJobStore } from '../electron/kinds/video/download/jobs.ts'
 const { _electron } = loadPlaywright()

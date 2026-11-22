@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import {ensureResourceCategory} from '../../services/resource-taxonomy.ts'
-import type { SqlDb } from '../../services/schema.ts'
+import {ensureResourceCategory} from '../../services/taxonomy/resource-taxonomy.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import { PROJECT_SOURCES, PROJECT_STATES, type ProjectCandidate,type ProjectEntry,type ProjectItem,type ProjectPatch } from '../../../src/types/project.ts'
 
 type Row=Record<string,any>

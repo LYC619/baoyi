@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 
 /** Only this disposable index is rebuilt; media and the library DB never enter this path. */
 export function openFrameIndex<T extends SqlDb & {close:()=>void}>(root:string,open:(file:string)=>T):T{

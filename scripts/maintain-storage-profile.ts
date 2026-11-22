@@ -5,9 +5,9 @@ import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
-import { archiveLibrarySnapshots, exportLibrarySnapshot } from '../electron/services/snapshot-archive.ts'
-import { readSnapshotInventory } from '../electron/services/library-snapshots.ts'
-import { readStorageUsage } from '../electron/services/storage-usage.ts'
+import { archiveLibrarySnapshots, exportLibrarySnapshot } from '../electron/services/storage/snapshot-archive.ts'
+import { readSnapshotInventory } from '../electron/services/storage/library-snapshots.ts'
+import { readStorageUsage } from '../electron/services/storage/storage-usage.ts'
 
 const profile = path.resolve(process.argv[2] || ''), output = path.resolve(process.argv[3] || '')
 assert.ok(process.argv[2] && process.argv[3], 'Pass profile and a NEW report directory')

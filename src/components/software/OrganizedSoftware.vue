@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { FolderOpen, Leaf, Link2, Loader2 } from 'lucide-vue-next'
@@ -37,10 +38,10 @@ async function previewMove(e: OrganizedEntry) {
 }
 async function apply(e: OrganizedEntry, action: 'relocate' | 'materialize' | 'unlink') {
   if (working.value || props.busy) return
-  if (action === 'materialize' && !window.confirm(`将「${e.name}」转为实体？\n真实文件将从 ${e.link_target} 移到 ${e.dir}。\n原位置将不再保留文件，依赖原路径的快捷方式或安装程序可能失效。`)) return
-  if (action === 'unlink' && !window.confirm(`移除「${e.name}」的链接？\n只删除 ${e.dir} 这个链接，真实文件保留；记录将指回原位置。`)) return
+  if (action === 'materialize' && !(await confirmDialog({ title: `将「${e.name}」转为实体目录？`, message: `真实文件将从 ${e.link_target} 移至 ${e.dir}。原位置不再保留文件，依赖原路径的外部快捷方式可能失效。`, confirmText: '转为实体' }))) return
+  if (action === 'unlink' && !(await confirmDialog({ title: `移除「${e.name}」的目录链接？`, message: `仅删除整理目录中的链接入口（${e.dir}），真实文件保留在原位置，库记录将指回原路径。`, confirmText: '移除链接' }))) return
   const p = preview.value
-  if (action === 'relocate' && (!p?.ok || !window.confirm(`确认重新归置「${e.name}」？\n从：${p.from}\n到：${p.to}\n${p.is_link ? '只改变链接位置，真实文件不动。' : '将移动整个软件文件夹。'}\n${p.warning || ''}`))) return
+  if (action === 'relocate' && (!p?.ok || !(await confirmDialog({ title: `确认重新归置「${e.name}」？`, message: `从：${p.from}\n到：${p.to}\n${p.is_link ? '仅改变链接位置，真实文件不动。' : '将移动整个软件文件夹。'}${p.warning ? '\n' + p.warning : ''}`, confirmText: '确认归置' })))) return
   working.value = true
   try {
     const result = action === 'relocate'

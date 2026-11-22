@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {createRequire} from 'node:module'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {ProjectLibrary} from '../electron/kinds/project/library.ts'
 import {inspectProject,projectEntry} from '../electron/kinds/project/scanner.ts'
@@ -38,7 +38,7 @@ try{
   await page.getByRole('button',{name:'列表视图',exact:true}).click();assert.equal(await page.locator('.pj-list').count(),1)
   await page.getByRole('button',{name:'甲工作台',exact:true}).click();await page.getByRole('tab',{name:'工作区概览',exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'工作区概览',exact:true}).getAttribute('aria-selected'),'true')
   await page.getByRole('button',{name:'项目库',exact:true}).click();assert.equal(await page.getByLabel('搜索项目',{exact:true}).inputValue(),'甲 工作');assert.equal(await page.locator('.pj-list').count(),1)
-  await page.getByRole('button',{name:'清空筛选',exact:true}).click();await page.getByLabel('筛选项目位置').selectOption('missing');await page.waitForFunction(()=>document.querySelectorAll('.pj-card').length===1);assert.match(await page.locator('.pj-card').innerText(),/离线项目/)
+  await page.getByRole('button',{name:'清空筛选',exact:true}).click();await page.locator('details summary').filter({hasText:'来源与位置'}).click();await page.getByRole('button',{name:'位置失效',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.pj-card').length===1);assert.match(await page.locator('.pj-card').innerText(),/离线项目/)
   await page.getByRole('button',{name:'清空筛选',exact:true}).click()
   await app.evaluate(({shell}:any)=>{(globalThis as any).__openOriginal=shell.openPath;shell.openPath=async(file:string)=>{(globalThis as any).__openedFile=file;return ''}})
   const entry=(await page.evaluate((id:string)=>window.baoyi.project.get(id),a.id)).entries[0]

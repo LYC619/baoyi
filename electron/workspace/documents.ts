@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { SqlDb } from '../services/schema.ts'
+import type { SqlDb } from '../services/storage/schema.ts'
 import { TextStreamService, type NovelIndexResult } from './text-stream.ts'
 import {
   type DocumentCategory,
@@ -354,7 +354,7 @@ export class DocumentLibrary {
       }
       try {
         const stat = await fs.lstat(file)
-        if (stat.isSymbolicLink()) return
+        if (stat.isSymbolicLink()) { if (depth === 0) warnings.push('已跳过链接：' + path.basename(file)); return }
         if (stat.isDirectory()) {
           const entries = await fs.readdir(file, { withFileTypes: true })
           for (const entry of entries) {

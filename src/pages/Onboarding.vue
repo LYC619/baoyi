@@ -208,7 +208,7 @@ async function finish(): Promise<void> {
         <h2 class="head">让 AI 帮你认出它们</h2>
         <p class="desc">
           抱一会把每个目录交给 AI 自己去看：列目录、读 exe 信息，判断哪个是主程序、
-          哪些只是加载器，再把 32 位和 64 位合并成一条。需要一个支持 function calling 的模型，
+          哪些只是加载器，再把 32 位和 64 位合并成一条。需要一个支持工具调用的模型，
           deepseek-chat 就够用。跳过也可以，之后随时能在设置里补。
         </p>
 

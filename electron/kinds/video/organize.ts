@@ -1,10 +1,10 @@
-import { parseJsonArray } from '../../services/json.ts'
+import { parseJsonArray } from '../../services/system/json.ts'
 import { readVideoLocalMetadata } from './local-metadata.ts'
 import fs from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoBundle, VideoDirectory, VideoSourceRef } from '../../../src/types/video-library.ts'
 import type {
   VideoOrganizeApplyRequest, VideoOrganizeCollision, VideoOrganizeEpisode, VideoOrganizeFile,
@@ -384,7 +384,7 @@ function prepareOrganize(d: SqlDb, input: VideoOrganizeRequest): Prepared {
     } catch (error) { addCollision(collisions, 'directory-conflict', 'physical', textError(error), { path: target }) }
   }
   if (!target) warnings.push('尚未选择物理目标；可以仅逻辑合并')
-  warnings.push(request.transfer === 'move' ? '源作品保留为归档记录；全部校验完成后移除专属原文件，回退可恢复原位置并保留副本' : '源作品保留为归档记录；复制后仍保留原文件，回滚也不会删除副本')
+  warnings.push(request.transfer === 'move' ? '源作品保留为归档记录；全部校验完成后移除专属原文件，回退可恢复原位置并保留副本' : '源作品保留为归档记录；复制后仍保留原文件，撤销也不会删除副本')
   const works: VideoOrganizeWork[] = ids.map(id => {
     const r = snap.resource.find(row => row.id === id)!, m = snap.video_meta.find(row => row.resource_id === id) || {}
     return { resourceId: id, name: r.name_zh || r.name_en || r.file_name, path: r.path, notes: r.notes || '', archived: !!r.is_archived, watchStatus: m.watch_status || 'unwatched', positionSec: m.position_sec || 0,

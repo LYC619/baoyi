@@ -165,6 +165,13 @@ async function planDir(
 }
 
 /** 把一个扫描根拆成识别单元，同时把根那一层的散落文件记下来 */
+/** 针对用户直接拖入的文件夹：若其自身就是单个软件目录则直接建单元，若是收纳目录则自动下钻 */
+export async function planDroppedDir(dir: string, opts: PlanOptions = {}): Promise<ScanPlan> {
+  const units: PlannedUnit[] = []
+  await planDir(dir, path.dirname(dir), 1, units, opts)
+  return { units, loose: [] }
+}
+
 export async function planRoot(root: string, opts: PlanOptions = {}): Promise<ScanPlan> {
   const units: PlannedUnit[] = []
   const loose: string[] = []

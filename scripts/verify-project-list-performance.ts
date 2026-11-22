@@ -3,7 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import assert from 'node:assert/strict'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {ProjectLibrary} from '../electron/kinds/project/library.ts'
 const root=await fs.mkdtemp(path.join(os.tmpdir(),'baoyi-project-list-')),db=new DatabaseSync(':memory:')
@@ -24,6 +24,8 @@ try{
   }
   samples.sort((a,b)=>a-b);const p95=samples[Math.ceil(samples.length*.95)-1]
   const result={projects:1000,samples:30,queriesPerList:1,p95Ms:p95,medianMs:samples[15],maxMs:samples.at(-1),scope:'local temporary directories + in-memory SQLite; not network disks or renderer paint'}
-  await fs.writeFile('output/p1-p2-project-2026-11-06/list-performance.json',JSON.stringify(result,null,2))
+  const output = process.env.BAOYI_TEST_DATA_DIR || root
+  await fs.mkdir(output, { recursive: true })
+  await fs.writeFile(path.join(output, 'list-performance.json'),JSON.stringify(result,null,2))
   console.log(JSON.stringify(result));assert.ok(p95<100,'本地1000项目列表 p95 应小于100ms')
 }finally{db.close();assert.ok(root.startsWith(path.join(os.tmpdir(),'baoyi-project-list-')));await fs.rm(root,{recursive:true,force:true})}

@@ -1,17 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Film } from 'lucide-vue-next'
-import { posterUrl } from '@/utils'
 const props = defineProps<{ sourceId: string; entryId: string; title: string; coverUrl: string }>()
-const root = ref<HTMLElement | null>(null), localPath = ref(''), visible = ref(false), failed = ref(false)
+const root = ref<HTMLElement | null>(null), url = ref(''), visible = ref(false), failed = ref(false)
 let observer: IntersectionObserver | undefined, revision = 0
-const url = computed(() => posterUrl(localPath.value))
 async function load() {
-  const current = ++revision; localPath.value = ''; failed.value = false
+  const current = ++revision; url.value = ''; failed.value = false
   if (!visible.value || !props.coverUrl) return
   try {
     const value = await window.baoyi.video.discovery.artwork({ sourceId: props.sourceId, entryId: props.entryId })
-    if (current === revision) { localPath.value = value; failed.value = !value }
+    if (current === revision) { url.value = value; failed.value = !value }
   } catch { if (current === revision) failed.value = true }
 }
 onMounted(() => {

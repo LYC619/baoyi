@@ -5,11 +5,12 @@ import {execFile} from 'node:child_process'
 import {promisify} from 'node:util'
 import {DatabaseSync} from 'node:sqlite'
 import {loadPlaywright,electronTestEnv} from './helpers/playwright.ts'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
+import {frameFfmpeg} from '../electron/kinds/video/frame-generator.ts'
 import {registerVideoContent} from '../electron/kinds/video/registration.ts'
-const {_electron}=loadPlaywright(),ffmpeg=process.argv[2],matrix=path.resolve(process.argv[3]),packed=process.argv[4],output=path.resolve(process.argv[5]||'output/p1-p2-video-2026-11-06/native-codecs')
-await fs.mkdir(output,{recursive:true});const profile=await fs.mkdtemp(path.join(output,'profile-')),exec=promisify(execFile)
+const {_electron}=loadPlaywright(),ffmpeg=await frameFfmpeg(process.argv[2]||process.env.BAOYI_TEST_FFMPEG||''),packed=process.argv[4],output=path.resolve(process.argv[5]||'output/p1-p2-video-2026-11-06/native-codecs');assert.ok(ffmpeg,'显式提供FFmpeg路径（通过参数或 BAOYI_TEST_FFMPEG）')
+await fs.mkdir(output,{recursive:true});const profile=await fs.mkdtemp(path.join(output,'profile-')),exec=promisify(execFile),matrix=process.argv[3]?path.resolve(process.argv[3]):path.join(profile,'matrix');if(!process.argv[3]){await fs.mkdir(matrix,{recursive:true});await exec(ffmpeg,['-nostdin','-hide_banner','-loglevel','error','-y','-f','lavfi','-i','testsrc2=size=640x360:rate=12','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','3','-c:v','libvpx-vp9','-deadline','realtime','-cpu-used','8','-c:a','libopus','-threads','2',path.join(matrix,'vp9-opus.webm')],{windowsHide:true,timeout:90000});await exec(ffmpeg,['-nostdin','-hide_banner','-loglevel','error','-y','-f','lavfi','-i','testsrc2=size=640x360:rate=12','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','3','-c:v','libvpx','-deadline','realtime','-cpu-used','8','-c:a','libvorbis','-threads','2',path.join(matrix,'vp8-vorbis.webm')],{windowsHide:true,timeout:90000});await exec(ffmpeg,['-nostdin','-hide_banner','-loglevel','error','-y','-f','lavfi','-i','color=c=blue:size=640x360:rate=1','-t','3600','-c:v','libx264','-preset','ultrafast','-g','3600','-keyint_min','3600','-sc_threshold','0','-pix_fmt','yuv420p','-threads','2',path.join(matrix,'one-hour-long-gop.mp4')],{windowsHide:true,timeout:90000})}
 const avc=path.join(profile,'h264-aac.mp4'),unsupported=path.join(profile,'ffv1.mkv')
 await exec(ffmpeg,['-nostdin','-hide_banner','-loglevel','error','-y','-f','lavfi','-i','testsrc2=size=320x180:rate=12','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-c:a','aac','-threads','2',avc],{windowsHide:true,timeout:30000})
 await exec(ffmpeg,['-nostdin','-hide_banner','-loglevel','error','-y','-i',avc,'-c:v','ffv1','-an','-threads','2',unsupported],{windowsHide:true,timeout:30000})

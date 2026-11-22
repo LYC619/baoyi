@@ -5,11 +5,11 @@ import type {ProjectMessage} from '../src/types/project.ts'
 import {runAgent} from '../electron/services/agent/loop.ts'
 import {createServer} from 'node:http'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {ProjectLibrary} from '../electron/kinds/project/library.ts'
 import {createProjectAgent} from '../electron/kinds/project/agent.ts'
-import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/library-backup.ts'
+import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/storage/library-backup.ts'
 import {VIDEO_JOBS_SQL} from '../electron/kinds/video/download/jobs.ts'
 
 test(`project 持久调用接入预算、固定历史快照和检查点，重启后可恢复原文`,async t=>{

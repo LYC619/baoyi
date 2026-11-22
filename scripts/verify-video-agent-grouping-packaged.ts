@@ -6,7 +6,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { registerVideoContent } from '../electron/kinds/video/registration.ts'
 import { videoImportLibraryStamp } from '../electron/kinds/video/import-command.ts'
@@ -82,8 +82,8 @@ async function launch() {
 async function selectAll() {
   await page.getByRole('button', { name: '批量管理', exact: true }).click()
   await page.getByRole('button', { name: '全选当前范围', exact: true }).click()
-  await page.getByRole('button', { name: 'Agent 整理', exact: true }).click()
-  dialog = page.getByRole('dialog', { name: 'Agent 整理', exact: true })
+  await page.getByRole('button', { name: '智能整理', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: '智能整理', exact: true })
   await expect(dialog.locator('header p')).toContainText('137')
   await dialog.locator('select').selectOption('move')
 }
@@ -111,7 +111,7 @@ try {
     await expect(dialog.locator('.agent-warnings')).toContainText('分组分析未完成')
     await expect(dialog.getByRole('button', { name: '确认执行所选操作', exact: true })).toBeEnabled()
     await dialog.locator('.agent-log summary').click(); await expect(dialog.locator('.agent-log pre')).toContainText('本轮仅回复说明')
-    const history = await taskHistory(), task = history.find((task: any) => task.title === 'Agent 整理 · 生成预览')
+    const history = await taskHistory(), task = history.find((task: any) => task.title === '智能整理 · 生成预览')
     assert.equal(task.status, 'failed'); assert.ok(task.events.some((event: any) => event.message.includes('本轮仅回复说明')))
     assert.equal(stamp(), before)
     await captureHiddenElectron(app, path.join(evidence, 'model-reply-diagnostics.png'))

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {randomUUID,createHash} from 'node:crypto'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 import type {ComicCatalog,ComicIngestJob,ComicIngestPreview,ComicProxy} from '../../../src/types/comic-ingest.ts'
 import {ComicRuntime,ComicSourceError,type ComicPageResult} from './comic-runtime.ts'
 import {comicDirectory,comicName,comicProxy} from './comic-source-rules.ts'
@@ -67,7 +67,7 @@ export class ComicIngestService {
     this.check();const preview=this.previews.get(token)
     if(!preview||Date.now()-preview.at>1800000)throw new Error('作品预览已过期，请重新解析')
     if(!Array.isArray(selected)||!selected.length||new Set(selected).size!==selected.length||selected.some(id=>!preview.catalog.chapters.some(c=>c.id===id)))throw new Error('请选择有效章节')
-    if([...this.jobs.values()].some(j=>j.workId===preview.catalog.workId&&!j.requiresRevalidation&&!['success','cancelled'].includes(j.status)))throw new Error('这部作品已有摄入任务，请从下载记录继续')
+    if([...this.jobs.values()].some(j=>j.workId===preview.catalog.workId&&!j.requiresRevalidation&&!['success','cancelled'].includes(j.status)))throw new Error('这部作品已在下载队列中，请在下载任务里查看或继续')
     if(groupId&&!this.library.groups().some(g=>g.id===groupId&&g.type==='comic'&&!g.hidden))throw new Error('漫画分类不可用')
     if(typeof directory!=='string'||comicName(directory,150)!==directory)throw new Error('目录名称含有不支持的字符')
     const root=await comicRoot(rootPath),existing=this.existing(preview.catalog.workId)
@@ -196,7 +196,7 @@ export class ComicIngestService {
       try{await stage.cleanFinished()}catch{job.current='作品已入库；暂存记录未清理，可稍后核对'}
     }catch(error){
       await writes
-      if(!['paused','cancelled'].includes(job.status)){job.status='failed';job.error=(writeError||error as Error) instanceof Error?((writeError||error) as Error).message:'漫画摄入失败'}
+      if(!['paused','cancelled'].includes(job.status)){job.status='failed';job.error=(writeError||error as Error) instanceof Error?((writeError||error) as Error).message:'漫画下载未能完成'}
       if(error instanceof ComicSourceError){job.errorCode=error.code;job.retryNotBefore=error.retryAt}
     }finally{
       clearTimeout(progressTimer)
@@ -283,6 +283,6 @@ export class ComicIngestService {
   private removeRecord(id:string){this.jobs.delete(id);this.deps.db.prepare('DELETE FROM image_download_jobs WHERE id=?').run(id);this.deps.jobsChanged()}
   async logs(id:string){this.get(id);const entries=await this.log.read(id);this.get(id);return entries}
   async dismiss(id:string){const job=this.get(id);if(['running','queued'].includes(job.status)||this.active?.id===id||this.maintaining.has(id))throw new Error('请等待当前操作完成');this.removeRecord(id)}
-  async stopAll(){this.cancelPreview();this.closing=true;for(const job of this.jobs.values())if(['queued','running'].includes(job.status)){job.status='paused';this.save(job)}const active=this.active;active?.controller.abort(new Error('漫画摄入已暂停'));await active?.settled;await this.log.flush()}
+  async stopAll(){this.cancelPreview();this.closing=true;for(const job of this.jobs.values())if(['queued','running'].includes(job.status)){job.status='paused';this.save(job)}const active=this.active;active?.controller.abort(new Error('漫画下载已暂停'));await active?.settled;await this.log.flush()}
   reopen(){this.closing=false}
 }

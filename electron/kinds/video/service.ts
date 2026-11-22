@@ -20,18 +20,18 @@ import type {
   VideoScanProgress,
   VideoScanResult
 } from '../../../src/types'
-import { getDb, postersDir } from '../../services/database.ts'
-import { getSettings } from '../../services/settings-store.ts'
-import { listCategories, tagPool } from '../../services/taxonomy-store.ts'
-import { saveIdentifyLog } from '../../services/identify-records.ts'
+import { getDb, postersDir } from '../../services/storage/database.ts'
+import { getSettings } from '../../services/storage/settings-store.ts'
+import { listCategories, tagPool } from '../../services/taxonomy/taxonomy-store.ts'
+import { saveIdentifyLog } from '../../services/storage/identify-records.ts'
 import { runAgent } from '../../services/agent/loop.ts'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoImportCommand } from './import-command.ts'
 import { groupVideoImportCandidates } from './import-series.ts'
 import { videoImportLibraryStamp } from './import-command.ts'
 import { parseVideoName } from './filename.ts'
 import { registeredVideoContent } from '../../../src/utils/video-content.ts'
-import { searchAvailable } from '../../services/searchService.ts'
+import { searchAvailable } from '../../services/network/searchService.ts'
 import {
   getEpisode,
   getVideo,
@@ -70,7 +70,7 @@ import { fillVideoSystem, videoCandidatePrompt } from './prompts.ts'
 import { buildVideoTools, type VideoToolContext } from './tools.ts'
 import { imageUrl, tmdbAvailable, tmdbDetail } from './tmdb.ts'
 import { fetchHanimeResource, hanimeDetail, hanimeSearch, newBudget } from './hentai/hanime.ts'
-import { isHanimeHost } from '../../services/hanime-network-rules.ts'
+import { isHanimeHost } from '../../services/hanime/hanime-network-rules.ts'
 import {
   acceptExternalPosterUrl,
   acceptPosterUrl,
@@ -325,13 +325,7 @@ export async function removeVideo(id: string): Promise<void> {
 }
 
 /** Resource shape and display type are independent: never execute a media file while revealing it. */
-export function revealVideo(id: string): void {
-  const item = getVideo(getDb(), id)
-  if (!item?.path) return
-  if (!existsSync(item.path)) return
-  if (fs.statSync(item.path).isDirectory()) shell.openPath(item.path)
-  else shell.showItemInFolder(item.path)
-}
+export async function revealVideo(id: string): Promise<boolean> { const item = getVideo(getDb(), id); if (!item?.path || !existsSync(item.path)) return false; if (fs.statSync(item.path).isDirectory()) return !(await shell.openPath(item.path)); shell.showItemInFolder(item.path); return true }
 
 /* ------------------------------ 播放 ------------------------------ */
 
@@ -711,7 +705,7 @@ async function identifyOne(
       runtime?.capture({ kind: 'local', path: c.path, candidate: c, facts, splitFromId })
       result.registered++; result.episodes += registered.episodesAdded
       const review = getVideo(db, registered.id)?.needs_review
-      const message = review ? '已按本地文件入库，资料不足；可选中后让 Agent 复查' : '已读取本地资料，无需调用 Agent'
+      const message = review ? '已按本地文件入库，资料尚不完整；可选中后做智能复查' : '已读取本地资料，无需额外复查'
       result.entries ||= []; result.entries.push({ path: c.path, resourceId: registered.id, status: review ? 'review' : registered.created ? 'new' : 'updated', message })
       {
         const item = getVideo(db, registered.id)!
@@ -867,13 +861,13 @@ export async function enrichVideoWithAgent(id: string, actions: { artwork: boole
         files, episodes: [], sidecars: { nfo: [], images: [], subtitles: [] }, extras: [], evidence: ['用户选择此内容补充资料或封面；仅处理本条视频'] }
       const stamp = videoImportLibraryStamp(db), fileStamp = candidateFingerprint(c), commands: VideoImportCommand[] = []
       const result: VideoScanResult = { candidates: 1, registered: 0, skipped: 0, failed: 0, episodes: 0, searches: 0, tokens: 0 }
-      report('Agent 正在查找：' + target.title)
+      report('正在查找资料：' + target.title)
       await identifyOne(c, result, progress => { if (progress.log) report(progress.log) }, signal, 0, item.category === HENTAI_CATEGORY ? 'category' : undefined,
         undefined, true, { db: scratch, signal, sourceId: target.code, capture: command => commands.push(command), log: (_path, text) => report(text) })
       tokens += result.tokens
       if (signal.aborted) break
       const command = commands.findLast(command => command.kind === 'agent')
-      if (result.failed || !command || command.kind !== 'agent') throw new Error('Agent 未找到可用资料，原记录保留')
+      if (result.failed || !command || command.kind !== 'agent') throw new Error('未找到可补充的公开资料，原记录已保留')
       if (videoImportLibraryStamp(db) !== stamp || candidateFingerprint(c) !== fileStamp) throw new Error('识别期间作品或文件已变化，未写入过期结果')
       const payload = command.payload, details = command.sourceDetails
       if (actions.metadata) {
@@ -1053,7 +1047,7 @@ export function videoScanReadiness(forAgent = false): { ok: boolean; message: st
   if (!forAgent) return { ok: true, message: '' }
   const s = getSettings(getDb())
   if (!s.ai.enabled || !s.ai.api_key.trim()) {
-    return { ok: false, message: 'Agent 复查需要先在设置中启用并配置 AI；本地扫描无需配置。' }
+    return { ok: false, message: '智能复查需要先在设置中启用并配置 AI 模型；仅做本地扫描无需配置。' }
   }
   return { ok: true, message: '' }
 }

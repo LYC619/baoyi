@@ -11,7 +11,7 @@
 
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { dirSize, exists, normalizeLinkTarget, verifyCopy } from '../../../services/fstree.ts'
+import { dirSize, exists, normalizeLinkTarget, verifyCopy } from '../../../services/system/fstree.ts'
 import { nestedInside, sameVolume } from './plan.ts'
 
 /**

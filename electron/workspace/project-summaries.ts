@@ -1,5 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto'
-import type {SqlDb} from '../services/schema.ts'
+import type {SqlDb} from '../services/storage/schema.ts'
 import type {ProjectSummary,SummaryKind} from '../../src/types/workspace.ts'
 import {summaryGroup} from '../../src/utils/project-summary.ts'
 import {TimelineLibrary} from './timeline.ts'

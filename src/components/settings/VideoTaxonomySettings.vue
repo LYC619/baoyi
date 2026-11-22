@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { errorMessage } from '@/utils'
 import { computed, onMounted, ref } from 'vue'
 import { useVideoStore } from '@/stores/video'
@@ -9,10 +10,10 @@ const emit = defineEmits<{ updated: [] }>()
 const data = ref<VideoTaxonomy>({ groups: [], tags: [], works: [] }), selected = ref<string[]>([]), name = ref(''), error = ref(''), message = ref(''), busy = ref(false)
 const store = useVideoStore(), label = computed(() => props.section === 'groups' ? '分组' : '标签')
 async function load() { data.value = await window.baoyi.video.taxonomy(props.hentai) }
-onMounted(() => void load().catch(cause => { error.value = cause.message }))
+onMounted(() => void load().catch(cause => { error.value = errorMessage(cause) }))
 async function edit(from: string | null, to: string | null) {
   if (busy.value || (to !== null && (!to.trim() || from === to.trim()))) return
-  if (from !== null && !confirm(to === null ? `移除「${from || '未分组'}」${label.value}？作品及文件保留。` : `将「${from || '未分组'}」改为「${to}」？同名${label.value}会合并。`)) return
+  if (from !== null && !(await confirmDialog({ title: to === null ? `移除${label.value}「${from || '未分组'}」？` : `修改${label.value}「${from || '未分组'}」？`, message: to === null ? '作品记录与本地原文件均会保留。' : `将改为「${to}」，同名${label.value}会自动合并。`, confirmText: to === null ? '确认移除' : '确认修改', tone: to === null ? 'danger' : 'default' }))) return
   busy.value = true; error.value = ''; message.value = ''
   try {
     const count = await window.baoyi.video.editTaxonomy({ hentai: props.hentai, field: props.section, from, to, ...(from === null ? { ids: [...selected.value] } : {}) })

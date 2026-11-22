@@ -2,7 +2,7 @@
  * 软件品类模块。公共层通过这一个对象认识「软件」，别的什么都不知道。
  */
 
-import { BUILTIN_TAGS, DEFAULT_CATEGORIES } from '../../services/taxonomy.ts'
+import { BUILTIN_TAGS, DEFAULT_CATEGORIES } from '../../services/taxonomy/taxonomy.ts'
 import type { ResourceKindModule } from '../types.ts'
 import { softwareSchema } from './schema.ts'
 

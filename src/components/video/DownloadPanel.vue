@@ -99,7 +99,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
               <button class="btn btn--ghost" type="button" :disabled="busy || draft.bound" @click="flow.pickRoot"><FolderOpen :size="14" />更换目录</button>
             </div>
             <p v-if="draft.directoryChange" class="download-directory-change">开始补齐时，当前文件夹会更名为上面的合集目录。现有视频文件名和观看记录保留；同名目录已存在时会停止并提示。</p>
-            <p v-if="!draft.bound" class="download-hint">名称中的非法字符和目录重名会在入队时处理，实际保存位置可在任务中打开。</p>
+            <p v-if="!draft.bound" class="download-hint">名称中的特殊字符和目录重名会在加入队列时自动处理，实际保存位置可在任务中打开。</p>
             <p v-if="needsPrepare" class="download-hint" role="status">链接已更改，请重新解析后再下载。</p>
             <div class="download-selection">
               <span>已发现 {{ episodes.length }} 项 · {{ localCount }} 项本地已有 · 已选 {{ selectedVideoCodes.length }}</span>

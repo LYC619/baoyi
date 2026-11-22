@@ -1,4 +1,4 @@
-import { getDb } from '../../../services/database'
+import { getDb } from '../../../services/storage/database'
 /**
  * 目录整理的编排层：出方案 → 用户改 → 执行 → 可撤销。
  *
@@ -31,10 +31,10 @@ import type {
   UndoResult
 } from '../../../../src/types'
 import { deleteSoftware, getSoftware, getSoftwareByPath, listSoftware, updateSoftware } from '../db.ts'
-import { getOrganizePlan, markPlanUndone, remapPaths, saveOrganizePlan } from '../../../services/organize-plans.ts'
-import { getSettings } from '../../../services/settings-store.ts'
-import { listCategories, upsertCategory } from '../../../services/taxonomy-store.ts'
-import { samePath } from '../../../services/fstree.ts'
+import { getOrganizePlan, markPlanUndone, remapPaths, saveOrganizePlan } from '../../../services/storage/organize-plans.ts'
+import { getSettings } from '../../../services/storage/settings-store.ts'
+import { listCategories, upsertCategory } from '../../../services/taxonomy/taxonomy-store.ts'
+import { samePath } from '../../../services/system/fstree.ts'
 import {
   alreadyOrganized,
   defaultAction,

@@ -24,14 +24,15 @@ defineEmits<{ (e: 'click'): void }>()
 
 <style scoped>
 .tag {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
+  vertical-align: middle;
   height: 20px;
+  line-height: 20px;
   padding: 0 8px;
   border-radius: var(--radius-tag);
   font-size: var(--fs-tag);
-  line-height: 1;
   white-space: nowrap;
+  min-width: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;

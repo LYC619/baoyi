@@ -7,23 +7,30 @@ import { reactive, ref } from 'vue'
 import { runAgent, type AgentEvent, type AgentTool } from '../../electron/services/agent/loop.ts'
 import { isInside, resolveInside } from '../../electron/services/agent/paths.ts'
 import { decodeText, isReadableName, looksBinary, readTextFile } from '../../electron/services/agent/files.ts'
-import { readExternalActiveAt } from '../../electron/services/activity.ts'
+import { readExternalActiveAt } from '../../electron/services/storage/activity.ts'
 import { activityOf, createLatestGuard, displayName, groupRounds, logToText, plain, searchCalls, subtitleName } from '../../src/utils/index.ts'
 import type { IdentifyLog } from '../../src/types/index.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { SCHEMA_VERSION, TABLES_SQL, initSchema, objectType, schemaVersion } from '../../electron/services/schema.ts'
+import { SCHEMA_VERSION, TABLES_SQL, initSchema, objectType, schemaVersion } from '../../electron/services/storage/schema.ts'
 import { KINDS } from '../../electron/kinds/index.ts'
 import { softwareKind } from '../../electron/kinds/software/index.ts'
 import { gameKind } from '../../electron/kinds/game/index.ts'
-import { normalizeProxyRules, parseProxyInput, serializeProxyInput, toElectronProxyConfig, usesChromiumFetch } from '../../electron/services/proxy-rules.ts'
-import { decidePortable, PORTABLE_MARKERS } from '../../electron/services/portable-rules.ts'
-import { HANIME_CLOUDFLARE_IPS, HANIME_HOSTS, buildHanimeHostResolverRules, getHanimeHostsStatus, isUnreachableLoadError, pickStartupIp, isConnectionFailure, isHanimeHost, orderedHanimeIps } from '../../electron/services/hanime-network-rules.ts'
+import { normalizeProxyRules, parseProxyInput, serializeProxyInput, toElectronProxyConfig, usesChromiumFetch } from '../../electron/services/network/proxy-rules.ts'
+import { decidePortable, PORTABLE_MARKERS } from '../../electron/services/storage/portable-rules.ts'
+import { HANIME_CLOUDFLARE_IPS, HANIME_HOSTS, buildHanimeHostResolverRules, getHanimeHostsStatus, isUnreachableLoadError, pickStartupIp, isConnectionFailure, isHanimeHost, orderedHanimeIps } from '../../electron/services/hanime/hanime-network-rules.ts'
 import { fetchHanimeResource } from '../../electron/kinds/video/hentai/hanime.ts'
 import { CONFIG, sleep, check, mockModel, echoTool } from './shared.ts'
+import { runArchiveEval } from '../../tests/evals/archive-eval.ts'
 export async function agentSection(): Promise<void> {
 
 
   console.log('\nagent loop')
+  await check('归档助理 22 工具离线评测集全部通过', async () => {
+    const summary = await runArchiveEval({ quiet: true })
+    assert.equal(summary.failed, 0, JSON.stringify(summary.failures.slice(0, 5)))
+    assert.equal(summary.toolCoverage.missing.length, 0, 'missing tools: ' + summary.toolCoverage.missing.join(', '))
+    assert.ok(summary.total >= 60)
+  })
 
   await check('执行工具、回灌结果、模型不再调用时收工', async () => {
     const calls: Array<{ name: string; args: any }> = []
@@ -1459,7 +1466,7 @@ export async function proxySection(): Promise<void> {
   })
 
   await check('代理只绑定 Hanime 专用 session', () => {
-    const src = fs.readFileSync(new URL('../../electron/services/proxy.ts', import.meta.url), 'utf-8')
+    const src = fs.readFileSync(new URL('../../electron/services/network/proxy.ts', import.meta.url), 'utf-8')
     assert.match(src, /fromPartition\(['"]persist:hanime-network['"]\)/)
     assert.doesNotMatch(src, /defaultSession\.setProxy/)
     assert.match(src, /looksLikeChallenge/)
@@ -1594,7 +1601,7 @@ export async function portableSection(): Promise<void> {
    */
   await check('没有第二处数据根 —— 所有数据目录都从 getPath(userData) 算', () => {
     const src = fs.readFileSync(
-      new URL('../../electron/services/database.ts', import.meta.url),
+      new URL('../../electron/services/storage/database.ts', import.meta.url),
       'utf-8'
     )
     // 硬拼环境变量是最可能的绕过方式

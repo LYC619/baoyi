@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { listVideos, videoCounts } from '../electron/kinds/video/db.ts'
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-library-benchmark-'))

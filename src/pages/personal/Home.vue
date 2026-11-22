@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { errorMessage } from '@/utils'
 import { ref, computed, onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -170,7 +171,7 @@ async function action(fn: () => Promise<unknown>) {
   }
 }
 async function remove(record: PersonalRecord) {
-  if (!confirm(`删除“${record.name}”这条个人记录？关联的原资料保留。`)) return;
+  if (!(await confirmDialog({ title: `删除个人记录「${record.name}」？`, message: '仅删除这条个人记录，已关联的外部资料与本地文件均会保留。', confirmText: '删除记录', tone: 'danger' }))) return;
   await action(async () => {
     await workspace.personal.remove(record.id);
     if (selected.value?.id === record.id) go(section.value);
@@ -549,8 +550,9 @@ function saved(record: PersonalRecord) {
 </template>
 <style scoped>
 .personal-focus { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:0 0 28px; }
-.personal-focus button { display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:18px; border:1px solid var(--divider); border-radius:9px; color:var(--text-main); background:var(--ws-tint); text-align:left; }
-.personal-focus strong { font-size:28px; color:var(--accent); font-weight:600; }
+.personal-focus button { display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:18px; border:1px solid var(--card-border,var(--divider)); border-radius:var(--radius-card); color:var(--text-main); background:var(--bg-card); box-shadow:var(--shadow-card); text-align:left; transition:border-color var(--t-fast) ease,background var(--t-fast) ease; }
+.personal-focus button:hover { border-color:var(--accent); background:var(--bg-card-hover); }
+.personal-focus strong { font-size:28px; color:var(--accent-ink,var(--accent)); font-weight:600; }
 .personal-focus small { color:var(--text-sub); }
 .asset-detail > .ws-section-head { margin-top:20px; }
 .asset-reminder-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin:18px 0; }
@@ -568,6 +570,9 @@ function saved(record: PersonalRecord) {
 }
 .personal-home {
   position: relative;
+}
+.personal-home .ws-main {
+  padding-bottom: 88px;
 }
 .personal-identity {
   display: flex;

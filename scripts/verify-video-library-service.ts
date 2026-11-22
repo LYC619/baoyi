@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import * as video from '../electron/kinds/video/db.ts'
 import { buildVideoTools, type VideoToolContext } from '../electron/kinds/video/tools.ts'
@@ -37,11 +37,11 @@ function harness() {
       openPath: async (path: string) => { shellCalls.push({ action: 'open', path }); return '' },
       showItemInFolder: (path: string) => { shellCalls.push({ action: 'reveal', path }) }
     } },
-    '../../services/database.ts': { getDb: () => db, postersDir: () => root },
-    '../../services/settings-store.ts': { getSettings: () => ({ ai: { enabled: true, api_key: 'fixture' }, search: {}, tmdb: {} }) },
-    '../../services/taxonomy-store.ts': { listCategories: () => VIDEO_CATEGORIES, tagPool: () => [] },
-    '../../services/identify-records.ts': { saveIdentifyLog: () => {} },
-    '../../services/searchService.ts': { searchAvailable: () => false },
+    '../../services/storage/database.ts': { getDb: () => db, postersDir: () => root },
+    '../../services/storage/settings-store.ts': { getSettings: () => ({ ai: { enabled: true, api_key: 'fixture' }, search: {}, tmdb: {} }) },
+    '../../services/taxonomy/taxonomy-store.ts': { listCategories: () => VIDEO_CATEGORIES, tagPool: () => [] },
+    '../../services/storage/identify-records.ts': { saveIdentifyLog: () => {} },
+    '../../services/network/searchService.ts': { searchAvailable: () => false },
     './tmdb.ts': { tmdbAvailable: () => false }, './hentai/hanime.ts': {},
     './mediainfo.ts': { readContainerInfo: async () => null },
     './db.ts': video,

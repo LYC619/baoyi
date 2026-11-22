@@ -9,6 +9,7 @@ export interface HermesEvent {sessionId:string;event:string;[key:string]:unknown
 export interface HermesTool {name:string;description:string;parameters:Record<string,unknown>}
 interface Options {
   runtime:string;bridge:string;home:string
+  controlTimeoutMs?:number
   event:(event:HermesEvent)=>void
   execute:(sessionId:string,name:string,args:Record<string,unknown>)=>Promise<string>
 }
@@ -27,20 +28,38 @@ export class HermesRuntime {
   start():Promise<void>{
     if(this.closed)return Promise.reject(new Error('归档助理已关闭，请重新打开'))
     if(this.startup)return this.startup
+    const attempt = Promise.resolve().then(() => this.startChild())
+    this.startup = attempt
+    void attempt.catch(() => { if (this.startup === attempt) this.startup = null })
+    return attempt
+  }
+  private startChild(): Promise<void> {
+    if (this.closed) return Promise.reject(new Error('归档助理已关闭，请重新打开'))
     const {runtime,bridge,home}=this.options
     const python=path.join(runtime,'python','python.exe')
     if(!fs.existsSync(python)||!fs.existsSync(path.join(runtime,'hermes','run_agent.py')))return Promise.reject(new Error('归档助理运行组件缺失，请使用完整的抱一程序目录'))
     fs.mkdirSync(home,{recursive:true})
     this.stderr=''
-    this.startup=new Promise((resolve,reject)=>{
-      const child=spawn(python,['-X','utf8','-u',bridge,home,runtime],{
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !['PYTHONPATH','PYTHONHOME','PYTHONSTARTUP'].includes(key.toUpperCase())))
+    return new Promise((resolve,reject)=>{
+      const child=spawn(python,['-I','-X','utf8','-u',bridge,home,runtime],{
         cwd:home,windowsHide:true,stdio:['pipe','pipe','pipe'],
-        env:{...process.env,PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8',PYTHONDONTWRITEBYTECODE:'1',HERMES_HOME:home},
+        env:{...env,PYTHONNOUSERSITE:'1',PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8',PYTHONDONTWRITEBYTECODE:'1',HERMES_HOME:home},
       })
       this.child=child
-      const timer=setTimeout(()=>{reject(new Error('归档助理启动超时，请重试'));child.kill()},90000)
+      const disconnect = (error: Error) => {
+        clearTimeout(timer)
+        reject(error)
+        if (this.child !== child) return
+        this.child = null
+        this.startup = null
+        for (const request of this.pending.values()) request.reject(error)
+        this.pending.clear()
+      }
+      const timer=setTimeout(()=>{disconnect(new Error('归档助理启动超时，请重试'));child.kill()},90000)
       const lines=createInterface({input:child.stdout})
       lines.on('line',line=>{
+        if (this.child !== child) return
         let frame:any
         try{frame=JSON.parse(line)}catch{this.stderr=(this.stderr+'\n'+line).slice(-4000);return}
         if(frame.type==='ready'){clearTimeout(timer);resolve()}
@@ -55,21 +74,30 @@ export class HermesRuntime {
       })
       child.stderr.on('data',chunk=>{this.stderr=(this.stderr+String(chunk)).slice(-4000)})
       child.stdin.on('error',()=>child.kill())
-      child.on('error',error=>{clearTimeout(timer);reject(error)})
+      child.on('error',disconnect)
       child.on('close',code=>{
         clearTimeout(timer);lines.close()
         const error=new Error(`归档助理已退出${code?`（${code}）`:''}，已保存的记录仍保留，请重新打开助理。`)
-        reject(error)
-        if(this.child===child){for(const p of this.pending.values())p.reject(error);this.pending.clear();this.child=null;this.startup=null}
+        disconnect(error)
       })
     })
-    return this.startup
   }
   async request<T=any>(method:string,args:Record<string,unknown>={}):Promise<T>{
     await this.start()
     const child=this.child,id=randomUUID()
     if(this.closed||!child||child.stdin.destroyed||child.stdin.writableEnded)throw new Error('归档助理连接已关闭，请重试')
-    return new Promise((resolve,reject)=>{this.pending.set(id,{resolve,reject});child.stdin.write(JSON.stringify({id,method,args})+'\n',error=>{if(error){this.pending.delete(id);reject(new Error('归档助理连接已断开，请重试'))}})})
+    const payload = JSON.stringify({id,method,args})+'\n'
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await new Promise<T>((resolve,reject) => {
+        this.pending.set(id,{resolve,reject})
+        if (method !== 'run') timer = setTimeout(() => reject(new Error('归档助理控制请求超时，请重试')), this.options.controlTimeoutMs ?? 20_000)
+        child.stdin.write(payload, error => { if (error) reject(new Error('归档助理连接已断开，请重试')) })
+      })
+    } finally {
+      clearTimeout(timer)
+      this.pending.delete(id)
+    }
   }
   run<T=any>(args:Record<string,unknown>,options:{priority?:'interactive'|'background';signal?:AbortSignal;onStart?:()=>void;cancelGraceMs?:number}={}):Promise<T>{
     return archiveRunSlot.run(async()=>{

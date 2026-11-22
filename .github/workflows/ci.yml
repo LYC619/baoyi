@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-core-checks:
+    name: Build, Boundaries & Core Offline Checks (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies (no native Electron binary download)
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build and native boundary verification
+        run: npm run build
+
+      - name: Verify architecture & IPC documentation sync
+        run: npm run docs:check
+
+      - name: Verify release config and strict test runner
+        run: |
+          node scripts/verify-release-config.cjs
+          node scripts/verify-test-runner.cjs
+
+      - name: Verify IPC boundary validation and schema migration/snapshot recovery
+        run: |
+          node --experimental-strip-types --no-warnings scripts/verify-ipc-validation.ts
+          node --experimental-strip-types --no-warnings scripts/verify-library-upgrade.ts
+
+      - name: Run 22-tool archive assistant offline eval suite
+        run: npm run eval:archive
+
+      - name: Run core selfcheck suite
+        run: npm run selfcheck
+
+  windows-unit-suite:
+    name: Strict Unit Suite & Python Runtimes (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies and verify native runtime
+        run: npm ci
+
+      - name: Cache bundled Python runtimes (hermes-runtime & comic-runtime)
+        id: py-runtimes-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            output/hermes-runtime
+            output/comic-runtime
+            output/archive-assistant-2026-11-05/downloads
+          key: ${{ runner.os }}-py-runtimes-v1-${{ hashFiles('scripts/prepare-hermes-runtime.py', 'scripts/prepare-comic-runtime.py', 'resources/hermes/**', 'resources/comic/**') }}
+
+      - name: Prepare and verify Hermes & Comic Python runtimes
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'output/hermes-runtime/runtime-stamp.json')) {
+            npm run prepare:hermes
+          }
+          npm run check:hermes
+          if (-not (Test-Path 'output/comic-runtime/runtime-stamp.json')) {
+            npm run prepare:comic
+          }
+          npm run check:comic
+
+      - name: Locate FFmpeg for media unit tests
+        shell: pwsh
+        run: |
+          $ff = Get-Command ffmpeg -ErrorAction SilentlyContinue
+          if ($ff) {
+            "BAOYI_TEST_FFMPEG=$($ff.Source)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "Using FFmpeg: $($ff.Source)"
+          } else {
+            Write-Warning "ffmpeg not found on PATH; FFmpeg-dependent suites may fail"
+          }
+
+      - name: Run full strict unit test suite (isolated profiles, zero private data)
+        env:
+          CI: 'true'
+        run: npm run test:unit

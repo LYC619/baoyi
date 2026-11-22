@@ -3,11 +3,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { insertGame, getGame, listGames } from '../electron/kinds/game/db.ts'
 import { inspectDir } from '../electron/kinds/game/scanner.ts'
-import { parseJsonArray } from '../electron/services/json.ts'
+import { parseJsonArray } from '../electron/services/system/json.ts'
 import { str } from '../electron/services/agent/values.ts'
 const fallback = ['default']
 for (const invalid of [undefined, '', '{', 'null', '{}', '1']) assert.equal(parseJsonArray(invalid, fallback), fallback)

@@ -15,12 +15,12 @@ const PROVIDERS: Array<{ value: SearchProvider; label: string; hint: string }> =
   {
     value: 'model_builtin',
     label: '不额外联网（默认）',
-    hint: 'agent 只依据本地文件信息和模型自身知识判断。不消耗任何搜索额度。'
+    hint: '仅依据本地文件信息与模型自身知识判断，不消耗任何搜索额度。'
   },
   {
     value: 'tavily',
     label: 'Tavily',
-    hint: '专为 agent 设计，返回结构化摘要。免费额度每月 1000 次。'
+    hint: '适合自动识别检索，返回结构化摘要。免费额度每月 1000 次。'
   },
   {
     value: 'exa',

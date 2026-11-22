@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { computed, onMounted, ref, watch } from 'vue'
 import { activeModule, type ModuleKey } from '@/composables/useModules'
 import { latestOnly, STALE } from '@/composables/latestOnly'
@@ -109,14 +110,15 @@ const TAG_SOURCE_META: Record<Tag['source'], { label: string; tone: 'muted' | 'a
   confirmed: { label: '已确认', tone: 'success' }
 }
 
-async function saveCategory(c: Category, patch: Partial<Category>): Promise<void> {
-  await mutateTaxonomy(module => window.baoyi.categories.upsert(plain({ ...c, ...patch }), module))
+async function saveCategory(c: Category, patch: Partial<Category>): Promise<boolean> {
+  return mutateTaxonomy(module => window.baoyi.categories.upsert(plain({ ...c, ...patch }), module))
 }
 
-function onCategoryField(c: Category, field: 'name' | 'description' | 'icon', e: Event): void {
-  const value = (e.target as HTMLInputElement).value.trim()
-  if (value === c[field] || (field === 'name' && !value)) return
-  void saveCategory(c, { [field]: value })
+async function onCategoryField(c: Category, field: 'name' | 'description' | 'icon', e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement
+  const value = input.value.trim()
+  if (value === c[field] || (field === 'name' && !value)) { input.value = c[field]; return }
+  if (!await saveCategory(c, { [field]: value }) && input.value.trim() === value) input.value = c[field]
 }
 
 async function addCategory(): Promise<void> {
@@ -138,7 +140,7 @@ async function shiftCategory(id: string, delta: number): Promise<void> {
 async function dropCategory(c: Category): Promise<void> {
   const n = categoryCount.value.get(c.name) ?? 0
   const warn = n > 0 ? `\n名下 ${n} 个条目会归入「其他」。` : ''
-  if (!window.confirm(`删除分类「${c.name}」？${warn}\n不会删除任何实际文件。`)) return
+  if (!(await confirmDialog({ title: `删除分类「${c.name}」？`, message: `${warn ? warn.trim() + '\n' : ''}仅调整库内分类，不会删除任何本地文件。`, confirmText: '删除分类', tone: 'danger' }))) return
   await mutateTaxonomy(() => window.baoyi.categories.remove(c.id))
 }
 
@@ -157,7 +159,7 @@ function onTagRename(t: Tag, e: Event): void {
 
 async function dropTag(t: Tag): Promise<void> {
   const warn = t.usage_count > 0 ? `\n${t.usage_count} 个条目会失去这个标签。` : ''
-  if (!window.confirm(`删除标签「${t.name}」？${warn}`)) return
+  if (!(await confirmDialog({ title: `删除标签「${t.name}」？`, message: warn ? warn.trim() : '删除后相关条目将移除该标签，本地文件不受影响。', confirmText: '删除标签', tone: 'danger' }))) return
   await mutateTaxonomy(() => window.baoyi.tags.remove(t.id))
   mergePick.value = mergePick.value.filter((id) => id !== t.id)
   await refreshTaxonomy()
@@ -179,7 +181,7 @@ async function doMerge(): Promise<void> {
   }
   const target = tags.value.find((t) => t.id === into)?.name ?? ''
   const names = tags.value.filter((t) => from.includes(t.id)).map((t) => t.name)
-  if (!window.confirm(`把「${names.join('、')}」并入「${target}」？\n所有条目上的引用会一起替换。`)) return
+  if (!(await confirmDialog({ title: `合并标签至「${target}」？`, message: `将把「${names.join('、')}」并入「${target}」，相关条目上的标签引用会一并更新。`, confirmText: '确认合并' }))) return
 
   if (!await mutateTaxonomy(() => window.baoyi.tags.merge(from, into))) return
   mergePick.value = []

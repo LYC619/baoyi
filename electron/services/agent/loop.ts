@@ -1,14 +1,14 @@
 /**
  * 一个最小的 tool-calling agent 循环，走 OpenAI 兼容的 /chat/completions。
  *
- * 结构参考 pi 的 agent-loop（参考/pi-main/packages/agent/src/agent-loop.ts）：
+ * 结构参考 pi 的 agent-loop（reference/legacy-refs/pi-main/packages/agent/src/agent-loop.ts）：
  * 「请求 → 拿到 tool_calls → 本地执行 → 结果回灌 → 再请求」，直到模型不再要求调用工具。
  * 会话持久化与来源检查点由调用方管理；循环负责预算暂停、重复调用检测、
  * 同一个错误反复出现就终止、可中断，不静默删除调用方的历史。
  */
 
 import type { AgentEvent, AgentStopReason, AIConfig } from '../../../src/types'
-import { timeAsync } from '../timing.ts'
+import { timeAsync } from '../system/timing.ts'
 
 export type { AgentEvent, AgentStopReason }
 
@@ -399,7 +399,7 @@ export async function probeToolCalling(
   if (!called) {
     return {
       ok: false,
-      message: `模型能连通，但没有发起工具调用。抱一的识别流程依赖 function calling，请换一个支持工具调用的模型（如 deepseek-chat、qwen-plus、gpt-4o-mini）。模型回复：${result.text.slice(0, 80)}`
+      message: `模型能连通，但没有发起工具调用。抱一的自动识别依赖工具调用能力，请更换支持工具调用的模型（如 deepseek-chat、qwen-plus、gpt-4o-mini）。模型回复：${result.text.slice(0, 80)}`
     }
   }
   return { ok: true, message: `连接正常，工具调用可用（本次自检消耗 ${result.tokens} tokens）。` }

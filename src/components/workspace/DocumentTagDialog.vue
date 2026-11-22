@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { errorMessage } from '@/utils'
 import { ref, computed, watch } from 'vue'
 import { Plus, Check, X, Tag } from 'lucide-vue-next'
@@ -141,7 +142,7 @@ async function renameCategoryTag(oldTag: string) {
 async function deleteCategoryTag(tag: string) {
   if (busy.value) return
   const categoryId = props.categoryId
-  if (!confirm(`确定要从当前${props.categoryName ? '【' + props.categoryName + '】' : ''}所有资料中移除“${tag}”标签吗？`)) return
+  if (!(await confirmDialog({ title: `移除标签「${tag}」？`, message: `将从当前${props.categoryName ? '「' + props.categoryName + '」' : ''}所有资料记录中移除该标签，本地原文件不受影响。`, confirmText: '移除标签', tone: 'danger' }))) return
   busy.value = true
   error.value = ''
   try {
@@ -346,7 +347,7 @@ async function deleteCategoryTag(tag: string) {
 .mode-option span {
   font-weight: 600;
   font-size: 13px;
-  color: var(--text-normal);
+  color: var(--text-main);
 }
 
 .mode-option small {
@@ -422,7 +423,7 @@ async function deleteCategoryTag(tag: string) {
   cursor: pointer;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  color: var(--text-normal);
+  color: var(--text-main);
   transition: all 0.15s ease;
   user-select: none;
 }

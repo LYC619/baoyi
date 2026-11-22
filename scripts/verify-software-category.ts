@@ -3,11 +3,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import type { RegisterPayload } from '../src/types/index.ts'
 import * as api from '../electron/kinds/software/db.ts'
-import { getSettings, patchSettings } from '../electron/services/settings-store.ts'
+import { getSettings, patchSettings } from '../electron/services/storage/settings-store.ts'
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-category-'))
 const db = new DatabaseSync(':memory:')
 initSchema(db, KINDS)

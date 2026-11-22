@@ -30,7 +30,7 @@ export function plain<T>(value: T): T {
  * 拼这句话的格式统一放这里，别每处各写各的。
  */
 export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  return (err instanceof Error ? err.message : String(err)).replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/i, '').replace(/^Error:\s*/i, '').trim() || '操作未能完成，请稍后重试'
 }
 
 /**

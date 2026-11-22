@@ -5,7 +5,7 @@ import {createHash} from 'node:crypto'
 import {pathToFileURL} from 'node:url'
 import {DatabaseSync} from 'node:sqlite'
 import {loadPlaywright,electronTestEnv} from './helpers/playwright.ts'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {ComicIngestService} from '../electron/kinds/image/comic-ingest.ts'
 import {comicCatalog,JM_ADAPTER_VERSION} from '../electron/kinds/image/comic-source-rules.ts'
@@ -36,9 +36,9 @@ page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(e.message))
 async function completed(id:string){const until=Date.now()+20000;while(Date.now()<until){const jobs=await page.evaluate(()=>window.baoyi.comic.jobs()),job=jobs.find(j=>j.id===id);if(job?.status==='success')return job;if(job?.status==='failed')throw new Error(job.error);await page.waitForTimeout(100)}throw new Error('任务未完成')}
 try{
   assert.equal(path.resolve(await app.evaluate(({app}:any)=>app.getPath('userData'))),profile)
-  await app.evaluate(({dialog}:any,{root,fake}:any)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[root]});dialog.showMessageBox=async()=>({response:1});const cp:any=process.getBuiltinModule('node:child_process'),original=cp.spawn;cp.spawn=(file:any,args:any[],options:any)=>original(file,args.map(a=>typeof a==='string'&&/[\\/]comic[\\/]bridge\.py$/.test(a)?fake:a),options);process.getBuiltinModule('node:module').syncBuiltinESMExports()},{root,fake})
+  await app.evaluate(({dialog}:any,{root,fake,profile}:any)=>{const nFs:any=process.getBuiltinModule('node:fs'),nPath:any=process.getBuiltinModule('node:path'),dev=nFs.statSync(root).dev;for(const dir of [nPath.join(root,'.baoyi-ingest'),nPath.join(profile,'comic-authorizations')]){if(!nFs.existsSync(dir))continue;for(const entry of nFs.readdirSync(dir)){const file=entry.endsWith('.json')?nPath.join(dir,entry):nPath.join(dir,entry,'intent.json');if(!nFs.existsSync(file))continue;const data=JSON.parse(nFs.readFileSync(file,'utf8'));if(data.root&&typeof data.root.dev==='number'){data.root.dev=dev;nFs.writeFileSync(file,JSON.stringify(data))}}};dialog.showOpenDialog=async()=>({canceled:false,filePaths:[root]});dialog.showMessageBox=async()=>({response:1});const cp:any=process.getBuiltinModule('node:child_process'),original=cp.spawn;cp.spawn=(file:any,args:any[],options:any)=>original(file,args.map(a=>typeof a==='string'&&/[\\/]comic[\\/]bridge\.py$/.test(a)?fake:a),options);process.getBuiltinModule('node:module').syncBuiltinESMExports()},{root,fake,profile})
   await page.waitForFunction(()=>!!window.baoyi?.comic);await page.waitForTimeout(250);assert.equal(await fs.stat(trace).catch(()=>null),null,'启动未自动联网')
-  await page.getByRole('button',{name:/^图片\s/}).click();await page.getByRole('button',{name:'摄入任务',exact:true}).click()
+  await page.getByRole('button',{name:/^图片\s/}).click();await page.getByRole('button',{name:'下载任务',exact:true}).click()
   let row=page.locator('.comic-downloads article[data-provider="jm"]').filter({hasText:'合成恢复 321'})
   await row.getByRole('button',{name:'重新核验',exact:true}).click();await page.getByRole('button',{name:'解析作品',exact:true}).click();await page.getByRole('heading',{name:'合成恢复 321',exact:true}).waitFor()
   await page.getByRole('button',{name:'核验并继续',exact:true}).click();await page.locator('.comic-dialog').waitFor({state:'hidden'});await completed(ids['321'])
@@ -49,7 +49,7 @@ try{
   const defaults=await page.evaluate(()=>window.baoyi.comic.defaults());assert.deepEqual(defaults.proxy,{mode:'custom',url:'http://127.0.0.1:7890'})
   requests=(await fs.readFile(trace,'utf8')).trim().split('\n').map(s=>JSON.parse(s));const download=requests.find(r=>r.action==='download'&&r.workId==='654');assert.ok(Object.values(download.proxies).every(p=>p==='http://127.0.0.1:7890'));assert.deepEqual(download.chapters[0].skip,['p1'])
   checks.push('失败记录更换代理并续传，记住最近连接方式')
-  row=page.locator('.comic-downloads article[data-provider="jm"]').filter({hasText:'合成恢复 987'});await row.getByRole('button',{name:'停止并清理暂存',exact:true}).click();await row.waitFor({state:'detached'})
+  row=page.locator('.comic-downloads article[data-provider="jm"]').filter({hasText:'合成恢复 987'});await row.getByRole('button',{name:'停止并清理暂存',exact:true}).click();await page.locator('.app-dialog [data-dialog-confirm]').click();await row.waitFor({state:'detached'})
   assert.equal(await fs.stat(path.join(root,'.baoyi-ingest',ids['987'])).catch(()=>null),null)
   assert.ok(await fs.stat(path.join(root,'[合成作者] 合成恢复 321')))
   checks.push('确认后清理未入库暂存，已完成作品保留')

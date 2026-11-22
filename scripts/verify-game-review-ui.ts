@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { insertGame, updateGame } from '../electron/kinds/game/db.ts'
 import { reserveWorkDirectory, writeBundleFiles } from '../electron/kinds/video/bundle.ts'
@@ -101,15 +101,15 @@ try {
   })
   await check('备份与删除立即刷新详情份数和侧栏游戏数', async () => {
     await detail(ids[0], '测试甲'); await page.getByRole('tab', { name: '存档与备份', exact: true }).click()
-    await page.getByRole('button', { name: '立即备份', exact: true }).click(); await page.locator('.backup').waitFor()
+    await page.getByRole('button', { name: '立即备份', exact: true }).click(); await page.locator('.app-dialog [data-dialog-confirm]').click(); await page.locator('.backup').waitFor()
     assert.equal(await backupText().innerText(), '1 份')
     await page.waitForFunction(() => [...document.querySelectorAll('.sidebar .row')].some(e => e.querySelector('.row__label')?.textContent === '已备份' && e.querySelector('.row__count')?.textContent === '1'))
-    await page.locator('.backup').getByRole('button', { name: '删掉这份备份', exact: true }).click()
+    await page.locator('.backup').getByRole('button', { name: '删掉这份备份', exact: true }).click(); await page.locator('.app-dialog [data-dialog-confirm]').click()
     await page.waitForFunction(() => document.querySelectorAll('.backup').length === 0)
     assert.equal(await backupText().innerText(), '0 份')
     await page.waitForFunction(() => [...document.querySelectorAll('.sidebar .row')].some(e => e.querySelector('.row__label')?.textContent === '已备份' && e.querySelector('.row__count')?.textContent === '0'))
     // Retain one real backup to test late replies and the difference in count units.
-    await page.getByRole('button', { name: '立即备份', exact: true }).click(); await page.locator('.backup').waitFor()
+    await page.getByRole('button', { name: '立即备份', exact: true }).click(); await page.locator('.app-dialog [data-dialog-confirm]').click(); await page.locator('.backup').waitFor()
   })
   await check('快速切换游戏不带入旧备份，侧栏与详情的计数单位明确', async () => {
     await route('/game'); await page.locator('.gameCard').first().waitFor()

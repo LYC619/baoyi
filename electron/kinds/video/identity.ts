@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoOwnership, VideoSourceRef } from '../../../src/types/video-library.ts'
 import { resolveVideoOrganizeOwner, resolveVideoOrganizePathOwner } from './organize-owner.ts'
 

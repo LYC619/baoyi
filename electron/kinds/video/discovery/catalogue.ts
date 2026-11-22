@@ -1,9 +1,10 @@
-import type { SqlDb } from '../../../services/schema.ts'
+import type { SqlDb } from '../../../services/storage/schema.ts'
 import type { DiscoveryCard, DiscoveryEntry, DiscoveryMark, DiscoverySource, DiscoverySourceSummary, DiscoveryOnlineConfig } from '../../../../src/types/video-discovery.ts'
 
 const extensions = new Set(['mp4', 'webm', 'm4v', 'mov', 'mkv', 'avi', 'ogv', 'ogg', 'mpg', 'mpeg'])
 const blankMark = (): DiscoveryMark => ({ favorite: false, watched: false, notes: '', userRating: 0 })
-export const VIDEO_DISCOVERY_SQL = `CREATE TABLE IF NOT EXISTS video_discovery_sources (id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, payload TEXT NOT NULL);
+export const VIDEO_DISCOVERY_SQL = `CREATE TABLE IF NOT EXISTS video_discovery_artwork (url_hash TEXT PRIMARY KEY, path TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS video_discovery_sources (id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, payload TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS video_discovery_marks (source_id TEXT NOT NULL, entry_id TEXT NOT NULL, payload TEXT NOT NULL,
   PRIMARY KEY(source_id,entry_id), FOREIGN KEY(source_id) REFERENCES video_discovery_sources(id) ON DELETE CASCADE);`
 const record = (value: unknown): Record<string, unknown> => {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
@@ -29,7 +30,7 @@ function disabled(kind: ComicTaskAction) {
 }
 async function action(kind: ComicTaskAction, saveProxy = false) {
   if (busy.value) return
-  if (kind === 'clean' && !window.confirm(`停止“${props.row.title}”并清理暂存？将删除已下载的临时图片文件，此操作不可撤销。`)) return
+  if (kind === 'clean' && !(await confirmDialog({ title: `停止「${props.row.title}」并清理暂存？`, message: '将删除已下载的临时图片文件，此操作不可撤销。', confirmText: '停止并清理', tone: 'danger' }))) return
   busy.value = true
   try {
     if (kind === 'open') await router.push({ name: 'image-detail', params: { id: props.row.resourceId } })

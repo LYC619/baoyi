@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { loadPlaywright,electronTestEnv } from './helpers/playwright.ts'
 import { createCanvas } from '@napi-rs/canvas'
@@ -139,7 +139,22 @@ try{
     const unavailable=p2!.candidates.filter(c=>c.artwork?.some(a=>a.state==='unavailable')).map(c=>c.existingId).sort()
     assert.deepEqual(checks.filter(c=>c.id!==id&&c.state!=='current').map(c=>c.id).sort(),unavailable)
     await page.locator('.sidebar').getByRole('button',{name:/有待处理问题/}).click();await page.locator('.gameCard').first().waitFor();const count=await page.locator('.gameCard').count();assert.ok(count>0&&count<69)
+    const categories=await page.evaluate(()=>window.baoyi.categories.list('game'))
+    assert.equal(new Set(categories.map(category=>category.name)).size,categories.length,'批量登记不能重复创建分类')
+    await page.evaluate(game=>window.baoyi.game.update(game.id,{category:game.category}),{id:android.id,category:androidGame!.category})
+    assert.deepEqual(await page.evaluate(()=>window.baoyi.categories.list('game')),categories)
     fs.writeFileSync(path.join(output,'actual-catalog-import.json'),JSON.stringify(result,null,2))
+  })
+  await check('设置拒绝游戏分类重名并恢复输入框中的原名',async()=>{
+    const original=await page.evaluate(()=>window.baoyi.categories.list('game'))
+    assert.ok(original.length>=2)
+    await route('/settings?scope=module&module=game&tab=categories')
+    const field=page.getByPlaceholder('分类名',{exact:true}).first();await field.waitFor()
+    const previous=await field.inputValue(),other=original.find(c=>c.name!==previous)!
+    await field.fill(other.name);await field.press('Enter')
+    await page.getByText(/已经有同名分类了/).first().waitFor()
+    await page.waitForFunction(name=>document.querySelector<HTMLInputElement>('input[placeholder="分类名"]')?.value===name,previous)
+    assert.deepEqual(await page.evaluate(()=>window.baoyi.categories.list('game')),original)
   })
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'verification.json'),JSON.stringify({passed:checks.length,checks,errors,profile,executable:packed||'development',boundary:'Actual Electron UI, IPC, SQLite and local reads; file picker and OS shell dispatch stubbed. Game/trainer processes not executed. Actual catalog imported only into isolated profile.'},null,2))
 }catch(error){await page.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify({error:String(error),checks,errors},null,2));throw error}

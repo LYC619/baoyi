@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { errorMessage } from '@/utils'
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { FolderOpen, X, Archive } from 'lucide-vue-next'
 import type { ImageImportPreview, ImageType } from '@/types/image'
 import { useImageStore } from '@/stores/image'
-const props = defineProps<{ type: ImageType }>()
+const props = defineProps<{ type: ImageType; initialPaths?: string[] }>()
 const emit = defineEmits<{ close: [] }>()
 const store = useImageStore(), mode = ref('single'), busy = ref(false), error = ref('')
 const folderCategories=ref(props.type!=='comic')
 const preview = ref<ImageImportPreview | null>(null), selected = ref<number[]>([])
-async function choose() {
+async function choose(droppedPaths?: string[]) {
   busy.value=true; error.value=''
   try {
-    const result = await window.baoyi.image.prepareImport(props.type,mode.value==='multiple',mode.value==='archive')
+    if (droppedPaths?.length && droppedPaths.every((p) => /\.(zip|cbz)$/i.test(p))) mode.value = 'archive'
+    const result = await window.baoyi.image.prepareImport(props.type,mode.value==='multiple',mode.value==='archive',droppedPaths)
     if (result) { preview.value=result; selected.value=result.items.filter(i=>i.pages>0).map(i=>i.index) }
   } catch(cause) { error.value=errorMessage(cause) } finally { busy.value=false }
 }
+onMounted(() => { if (props.initialPaths?.length) void choose(props.initialPaths) })
 async function confirm() {
   if (!preview.value) return
   busy.value=true; error.value=''

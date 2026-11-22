@@ -31,8 +31,8 @@ async function fixture() {
     insertScanned: (_db: unknown, files: any[]) => files.map((f, i) => add('new-' + i, path.dirname(f.exe_path))),
     getSoftwareByPath: (_db: unknown, exe: string) => [...rows.values()].find(r => r.exe_path === exe)
   }
-  const load = createRendererLoader({ 'node:fs/promises': { default: fsp }, 'node:path': { default: path }, 'node:fs': { default: fs }, '../../../services/database': { getDb: () => ({}) }, '../db.ts': db, '../../../services/taxonomy-store.ts': db, '../../../services/settings-store.ts': db, '../../../services/organize-plans.ts': db,
-    '../../../services/iconExtractor': { extractIcon: async () => '' },
+  const load = createRendererLoader({ 'node:fs/promises': { default: fsp }, 'node:path': { default: path }, 'node:fs': { default: fs }, '../../../services/storage/database': { getDb: () => ({}) }, '../db.ts': db, '../../../services/taxonomy/taxonomy-store.ts': db, '../../../services/storage/settings-store.ts': db, '../../../services/storage/organize-plans.ts': db,
+    '../../../services/media/iconExtractor': { extractIcon: async () => '' },
     './refs': { scanRefs: async () => ({}), hasRefs: () => false, describeRefs: () => '' }
   }, { Buffer, process })
   const service = load('electron/kinds/software/organize/index.ts')

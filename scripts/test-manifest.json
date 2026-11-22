@@ -68,6 +68,12 @@
     "status": "pass"
   },
   {
+    "file": "verify-archive-eval.ts",
+    "module": "archive",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
     "file": "verify-audio-experience-ui.ts",
     "module": "audio",
     "kind": "ui-dev",
@@ -102,8 +108,7 @@
     "file": "verify-comic-ingest-ui.ts",
     "module": "comic",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.click: Timeout 20000ms exceeded.；waiting for getByRole('button', { name: '从 JM 添加', exact: true })",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -153,8 +158,7 @@
     "file": "verify-comic-recovery-ui.ts",
     "module": "comic",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "重新核验被拒绝：漫画提交记录与本机授权不一致，弹窗未关闭；保留产品/夹具疑点，不改校验",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -216,8 +220,7 @@
     "file": "verify-document-category-ui.ts",
     "module": "document",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.click: Timeout 15000ms exceeded.；waiting for locator('.ws-sidebar button').filter({ hasText: /^证书/ })"
+    "status": "pass"
   },
   {
     "file": "verify-document-cover-queue.ts",
@@ -237,13 +240,6 @@
     "kind": "ui-dev",
     "status": "pass",
     "packaged": true
-  },
-  {
-    "file": "verify-document-experience-ui.ts",
-    "module": "document",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "阅读进度断言 actual=0、expected=58，未放宽断言；其他旧页面断言未走完"
   },
   {
     "file": "verify-document-experience.ts",
@@ -280,8 +276,7 @@
     "file": "verify-document-feedback-ui.ts",
     "module": "document",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.fill: Timeout 18000ms exceeded.；waiting for getByLabel('批量设置标签')",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -433,25 +428,10 @@
     "status": "pass"
   },
   {
-    "file": "verify-field-feedback-20261028-ui.ts",
-    "module": "infra",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.fill: Timeout 15000ms exceeded.；waiting for getByLabel('仓库子目录（相对于项目目录）')"
-  },
-  {
     "file": "verify-field-feedback-20261028.ts",
     "module": "infra",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-field-feedback-ui.ts",
-    "module": "infra",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.click: Timeout 20000ms exceeded.；waiting for getByRole('button', { name: '返回', exact: true })",
-    "packaged": true
   },
   {
     "file": "verify-field-ffmpeg.ts",
@@ -464,14 +444,6 @@
     "module": "game",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-field-libraries-ui.ts",
-    "module": "infra",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.selectOption: Timeout 10000ms exceeded.；waiting for getByLabel('游戏分组', { exact: true })",
-    "packaged": true
   },
   {
     "file": "verify-field-renderer.ts",
@@ -489,16 +461,8 @@
     "file": "verify-files-settings-ui.ts",
     "module": "settings",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "七模块外观轮巡等待 app__view 且无过渡类超时（脚本第 64 行）",
+    "status": "pass",
     "packaged": true
-  },
-  {
-    "file": "verify-game-covers-electron.cjs",
-    "module": "game",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "旧路由夹具缺 query.tab，且仍等待已替换的 .hero__img；需更新整套封面夹具"
   },
   {
     "file": "verify-game-covers-fixtures.ts",
@@ -647,8 +611,7 @@
     "file": "verify-image-bulk-ui.ts",
     "module": "image",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.selectOption: Timeout 90000ms exceeded.；waiting for getByLabel('批量已读状态', { exact: true })",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -667,8 +630,7 @@
     "file": "verify-image-download-control-ui.ts",
     "module": "image",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.click: Timeout 6000ms exceeded.；waiting for getByRole('button', { name: '从哔咔添加', exact: true })",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -700,16 +662,14 @@
     "file": "verify-image-field-round5-ui.ts",
     "module": "image",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.waitFor: Timeout 6000ms exceeded.；waiting for locator('.detail-utilities') to be visible",
+    "status": "pass",
     "packaged": true
   },
   {
     "file": "verify-image-integrity-ui.ts",
     "module": "image",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.click: Timeout 8000ms exceeded.；waiting for getByRole('button', { name: '检查完整性', exact: true })",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -790,8 +750,7 @@
     "file": "verify-image-source-ui.ts",
     "module": "image",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.click: Timeout 15000ms exceeded.；waiting for getByRole('button', { name: '从哔咔添加', exact: true })",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -810,16 +769,14 @@
     "file": "verify-image-ui.ts",
     "module": "image",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "Error: 分类与图片类型不匹配或已隐藏",
+    "status": "pass",
     "packaged": true
   },
   {
     "file": "verify-image-updates-ui.ts",
     "module": "image",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.waitFor: Timeout 8000ms exceeded.；waiting for getByRole('button', { name: '检查连载更新', exact: true }) to be visible",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -832,8 +789,7 @@
     "file": "verify-image-ux-ui.ts",
     "module": "image",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "FAIL chapter-preview page.waitForFunction: Timeout 3500ms exceeded.；waiting for getByRole('button', { name: '检查完整性', exact: true })",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -870,6 +826,12 @@
     "packaged": true
   },
   {
+    "file": "verify-ipc-validation.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
     "file": "verify-javdb-parse.ts",
     "module": "video",
     "kind": "unit",
@@ -892,14 +854,6 @@
     "module": "infra",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-library-review-ui.ts",
-    "module": "infra",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "旧资料分类/分组夹具更新后，资料7隐藏断言仍不符（预期 0，实际 1）",
-    "packaged": true
   },
   {
     "file": "verify-library-review.ts",
@@ -1008,14 +962,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-online-source-ui.ts",
-    "module": "video",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.waitFor: Timeout 30000ms exceeded.；waiting for getByText('此作品未提供可内置播放的媒体文件。', { exact: true }) to be visible",
-    "packaged": true
-  },
-  {
     "file": "verify-online-source.ts",
     "module": "video",
     "kind": "unit",
@@ -1095,8 +1041,7 @@
     "file": "verify-personal-revision-ui.ts",
     "module": "personal",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.fill: Timeout 15000ms exceeded.；waiting for getByLabel('搜索背包', { exact: true })"
+    "status": "pass"
   },
   {
     "file": "verify-personal-revision.ts",
@@ -1139,8 +1084,7 @@
     "file": "verify-photo-ui.ts",
     "module": "image",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "照片筛选/排序后的 DOM 条件等待超时（脚本第 36 行）",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -1221,8 +1165,7 @@
     "file": "verify-project-handoff-ui.ts",
     "module": "project",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.waitFor: Timeout 15000ms exceeded.；waiting for getByLabel('当前情况', { exact: true }) to be visible",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -1254,8 +1197,7 @@
     "file": "verify-project-launch-ui.ts",
     "module": "project",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.waitFor: Timeout 15000ms exceeded.；waiting for getByLabel('当前情况', { exact: true }) to be visible",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -1268,8 +1210,7 @@
     "file": "verify-project-list-performance.ts",
     "module": "project",
     "kind": "unit",
-    "status": "failing",
-    "reason": "AssertionError [ERR_ASSERTION]: 本地1000项目列表 p95 应小于100ms"
+    "status": "pass"
   },
   {
     "file": "verify-project-notes-renderer.ts",
@@ -1318,8 +1259,7 @@
     "file": "verify-project-workbench-ui.ts",
     "module": "project",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.selectOption: Timeout 15000ms exceeded.；waiting for getByLabel('筛选项目位置')",
+    "status": "pass",
     "packaged": true
   },
   {
@@ -1358,8 +1298,7 @@
     "file": "verify-reset-seed.ts",
     "module": "infra",
     "kind": "unit",
-    "status": "failing",
-    "reason": "用法: node --experimental-strip-types scripts/verify-reset-seed.ts <profile 目录>"
+    "status": "pass"
   },
   {
     "file": "verify-resource-reliability-ui.ts",
@@ -1399,14 +1338,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-retest-ui.ts",
-    "module": "infra",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.waitFor: Timeout 15000ms exceeded.；waiting for getByRole('button', { name: '创建合集', exact: true }) to be visible",
-    "packaged": true
-  },
-  {
     "file": "verify-review-boundaries.ts",
     "module": "infra",
     "kind": "unit",
@@ -1424,14 +1355,6 @@
     "module": "personal",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-review-ux-ui.ts",
-    "module": "infra",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "FAIL video-real-ipc-query: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:；waiting for getByText('已登记，可分析', { exact: true }) to be visible",
-    "packaged": true
   },
   {
     "file": "verify-search-log-scope.ts",
@@ -1557,18 +1480,17 @@
     "status": "pass"
   },
   {
+    "file": "verify-test-runner.cjs",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
     "file": "verify-unified-settings-ui.ts",
     "module": "settings",
     "kind": "ui-dev",
     "status": "pass",
     "packaged": true
-  },
-  {
-    "file": "verify-unified-ux.ts",
-    "module": "infra",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "FAIL project-bulk-workflow: Error: locator.click: Error: strict mode violation: getByRole('button', { name: '清空筛选', exact: true }) resolved to 2 elements:；waiting for getByRole('button', { name: '批量整理', exact: true })"
   },
   {
     "file": "verify-ux-packaged-integration.ts",
@@ -1602,7 +1524,7 @@
     "module": "video",
     "kind": "e2e-packaged",
     "status": "failing",
-    "reason": "FAIL background fixture: locator.evaluate: Timeout 15000ms exceeded.；waiting for getByRole('button', { name: 'Agent 整理', exact: true })"
+    "reason": "FAIL background fixture: locator.evaluate: Timeout 15000ms exceeded.；waiting for getByRole('button', { name: '智能整理', exact: true })"
   },
   {
     "file": "verify-video-agent-background.ts",
@@ -1615,7 +1537,7 @@
     "module": "video",
     "kind": "e2e-packaged",
     "status": "failing",
-    "reason": "FAIL packaged grouping: locator.click: Timeout 30000ms exceeded.；waiting for getByRole('button', { name: 'Agent 整理', exact: true })"
+    "reason": "FAIL packaged grouping: locator.click: Timeout 30000ms exceeded.；waiting for getByRole('button', { name: '智能整理', exact: true })"
   },
   {
     "file": "verify-video-agent-grouping-renderer.ts",
@@ -1658,8 +1580,7 @@
     "file": "verify-video-codecs-ui.ts",
     "module": "video",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "默认入口缺少 FFmpeg 路径和合成视频矩阵目录参数（paths[0] 为 undefined）"
+    "status": "pass"
   },
   {
     "file": "verify-video-concurrency.ts",
@@ -1730,13 +1651,6 @@
     "reason": "ExpectError: expect(locator).toContainText(expected) failed；waiting for locator('.scan-results')"
   },
   {
-    "file": "verify-video-feedback-renderer.ts",
-    "module": "video",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "FAIL 首页展开合集，并由单集标签进入对应介绍 Expected values to be strictly equal:；waiting for getByRole('button', { name: '编辑这一集', exact: true })"
-  },
-  {
     "file": "verify-video-field-feedback-renderer.ts",
     "module": "video",
     "kind": "ui-dev",
@@ -1756,13 +1670,6 @@
     "reason": "FAIL native field retest: locator.click: Timeout 20000ms exceeded.；waiting for getByRole('button', { name: '创建合集', exact: true })"
   },
   {
-    "file": "verify-video-field-retest-renderer.ts",
-    "module": "video",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "FAIL import has scoped identify logs and finished downloads stay collapsed after task history: locator.click: Timeout 3000ms exceeded.；waiting for getByRole('button', { name: /^日志：/ })"
-  },
-  {
     "file": "verify-video-field-retest.ts",
     "module": "video",
     "kind": "unit",
@@ -1780,13 +1687,6 @@
     "kind": "real-env",
     "status": "failing",
     "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
-    "file": "verify-video-field-round2-renderer.ts",
-    "module": "video",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "FAIL B2 搜索命中单集的合集自动展开，只命中作品名的不展开，清空后全部收回 关键词命中一集：展开且只列那一集；waiting for getByRole('button', { name: '展开 10 集', exact: true })"
   },
   {
     "file": "verify-video-field-round3-real-db.ts",
@@ -1818,29 +1718,25 @@
     "file": "verify-video-frame-cancel.ts",
     "module": "video",
     "kind": "unit",
-    "status": "failing",
-    "reason": "需要 FFmpeg 路径和合成视频参数，统一入口未提供"
+    "status": "pass"
   },
   {
     "file": "verify-video-frame-matrix.ts",
     "module": "video",
     "kind": "unit",
-    "status": "failing",
-    "reason": "自动入口未配置 FFmpeg；显式设置 BAOYI_TEST_FFMPEG 的后台验证已通过"
+    "status": "pass"
   },
   {
     "file": "verify-video-frames-native.ts",
     "module": "video",
     "kind": "unit",
-    "status": "failing",
-    "reason": "自动入口未配置 FFmpeg；显式设置 BAOYI_TEST_FFMPEG 的后台验证已通过"
+    "status": "pass"
   },
   {
     "file": "verify-video-frames-ui.ts",
     "module": "video",
     "kind": "ui-dev",
-    "status": "failing",
-    "reason": "AssertionError [ERR_ASSERTION]: 显式提供FFmpeg及合成视频路径；actual=undefined, expected=true,"
+    "status": "pass"
   },
   {
     "file": "verify-video-frames.ts",
@@ -1892,13 +1788,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-video-library-usability-renderer.ts",
-    "module": "video",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "FAIL Agent review is explicit and the Hanime entry follows the private content scope: locator.click: Timeout 3000ms exceeded.；waiting for getByRole('button', { name: '从 Hanime 添加', exact: true })"
-  },
-  {
     "file": "verify-video-library-usability.ts",
     "module": "video",
     "kind": "unit",
@@ -1916,13 +1805,6 @@
     "kind": "e2e-packaged",
     "status": "failing",
     "reason": "ExpectError: expect(locator).toHaveCount(expected) failed；waiting for locator('.video-item')"
-  },
-  {
-    "file": "verify-video-local-structure-renderer.ts",
-    "module": "video",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:；actual=4, expected=5,"
   },
   {
     "file": "verify-video-local-structure.ts",
@@ -1947,13 +1829,6 @@
     "module": "video",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-video-organize-renderer.ts",
-    "module": "video",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "FAIL 选完作品自动预览，默认只有创建合集，无文件路径表单或自动执行: locator.click: Timeout 3000ms exceeded. Call log:   - waiting for getByRole('button', { name: '创建合集', exact: true })；waiting for getByRole('button', { name: '创建合集', exact: true }) "
   },
   {
     "file": "verify-video-organize-ui.ts",
@@ -2003,8 +1878,7 @@
     "file": "verify-video-seed.ts",
     "module": "video",
     "kind": "unit",
-    "status": "failing",
-    "reason": "用法: node --experimental-strip-types scripts/verify-video-seed.ts <profile 目录>"
+    "status": "pass"
   },
   {
     "file": "verify-video-series-download-ui.ts",
@@ -2090,14 +1964,6 @@
     "module": "infra",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-workspace-ui.ts",
-    "module": "infra",
-    "kind": "ui-dev",
-    "status": "failing",
-    "reason": "locator.waitFor: Timeout 15000ms exceeded.；waiting for getByRole('heading', { name: '资料' }).first() to be visible",
-    "packaged": true
   },
   {
     "file": "verify-workspace.ts",

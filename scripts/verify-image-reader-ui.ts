@@ -2,15 +2,14 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ImageLibrary } from '../electron/kinds/image/library.ts'
 import { scanImageImport } from '../electron/kinds/image/scanner.ts'
 import { pngImage } from './helpers/test-images.ts'
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+import { loadPlaywright } from './helpers/playwright.ts'
+const { _electron } = loadPlaywright() as any
 const packedExecutable = process.argv[2]
 const executable = path.resolve(packedExecutable || 'node_modules/electron/dist/electron.exe')
 const output = path.resolve('output/image-optimization/reader-ui' + (packedExecutable ? '-packaged' : '')); fs.mkdirSync(output, { recursive: true })

@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoRemovalRequest, VideoRemovalPreview, VideoBulkPatch } from '../../../src/types/video-management.ts'
 import { deleteVideo, getVideo, listEpisodes, updateVideo, syncSeriesStatus } from './db.ts'
 import { getVideoWorkLibrary, registerVideoAsset } from './library.ts'

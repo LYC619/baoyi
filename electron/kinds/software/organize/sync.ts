@@ -1,4 +1,4 @@
-import { getDb } from '../../../services/database'
+import { getDb } from '../../../services/storage/database'
 /**
  * 整理目录的「读回来」编排：把 syncPlan 算出来的对账结果落到库和磁盘上。
  *
@@ -14,12 +14,12 @@ import { getDb } from '../../../services/database'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { OrganizeSyncReport } from '../../../../src/types'
-import { getSettings } from '../../../services/settings-store.ts'
+import { getSettings } from '../../../services/storage/settings-store.ts'
 import { getSoftwareByPath, insertScanned, listSoftware, updateSoftware } from '../db.ts'
-import { listCategories, upsertCategory } from '../../../services/taxonomy-store.ts'
-import { remapPaths } from '../../../services/organize-plans.ts'
-import { exists, samePath, nestedInside } from '../../../services/fstree.ts'
-import { extractIcon } from '../../../services/iconExtractor'
+import { listCategories, upsertCategory } from '../../../services/taxonomy/taxonomy-store.ts'
+import { remapPaths } from '../../../services/storage/organize-plans.ts'
+import { exists, samePath, nestedInside } from '../../../services/system/fstree.ts'
+import { extractIcon } from '../../../services/media/iconExtractor'
 import { readPeInfo } from '../peReader'
 import { LINK_MARK, entryExists, removeJunction } from './fsops.ts'
 import { rootDirOf } from './plan.ts'

@@ -15,7 +15,10 @@
 import { DatabaseSync } from 'node:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
-import { SCHEMA_VERSION } from '../electron/services/schema.ts'
+import os from 'node:os'
+import assert from 'node:assert/strict'
+import { initSchema, SCHEMA_VERSION } from '../electron/services/storage/schema.ts'
+import { KINDS } from '../electron/kinds/index.ts'
 import { HENTAI_CATEGORY } from '../electron/kinds/video/taxonomy.ts'
 import { SEED_VIDEOS, SEED_HENTAI } from './lib/video-seed-data.ts'
 
@@ -27,20 +30,18 @@ if (SEED_HENTAI !== HENTAI_CATEGORY) {
   process.exit(1)
 }
 
-const profile = process.argv[2]
-if (!profile) {
-  console.error('用法: node --experimental-strip-types scripts/verify-video-seed.ts <profile 目录>')
-  process.exit(1)
-}
+const standalone = !process.argv[2]
+const profile = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-video-seed-'))
 
 const dbFile = path.join(profile, 'baoyi.db')
-if (!fs.existsSync(dbFile)) {
+if (!standalone && !fs.existsSync(dbFile)) {
   console.error(`找不到 ${dbFile} —— 先空跑一次应用让它建表，再来铺数据`)
   process.exit(1)
 }
 
 const db = new DatabaseSync(dbFile)
 db.exec('PRAGMA foreign_keys = ON')
+if (standalone) initSchema(db, KINDS)
 
 /**
  * 版本闸门读的是 `SCHEMA_VERSION` 而不是写死的数字。
@@ -213,6 +214,10 @@ for (const season of [1, 2]) {
 }
 
 const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n
+assert.equal(n('SELECT COUNT(*) n FROM video'), SEED_VIDEOS.length)
+assert.equal(n('SELECT COUNT(*) n FROM episode'), 16)
+assert.equal(n("SELECT COUNT(*) n FROM episode WHERE path=''"), 5)
+assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
 console.log(
   JSON.stringify(
     {
@@ -234,3 +239,4 @@ console.log(
   )
 )
 db.close()
+if (standalone) fs.rmSync(profile, { recursive: true, force: true })

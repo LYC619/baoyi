@@ -2,32 +2,32 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
+import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ImageLibrary } from '../electron/kinds/image/library.ts'
 import { scanImageImport } from '../electron/kinds/image/scanner.ts'
 import { pngImage } from './helpers/test-images.ts'
-const require=createRequire(import.meta.url)
-const {_electron}=require(process.env.BAOYI_PLAYWRIGHT||'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const {_electron}=loadPlaywright()
 const output=path.resolve(process.env.BAOYI_IMAGE_UI_OUTPUT||'output/image-comic-verification');fs.mkdirSync(output,{recursive:true})
 const profile=fs.mkdtempSync(path.join(output,'profile-')),media=path.join(profile,'media');fs.mkdirSync(media)
 const db=new DatabaseSync(path.join(profile,'baoyi.db'));db.exec('PRAGMA foreign_keys=ON');initSchema(db,KINDS)
 for(const [key,value]of Object.entries({onboarded:true,theme:'dark',hanime_builtin_hosts:false}))db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key,JSON.stringify(value))
 const library=new ImageLibrary(db),titles=['东京的雨','神社的阶梯','星际驾驶员','灯塔与海','雨中的咖啡馆','雪落的校园'],ids:string[]=[],covers:string[]=[]
+const groups=Array.from({length:4},(_,i)=>library.saveGroup({name:'合成分类 '+i,type:'comic'}))
 for(const [i,title]of titles.entries()){
   const work=path.join(media,title)
   for(const chapter of ['第1话','第2话']){const dir=path.join(work,chapter);fs.mkdirSync(dir,{recursive:true});for(let n=1;n<=5;n++)fs.writeFileSync(path.join(dir,`${n}.png`),pngImage(320,470,[35+i*24,65+i*10,115+i*12]))}
   const item=library.register((await scanImageImport(work,'comic',false))[0]);ids.push(item.id);covers.push(library.pages(item.id)[0].file)
-  library.update(item.id,{groupId:`image-group-${i%4}`,publication:i===3?'completed':'ongoing',tags:['合成验证'],description:'用于隔离界面验证的示例资料，不写入正式资料库。'})
+  library.update(item.id,{groupId:groups[i%4].id,publication:i===3?'completed':'ongoing',tags:['合成验证'],description:'用于隔离界面验证的示例资料，不写入正式资料库。'})
   if(i<4)library.saveProgress(item.id,library.pages(item.id)[i+1].id,0)
 }
 const album=path.join(media,'旅行相册');fs.mkdirSync(album);for(let i=0;i<9;i++)fs.writeFileSync(path.join(album,`${i}.png`),pngImage(400,260,[60+i*12,100,140]))
 library.register((await scanImageImport(album,'photo',false))[0]);db.close()
 const packed=!!process.argv[2]&&process.argv[2]!=='-'
 const executable=path.resolve(packed?process.argv[2]:'node_modules/electron/dist/electron.exe'),artwork=process.argv[3] ? path.resolve(process.argv[3]):''
-const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;delete env.VITE_DEV_SERVER_URL
+const env = electronTestEnv()
 const args=[...(packed?[]:[path.resolve('.')]),'--user-data-dir='+profile,'--disable-gpu']
 let application=await _electron.launch({executablePath:executable,args,env,timeout:30000})
 const checks:string[]=[],errors:string[]=[]
@@ -67,15 +67,16 @@ try{
   const saved=await page.evaluate(async(id:string)=>(await window.baoyi.image.get(id))?.progress,ids[0]);assert.ok(saved)
   await page.reload();await page.waitForSelector('.detail-actions');const after=await page.evaluate(async(id:string)=>(await window.baoyi.image.get(id))?.progress,ids[0]);assert.equal(after?.pageId,saved.pageId)
   checks.push('single-double-scroll-reading-and-progress-persistence')
-  await page.getByRole('button',{name:'返回书架',exact:true}).click();await page.getByRole('button',{name:'照片',exact:true}).click();assert.equal(await page.locator('.image-card').count(),1)
+  await page.getByRole('button',{name:'返回书架',exact:true}).click();await page.getByRole('button',{name:'照片',exact:true}).click();await page.getByLabel('图片展示方式').selectOption('albums');await page.waitForFunction(()=>document.querySelectorAll('.image-card').length===1)
   await page.locator('.image-card').click();await page.getByRole('button',{name:'浏览照片',exact:true}).click();assert.equal(await page.getByLabel('阅读模式',{exact:true}).count(),0);await page.getByLabel('关闭阅读器',{exact:true}).click();checks.push('album-grid-and-lightbox')
-  await page.getByRole('button',{name:'返回书架',exact:true}).click();await page.getByRole('button',{name:'漫画',exact:true}).click()
+  await page.getByRole('button',{name:'返回相册',exact:true}).click();await page.getByRole('button',{name:'漫画',exact:true}).click()
   await application.evaluate(({BrowserWindow}:any)=>BrowserWindow.getAllWindows()[0].setSize(960,640))
   await page.screenshot({path:path.join(output,'bookshelf-960.png')})
   const overflow=await page.locator('.image-content').evaluate((el:HTMLElement)=>el.scrollWidth>el.clientWidth);assert.equal(overflow,false)
-  await page.getByRole('button',{name:'从哔咔添加',exact:true}).click();await page.getByRole('dialog',{name:'从哔咔添加',exact:true}).waitFor()
+  await page.getByRole('button',{name:'在线漫画',exact:true}).click();await page.getByRole('dialog',{name:'在线漫画',exact:true}).waitFor()
+  await page.getByRole('button',{name:'哔咔 Pica',exact:true}).click()
   const accountInput=page.getByLabel('用户名',{exact:true});await accountInput.fill('comic_reader');assert.equal(await accountInput.getAttribute('type'),'text');assert.equal(await accountInput.evaluate((el:HTMLInputElement)=>el.checkValidity()),true)
-  await page.getByLabel('关闭哔咔',{exact:true}).click();checks.push('minimum-window-and-source-login-dialog')
+  await page.getByLabel('关闭在线漫画',{exact:true}).click();checks.push('minimum-window-and-source-login-dialog')
   await application.evaluate(({dialog}:any,root:string)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[root]})},path.join(media,titles[0]))
   await page.getByRole('button',{name:'导入目录',exact:true}).click();await page.getByRole('button',{name:'选择文件夹',exact:true}).click();await page.getByRole('button',{name:'确认导入',exact:true}).click();await page.getByRole('dialog',{name:'导入图片',exact:true}).waitFor({state:'hidden'})
   assert.equal(await page.locator('.image-card').count(),6);checks.push('native-import-preview-confirm-and-deduplication')

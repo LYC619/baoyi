@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import { Readable } from 'node:stream'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import { isAudioFile } from '../../../src/utils/audio.ts'
 import { getVideo, listEpisodes } from './db.ts'
 import { readContainerInfo } from './mediainfo.ts'

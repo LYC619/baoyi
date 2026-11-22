@@ -7,7 +7,7 @@ import { useTaskCenter } from '@/composables/useTaskCenter'
 import { useToast } from '@/composables/useToast'
 import { useSettingsStore } from '@/stores/settings'
 import { errorMessage } from '@/utils'
-import { parseProxyInput, serializeProxyInput, type ProxyInput } from '../../../../electron/services/proxy-rules'
+import { parseProxyInput, serializeProxyInput, type ProxyInput } from '../../../../electron/services/network/proxy-rules'
 
 const settings = useSettingsStore()
 

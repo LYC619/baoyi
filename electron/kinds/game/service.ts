@@ -29,16 +29,16 @@ import type {
 } from '../../../src/types'
 import { app, net, nativeImage, session, shell } from 'electron'
 import { runAgent, type AgentEvent } from '../../services/agent/loop'
-import { coversDir, getDb, saveBackupRoot } from '../../services/database'
-import { getSettings } from '../../services/settings-store.ts'
-import { listCategories, tagPool } from '../../services/taxonomy-store.ts'
-import { saveIdentifyLog } from '../../services/identify-records.ts'
+import { coversDir, getDb, saveBackupRoot } from '../../services/storage/database'
+import { getSettings } from '../../services/storage/settings-store.ts'
+import { listCategories, tagPool } from '../../services/taxonomy/taxonomy-store.ts'
+import { saveIdentifyLog } from '../../services/storage/identify-records.ts'
 import {
   imageSearchAvailable,
   imageSearchWhyNot,
   searchAvailable,
   searchImages
-} from '../../services/searchService'
+} from '../../services/network/searchService'
 import {
   acceptImageUrl,
   candidatesFromSearch,

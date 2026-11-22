@@ -6,10 +6,10 @@ import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
 import { DatabaseSync } from 'node:sqlite'
-import { readSnapshotInventory } from '../electron/services/library-snapshots.ts'
-import { migrateArtworkIntoLibrary } from '../electron/services/artwork-migration.ts'
-import { archiveLibrarySnapshots, exportLibrarySnapshot } from '../electron/services/snapshot-archive.ts'
-import { readStorageUsage, clearBrowserCacheSessions } from '../electron/services/storage-usage.ts'
+import { readSnapshotInventory } from '../electron/services/storage/library-snapshots.ts'
+import { migrateArtworkIntoLibrary } from '../electron/services/media/artwork-migration.ts'
+import { archiveLibrarySnapshots, exportLibrarySnapshot } from '../electron/services/storage/snapshot-archive.ts'
+import { readStorageUsage, clearBrowserCacheSessions } from '../electron/services/storage/storage-usage.ts'
 
 const digest = (data: Buffer) => createHash('sha256').update(data).digest('hex')
 function fixture() { return fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-storage-')) }

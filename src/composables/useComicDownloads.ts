@@ -14,7 +14,7 @@ export interface ComicTaskRow {
 }
 export const comicStatusLabels: Record<string, string> = { queued: '排队中', running: '正在下载', paused: '已暂停', success: '已入库', failed: '需要处理', cancelled: '已停止', interrupted: '上次中断' }
 export const comicPhaseLabels: Record<string, string> = {
-  queued: '排队中', catalog: '读取章节目录', checking: '校验已有页面', connecting: '连接图片服务器', receiving: '接收图片',
+  queued: '排队中', catalog: '读取章节目录', checking: '校验已有页面', connecting: '连接图源', receiving: '接收图片',
   retrying: '等待重试', 'rate-limited': '等待限流', saving: '保存图片', importing: '整理入库', idle: '',
   resolving: '读取目录', downloading: '下载页面', verifying: '核验图片', prepared: '准备保存', placed: '已落盘，待登记', indexing: '登记入库', done: '已入库',
 }

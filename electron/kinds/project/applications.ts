@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {spawn} from 'node:child_process'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 import {projectChildEnvironment} from './launch-resolution.ts'
 export type ProjectEditor='vscode'|'cursor'
 export interface ProjectApplication {id:ProjectEditor;name:string;path:string;available:boolean}

@@ -1,6 +1,6 @@
 import path from 'node:path'
 import fs from 'node:fs'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 
 interface OwnerJournal {
   createdAt: number

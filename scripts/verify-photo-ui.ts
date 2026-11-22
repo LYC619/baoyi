@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ImageLibrary } from '../electron/kinds/image/library.ts'
 import { scanImageImport } from '../electron/kinds/image/scanner.ts'
@@ -33,6 +33,7 @@ try{
  await page.getByRole('heading',{name:'我的照片'}).waitFor()
  await page.locator('.image-types button').filter({hasText:'旅行'}).waitFor()
  assert.equal(await page.locator('.image-types button').filter({hasText:'漫画独有'}).count(),0)
+ await page.getByLabel('图片展示方式').selectOption('albums')
  await page.waitForFunction(()=>document.querySelectorAll('.image-card').length===2)
  await page.getByLabel('图片排序').selectOption('name')
  await page.getByLabel('照片视图',{exact:true}).selectOption('horizontal')

@@ -11,7 +11,7 @@
  */
 
 import type { PlayStatus } from '../../../src/types'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 
 /**
  * 一次游玩至少要够这么久才计入总时长。

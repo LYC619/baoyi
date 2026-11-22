@@ -51,7 +51,7 @@ export function useScan() {
    * dirs 往往直接来自 settings store，那是一个 reactive 代理数组 ——
    * 必须在这里拍平，contextBridge 收到代理会当场同步抛。见 utils 里的 plain()
    */
-  async function run(dirs: string[]): Promise<ScanResult> {
+  async function run(dirs: string[], directDirs = false): Promise<ScanResult> {
     if (running.value || dirs.length === 0) {
       return { found: 0, added: 0, pending: 0, settled: 0, loose_files: [] }
     }
@@ -62,7 +62,7 @@ export function useScan() {
     activeTask = task
     progress.value = { phase: 'walking', current: '', found: 0, processed: 0, total: 0 }
     try {
-      const result = await window.baoyi.scan.run(plain(dirs))
+      const result = await window.baoyi.scan.run(plain(dirs), directDirs || undefined)
       lastResult.value = result
       const message = `发现 ${result.found} 个程序或手机安装包，${result.added} 个新增目录，${result.pending} 个待识别，${result.settled} 个已识别过`
       if (result.loose_files.length) tasks.log(task.id, 'warn', `另有 ${result.loose_files.length} 个散落文件，本次未处理`)

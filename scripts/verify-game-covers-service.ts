@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import ts from 'typescript'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import * as games from '../electron/kinds/game/db.ts'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
@@ -58,10 +58,10 @@ function harness() {
       } }) },
       shell: {}
     },
-    '../../services/database': { getDb: () => db, coversDir: () => covers },
-    '../../services/settings-store.ts': { getSettings: () => ({ ai: { enabled: false, api_key: '' }, search: {} }) },
-    '../../services/taxonomy-store.ts': { listCategories: () => [], tagPool: () => [] },
-    '../../services/searchService': { imageSearchAvailable: () => false, imageSearchWhyNot: () => '', searchAvailable: () => false },
+    '../../services/storage/database': { getDb: () => db, coversDir: () => covers },
+    '../../services/storage/settings-store.ts': { getSettings: () => ({ ai: { enabled: false, api_key: '' }, search: {} }) },
+    '../../services/taxonomy/taxonomy-store.ts': { listCategories: () => [], tagPool: () => [] },
+    '../../services/network/searchService': { imageSearchAvailable: () => false, imageSearchWhyNot: () => '', searchAvailable: () => false },
     '../../services/agent/loop': {}, './backup': {}, './savedb': {}, './session': {}, './tools': {}, './prompts': {},
     './db': games
   }, { Buffer, URL, AbortController, AbortSignal, process, setTimeout, clearTimeout })

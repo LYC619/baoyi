@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import { ImageLibrary } from './library.ts'
 import type { ImageMoveResult } from '../../../src/types/image.ts'
 

@@ -766,7 +766,7 @@ async function recoverOrganize(id: string) {
 }
 
 .settings-subtabs button:hover {
-  color: var(--text);
+  color: var(--text-main);
 }
 
 .settings-subtabs button.active {
@@ -803,7 +803,7 @@ async function recoverOrganize(id: string) {
 
 .submodule-switcher button.active {
   background: var(--bg-card, #fff);
-  color: var(--text);
+  color: var(--text-main);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
@@ -953,7 +953,7 @@ async function recoverOrganize(id: string) {
   padding: 10px 14px;
   border-radius: 6px;
   background: rgba(16, 185, 129, 0.1);
-  color: var(--text);
+  color: var(--text-main);
   font-size: 13px;
 }
 

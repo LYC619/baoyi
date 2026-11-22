@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import type { SqlDb } from "../services/schema.ts";
+import type { SqlDb } from "../services/storage/schema.ts";
 import { PersonalLibrary } from "./personal.ts";
 import type {
   SkillCard,

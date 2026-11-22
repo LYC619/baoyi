@@ -6,7 +6,7 @@ import path from 'node:path'
 import {createMusicService,musicUrl,audioExtension} from '../electron/kinds/video/music.ts'
 import {archiveTurnMode} from '../electron/archive/turn-policy.ts'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {registerVideoContent} from '../electron/kinds/video/registration.ts'
 const delay=()=>new Promise(r=>setTimeout(r,5))

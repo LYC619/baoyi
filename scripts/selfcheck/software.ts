@@ -5,8 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { apiBase, parseModelList } from '../../electron/services/agent/loop.ts'
 import { fillIdentifySystem, limitTags } from '../../electron/kinds/software/prompts.ts'
-import { BUILTIN_TAGS, DEFAULT_CATEGORIES, FALLBACK_CATEGORY, mapCategory } from '../../electron/services/taxonomy.ts'
-import { planRoot, skippable } from '../../electron/kinds/software/scanPlan.ts'
+import { BUILTIN_TAGS, DEFAULT_CATEGORIES, FALLBACK_CATEGORY, mapCategory } from '../../electron/services/taxonomy/taxonomy.ts'
+import { planDroppedDir, planRoot, skippable } from '../../electron/kinds/software/scanPlan.ts'
 import { countExes } from '../../electron/kinds/software/exeCount.ts'
 import { parseVersionResource } from '../../electron/kinds/software/peReader.ts'
 import { pickBestPngFrame } from '../../electron/kinds/software/peIcon.ts'
@@ -141,6 +141,13 @@ export async function scanSection(): Promise<void> {
     const stopped = await planRoot(scanRoot, { cancelled: () => true })
     assert.equal(stopped.units.length, 0)
     assert.equal(stopped.loose.length, 0)
+  })
+
+  await check('直接拖入单个便携软件目录时直接作为一个单元收录', async () => {
+    const dropped = await planDroppedDir(path.join(scanRoot, 'BlueStacks X'))
+    assert.equal(dropped.units.length, 1)
+    assert.equal(dropped.units[0].dir, path.join(scanRoot, 'BlueStacks X'))
+    assert.equal(dropped.units[0].exe_count, 2)
   })
 
   /* ----------------------------- 数 exe 的遍历 ----------------------------- */

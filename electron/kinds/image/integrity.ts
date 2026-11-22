@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { ImageAudit, ImageAuditEntry, ImagePageInfo } from '../../../src/types/image.ts'
 import { ImageLibrary } from './library.ts'
 import { readImagePage } from './files.ts'

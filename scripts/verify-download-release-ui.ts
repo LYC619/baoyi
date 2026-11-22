@@ -4,9 +4,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema, SCHEMA_VERSION } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_VERSION } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
-import { APP_VERSION_KEY } from '../electron/services/library-snapshots.ts'
+import { APP_VERSION_KEY } from '../electron/services/storage/library-snapshots.ts'
 
 const { _electron } = loadPlaywright()
 const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version

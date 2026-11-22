@@ -22,12 +22,12 @@ export function useVideoAgentOrganize() {
     if (busy.value) return
     busy.value = kind; error.value = ''; progress.value = null
     if (kind === 'prepare') { analysisLog.value = ''; plan.value = null; groupIds.value = [] }
-    taskId = tasks.start('video-scan', kind === 'prepare' ? 'Agent 整理 · 生成预览' : 'Agent 整理 · 执行所选操作')
+    taskId = tasks.start('video-scan', kind === 'prepare' ? '智能整理 · 生成预览' : '智能整理 · 执行所选操作')
     try { await action() }
     catch (cause) {
       error.value = errorMessage(cause).replace(/^(?:Error:\s*)?Error invoking remote method ['"]video-agent:[^'"]+['"]:\s*(?:Error:\s*)?/, '')
       const cancelled = /^已停止|^已取消/.test(error.value)
-      tasks.finish(taskId, cancelled ? 'cancelled' : 'failed', cancelled ? 'Agent 整理已停止' : 'Agent 整理未完成', error.value)
+      tasks.finish(taskId, cancelled ? 'cancelled' : 'failed', cancelled ? '智能整理已停止' : '智能整理未完成', error.value)
     }
     finally { busy.value = ''; taskId = '' }
   }
@@ -55,7 +55,7 @@ export function useVideoAgentOrganize() {
       for (const outcome of result.value.outcomes) tasks.log(taskId, outcome.ok ? 'info' : 'warn', outcome.title + '：' + outcome.message)
       tasks.log(taskId, 'info', `本轮消耗 ${result.value.tokens.toLocaleString()} tokens`)
       const failures = result.value.outcomes.filter(outcome => !outcome.ok).length
-      tasks.finish(taskId, result.value.cancelled ? 'cancelled' : failures ? 'failed' : 'success', `Agent 整理${result.value.cancelled ? '已停止' : '结束'}：${result.value.outcomes.length - failures} 项完成，${failures} 项待处理`)
+      tasks.finish(taskId, result.value.cancelled ? 'cancelled' : failures ? 'failed' : 'success', `智能整理${result.value.cancelled ? '已停止' : '结束'}：${result.value.outcomes.length - failures} 项完成，${failures} 项待处理`)
     }),
     cancel: () => window.baoyi.videoAgentOrganize.cancel(),
     reset: () => { if (!busy.value) { plan.value = null; result.value = null; analysisLog.value = ''; error.value = '' } },

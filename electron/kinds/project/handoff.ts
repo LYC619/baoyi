@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import {createHash,randomUUID} from 'node:crypto'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 import type {AIConfig} from '../../../src/types/index.ts'
 import type {ProjectHandoffPreview,ProjectHandoffSnapshot,ProjectHandoffResult} from '../../../src/types/project-handoff.ts'
 import {ProjectLibrary} from './library.ts'

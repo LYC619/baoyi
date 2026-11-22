@@ -167,9 +167,14 @@ const videoCount = computed(() => typeof props.item.available_files === 'number'
     box-shadow var(--t-fast) ease;
 }
 
-.card:hover .card__poster {
+.card:hover .card__poster,
+.card:focus-within .card__poster {
   transform: translateY(-3px);
   box-shadow: var(--shadow-pop);
+}
+@media (prefers-reduced-motion: reduce) {
+  .card__poster { transition: none; }
+  .card:hover .card__poster, .card:focus-within .card__poster { transform: none; }
 }
 
 .card__img {
@@ -228,11 +233,9 @@ const videoCount = computed(() => typeof props.item.available_files === 'number'
   font-variant-numeric: tabular-nums;
 }
 .card { --text-faint: var(--text-sub); border-radius: var(--radius-input); }
-.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .card__body { display: flex; flex-direction: column; gap: 5px; min-width: 0; width: 100%; }
 .card__name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; line-height: 1.6; min-height: 3.2em; }
 .card__detail, .card__pending, .card__match { color: var(--text-sub); font-size: var(--fs-tag); line-height: 1.5; overflow-wrap: anywhere; }
 .card__pending { color: var(--text-main); }
 .card__match { padding-top: 4px; border-top: 1px solid var(--divider); }
-@media (prefers-reduced-motion: reduce) { .card__poster { transition: none; } }
 </style>

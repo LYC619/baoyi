@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import {Readable} from 'node:stream'
 import {createHash,randomUUID} from 'node:crypto'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 import {getVideo,listEpisodes} from './db.ts'
 import type {VideoPreviewAsset,VideoPreviewSelection,VideoPreviewSession} from '../../../src/types/video-preview.ts'
 

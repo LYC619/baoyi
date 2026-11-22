@@ -1,4 +1,4 @@
-import { getDb } from '../../services/database'
+import { getDb } from '../../services/storage/database'
 import { str } from '../../services/agent/values.ts'
 /**
  * 交给识别 agent 的工具集。
@@ -11,9 +11,9 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { Launcher, MoveRisk, RegisterPayload, SearchConfig } from '../../../src/types'
-import { readExternalActiveAt } from '../../services/activity'
-import { extractIcon } from '../../services/iconExtractor'
-import { timeAsync, timeSync } from '../../services/timing.ts'
+import { readExternalActiveAt } from '../../services/storage/activity'
+import { extractIcon } from '../../services/media/iconExtractor'
+import { timeAsync, timeSync } from '../../services/system/timing.ts'
 import { countExes } from './exeCount'
 import { isManualIcon } from './icons.ts'
 import { readPeArch, readPeInfo } from './peReader'
@@ -21,9 +21,9 @@ import { APP_CATEGORY, isMobilePackage, isSoftwareFile, SOFTWARE_EXTENSIONS } fr
 // skippable 和扫描时用的是同一份名单：同一棵目录树，扫描不进去的地方
 // agent 也不该为了数 exe 进去
 import { skippable } from './scanPlan'
-import { formatHits, search } from '../../services/searchService'
+import { formatHits, search } from '../../services/network/searchService'
 import { getSoftware, isSkipped, registerSoftware, stagePending, updateSoftware, type RegisterFileFacts } from './db.ts'
-import { listCategories, tagPool } from '../../services/taxonomy-store.ts'
+import { listCategories, tagPool } from '../../services/taxonomy/taxonomy-store.ts'
 import type { AgentTool } from '../../services/agent/loop'
 import { formatSize, isReadableName, readTextFile } from '../../services/agent/files'
 import { limitTags as limitTagsTo } from './prompts'

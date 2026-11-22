@@ -1,4 +1,4 @@
-import { getDb } from '../../services/database'
+import { getDb } from '../../services/storage/database'
 /**
  * 软件模块与 Electron / 真实库之间的接缝。
  *
@@ -10,8 +10,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { SoftwareItem } from '../../../src/types'
 import { getSoftware, listSoftware, updateSoftware } from './db.ts'
-import { iconsDir } from '../../services/database'
-import { extractIcon } from '../../services/iconExtractor'
+import { iconsDir } from '../../services/storage/database'
+import { extractIcon } from '../../services/media/iconExtractor'
 import { ICON_EXTS, iconFileName, iconSiblings, isIconExt, isManualIcon } from './icons.ts'
 
 /** 清掉这个条目的所有手动图标文件（含换过扩展名留下的孤儿） */

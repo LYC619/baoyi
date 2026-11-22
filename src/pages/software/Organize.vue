@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 /**
  * 整理预览面板。
  *
@@ -90,7 +91,7 @@ async function refreshEntry(id: string): Promise<void> {
 
 async function cleanLinks(): Promise<void> {
   if (busy.value || !selectedLinks.value.length) return
-  if (!window.confirm(`清理所选 ${selectedLinks.value.length} 个孤立链接？\n只删链接入口，真实软件文件保留。\n${selectedLinks.value.join('\n')}`)) return
+  if (!(await confirmDialog({ title: `清理所选 ${selectedLinks.value.length} 个孤立链接？`, message: `仅删除失效的目录链接入口，真实软件文件保留。\n${selectedLinks.value.join('\n')}`, confirmText: '清理链接', tone: 'danger' }))) return
   actionBusy.value = true
   try {
     const result = await organize.removeLinks(selectedLinks.value)
@@ -155,7 +156,7 @@ async function execute(): Promise<void> {
     '',
     '执行后可以在设置 → 目录整理里撤销。确认继续？'
   ].filter(Boolean)
-  if (!window.confirm(lines.join('\n'))) return
+  if (!(await confirmDialog({ title: '确认执行目录整理？', message: lines.join('\n'), confirmText: '开始整理' }))) return
 
   let result: OrganizeResult | null = null
   try {

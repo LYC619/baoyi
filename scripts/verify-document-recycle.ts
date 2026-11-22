@@ -5,13 +5,13 @@ import {existsSync} from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {DocumentLibrary} from '../electron/workspace/documents.ts'
 import {ProjectLibrary} from '../electron/kinds/project/library.ts'
 import {WorkspaceLinks} from '../electron/workspace/links.ts'
 import {VIDEO_JOBS_SQL} from '../electron/kinds/video/download/jobs.ts'
-import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/library-backup.ts'
+import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/storage/library-backup.ts'
 
 async function fixture(t:any){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'baoyi-recycle-')),db=new DatabaseSync(':memory:');initSchema(db,KINDS);db.exec(VIDEO_JOBS_SQL)

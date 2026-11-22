@@ -4,7 +4,7 @@ import {existsSync} from 'node:fs'
 import path from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
 import {_electron} from 'playwright'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {VIDEO_JOBS_SQL} from '../electron/kinds/video/download/jobs.ts'
 import {DocumentLibrary} from '../electron/workspace/documents.ts'
@@ -61,7 +61,7 @@ try{
   await app.evaluate(({BrowserWindow},width)=>{const win=BrowserWindow.getAllWindows()[0];win.unmaximize();win.setSize(width,900);if(width===1440)win.maximize()},width)
   await navigate('/settings?scope=global&tab=appearance');await page.getByRole('button',{name:theme==='dark'?'深色':'浅色',exact:true}).click();await page.waitForFunction(theme=>document.documentElement.dataset.theme===theme,theme)
   for(const url of ['/personal','/project','/','/game','/video','/image','/document']){
-   await navigate(url);await page.locator('.settings').waitFor({state:'hidden'});await page.waitForFunction(()=>!!document.querySelector('.app__view')&&!document.querySelector('.page-enter-active,.page-leave-active'))
+   await navigate(url);await page.locator('.settings').waitFor({state:'hidden'});await page.waitForFunction(()=>!!document.querySelector('.app__view,.home')&&!document.querySelector('.page-enter-active,.page-leave-active'))
    assert.ok(await page.getByRole('button',{name:'设置',exact:true}).isVisible())
    await page.screenshot({path:path.join(output,`layout-${theme}-${width}-${url.slice(1)||'software'}.png`)})
    const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1);assert.equal(overflow,false,`${theme}/${width}/${url}: horizontal overflow`)

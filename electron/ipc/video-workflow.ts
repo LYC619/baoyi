@@ -2,15 +2,15 @@ import { app, dialog, nativeImage, shell, type BrowserWindow, type IpcMainInvoke
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { getDb, postersDir } from '../services/database.ts'
-import { getSettings, patchSettings } from '../services/settings-store.ts'
+import { getDb, postersDir } from '../services/storage/database.ts'
+import { getSettings, patchSettings } from '../services/storage/settings-store.ts'
 import { createVideoWorkflow } from '../kinds/video/download/workflow.ts'
 import { loadVideoSources, loadVideoWork } from '../kinds/video/download/sources.ts'
-import { transferHanimeMedia } from '../services/hanime-download.ts'
+import { transferHanimeMedia } from '../services/hanime/hanime-download.ts'
 import { videoTransferOptions } from '../kinds/video/download/options.ts'
 import { transferVideo } from '../kinds/video/download/transfer.ts'
 import { fetchHanimeResource } from '../kinds/video/hentai/hanime.ts'
-import { isHanimeHost } from '../services/hanime-network-rules.ts'
+import { isHanimeHost } from '../services/hanime/hanime-network-rules.ts'
 import { atomicWrite } from '../kinds/video/bundle.ts'
 import { getVideoWorkLibrary, relocateVideoAsset, setDefaultVideoAsset } from '../kinds/video/library.ts'
 import { syncVideoWorkFiles } from '../kinds/video/local-sync.ts'
@@ -24,10 +24,11 @@ import { resolveMissav } from '../kinds/video/discovery/missav.ts'
 import { downloadHls } from '../kinds/video/download/hls.ts'
 import { locateFfmpeg, validateFfmpeg } from '../kinds/video/download/ffmpeg.ts'
 import { registerDiscoveryIpc } from './video-discovery.ts'
-import { onlineFetch } from '../services/online-network.ts'
+import { onlineFetch } from '../services/network/online-network.ts'
 import { inspectDownloadCaches, clearDownloadCaches } from '../kinds/video/download/cache-management.ts'
 import {createVideoUpdateCheck} from '../kinds/video/update-check.ts'
 import {libraryRestoreInProgress} from './library-backup.ts'
+import { optBool, optRecord, optStringArray, reqId, reqRecord, reqString } from './validate.ts'
 
 /** 装成一个普通 Chrome。图床常带 Cloudflare 防盗链：缺 UA / Referer 直接 403。 */
 const POSTER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
@@ -39,7 +40,7 @@ function posterRequestHeaders(target: URL, referer?: string): Record<string, str
   return headers
 }
 
-export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, ipcMain: Pick<Electron.IpcMain, 'handle'>): { resetHistory: () => void } {
+export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, ipcMain: Pick<Electron.IpcMain, 'handle'>) {
   const assertMain = (event: IpcMainInvokeEvent) => {
     const win = getWindow()
     if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('只允许主窗口操作影视库')
@@ -111,16 +112,16 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     resolve:(code,signal)=>loadVideoWork(code,{signal}),jobs:allJobs,
     weekly:()=>({enabled:getSettings(getDb()).video_updates_weekly===true,last:getSettings(getDb()).video_updates_last_checked||0}),
     completed:time=>{patchSettings(getDb(), {video_updates_last_checked:time})},changed:()=>send('video-updates:changed',null)})
-  ipcMain.handle('video-updates:start',(event,ids,startup)=>{assertMain(event);return updates.start(ids,startup===true)})
+  ipcMain.handle('video-updates:start',(event,ids,startup)=>{assertMain(event);return updates.start(optStringArray(ids,'ids',{max:5000}),optBool(startup,'startup')===true)})
   ipcMain.handle('video-updates:status',event=>{assertMain(event);return updates.status()})
   ipcMain.handle('video-updates:cancel',event=>{assertMain(event);return updates.cancel()})
-  ipcMain.handle('video-workflow:prepare', (event, input) => { assertMain(event); return input?.discovery ? discovery.prepare(input.discovery) : workflow.prepare(input || {}) })
+  ipcMain.handle('video-workflow:prepare', (event, input) => { assertMain(event); const safe = optRecord(input, 'input') as any; return safe?.discovery ? discovery.prepare(safe.discovery) : workflow.prepare(safe || {}) })
   ipcMain.handle('video-workflow:pick-root', async (event, id: string) => {
-    assertMain(event)
+    assertMain(event); id = reqId(id)
     const result = await dialog.showOpenDialog(getWindow()!, { title: '选择影视库根目录', properties: ['openDirectory', 'createDirectory'] })
     return result.canceled || !result.filePaths[0] ? null : workerFor(id).setRoot(id, result.filePaths[0])
   })
-  ipcMain.handle('video-workflow:enqueue', (event, request: VideoEnqueueRequest) => { assertMain(event); return workerFor(request?.draftId).enqueue(request) })
+  ipcMain.handle('video-workflow:enqueue', (event, request: VideoEnqueueRequest) => { assertMain(event); const safe = reqRecord(request, 'request') as unknown as VideoEnqueueRequest; return workerFor(reqId(safe.draftId, 'request.draftId')).enqueue(safe) })
   ipcMain.handle('video-workflow:list', event => { assertMain(event); return allJobs().filter(visible) })
   ipcMain.handle('video-workflow:caches', event => {
     assertMain(event)
@@ -129,7 +130,7 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   })
   ipcMain.handle('video-workflow:clear-cache', async (event, id: string) => {
     assertMain(event)
-    const job = allJobs().find(job => job.id === id && visible(job))
+    const job = allJobs().find(job => job.id === reqId(id) && visible(job))
     if (!job) throw new Error('下载任务不存在或当前不可见')
     const before = inspectDownloadCaches(allJobs()).find(cache => cache.jobId === id)
     if (!before?.canClear) throw new Error(before?.reason || '没有可清理的缓存')
@@ -145,38 +146,38 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     if (!after?.canClear || JSON.stringify(after.directories) !== JSON.stringify(before.directories) || after.bytes !== before.bytes) throw new Error('缓存状态已变化，请刷新后重新确认')
     return { cleared: true, bytes: clearDownloadCaches(current, jobs) }
   })
-  ipcMain.handle('video-workflow:retry', (event, id: string, stage: VideoJobRetry) => { assertMain(event); return workerFor(id).retry(id, stage) })
-  ipcMain.handle('video-workflow:cancel', (event, id: string) => { assertMain(event); return workerFor(id).cancel(id) })
-  ipcMain.handle('video-workflow:dismiss', (event, id: string) => { assertMain(event); return workerFor(id).dismiss(id) })
+  ipcMain.handle('video-workflow:retry', (event, id: string, stage: VideoJobRetry) => { assertMain(event); const safeId = reqId(id); return workerFor(safeId).retry(safeId, reqString(stage, 'stage', { max: 64 }) as VideoJobRetry) })
+  ipcMain.handle('video-workflow:cancel', (event, id: string) => { assertMain(event); const safeId = reqId(id); return workerFor(safeId).cancel(safeId) })
+  ipcMain.handle('video-workflow:dismiss', (event, id: string) => { assertMain(event); const safeId = reqId(id); return workerFor(safeId).dismiss(safeId) })
   ipcMain.handle('video-workflow:reveal', async (event, id: string) => {
-    assertMain(event); const job = allJobs().find(job => job.id === id)
+    assertMain(event); const job = allJobs().find(job => job.id === reqId(id))
     if (!job || !job.directory || !fs.existsSync(job.directory)) return false
     return !(await shell.openPath(job.directory))
   })
-  ipcMain.handle('video:library', (event, id: string) => { assertMain(event); return getVideoLibrary(id) })
+  ipcMain.handle('video:library', (event, id: string) => { assertMain(event); return getVideoLibrary(reqId(id)) })
   ipcMain.handle('video:sync-files', (event, id: string) => {
     assertMain(event)
-    const result = syncVideoWorkFiles(getDb(), id, { roots: getSettings(getDb()).video_scan_dirs })
+    const result = syncVideoWorkFiles(getDb(), reqId(id), { roots: getSettings(getDb()).video_scan_dirs })
     return { ...result, library: getVideoLibrary(result.library.resourceId) }
   })
   ipcMain.handle('video:preview-collection-name', (event, id: string, title: string) => {
-    assertMain(event); return previewVideoCollectionName(getDb(), id, title, getSettings(getDb()).video_scan_dirs)
+    assertMain(event); return previewVideoCollectionName(getDb(), reqId(id), reqString(title, 'title', { max: 300 }), getSettings(getDb()).video_scan_dirs)
   })
   ipcMain.handle('video:rename-collection', (event, id: string, title: string) => {
     assertMain(event)
-    const result = renameVideoCollection(getDb(), id, title, getSettings(getDb()).video_scan_dirs)
+    const result = renameVideoCollection(getDb(), reqId(id), reqString(title, 'title', { max: 300 }), getSettings(getDb()).video_scan_dirs)
     send('video:library-changed', id)
     return result
   })
-  ipcMain.handle('video:default-asset', (event, episodeId: string, assetId: string) => { assertMain(event); return setDefaultVideoAsset(getDb(), episodeId, assetId) })
+  ipcMain.handle('video:default-asset', (event, episodeId: string, assetId: string) => { assertMain(event); return setDefaultVideoAsset(getDb(), reqId(episodeId, 'episodeId'), reqId(assetId, 'assetId')) })
   ipcMain.handle('video:reveal-asset', (event, assetId: string) => {
-    assertMain(event); const asset = getDb().prepare('SELECT path FROM video_assets WHERE id = ?').get(assetId) as { path: string } | undefined
+    assertMain(event); const asset = getDb().prepare('SELECT path FROM video_assets WHERE id = ?').get(reqId(assetId, 'assetId')) as { path: string } | undefined
     if (!asset || !fs.existsSync(asset.path)) return false
     shell.showItemInFolder(asset.path); return true
   })
   ipcMain.handle('video:relocate-asset', async (event, assetId: string) => {
     assertMain(event)
-    const asset = getDb().prepare('SELECT resource_id FROM video_assets WHERE id = ?').get(assetId) as { resource_id: string } | undefined
+    const asset = getDb().prepare('SELECT resource_id FROM video_assets WHERE id = ?').get(reqId(assetId, 'assetId')) as { resource_id: string } | undefined
     if (!asset) return false
     const result = await dialog.showOpenDialog(getWindow()!, { title: '重新定位视频文件', properties: ['openFile'], filters: [{ name: '视频', extensions: ['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'mpg', 'mpeg'] }] })
     if (result.canceled || !result.filePaths[0]) return false
@@ -184,7 +185,7 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   })
   ipcMain.handle('video:play-asset', async (event, assetId: string) => {
     assertMain(event)
-    const asset = getDb().prepare("SELECT * FROM video_assets WHERE id = ? AND role = 'video'").get(assetId) as { path: string; resource_id: string } | undefined
+    const asset = getDb().prepare("SELECT * FROM video_assets WHERE id = ? AND role = 'video'").get(reqId(assetId, 'assetId')) as { path: string; resource_id: string } | undefined
     if (!asset) return { ok: false, message: '视频文件记录不存在', item: null, episode: null }
     const item = getVideoItem(asset.resource_id)
     let exists = false; try { exists = fs.statSync(asset.path).isFile() } catch { /* Show missing state. */ }
@@ -198,5 +199,8 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     send('video:library-changed', asset.resource_id)
     return { ok: true, message: '', item: getVideoItem(asset.resource_id), episode: link ? getEpisode(getDb(), link.episode_id) : null }
   })
-  return { resetHistory: () => { workflow.clearHistory(); discovery.clearHistory() } }
+  return { resetHistory: () => { workflow.clearHistory(); discovery.clearHistory() }, stop: async () => {
+    for (const job of allJobs()) if (job.status === 'running' || job.status === 'queued') workerFor(job.id).cancel(job.id)
+    await Promise.all([updates.stop(), workflow.idle(), discovery.idle()])
+  } }
 }

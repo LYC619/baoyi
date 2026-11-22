@@ -2,7 +2,7 @@
 import { errorMessage } from '@/utils'
 import { computed, onMounted, ref } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
-import { parseProxyInput, serializeProxyInput } from '../../../electron/services/proxy-rules'
+import { parseProxyInput, serializeProxyInput } from '../../../electron/services/network/proxy-rules'
 import type { DiscoverySourceSummary } from '@/types/video-discovery'
 import { onlineProbeMessage } from '@/utils/online-probe'
 import '@/styles/workspace.css'

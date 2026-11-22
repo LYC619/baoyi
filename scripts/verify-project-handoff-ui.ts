@@ -4,7 +4,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ProjectLibrary } from '../electron/kinds/project/library.ts'
 import { ProjectLaunchProfiles } from '../electron/kinds/project/launch-profiles.ts'
@@ -61,17 +61,17 @@ async function check(name:string,action:()=>Promise<void>){console.log('RUN '+na
 async function notes(id=a.id){return page.evaluate((id:string)=>window.baoyi.workspace.timeline.context(id),id)}
 async function until(action:()=>Promise<boolean>){const end=Date.now()+15000;while(!await action()){if(Date.now()>end)throw new Error('UI state timeout');await new Promise(r=>setTimeout(r,80))}}
 try{
-  await open();await route('/project/'+a.id+'?tab=overview');await page.getByLabel('当前情况',{exact:true}).waitFor();await until(()=>page.getByLabel('当前情况',{exact:true}).isEnabled())
+  await open();await route('/project/'+a.id+'?tab=notes');await page.getByLabel('当前情况',{exact:true}).waitFor();await until(()=>page.getByLabel('当前情况',{exact:true}).isEnabled())
   await check('便签自动保存、切项 flush 与卡片摘要；Prompt 和规则保持',async()=>{
     await page.getByLabel('当前情况',{exact:true}).fill('已完成第一阶段');await page.getByLabel('下一步',{exact:true}).fill('从验收继续')
     await page.getByRole('button',{name:'展开关键 Prompt 与规则'}).click();await page.locator('textarea.prompt').fill('保留我的交接提示词')
     await page.getByLabel('规则相对路径').fill('README.md');await page.getByRole('button',{name:'添加',exact:true}).click()
-    await route('/project/'+b.id+'?tab=overview');await until(async()=>((await notes()).rules.length===1))
+    await route('/project/'+b.id+'?tab=notes');await until(async()=>((await notes()).rules.length===1))
     assert.equal((await notes()).prompt,'保留我的交接提示词');assert.equal((await notes(b.id)).current,'')
     await route('/project');const card=page.locator(`[data-project-id="${a.id}"]`);await card.waitFor();assert.match(await card.innerText(),/已完成第一阶段/)
   })
   await check('保存冲突保持输入；比较后主动采用自己的版本',async()=>{
-    await route('/project/'+a.id+'?tab=overview');await until(()=>page.getByLabel('当前情况',{exact:true}).isEnabled())
+    await route('/project/'+a.id+'?tab=notes');await until(()=>page.getByLabel('当前情况',{exact:true}).isEnabled())
     await app.evaluate(({ipcMain}:any)=>{const handlers=(ipcMain as any)._invokeHandlers,original=handlers.get('workspace:timeline:update-context');(globalThis as any).__save=original;handlers.set('workspace:timeline:update-context',()=>{throw new Error('隔离并发冲突')})})
     await page.getByLabel('下一步',{exact:true}).fill('我的未保存计划');await page.getByRole('alert').filter({hasText:'隔离并发冲突'}).waitFor()
     await route('/project/'+b.id);assert.match(await page.getByLabel('下一步',{exact:true}).inputValue(),/我的未保存计划/)
@@ -102,7 +102,7 @@ try{
     }
   })
   await check('便签快捷键、复制与规则状态；应用入口',async()=>{
-    await page.keyboard.press('Control+Shift+M');assert.equal(await page.getByLabel('下一步',{exact:true}).evaluate((e:any)=>e===document.activeElement),true)
+    await route('/project/'+a.id+'?tab=notes');await until(()=>page.getByLabel('下一步',{exact:true}).isEnabled());await page.keyboard.press('Control+Shift+M');assert.equal(await page.getByLabel('下一步',{exact:true}).evaluate((e:any)=>e===document.activeElement),true)
     await page.keyboard.press('Control+Enter');await page.getByRole('button',{name:'展开关键 Prompt 与规则',exact:false}).click()
     await page.getByRole('button',{name:'复制 Prompt',exact:true}).click()
     assert.equal(await app.evaluate(({clipboard}:any)=>clipboard.readText()),'保留我的交接提示词')
@@ -148,7 +148,7 @@ try{
     }
   })
   await check('冷启动保留便签与启动配置，不自动启动命令',async()=>{
-    await app.close();await open();await route('/project/'+a.id+'?tab=overview');await until(()=>page.getByLabel('当前情况',{exact:true}).isEnabled());assert.equal(await page.getByLabel('下一步',{exact:true}).inputValue(),'我的未保存计划')
+    await app.close();await open();await route('/project/'+a.id+'?tab=notes');await until(()=>page.getByLabel('当前情况',{exact:true}).isEnabled());assert.equal(await page.getByLabel('下一步',{exact:true}).inputValue(),'我的未保存计划')
     const profiles=await page.evaluate((id:string)=>window.baoyi.project.launch.profiles(id),a.id);assert.equal(profiles.length,2)
     assert.equal((await page.evaluate(()=>window.baoyi.project.launch.runs())).some((r:any)=>r.status==='running'),false)
   })

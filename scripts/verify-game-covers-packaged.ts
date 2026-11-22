@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { pngFixture } from './verify-game-covers-fixtures.ts'
 
@@ -16,7 +16,7 @@ const executable = path.resolve(process.argv[2] || 'release/0.8.0-integration-20
 assert.ok(fs.existsSync(executable))
 for (const marker of ['portable.txt', '绿色版.txt']) assert.ok(!fs.existsSync(path.join(path.dirname(executable), marker)))
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-game-package-'))
-const outputRoot = path.resolve(process.argv[3] || '.planning/ux-execution-20260908/packaged-ui')
+const outputRoot = path.resolve(process.argv[3] || 'output/game-covers-packaged')
 fs.mkdirSync(outputRoot, { recursive: true })
 const output = fs.mkdtempSync(path.join(outputRoot, 'game-'))
 const db = new DatabaseSync(path.join(profile, 'baoyi.db'))
@@ -130,7 +130,7 @@ try {
   assert.deepEqual(errors, [])
   const report = { executable, profile, output, checks, errors, limitations: ['All network responses are offline fixtures; official artwork availability and likeness are not asserted', 'No installed games or actual save directories were accessed; no launcher was executed'] }
   fs.writeFileSync(path.join(output, 'evidence.json'), JSON.stringify(report, null, 2))
-  if (!process.argv[3]) fs.writeFileSync(path.resolve('.planning/ux-execution-20260908/validation-logs/game-packaged.json'), JSON.stringify(report, null, 2))
+  if (!process.argv[3]) fs.writeFileSync(path.join(outputRoot, 'game-packaged.json'), JSON.stringify(report, null, 2))
   console.log(`Packaged game covers: ${checks.length} passed / 0 failed; evidence: ${output}`)
 } catch (error) {
   if (page) { await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {}); fs.writeFileSync(path.join(output, 'failure.json'), JSON.stringify({ checks, errors, error: String(error), text: await page.locator('body').innerText().catch(() => '') }, null, 2)) }

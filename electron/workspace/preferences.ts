@@ -1,4 +1,4 @@
-import type {SqlDb} from '../services/schema.ts'
+import type {SqlDb} from '../services/storage/schema.ts'
 import type {AIConfig,AIProfile} from '../../src/types/index.ts'
 import {DEFAULT_MODULE_PREFERENCES,type ModulePreferencesValue,type PreferenceModule} from '../../src/types/workspace.ts'
 import * as v from './validation.ts'

@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 import {getVideo,listEpisodes} from './db.ts'
 import {listVideoAssets} from './library.ts'
 import type {VideoDownloadJob} from '../../../src/types/video-workflow.ts'
@@ -15,6 +15,7 @@ export function createVideoUpdateCheck(deps:{db:SqlDb;hidden:()=>boolean;ready:(
   weekly:()=>{enabled:boolean;last:number};completed:(time:number)=>void;changed:()=>void}){
   let state:VideoUpdateState={running:false,checked:0,total:0,rows:[],finishedAt:0,cancelled:false}
   let controller:AbortController|undefined
+  let completion:Promise<void>|undefined
   const visible=(id:string)=>{const item=getVideo(deps.db,id);return item&&(!deps.hidden()||item.category!=='里番')?item:null}
   const sourceCode=(id:string)=>{const item=visible(id);if(!item||item.media_kind==='audio'||!['剧集','里番'].includes(item.category))return '';const code=item.hanime_id||(deps.db.prepare("SELECT external_id FROM video_sources WHERE resource_id=? AND provider='hanime' AND scope='work' LIMIT 1").get(id) as {external_id:string}|undefined)?.external_id||'';return /^\d{1,20}$/.test(code)?code:''}
   const status=():VideoUpdateState=>({...state,rows:state.rows.filter(row=>sourceCode(row.id)).map(row=>({...row}))})
@@ -54,7 +55,7 @@ export function createVideoUpdateCheck(deps:{db:SqlDb;hidden:()=>boolean;ready:(
     if(!selected.length){state={running:false,checked:0,total:0,rows:[],finishedAt:Date.now(),cancelled:false};deps.changed();return status()}
     const own=new AbortController();controller=own
     state={running:true,checked:0,total:selected.length,rows:[],finishedAt:0,cancelled:false};deps.changed()
-    void(async()=>{
+    completion=(async()=>{
       try{
         for(const id of selected){
           own.signal.throwIfAborted();if(!deps.ready())throw new Error('资料库正在恢复')
@@ -71,5 +72,5 @@ export function createVideoUpdateCheck(deps:{db:SqlDb;hidden:()=>boolean;ready:(
     })()
     return status()
   }
-  return {start,status,cancel(){controller?.abort();return status()}}
+  return {start,status,cancel(){controller?.abort();return status()},stop(){controller?.abort();return completion}}
 }

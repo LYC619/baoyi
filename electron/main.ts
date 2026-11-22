@@ -3,23 +3,27 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc/handlers'
+import { IpcActivity } from './ipc/main-window.ts'
+import { QuitCoordinator, stopServices } from './services/system/lifecycle.ts'
 import { finalizeGameSessions } from './kinds/game/service'
-import { closeDb, coversDir, getDb, iconsDir, postersDir } from './services/database'
-import { getSettings, patchSettings } from './services/settings-store.ts'
-import { interruptRunningTasks } from './services/task-records.ts'
-import { resolvePosterRequest } from './services/poster-protocol'
-import { initPortable } from './services/portable'
-import { initProxy, setHanimeHostsEnabled } from './services/proxy'
-import { buildHanimeHostResolverRules, pickStartupIp } from './services/hanime-network-rules'
-import { startHeartbeat } from './services/timing.ts'
+import { closeDb, coversDir, getDb, iconsDir, postersDir, readStartupNetworkSettings } from './services/storage/database'
+import { getSettings, patchSettings } from './services/storage/settings-store.ts'
+import { interruptRunningTasks } from './services/storage/task-records.ts'
+import { discoveryPoster, posterReferenced, posterResponse } from './services/media/poster-protocol'
+import { initPortable } from './services/storage/portable'
+import { initProxy, setHanimeHostsEnabled } from './services/network/proxy'
+import { buildHanimeHostResolverRules, pickStartupIp } from './services/hanime/hanime-network-rules'
+import { startHeartbeat } from './services/system/timing.ts'
 import { imageResponse } from './kinds/image/protocol.ts'
+import { closeImageThumbnails } from './kinds/image/thumbnails.ts'
 import { ImageFolderSync } from './kinds/image/folder-sync.ts'
 import { isWritingTo } from './kinds/image/downloads.ts'
 import {musicResponse} from './ipc/music.ts'
 import { audioResponse } from './kinds/video/audio-playback.ts'
 import {videoPreviewResponse,videoFrameResponse} from './ipc/video-preview.ts'
-import { BROWSER_CACHE_BUDGET } from './services/storage-usage.ts'
-import { archiveLibrarySnapshots } from './services/snapshot-archive.ts'
+import { BROWSER_CACHE_BUDGET } from './services/storage/storage-usage.ts'
+import { archiveLibrarySnapshots } from './services/storage/snapshot-archive.ts'
+import { isMainNavigation, isWebNavigation } from './services/network/web-browser-url.ts'
 
 // **必须排在最前面，不能挪进 whenReady。** 绿色版要把 userData 指到 exe 旁边，
 // 而下面的 requestSingleInstanceLock 会在 userData 里建锁文件、createWindow 会
@@ -31,18 +35,32 @@ const primaryInstance = app.requestSingleInstanceLock()
 let startupError: unknown = null
 let startupReady = false
 let archiveTimer: ReturnType<typeof setTimeout> | undefined
+let snapshotWork: Promise<void> | undefined
+let proxyWork: Promise<unknown> | undefined
 let imageSync:ImageFolderSync|undefined
+let ipc: ReturnType<typeof registerIpcHandlers> | undefined
+const activity = new IpcActivity()
+const quitting = new QuitCoordinator({
+  confirm: async () => ipc ? ipc.confirmQuit() : true,
+  stop: async () => {
+    clearTimeout(archiveTimer)
+    await stopServices(() => ipc ? ipc.stop() : activity.stop(), () => imageSync?.stop(), () => snapshotWork, () => proxyWork)
+    await closeImageThumbnails()
+  },
+  quit: () => app.quit(),
+  failed: cause => dialog.showErrorBox('尚未退出抱一', '后台任务未能安全停止，资料库仍保持打开。请重试退出。\n'+String(cause))
+})
 
 // 必须在 app ready 前设置：Chromium 只会在网络栈初始化时读取这项，之后追加不认
 // （scripts 里做过实验）。这让 Hanime 直连请求也能绕开受污染的系统 DNS；代理模式
 // 仍由 session.setProxy 决定。用户关掉内置 Hosts 后走系统 DNS，改动要重启才到这一层。
-// 这里读设置会提前把库打开 —— initPortable 已经排在前面，位置是对的；读不到就按开启处理。
+// 就绪前只读网络启动选项；资料库升级和密钥处理等系统加密服务就绪后再做。
 // 启动地址用上次运行时回退通了的那个（记在设置里），没有就是地址池第一个：
 // 第一个地址死了的话，验证窗口和下载都跟着死，只有换启动地址才救得回来。
 const hanimeStartup = (() => {
   if (!primaryInstance) return { enabled: false, ip: pickStartupIp() }
   try {
-    const s = getSettings(getDb())
+    const s = readStartupNetworkSettings()
     return { enabled: s.hanime_builtin_hosts !== false, ip: pickStartupIp(s.hanime_hosts_active_ip) }
   } catch (cause) { startupError = cause; return { enabled: false, ip: pickStartupIp() } }
 })()
@@ -54,7 +72,9 @@ setHanimeHostsEnabled(hanimeStartup.enabled, {
 
 const APP_ROOT = path.join(__dirname, '..')
 const RENDERER_DIST = path.join(APP_ROOT, 'dist')
-const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
+const DEV_SERVER_URL = !app.isPackaged && process.env.VITE_DEV_SERVER_URL
+const rendererFile = path.join(RENDERER_DIST, 'index.html')
+const rendererEntry = DEV_SERVER_URL ? new URL(DEV_SERVER_URL) : pathToFileURL(rendererFile)
 
 let mainWindow: BrowserWindow | null = null
 const getWindow = () => mainWindow
@@ -78,19 +98,10 @@ const PROTOCOL_DIRS: Record<string, () => string> = {
   cover: coversDir
 }
 
-/** 库里是不是记着这条路径。海报协议放行的第三类（片子旁边的 poster.jpg 这种用户文件）靠它 */
-function posterReferenced(file: string): boolean {
-  try {
-    const slashed = file.split('\\').join('/')
-    return !!getDb().prepare(
-      `SELECT 1 FROM video_meta WHERE poster_path IN (?, ?) COLLATE NOCASE OR thumbnail_path IN (?, ?) COLLATE NOCASE
-       UNION SELECT 1 FROM episode WHERE poster_path IN (?, ?) COLLATE NOCASE OR thumbnail_path IN (?, ?) COLLATE NOCASE LIMIT 1`
-    ).get(file, slashed, file, slashed, file, slashed, file, slashed)
-  } catch { return false }
-}
-
 function registerFileProtocol(): void {
-  protocol.handle('baoyi', async (request) => {
+  protocol.handle('baoyi', request => activity.unavailable
+    ? new Response(null, {status:503, headers:{'Cache-Control':'no-store'}})
+    : activity.run(async () => {
     const url = new URL(request.url)
     if (url.hostname === 'image') return imageResponse(url)
     if (url.hostname === 'online-music') return musicResponse(request)
@@ -99,9 +110,10 @@ function registerFileProtocol(): void {
     if (url.hostname === 'video-frame') return videoFrameResponse(request)
     // 海报按完整路径取（?p=），放行规则见 poster-protocol.ts；图标和封面仍按文件名在各自目录里找
     if (url.hostname === 'poster') {
-      const file = resolvePosterRequest(request.url, { postersDir: postersDir(), isReferenced: posterReferenced })
-      if (!file || !fs.existsSync(file)) return new Response('Not Found', { status: 404 })
-      return net.fetch(pathToFileURL(file).toString())
+      const db=getDb(), hideHentai=getSettings(db).hide_hentai
+      return posterResponse(request.url,{postersDir:postersDir(),hideHentai,isReferenced:file=>posterReferenced(db,file,hideHentai),
+        discoveryFile:(source,entry)=>discoveryPoster(db,source,entry,hideHentai)},
+        async file=>fs.existsSync(file)?net.fetch(pathToFileURL(file).href):new Response(null,{status:404}))
     }
     const resolveDir = PROTOCOL_DIRS[url.hostname]
     if (!resolveDir) return new Response('Not Found', { status: 404 })
@@ -112,7 +124,7 @@ function registerFileProtocol(): void {
     const file = path.join(resolveDir(), name)
     if (!fs.existsSync(file)) return new Response('Not Found', { status: 404 })
     return net.fetch(pathToFileURL(file).toString())
-  })
+  }))
 }
 
 function createWindow(): void {
@@ -131,23 +143,36 @@ function createWindow(): void {
     minHeight: 640,
     show: false,
     frame: false,
-    backgroundColor: theme === 'light' ? '#F8F9FC' : '#1E1E2E',
+    backgroundColor: theme === 'light' ? '#fbfbfd' : '#15151c',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   })
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('close', event => {
+    if (process.platform !== 'darwin' || ipc?.projectBusy()) void quitting.beforeQuit(event)
+  })
   mainWindow.on('closed', () => (mainWindow = null))
   mainWindow.on('maximize', () => mainWindow?.webContents.send('win:maximize-change', true))
   mainWindow.on('unmaximize', () => mainWindow?.webContents.send('win:maximize-change', false))
 
-  // 外链一律交给系统浏览器，不在应用内开新窗口
+  const openExternal = (url: string) => {
+    if (isWebNavigation(url)) void shell.openExternal(url).catch(cause => console.error('[打开外链]', cause))
+  }
+  const guardNavigation = (event: Electron.Event, url: string) => {
+    if (isMainNavigation(url, rendererEntry)) return
+    event.preventDefault()
+    openExternal(url)
+  }
+  mainWindow.webContents.on('will-navigate', event => guardNavigation(event, event.url))
+  mainWindow.webContents.on('will-redirect', event => { if (event.isMainFrame) guardNavigation(event, event.url) })
+  mainWindow.webContents.on('will-attach-webview', event => event.preventDefault())
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+    openExternal(url)
     return { action: 'deny' }
   })
 
@@ -155,7 +180,7 @@ function createWindow(): void {
     void mainWindow.loadURL(DEV_SERVER_URL)
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   } else {
-    void mainWindow.loadFile(path.join(RENDERER_DIST, 'index.html'))
+    void mainWindow.loadFile(rendererFile)
   }
 }
 
@@ -170,15 +195,16 @@ if (!primaryInstance) {
 
   void app.whenReady().then(() => {
     if (startupError) throw startupError
+    if (quitting.stopping) return
     // 默认是空操作，只有带 BAOYI_TIMING=1 起才真的跑
     startHeartbeat()
 
     registerFileProtocol()
     interruptRunningTasks(getDb())
-    registerIpcHandlers(getWindow)
+    ipc = registerIpcHandlers(getWindow, activity)
     // 代理不 await：它只影响联网刮削，拦住建窗口不值得。里面自己吞异常 ——
     // 填错一个代理地址不该变成「应用打不开」
-    void initProxy(() => getSettings(getDb()).proxy)
+    proxyWork = initProxy(() => getSettings(getDb()).proxy)
     createWindow()
     imageSync=new ImageFolderSync(getDb,()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('image:changed')},isWritingTo)
     imageSync.start()
@@ -186,7 +212,7 @@ if (!primaryInstance) {
     startupReady = true
     // Immutable older recovery points can be compressed after the window is usable.
     archiveTimer = setTimeout(() => {
-      void archiveLibrarySnapshots(app.getPath('userData')).then(result => {
+      snapshotWork = archiveLibrarySnapshots(app.getPath('userData')).then(result => {
         for (const warning of result.warnings) console.warn('[抱一] 快照整理：' + warning)
       }).catch(cause => console.warn('[抱一] 快照整理未完成，原件保留：', cause))
     }, 5000)
@@ -204,14 +230,12 @@ if (!primaryInstance) {
   })
 
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit()
+    if (!quitting.stopping && process.platform !== 'darwin') app.quit()
   })
 
+  app.on('before-quit', event => { void quitting.beforeQuit(event) })
   app.on('will-quit', () => {
-    imageSync?.stop()
-    if (archiveTimer) clearTimeout(archiveTimer)
-    // 顺序是硬要求：结算要写库，得赶在库关掉之前。所以这两件事放在同一个处理器里
-    // 按顺序写，而不是分成两个 app.on —— 那样就依赖注册顺序了。
+    // No renderer or background writer remains. Game sessions are the final DB writes.
     if (startupReady) finalizeGameSessions()
     closeDb()
   })

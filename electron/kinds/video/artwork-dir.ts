@@ -14,7 +14,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 
 const ARTWORK = ['.baoyi', 'artwork']
 

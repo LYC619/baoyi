@@ -1,7 +1,7 @@
 /** Isolated SQLite coverage for settings taxonomy; no real files or user database. */
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { imageTagCounts, renameImageTag } from '../electron/kinds/image/tags.ts'
 import { videoTaxonomy, editVideoTaxonomy } from '../electron/kinds/video/taxonomy-settings.ts'

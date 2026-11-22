@@ -138,7 +138,7 @@ def network(jm, proxies, api_host):
                         raise AdapterError('network', '漫画来源连接失败，请检查代理或稍后重试')
 
         def post(self, url, **kwargs):
-            raise AdapterError('method', '漫画摄入仅使用来源读取接口')
+            raise AdapterError('method', '漫画下载仅使用来源读取接口')
 
         def fetch(self, url, output=None, image=False, max_bytes=None, **kwargs):
             check_cancel()

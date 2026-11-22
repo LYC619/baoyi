@@ -1,12 +1,12 @@
-import { parseJsonArray } from '../../services/json.ts'
+import { parseJsonArray } from '../../services/system/json.ts'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { readExternalActiveAt } from '../../services/activity.ts'
-import { insertCategories, insertTag } from '../../services/schema.ts'
-import { FALLBACK_CATEGORY } from '../../services/taxonomy.ts'
+import { readExternalActiveAt } from '../../services/storage/activity.ts'
+import { insertCategories, insertTag } from '../../services/storage/schema.ts'
+import { FALLBACK_CATEGORY } from '../../services/taxonomy/taxonomy.ts'
 import type { Category, ConfirmResult, Launcher, MoveRisk, PendingItem, RegisterPayload, ScannedFile, SidebarCounts, SoftwareItem, SoftwareQuery } from '../../../src/types/index.ts'
-import { listCategories, tagPool, pruneOrphanAiTags } from '../../services/taxonomy-store.ts'
-import type { SqlDb } from '../../services/schema.ts'
+import { listCategories, tagPool, pruneOrphanAiTags } from '../../services/taxonomy/taxonomy-store.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import { transaction } from '../../workspace/validation.ts'
 
 type Row = Record<string, any>

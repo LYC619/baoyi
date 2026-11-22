@@ -1,4 +1,4 @@
-import type { SqlDb } from '../../../services/schema.ts'
+import type { SqlDb } from '../../../services/storage/schema.ts'
 import type { VideoDownloadJob } from '../../../../src/types/video-workflow.ts'
 import path from 'node:path'
 

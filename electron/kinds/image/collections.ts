@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { ImageCollection, ImageItem } from '../../../src/types/image.ts'
 export function imageCollections(db: SqlDb): ImageCollection[] {
   return (db.prepare(`SELECT * FROM image_collections c WHERE EXISTS(SELECT 1 FROM image_collection_members m WHERE m.collection_id=c.id)

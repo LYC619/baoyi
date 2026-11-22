@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema, SCHEMA_KEY, SCHEMA_VERSION } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_KEY, SCHEMA_VERSION } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
-import { APP_VERSION_KEY } from '../electron/services/library-snapshots.ts'
+import { APP_VERSION_KEY } from '../electron/services/storage/library-snapshots.ts'
 import { seedImageLibrary } from './helpers/image-library-fixture.ts'
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+import { loadPlaywright } from './helpers/playwright.ts'
+const { _electron } = loadPlaywright() as any
 const packedExecutable = process.argv[2]
 const sourceSchema=Number(process.argv[3]||12)
 assert.ok([11,12].includes(sourceSchema))

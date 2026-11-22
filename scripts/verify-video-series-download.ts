@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import os from 'node:os'
+import { mkdtempSync, rmSync } from 'node:fs'
+const tmpSeriesDownloads = mkdtempSync(path.join(os.tmpdir(), 'baoyi-series-dl-'))
+process.on('exit', () => { try { rmSync(tmpSeriesDownloads, { recursive: true, force: true }) } catch {} })
 import { transferVideo } from '../electron/kinds/video/download/transfer.ts'
 
 const sourceModule: any = await import('../electron/kinds/video/download/sources.ts').catch(e => {
@@ -55,9 +58,9 @@ function harness(extra: Record<string, unknown> = {}) {
         { url: 'https://cdn.test/' + code + '-720.mp4', label: '720p', extension: 'mp4' }
       ], warnings: [] }
     },
-    downloadsDirectory: () => path.resolve('series-downloads'),
-    chooseDirectory: async () => { directories.push(true); return path.resolve('series-downloads') },
-    chooseFile: async () => path.resolve('series-downloads/single.mp4'),
+    downloadsDirectory: () => tmpSeriesDownloads,
+    chooseDirectory: async () => { directories.push(true); return tmpSeriesDownloads },
+    chooseFile: async () => path.join(tmpSeriesDownloads, 'single.mp4'),
     transfer: async (options: any) => {
       order.push('transfer:' + path.basename(options.destination))
       transfers.push(options)

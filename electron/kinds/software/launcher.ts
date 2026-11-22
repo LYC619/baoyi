@@ -1,4 +1,4 @@
-import { getDb } from '../../services/database'
+import { getDb } from '../../services/storage/database'
 import { shell } from 'electron'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -61,5 +61,5 @@ export async function launchSoftware(id: string, launcherPath?: string): Promise
 
 export function revealInFolder(id: string, launcherPath?: string): void {
   const item = getSoftware(getDb(), id)
-  if (item) shell.showItemInFolder(resolveTarget(item, launcherPath))
+  if (!item) throw new Error('未找到该软件记录'); const target = resolveTarget(item, launcherPath); if (!target || !fs.existsSync(target)) throw new Error('未找到程序文件，可能已被移动或所在磁盘未连接'); shell.showItemInFolder(target)
 }

@@ -1,4 +1,4 @@
-import type { SqlDb } from '../services/schema.ts'
+import type { SqlDb } from '../services/storage/schema.ts'
 import type { AgentTool } from '../services/agent/loop.ts'
 import type { ProjectSession, ProjectItem, ProjectRepositoryState } from '../../src/types/project.ts'
 import { projectHistory, projectCommit } from './project-history.ts'

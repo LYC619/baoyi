@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
+import { loadPlaywright, electronTestEnv } from './helpers/playwright.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { ImageLibrary } from '../electron/kinds/image/library.ts'
 import { PicacomicSource } from '../electron/kinds/image/source.ts'
@@ -11,8 +11,7 @@ import { createImageDownloads } from '../electron/kinds/image/downloads.ts'
 import { pngImage } from './helpers/test-images.ts'
 import { inspectImage } from '../electron/kinds/image/metadata.ts'
 
-const require = createRequire(import.meta.url)
-const { _electron } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const { _electron } = loadPlaywright()
 const packedExecutable = process.argv[2]
 const executable = path.resolve(packedExecutable || 'node_modules/electron/dist/electron.exe')
 const output = path.resolve('output/image-optimization/integrity-ui' + (packedExecutable ? '-packaged' : '')); fs.mkdirSync(output, { recursive: true })
@@ -27,7 +26,7 @@ await queue.enqueue({ id: 'fixture', title: '完整性检查样本', author: '',
 await queue.idle(); assert.equal(queue.list()[0].status, 'success')
 const library = new ImageLibrary(db), item = library.list()[0], pages = library.pages(item.id)
 fs.unlinkSync(pages[1].file); fs.writeFileSync(pages[2].file, pngImage(320, 480, [9, 8, 7])); db.close()
-const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL
+const env = electronTestEnv()
 const app = await _electron.launch({ executablePath: executable, args: [...(packedExecutable ? [] : [path.resolve('.')]), '--user-data-dir=' + profile, '--disable-gpu'], env, timeout: 30000 })
 try {
   assert.equal(path.resolve(await app.evaluate(({ app }: any) => app.getPath('userData'))), profile)
@@ -37,6 +36,7 @@ try {
   const errors: string[] = []; page.on('pageerror', (error: Error) => errors.push(error.message))
   await page.waitForFunction(() => !!window.baoyi?.image)
   await page.evaluate((id: string) => { location.hash = '/image/' + id }, item.id)
+  await page.getByRole('tab', { name: '文件管理', exact: true }).click()
   await page.getByRole('button', { name: '检查完整性', exact: true }).click()
   await page.getByLabel('文件检查结果').waitFor()
   assert.match(await page.getByLabel('文件检查结果').innerText(), /正常\s*1/)

@@ -7,6 +7,7 @@ const { text, clear } = useSearch()
 const input = ref<HTMLInputElement | null>(null)
 
 function onKeydown(e: KeyboardEvent): void {
+  if (e.isComposing || document.querySelector?.('dialog[open]')) return
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault()
     input.value?.focus()

@@ -32,9 +32,9 @@ import { str } from '../../services/agent/values.ts'
  */
 
 import type { AgentTool } from '../../services/agent/loop.ts'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { SearchConfig, TmdbConfig, VideoPart } from '../../../src/types'
-import { formatHits, search, searchCached } from '../../services/searchService.ts'
+import { formatHits, search, searchCached } from '../../services/network/searchService.ts'
 import type { EpisodePayload, VideoPayload } from './db.ts'
 import { registerVideoIdentification } from './registration.ts'
 import { doubanLookup, doubanQuery, doubanUrl, type DoubanCandidate } from './douban.ts'

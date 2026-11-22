@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmDialog } from '@/composables/useDialog'
 import { computed, ref } from 'vue'
 import { Eye, EyeOff, Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
@@ -154,7 +155,7 @@ async function removeProfile(): Promise<void> {
   const p = activeProfile.value
   if (!p) return
   // confirm 在 Electron 里是能用的（prompt 才是空实现），删除这种不可逆操作值得拦一道
-  if (!window.confirm(`删除配置「${p.name}」？\n\n当前填在表单里的接口不会被清掉。`)) return
+  if (!(await confirmDialog({ title: `删除模型预设「${p.name}」？`, message: '当前表单里已填写的连接信息不会被清空。', confirmText: '删除预设', tone: 'danger' }))) return
   await settings.patch({
     ai_profiles: profiles.value.filter((x) => x.id !== p.id),
     ai_profile_id: ''
@@ -310,7 +311,7 @@ async function loadModels(): Promise<void> {
   </p>
 
   <p class="sec-desc sec-desc--foot">
-    需要一个<b>支持 function calling</b> 的模型，兼容 OpenAI 格式的服务商都能用。
+    需要<b>支持工具调用</b>的模型，兼容 OpenAI 接口格式的服务商均可使用。
     deepseek-chat、qwen-plus、gpt-4o-mini 都够用。
     「测试连接」会真的发一次工具调用来验证，而不只是看能不能连通 ——
     模型列表里哪些支持工具调用，接口不会告诉你，挑完还是得测一次。

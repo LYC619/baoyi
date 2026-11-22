@@ -1,4 +1,4 @@
-import type { SqlDb } from '../services/schema.ts'
+import type { SqlDb } from '../services/storage/schema.ts'
 import type { AIConfig } from '../../src/types/index.ts'
 import { createHash } from 'node:crypto'
 import { collectEvidence } from './evidence.ts'

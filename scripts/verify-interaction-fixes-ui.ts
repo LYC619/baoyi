@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {ProjectLibrary} from '../electron/kinds/project/library.ts'
 import {inspectProject} from '../electron/kinds/project/scanner.ts'
@@ -99,8 +99,8 @@ try{
   })
   await check('清理暂存前出现不可撤销提示，取消不调用，确认后才调用',async()=>{
     const clean=page.getByRole('button',{name:'停止并清理暂存',exact:true}).first();await clean.waitFor()
-    let text='';page.once('dialog',async dialog=>{text=dialog.message();await dialog.dismiss()});await clean.click();assert.match(text,/将删除已下载的临时图片文件.*不可撤销/);assert.equal((await stats()).cleaned.length,0)
-    page.once('dialog',async dialog=>{await dialog.accept()});await clean.click();assert.equal((await stats()).cleaned.length,1);await page.getByLabel('关闭在线漫画').click()
+    await clean.click();await page.locator('.app-dialog[open]').waitFor();const text=await page.locator('.app-dialog__message').innerText();assert.match(text,/将删除已下载的临时图片文件.*不可撤销/);await page.locator('.app-dialog [data-dialog-cancel]').click();assert.equal((await stats()).cleaned.length,0)
+    await clean.click();await page.locator('.app-dialog [data-dialog-confirm]').click();await page.waitForFunction(async()=>((await (window as any).baoyi.comic.jobs())||true)&&true);for(let i=0;i<20&&(await stats()).cleaned.length<1;i++)await new Promise(r=>setTimeout(r,50));assert.equal((await stats()).cleaned.length,1);await page.getByLabel('关闭在线漫画').click()
   })
   await check('多版本悬停使用首版本展示代表帧，列表试看图标尺寸统一',async()=>{
     await route('/video');const card=page.locator('article.card').filter({hasText:'合成多版本影片'});await card.locator('.card__poster').hover();await page.locator('.video-hover-picture').waitFor();assert.equal((await stats()).videoOpened.at(-1),'1080p');assert.equal(await card.locator('.card__frame,input[type=range]').count(),0);const frame=await page.locator('.video-hover-picture').boundingBox();assert.ok(frame&&Math.abs(frame.width/frame.height-16/9)<0.02);await page.screenshot({path:path.join(output,'video-hover.png')})

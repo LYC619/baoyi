@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createPinia } from 'pinia'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import * as videoDb from '../electron/kinds/video/db.ts'
 import { registerVideoContent } from '../electron/kinds/video/registration.ts'
@@ -32,11 +32,11 @@ function serviceFixture() {
   const load = createRendererLoader({
     'node:fs': { ...io, default: io }, 'node:path': { ...path, default: path },
     electron: { app: { getPath: () => root }, net: {}, shell: {} },
-    '../../services/database.ts': { getDb: () => db, postersDir: () => path.join(root, 'posters') },
-    '../../services/settings-store.ts': { getSettings: () => ({ hide_hentai: false, ai: {}, search: {}, tmdb: {} }) },
-    '../../services/taxonomy-store.ts': { listCategories: () => [], tagPool: () => [] },
-    '../../services/identify-records.ts': { saveIdentifyLog: () => {} },
-    './db.ts': videoDb, './tmdb.ts': {}, './hentai/hanime.ts': {}, './mediainfo.ts': {}, '../../services/searchService.ts': {}, './tools.ts': {}, '../../services/agent/loop.ts': {}
+    '../../services/storage/database.ts': { getDb: () => db, postersDir: () => path.join(root, 'posters') },
+    '../../services/storage/settings-store.ts': { getSettings: () => ({ hide_hentai: false, ai: {}, search: {}, tmdb: {} }) },
+    '../../services/taxonomy/taxonomy-store.ts': { listCategories: () => [], tagPool: () => [] },
+    '../../services/storage/identify-records.ts': { saveIdentifyLog: () => {} },
+    './db.ts': videoDb, './tmdb.ts': {}, './hentai/hanime.ts': {}, './mediainfo.ts': {}, '../../services/network/searchService.ts': {}, './tools.ts': {}, '../../services/agent/loop.ts': {}
   }, { Buffer, URL, AbortController, AbortSignal, setTimeout, clearTimeout })
   const service = load('electron/kinds/video/service.ts') as typeof import('../electron/kinds/video/service.ts')
   return { root, db, file, work, service, imageReads, syncReads: () => syncReads }

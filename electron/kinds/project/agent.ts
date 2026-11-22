@@ -1,6 +1,6 @@
 import {ModulePreferences} from '../../workspace/preferences.ts'
 import {randomUUID,createHash} from 'node:crypto'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 import type {AIConfig} from '../../../src/types/index.ts'
 import type {ProjectItem,ProjectPatch,ProjectPreferences,ProjectSession,ProjectMessage} from '../../../src/types/project.ts'
 import {PROJECT_SOURCES,PROJECT_STATES,PROJECT_TABS} from '../../../src/types/project.ts'
@@ -47,6 +47,8 @@ interface Options {db:SqlDb;config:()=>AIConfig;run?:typeof runAgent;changed?:(s
 export function createProjectAgent(options:Options) {
   const {db}=options,library=new ProjectLibrary(db),active=new Map<string,AbortController>(),jobs=new Map<string,AbortController>()
   let disposed=false
+  const pending=new Set<Promise<unknown>>()
+  function background(task:Promise<unknown>){pending.add(task);void task.catch(error=>console.error('[项目助手]',error)).finally(()=>pending.delete(task))}
   const cache=new Map<string,ProjectSession>()
   const get=(id:string):ProjectSession|null=>{if(disposed)return cache.get(id)||null;const row=db.prepare('SELECT payload FROM project_sessions WHERE id=?').get(id) as {payload:string}|undefined;const session:ProjectSession|null=row?JSON.parse(row.payload):null;if(session)cache.set(id,session);return session}
   const save=(session:ProjectSession)=>{
@@ -164,7 +166,7 @@ export function createProjectAgent(options:Options) {
       }catch(error){const current=get(session.id)!;current.status='failed';current.error=(error as Error).message;if(current.workflow)current.workflow.state='paused';save(current);if(!disposed)options.paused?.(current)}
       finally{jobs.delete(session.id)}
     }
-    void work().catch(error=>{const current=get(session.id)!;current.status='failed';current.error=(error as Error).message;if(current.workflow)current.workflow.state='paused';jobs.delete(session.id);save(current)})
+    background(work().catch(error=>{const current=get(session.id)!;current.status='failed';current.error=(error as Error).message;if(current.workflow)current.workflow.state='paused';jobs.delete(session.id);save(current)}))
     return get(session.id)!
   }
   function organize(projectId:string,after?:string){
@@ -191,11 +193,11 @@ export function createProjectAgent(options:Options) {
     const sources=new ProjectSummaries(db).sources(projectId,kind,key);if(!sources.events.length)throw new Error('此分组没有原始记录')
     const config=options.config();if(!config.enabled||!config.api_key?.trim()||!config.api_url?.trim()||!config.model?.trim())throw new Error('请在全局设置中启用并配置模型')
     const session=create(projectId);session.summary={kind,key};session.title=`${kind==='day'?'日':kind==='week'?'周':'版本'}摘要 · ${key||'未标记版本'}`;save(session)
-    void send(session.id,`请为分组 ${JSON.stringify({kind,key})} 生成并保存摘要。使用 read_project_summary_sources 完整分页读取对应的原始事件和提交依据，需要时核对提交。不以其他摘要代替原始记录，不重复调用 record_project_event 写入日志。保留限制条件，区分代码变更、发布和实测通过，不臆测动机。读完后调用 save_project_summary 保存实际摘要。若已人工修订则保留它，只在会话中说明。`).catch(error=>{session.status='failed';session.error=(error as Error).message;save(session)})
+    background(send(session.id,`请为分组 ${JSON.stringify({kind,key})} 生成并保存摘要。使用 read_project_summary_sources 完整分页读取对应的原始事件和提交依据，需要时核对提交。不以其他摘要代替原始记录，不重复调用 record_project_event 写入日志。保留限制条件，区分代码变更、发布和实测通过，不臆测动机。读完后调用 save_project_summary 保存实际摘要。若已人工修订则保留它，只在会话中说明。`).catch(error=>{session.status='failed';session.error=(error as Error).message;save(session)}))
     return get(session.id)!
   }
   return {get,list,create,send,apply,recordImport,organize,resumeOrganize,selectRepository,summarize,
-    dispose:()=>{disposed=true;for(const controller of jobs.values())controller.abort();for(const controller of active.values())controller.abort()},
+    dispose:async()=>{disposed=true;for(const controller of jobs.values())controller.abort();for(const controller of active.values())controller.abort();await Promise.all(pending)},
     undoEvent:(projectId:string,eventId:string)=>{const result=new AgentJournal(db).undo(projectId,eventId);options.updated?.();return result},
     undoBatch:(projectId:string,sessionId:string,apply=false)=>{const result=new AgentJournal(db).undoBatch(projectId,sessionId,apply);if(apply)options.updated?.();return result},
     cancel:(id:string)=>{jobs.get(id)?.abort();active.get(id)?.abort()},busy:()=>active.size>0||jobs.size>0}

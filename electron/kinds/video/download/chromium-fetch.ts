@@ -1,1 +1,1 @@
-export { createChromiumDownloadFetch } from '../../../services/chromium-download-fetch.ts'
+export { createChromiumDownloadFetch } from '../../../services/network/chromium-download-fetch.ts'

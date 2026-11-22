@@ -14,10 +14,13 @@ import LibraryBulkPanel from '@/components/library/LibraryBulkPanel.vue'
 import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
 import ProjectImport from '@/components/project/ProjectImport.vue'
 import ProjectDialog from '@/components/project/ProjectDialog.vue'
+import { useFileDrop } from '@/composables/useFileDrop'
+import DropZoneOverlay from '@/components/ui/DropZoneOverlay.vue'
 import '@/styles/project.css'
 
 const store = useProjectStore(), router = useRouter(), { error: toastError, success } = useToast()
-const importer = ref(false), history = ref(false), records = ref<ProjectMoveRecord[]>([]), busy = ref(false), bulkBusy = ref(false)
+const importer = ref(false), droppedProjectPaths = ref<string[]>([]), history = ref(false), records = ref<ProjectMoveRecord[]>([]), busy = ref(false), bulkBusy = ref(false)
+const { dragging: dropActive, dropHandlers } = useFileDrop((paths) => { if (!paths.length) return; droppedProjectPaths.value = paths; importer.value = true }, { disabled: () => importer.value || history.value || bulkBusy.value })
 const scroll = ref<HTMLElement>(), searchInput = ref<HTMLInputElement>()
 const selection = useLibrarySelection(() => store.shown, () => bulkBusy.value)
 const { selecting, selectedIds } = selection
@@ -38,18 +41,21 @@ async function bulkCompleted(failedIds: string[]) { selectedIds.value = new Set(
 async function open(item: ProjectItem,entryId?:string) { if(opening.value.has(item.id))return;opening.value.add(item.id);try { await window.baoyi.project.open(item.id,entryId) } catch (e) { toastError(errorMessage(e)) } finally{opening.value.delete(item.id)} }
 function openChoice(item:ProjectItem,event:Event){const input=event.target as HTMLSelectElement;if(input.value)void open(item,input.value);input.value=''}
 async function pin(item: ProjectItem) { try { await window.baoyi.project.update(item.id, { pinned: !item.pinned }); await store.refresh() } catch (e) { toastError(errorMessage(e)) } }
+async function revealProject(item: ProjectItem) { try { await window.baoyi.project.reveal(item.id) } catch (e) { toastError(errorMessage(e)) } }
 async function showHistory() { try { records.value = await window.baoyi.project.moveRecords(); history.value = true } catch (e) { toastError(errorMessage(e)) } }
 async function recover(id: string) { busy.value = true; try { success(await window.baoyi.project.recoverMove(id)); records.value = await window.baoyi.project.moveRecords(); await store.refresh() } catch (e) { toastError(errorMessage(e)) } finally { busy.value = false } }
 function key(event: KeyboardEvent) { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && !importer.value && !history.value) { event.preventDefault(); searchInput.value?.focus() } }
-onMounted(async () => { document.addEventListener('keydown', key); await store.refresh(); await nextTick(); if (scroll.value) scroll.value.scrollTop = recallScroll('project') })
-onBeforeUnmount(() => { document.removeEventListener('keydown', key); rememberScroll('project', scroll.value?.scrollTop || 0) })
-const gitClock=ref(Date.now()),gitTimer=setInterval(()=>gitClock.value=Date.now(),1000)
-onBeforeUnmount(()=>clearInterval(gitTimer))
+const gitClock = ref(Date.now())
+function syncGitClock() { if (typeof document === 'undefined' || !document.hidden) gitClock.value = Date.now() }
+const gitTimer = setInterval(syncGitClock, 30000)
+onMounted(async () => { document.addEventListener('keydown', key); window.addEventListener('focus', syncGitClock); document.addEventListener('visibilitychange', syncGitClock); await store.refresh(); await nextTick(); if (scroll.value) scroll.value.scrollTop = recallScroll('project') })
+onBeforeUnmount(() => { clearInterval(gitTimer); document.removeEventListener('keydown', key); window.removeEventListener('focus', syncGitClock); document.removeEventListener('visibilitychange', syncGitClock); rememberScroll('project', scroll.value?.scrollTop || 0) })
 async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refresh:true});await store.refresh()}catch(e){toastError(errorMessage(e))}}
 </script>
 
 <template>
-  <div class="pj-home" @keydown="selection.key">
+  <div class="pj-home" v-on="dropHandlers" @keydown="selection.key">
+    <DropZoneOverlay :active="dropActive" title="松开以添加项目" hint="支持拖入项目文件夹或文稿文件，保留原位置建立项目入口" />
     <aside class="pj-sidebar">
       <div class="pj-sidebar-heading"><FolderKanban :size="20" /><span>项目</span></div>
       <nav aria-label="项目筛选">
@@ -93,7 +99,7 @@ async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refr
             <div class="pj-project-symbol" :class="{ 'pj-symbol-research': item.category === '调研写作' }"><component :is="icon(item.category)" :size="25" /></div>
             <span class="pj-chip">{{ sourceNames[item.source] }}</span>
             <button v-if="!selecting" class="pj-icon" :class="{ selected: item.pinned }" :aria-label="item.pinned ? '取消置顶' : '置顶项目'" @click="pin(item)"><Pin :size="16" /></button>
-            <LibraryToolbarMenu v-if="!selecting" label="更多"><button class="pj-danger" @click="removing=item">删除项目</button></LibraryToolbarMenu>
+            <LibraryToolbarMenu v-if="!selecting" label="更多"><button @click="router.push({path:'/project/'+item.id,query:{tab:'notes',handoff:'1'}})">下一步交接</button><button @click="revealProject(item)">打开所在目录</button><button class="pj-danger" @click="removing=item">删除项目</button></LibraryToolbarMenu>
           </div>
           <button class="pj-card-title" :disabled="bulkBusy" @click="detail(item)">{{ item.name }}</button>
           <p class="pj-card-summary">{{ item.summary || '添加一句简介，下次更快找到它。' }}</p>
@@ -102,16 +108,17 @@ async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refr
           <div class="pj-tags"><span>{{ item.category }}</span><span v-if="item.group">{{ item.group }}</span><span v-for="tag in item.tags.slice(0, 2)" :key="tag">#{{ tag }}</span></div>
           <div class="pj-card-path" :title="item.path"><FolderOpen :size="13" /><span>{{ item.path }}</span></div>
           <footer>
-            <button v-if="!selecting" class="pj-button" :disabled="bulkBusy" @click="router.push({path:'/project/'+item.id,query:{tab:'notes',handoff:'1'}})">下一步 Prompt</button>
-            <button v-if="!selecting" class="pj-button" :disabled="bulkBusy||launcher.busy.value" @click="launcher.open(item)">启动</button><button v-if="!selecting&&launcher.last(item.id)" class="pj-button" :disabled="bulkBusy||launcher.busy.value||!item.available" :title="launcher.last(item.id)?.profileName" @click="launcher.rerun(item)">重跑上次</button>
+            <button v-if="!selecting" class="pj-button" :disabled="bulkBusy||launcher.busy.value" @click="launcher.open(item)">启动</button>
+            <button v-if="!selecting&&launcher.last(item.id)" class="pj-button" :disabled="bulkBusy||launcher.busy.value||!item.available" :title="launcher.last(item.id)?.profileName" @click="launcher.rerun(item)">重跑上次</button>
+            <button v-if="selecting" class="pj-button" :disabled="bulkBusy" @click="detail(item)">{{ selectedIds.has(item.id) ? '取消选择' : '选择' }}</button>
             <span :class="{ 'pj-missing': !item.available }">{{ item.available ? stateNames[item.state] : '位置失效' }}</span>
-            <button class="pj-button" :disabled="bulkBusy" @click="detail(item)">{{ selecting ? selectedIds.has(item.id) ? '取消选择' : '选择' : '详情' }}</button>
-            <select v-if="!selecting&&item.entries.length>1" class="pj-entry-choice" :aria-label="'打开项目入口 '+item.name" :disabled="opening.has(item.id)||bulkBusy" value="" @change="openChoice(item,$event)"><option value="" disabled>打开其他入口</option><option v-for="entry in item.entries" :key="entry.id" :value="entry.id">{{entry.label}}</option></select><button v-if="!selecting" class="pj-icon" aria-label="打开项目默认入口" :title="item.entries.find(e=>e.id===item.defaultEntryId)?.label||'请先设置默认入口'" :disabled="opening.has(item.id)||!item.defaultEntryId" @click="open(item)"><ArrowUpRight :size="19" /></button>
+            <select v-if="!selecting&&item.entries.length>1" class="pj-entry-choice" :aria-label="'打开项目入口 '+item.name" :disabled="opening.has(item.id)||bulkBusy" value="" @change="openChoice(item,$event)"><option value="" disabled>其他入口</option><option v-for="entry in item.entries" :key="entry.id" :value="entry.id">{{entry.label}}</option></select>
+            <button v-if="!selecting" class="pj-icon" aria-label="打开项目默认入口" :title="item.entries.find(e=>e.id===item.defaultEntryId)?.label||'请先设置默认入口'" :disabled="opening.has(item.id)||!item.defaultEntryId" @click="open(item)"><ArrowUpRight :size="19" /></button>
           </footer>
         </article>
       </div>
     </main>
-    <ProjectImport v-if="importer" @close="importer = false" @imported="store.refresh" />
+    <ProjectImport v-if="importer" :initial-paths="droppedProjectPaths" @close="importer = false; droppedProjectPaths = []" @imported="store.refresh" />
     <ProjectDialog v-if="removing" title="删除项目" :busy="removeBusy" @close="removing=null"><p>从抱一中删除“{{removing.name}}”及其项目登记与记录？项目目录和原文件保留在原位置。</p><template #footer><button class="pj-button" :disabled="removeBusy" @click="removing=null">取消</button><button class="pj-button pj-danger" :disabled="removeBusy" @click="removeProject">确认删除项目</button></template></ProjectDialog>
     <ProjectDialog v-if="history" title="项目移动记录" :busy="busy" @close="history = false">
       <p class="pj-muted">记录保留原位置、新位置及恢复结果。原位关联的参考文件不会随主目录搬走。</p><p v-if="!records.length">还没有移动记录。</p>

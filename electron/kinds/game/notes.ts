@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto'
-import type {SqlDb} from '../../services/schema.ts'
+import type {SqlDb} from '../../services/storage/schema.ts'
 import type {GameNote,GameNoteInput} from '../../../src/types/game-workspace.ts'
 export const GAME_NOTES_SQL=`CREATE TABLE IF NOT EXISTS game_notes(id TEXT PRIMARY KEY,resource_id TEXT NOT NULL REFERENCES resource(id) ON DELETE CASCADE,title TEXT NOT NULL,body TEXT NOT NULL,sort INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);CREATE INDEX IF NOT EXISTS idx_game_notes_resource ON game_notes(resource_id,sort,created_at);`
 export function migrateLegacyGameNotes(d:SqlDb){d.exec(`INSERT OR IGNORE INTO game_notes(id,resource_id,title,body,sort,created_at,updated_at) SELECT 'legacy-game-note:'||id,id,'笔记',notes,0,created_at,updated_at FROM resource WHERE kind='game' AND trim(COALESCE(notes,''))!='' AND NOT EXISTS(SELECT 1 FROM game_notes n WHERE n.resource_id=resource.id)`)}

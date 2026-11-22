@@ -4,12 +4,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { createServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { loadPlaywright, findChromiumExecutable } from './playwright.ts'
 
-const require = createRequire(import.meta.url)
-const { chromium } = require(process.env.BAOYI_PLAYWRIGHT || 'C:/Users/yicha/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const { chromium } = loadPlaywright()
 const entry = String.raw`
 import { createApp, h, Transition } from 'vue'
 import { createPinia } from 'pinia'
@@ -168,7 +167,8 @@ const server = await createServer({
 await server.listen()
 const address = server.httpServer!.address()
 assert.ok(address && typeof address !== 'string')
-const browser = await chromium.launch({ headless: true })
+const executablePath = findChromiumExecutable()
+const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) })
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
 page.setDefaultTimeout(3000)
 const errors: string[] = []
@@ -177,3 +177,4 @@ page.on('pageerror', (error: Error) => errors.push(error.message))
 await page.route('**/*', (route: any) => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort())
 return { page, errors, temporary, url: 'http://127.0.0.1:' + address.port + '/__w56__#/video', close: async () => { await browser.close(); await server.close() } }
 }
+

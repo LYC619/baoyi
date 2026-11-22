@@ -5,13 +5,13 @@ import os from 'node:os'
 import path from 'node:path'
 import {existsSync} from 'node:fs'
 import {DatabaseSync} from 'node:sqlite'
-import {initSchema} from '../electron/services/schema.ts'
+import {initSchema} from '../electron/services/storage/schema.ts'
 import {KINDS} from '../electron/kinds/index.ts'
 import {DocumentLibrary} from '../electron/workspace/documents.ts'
 import {WorkspaceLinks} from '../electron/workspace/links.ts'
 import {PersonalLibrary} from '../electron/workspace/personal.ts'
 import {VIDEO_JOBS_SQL} from '../electron/kinds/video/download/jobs.ts'
-import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/library-backup.ts'
+import {buildLibraryBackup,restoreLibraryBackup} from '../electron/services/storage/library-backup.ts'
 test('文字范围区分重复句，更新后按上下文重定位；歧义不能伪造精确位置',async()=>{
   assert.ok(existsSync('src/utils/document-anchor.ts'),'需要持久文字范围与上下文锚点')
   const {makeTextAnchor,resolveTextAnchor}=await import('../src/utils/document-anchor.ts')

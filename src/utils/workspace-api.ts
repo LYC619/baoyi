@@ -1,6 +1,6 @@
 import type { ResourceLink } from '@/types/workspace'
 import type { Router } from 'vue-router'
-export const workspace = window.baoyi.workspace
+export const workspace = (typeof window !== 'undefined' ? window.baoyi?.workspace : undefined) as Window['baoyi']['workspace']
 export const plain = <T>(value:T):T=>JSON.parse(JSON.stringify(value))
 export const localDate = (value = new Date()) => `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`
 export const kindLabels:Record<string,string>={software:'软件',game:'游戏',video:'影视',image:'图片',document:'资料',project:'项目'}

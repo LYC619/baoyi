@@ -32,7 +32,7 @@ export function useVideoImport() {
   async function review(ids: string[]) {
     if (!batch.value || !ids.length) return
     await perform('review', async () => {
-      taskId = tasks.start('video-scan', '视频导入 · Agent 复查')
+      taskId = tasks.start('video-scan', '视频导入 · 智能复查')
       try {
         const value = await window.baoyi.videoImport.review(batch.value!.id, plain(ids)); merge(value)
         const failures = value.entries.filter(entry => ids.includes(entry.id) && entry.reviewError)

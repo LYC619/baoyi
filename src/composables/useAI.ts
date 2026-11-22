@@ -24,7 +24,7 @@ function ensureSubscribed(): void {
     const message = p.log || (p.phase === 'done' ? '正在汇总识别结果' : `已处理 ${p.processed}/${p.total} 个目录，已注册 ${p.registered} 个软件`)
     tasks.update(activeTask.id, {
       processed: p.processed, total: p.total, current: p.current,
-      message: activeTask.cancelled ? '正在停止，等待当前 agent 收尾…' : message
+      message: activeTask.cancelled ? '正在停止，等待当前识别步骤收尾…' : message
     }, { message: p.current ? `${message} · ${p.current}` : message })
   })
 }
@@ -85,7 +85,7 @@ export function useAI() {
     if (!activeTask || activeTask.cancelled || progress.value?.phase === 'done') return
     window.baoyi.ai.cancel()
     activeTask.cancelled = true
-    tasks.update(activeTask.id, { message: '正在停止，等待当前 agent 收尾…' })
+    tasks.update(activeTask.id, { message: '正在停止，等待当前识别步骤收尾…' })
     tasks.log(activeTask.id, 'warn', '用户请求停止识别；已注册的结果保留')
   }
 

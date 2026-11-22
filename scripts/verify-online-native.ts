@@ -5,7 +5,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { _electron } from 'playwright'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 const output=path.resolve('output/release-0.17.5/online-native');await fs.mkdir(output,{recursive:true})
 const profile=await fs.mkdtemp(path.join(output,'profile-'));const db=new DatabaseSync(path.join(profile,'baoyi.db'));initSchema(db,KINDS)

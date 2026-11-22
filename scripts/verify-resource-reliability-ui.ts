@@ -4,13 +4,13 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema, SCHEMA_KEY, SCHEMA_VERSION } from '../electron/services/schema.ts'
+import { initSchema, SCHEMA_KEY, SCHEMA_VERSION } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { DocumentLibrary } from '../electron/workspace/documents.ts'
 import { DocumentFiles } from '../electron/workspace/document-files.ts'
 import { ImageLibrary } from '../electron/kinds/image/library.ts'
 import { scanImageImport } from '../electron/kinds/image/scanner.ts'
-import { APP_VERSION_KEY } from '../electron/services/library-snapshots.ts'
+import { APP_VERSION_KEY } from '../electron/services/storage/library-snapshots.ts'
 import { pngImage } from './helpers/test-images.ts'
 
 const require = createRequire(import.meta.url), { _electron } = require('playwright')
@@ -48,6 +48,8 @@ let app: any, page: any
 const checks: string[] = [], errors: string[] = []
 async function open() {
   app = await launch(); page = await app.firstWindow(); page.setDefaultTimeout(15000)
+  const documents = path.join(profile, 'documents'); fs.mkdirSync(documents, {recursive:true})
+  await app.evaluate(({app}: any, directory: string) => app.setPath('documents', directory), documents)
   page.on('pageerror', (e: Error) => errors.push(e.message))
   assert.equal(path.resolve(await app.evaluate(({ app }: any) => app.getPath('userData'))), profile)
   await page.locator('.titlebar').waitFor()

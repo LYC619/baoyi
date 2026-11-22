@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { initSchema } from '../electron/services/schema.ts'
+import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import * as dbVideo from '../electron/kinds/video/db.ts'
 import * as posters from '../electron/kinds/video/posters.ts'
@@ -32,9 +32,9 @@ function harness() {
   const load = createRendererLoader({
     'node:fs': { ...fs, default: fs }, 'node:path': { ...path, default: path },
     electron: { app: { getPath: () => root }, net: { fetch }, shell: {}, nativeImage: { createFromBuffer: dimensions, createFromPath: (p: string) => dimensions(fs.readFileSync(p)) } },
-    '../../services/database.ts': { getDb: () => db, postersDir: () => cache },
-    '../../services/settings-store.ts': { getSettings: () => settings },
-    '../../services/agent/loop.ts': {}, '../../services/searchService.ts': {},
+    '../../services/storage/database.ts': { getDb: () => db, postersDir: () => cache },
+    '../../services/storage/settings-store.ts': { getSettings: () => settings },
+    '../../services/agent/loop.ts': {}, '../../services/network/searchService.ts': {},
     './db.ts': dbVideo, './posters.ts': posters, './facts.ts': {}, './prompts.ts': {}, './tools.ts': {},
     './download/sources.ts': { loadVideoWork: async () => work },
     './tmdb.ts': {

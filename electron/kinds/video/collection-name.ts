@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import type { SqlDb } from '../../services/schema.ts'
+import type { SqlDb } from '../../services/storage/schema.ts'
 import type { VideoDirectoryChange } from '../../../src/types/video-workflow.ts'
 import { getVideo, updateVideo } from './db.ts'
 import { atomicWrite, safeWorkFolderName } from './bundle.ts'

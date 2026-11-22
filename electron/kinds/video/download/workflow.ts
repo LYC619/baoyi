@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { SqlDb } from '../../../services/schema.ts'
+import type { SqlDb } from '../../../services/storage/schema.ts'
 import type { VideoDownloadDraft, VideoDownloadJob, VideoEnqueueRequest, VideoJobItem, VideoJobRetry } from '../../../../src/types/video-workflow.ts'
 import type { VideoSourceRef } from '../../../../src/types/video-library.ts'
 import { getVideo, listEpisodes } from '../db.ts'
