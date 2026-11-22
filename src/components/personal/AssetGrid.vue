@@ -2,9 +2,10 @@
 import { computed } from "vue";
 import { Backpack } from "lucide-vue-next";
 import type { PersonalRecord } from "@/types/workspace";
-import { assetAnnualCosts, filterAssets, matchesExpiry, isReminding, isSnoozed } from "@/utils/personal-assets";
+import { assetAnnualCosts, filterAssets, formatAssetPrice, matchesExpiry, isReminding, isSnoozed, CURRENCY_SYMBOLS } from "@/utils/personal-assets";
 import { usePersonalView } from "@/composables/usePersonalView";
 import { daysUntil, dueText } from "@/utils/personal-view";
+
 const props = defineProps<{
   records: PersonalRecord[];
   categories: string[];
@@ -12,21 +13,40 @@ const props = defineProps<{
   remindDays: number;
 }>();
 const emit = defineEmits<{ select: [record: PersonalRecord] }>();
-const view = usePersonalView("assets", {query:"", category:"", sort:"expiry", status:"all"});
+const view = usePersonalView("assets", { query: "", category: "", sort: "expiry", status: "all" });
+
 const categories = computed(() => [
   ...new Set([
     ...props.categories,
     ...props.records.map((r) => String(r.data.category || "其他")),
   ]),
 ]);
+
 const filtered = computed(() =>
-  filterAssets(props.records, view.query, view.category, view.sort).filter(r => matchesExpiry(r, view.status, props.today, props.remindDays)),
+  filterAssets(props.records, view.query, view.category, view.sort).filter((r) =>
+    matchesExpiry(r, view.status, props.today, props.remindDays),
+  ),
 );
+
+const snoozedCount = computed(() => props.records.filter((r) => isSnoozed(r, props.today)).length);
 const annual = computed(() => assetAnnualCosts(props.records));
 const days = (r: PersonalRecord) => daysUntil(r.data.expiresOn, props.today);
 const expiry = (r: PersonalRecord) => days(r) === null ? '未设置到期日' : dueText(r.data.expiresOn, props.today);
-const snoozedDate = (r: PersonalRecord) => { const [, month, day] = String(r.data.snoozedUntil).split('-'); return `${Number(month)} 月 ${Number(day)} 日` };
-function reset() { view.query=''; view.category=''; view.status='all'; view.sort='expiry' }
+const snoozedDate = (r: PersonalRecord) => {
+  const [, month, day] = String(r.data.snoozedUntil).split('-');
+  return `${Number(month)} 月 ${Number(day)} 日`;
+};
+
+function monthlyEquivalent(r: PersonalRecord): string {
+  if (r.data.cycle !== 'yearly' || typeof r.data.cost !== 'number' || !Number.isFinite(r.data.cost) || r.data.cost <= 0) return '';
+  const code = String(r.data.currency || '').toUpperCase();
+  const sym = CURRENCY_SYMBOLS[code] || '';
+  const monthly = (r.data.cost / 12).toLocaleString(undefined, { maximumFractionDigits: 1 });
+  return `约 ${sym}${monthly}${!sym && code ? ' ' + code : ''}/月`;
+}
+
+function reset() { view.query = ''; view.category = ''; view.status = 'all'; view.sort = 'expiry' }
+
 const cycles: Record<string, string> = {
   once: "一次性",
   monthly: "每月",
@@ -37,25 +57,17 @@ const cycles: Record<string, string> = {
 <template>
   <section class="asset-browser">
     <div class="asset-summary">
-      <span
-        ><strong>{{ records.length }}</strong> 项资产</span
-      >
-      <span
-        ><strong>{{
-          records.filter((r) => isReminding(r, remindDays, today)).length
-        }}</strong>
-        项已到期 / {{ remindDays }} 天内到期</span
-      >
-      <span v-for="(cost, currency) in annual.totals" :key="currency"
-        >按当前周期折算年费
-        <strong
-          >{{ cost.toLocaleString(undefined, { maximumFractionDigits: 2 }) }}
-          {{ currency }}</strong
-        ></span
-      >
-      <small v-if="annual.omitted"
-        >{{ annual.omitted }} 项费用或周期未明确，未计入年费</small
-      >
+      <span><strong>{{ records.length }}</strong> 项资产</span>
+      <span><strong>{{ records.filter((r) => isReminding(r, remindDays, today)).length }}</strong> 项已到期 / {{ remindDays }} 天内到期</span>
+      <span v-for="(cost, currency) in annual.totals" :key="currency">
+        按当前周期折算年费
+        <strong>{{ CURRENCY_SYMBOLS[String(currency)] || '' }}{{ cost.toLocaleString(undefined, { maximumFractionDigits: 2 }) }} {{ currency }}</strong>
+        <em class="asset-summary-monthly">（约 {{ CURRENCY_SYMBOLS[String(currency)] || '' }}{{ (cost / 12).toLocaleString(undefined, { maximumFractionDigits: 1 }) }}/月）</em>
+      </span>
+      <button v-if="snoozedCount" type="button" class="ws-button asset-snooze-btn" @click="view.status = view.status === 'snoozed' ? 'all' : 'snoozed'">
+        {{ view.status === 'snoozed' ? '返回全部资产' : `查看 ${snoozedCount} 项已暂缓提醒` }}
+      </button>
+      <small v-if="annual.omitted">{{ annual.omitted }} 项费用或周期未明确，未计入年费</small>
     </div>
     <div class="ws-toolbar">
       <input
@@ -68,8 +80,12 @@ const cycles: Record<string, string> = {
         <option v-for="item in categories" :key="item">{{ item }}</option>
       </select>
       <select v-model="view.status" aria-label="背包到期筛选">
-        <option value="all">全部到期状态</option><option value="overdue">已到期</option>
-        <option value="soon">{{ remindDays }} 天内到期</option><option value="undated">未设到期日</option>
+        <option value="all">全部到期状态</option>
+        <option value="reminding">待处理到期（已到期 + {{ remindDays }} 天内）</option>
+        <option value="overdue">已到期</option>
+        <option value="soon">{{ remindDays }} 天内到期</option>
+        <option value="snoozed">已暂缓提醒</option>
+        <option value="undated">未设到期日</option>
       </select>
       <select v-model="view.sort" aria-label="背包排序">
         <option value="expiry">到期时间</option>
@@ -77,7 +93,13 @@ const cycles: Record<string, string> = {
         <option value="cost">折算年费（按币种分组）</option>
       </select>
     </div>
-    <div class="ws-toolbar"><small class="ws-muted" role="status">显示 {{ filtered.length }} / {{ records.length }} 项 · 汇总为全部资产，买断和未知周期不折算年费</small><button v-if="view.query || view.category || view.status !== 'all'" class="ws-button" @click="reset">清除筛选</button></div>
+    <div class="ws-toolbar">
+      <small class="ws-muted" role="status">
+        显示 {{ filtered.length }} / {{ records.length }} 项 · 汇总为全部资产，买断和未知周期不折算年费
+        <template v-if="snoozedCount && ['reminding', 'overdue', 'soon'].includes(view.status)"> · 另有 {{ snoozedCount }} 项已暂缓提醒（可切到「已暂缓提醒」查看）</template>
+      </small>
+      <button v-if="view.query || view.category || view.status !== 'all'" class="ws-button" @click="reset">清除筛选</button>
+    </div>
     <div class="asset-grid">
       <button
         v-for="record in filtered"
@@ -85,21 +107,14 @@ const cycles: Record<string, string> = {
         class="asset-card"
         @click="emit('select', record)"
       >
-        <span class="asset-category"
-          ><Backpack :size="18" />{{ record.data.category || "其他" }}</span
-        >
+        <span class="asset-category"><Backpack :size="18" />{{ record.data.category || "其他" }}</span>
         <h3>{{ record.name }}</h3>
         <p>{{ record.data.provider || record.body || "尚未补充用途" }}</p>
-        <strong
-          >{{
-            typeof record.data.cost === "number"
-              ? `${record.data.cost} ${record.data.currency || ""}`
-              : "费用未填写"
-          }}
-          <small v-if="record.data.cycle"
-            >/ {{ cycles[String(record.data.cycle)] }}</small
-          ></strong
-        >
+        <strong>
+          {{ formatAssetPrice(record.data.cost, record.data.currency) }}
+          <small v-if="record.data.cycle">/ {{ cycles[String(record.data.cycle)] }}</small>
+          <small v-if="monthlyEquivalent(record)" class="asset-monthly"> · {{ monthlyEquivalent(record) }}</small>
+        </strong>
         <span
           class="asset-expiry"
           :class="{
@@ -109,8 +124,7 @@ const cycles: Record<string, string> = {
               days(record)! > Math.min(10, remindDays) &&
               days(record)! <= remindDays,
           }"
-          >{{ expiry(record) }}</span
-        >
+        >{{ expiry(record) }}</span>
         <span v-if="isSnoozed(record, today)" class="asset-snoozed">已暂缓至 {{ snoozedDate(record) }}</span>
       </button>
     </div>
@@ -124,10 +138,14 @@ const cycles: Record<string, string> = {
   </section>
 </template>
 <style scoped>
-.asset-snoozed { color:var(--text-sub); font-size:12px; }
+.asset-snoozed { color: var(--text-sub); font-size: 12px; }
+.asset-summary-monthly { font-style: normal; color: var(--text-sub); margin-left: 4px; }
+.asset-snooze-btn { padding: 4px 10px; font-size: 12px; }
+.asset-monthly { color: var(--text-sub); }
 .asset-summary {
   display: flex;
   gap: 16px 24px;
+  align-items: center;
   flex-wrap: wrap;
   padding: 18px;
   background: var(--ws-tint);

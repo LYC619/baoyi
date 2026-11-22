@@ -233,7 +233,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
     const value = await docs().relocate(id,result.filePaths[0]); changed(); return value
   }))
   // content captures its metadata before awaiting file reads and never writes the DB.
-  handle('documents:content', id => docs().content(reqId(id)))
+  handle('documents:content', (id, encoding?: string) => docs().content(reqId(id), optString(encoding,'encoding',{max:64})))
   handle('documents:text:index', (id: string, encoding?: string) => docs().textIndex(reqId(id), optString(encoding,'encoding',{max:64})))
   handle('documents:text:search', (id:string,query:string,page?:number,start?:number,encoding?:string)=>docs().searchText(reqId(id),reqString(query,'query',{max:1000}),optNumber(page,'page',{min:1,integer:true}),optNumber(start,'start',{min:0,integer:true}),optString(encoding,'encoding',{max:64})))
   handle('documents:text:slice', (id: string, byteOffset: number, byteLength: number, encoding?: string) => docs().textSlice(reqId(id), reqNumber(byteOffset,'byteOffset',{min:0,integer:true}), reqNumber(byteLength,'byteLength',{min:1,max:16*1024*1024,integer:true}), optString(encoding,'encoding',{max:64})))
@@ -287,7 +287,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
   handle('timeline:export',id=>{const safeId=reqId(id);return operation(()=>exportFile((timeline().require(safeId).name_zh||'项目')+'-日志',timeline().export(safeId,links())))})
   const skills=()=>new SkillProfiles(getDb())
   handle('skills:list',()=>skills().list());handle('skills:proposals',()=>skills().proposals())
-  write('skills:confirm',(id,draft)=>skills().confirm(reqId(id),optRecord(draft,'draft') as any));write('skills:cancel',id=>skills().cancel(reqId(id)));write('skills:undo-record',id=>skills().undoRecord(reqId(id)))
+  write('skills:save',draft=>skills().saveManual(reqRecord(draft,'draft') as any));write('skills:record',input=>skills().record(reqRecord(input,'input') as any));write('skills:confirm',(id,draft)=>skills().confirm(reqId(id),optRecord(draft,'draft') as any));write('skills:cancel',id=>skills().cancel(reqId(id)));write('skills:undo-record',id=>skills().undoRecord(reqId(id)))
   handle('personal:choose-avatar',()=>operation(async()=>{
     const result=await dialog.showOpenDialog(getWindow()!,{title:'选择个人头像',properties:['openFile'],filters:[{name:'图片',extensions:['png','jpg','jpeg','webp']}]});restoreWindowFocus(getWindow())
     if(result.canceled||!result.filePaths[0])return null
@@ -296,7 +296,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
     const size=image.getSize();if(size.width*size.height>40000000)throw new Error('头像图片尺寸过大')
     const side=Math.min(size.width,size.height);return image.crop({x:Math.floor((size.width-side)/2),y:Math.floor((size.height-side)/2),width:side,height:side}).resize({width:256,height:256}).toDataURL()
   }))
-  write('personal:capture-state',(name,unit,value,date,metricId)=>personal().captureState(name,unit,value,date,metricId))
+  write('personal:capture-state',(name,unit,value,date,metricId,note)=>personal().captureState(reqString(name,'name',{max:300}),optString(unit,'unit',{max:50})??'',reqNumber(value,'value'),reqString(date,'date',{max:64}),optId(metricId,'metricId'),optString(note,'note',{max:4000})??''))
   write('personal:renew',(id,input)=>personal().renew(reqId(id),reqRecord(input,'input') as any))
   write('personal:snooze',(id,until)=>personal().snooze(reqId(id),optString(until,'until',{max:64})??null))
   handle('personal:list',kind=>personal().list(optString(kind,'kind',{max:64}) as any)); write('personal:save',input=>{input=reqRecord(input,'input');if(input.kind==='profile'&&(input.data as any)?.avatar){const image=nativeImage.createFromDataURL((input.data as any).avatar);if(image.isEmpty()||image.getSize().width>256||image.getSize().height>256)throw new Error('头像无效或尺寸过大')}return personal().save(input as any)}); write('personal:remove',id=>personal().remove(reqId(id)))

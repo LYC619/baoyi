@@ -1,33 +1,135 @@
 <script setup lang="ts">
 import { errorMessage } from '@/utils'
 import { latestOnly, STALE } from '@/composables/latestOnly'
-import { onMounted,ref,watch } from 'vue'
-import {useFloatingDock} from '@/composables/useFloatingDock'
-import { Play,Square,Terminal,FolderOpen,Plus,Pencil,RotateCcw,ShieldOff,ExternalLink } from 'lucide-vue-next'
+import { onMounted, ref, watch } from 'vue'
+import { useFloatingDock } from '@/composables/useFloatingDock'
+import { Play, Square, Terminal, FolderOpen, Plus, Pencil, RotateCcw, ShieldOff, ExternalLink } from 'lucide-vue-next'
 import ProjectDialog from './ProjectDialog.vue'
 import { useProjectLaunch } from '@/composables/useProjectLaunch'
 import type { ProjectApplication } from '@/types/project'
-import type { ProjectLaunchProfile,ProjectLaunchInput } from '@/types/project-launch'
-const launcher=useProjectLaunch(),{item,seed,runs,active,preview,showRuns,error,busy}=launcher,projectApi=window.baoyi.project,api=projectApi.launch
-const applications=ref<ProjectApplication[]>([]),profiles=ref<ProjectLaunchProfile[]>([]),editing=ref<ProjectLaunchInput|null>(null),argsText=ref(''),remember=ref(true),loading=ref(false)
-const readProfiles=latestOnly((id?:string)=>id?Promise.all([api.profiles(id),projectApi.applications()]):Promise.resolve(null))
-onMounted(()=>void launcher.initialize())
-watch(()=>item.value?.id,()=>{editing.value=null;profiles.value=[];applications.value=[];void load()})
-watch(seed,value=>{if(value)edit(value)})
-watch(preview,()=>remember.value=true)
-async function load(){loading.value=true;try{const value=await readProfiles(item.value?.id);if(value===STALE)return;if(value){const [result,apps]=value;profiles.value=result;applications.value=apps}}catch(e){error.value=errorMessage(e)}loading.value=false}
-function edit(value?:ProjectLaunchInput|ProjectLaunchProfile){
-  editing.value=value?{...(value.id?{id:value.id,revision:value.revision}:{}),name:value.name,kind:value.kind,command:value.command,args:[...value.args],cwd:value.cwd,source:value.source,sourceRef:value.sourceRef,port:value.port,url:value.url,enabled:value.enabled}:{name:'',kind:'script',command:'',args:[],cwd:'',source:'manual',sourceRef:'',port:null,url:'',enabled:true}
-  argsText.value=editing.value.args.join('\n');error.value=''
+import type { ProjectLaunchProfile, ProjectLaunchInput } from '@/types/project-launch'
+
+const launcher = useProjectLaunch()
+const { item, seed, runs, active, preview, showRuns, error, busy } = launcher
+const projectApi = window.baoyi.project
+const api = projectApi.launch
+const applications = ref<ProjectApplication[]>([])
+const profiles = ref<ProjectLaunchProfile[]>([])
+const projectNames = ref<Record<string, string>>({})
+const editing = ref<ProjectLaunchInput | null>(null)
+const argsText = ref('')
+const remember = ref(true)
+const loading = ref(false)
+
+const readProfiles = latestOnly((id?: string) =>
+  id ? Promise.all([api.profiles(id), projectApi.applications()]) : Promise.resolve(null)
+)
+
+async function refreshProjectNames() {
+  try {
+    const list = await projectApi.list()
+    const map: Record<string, string> = {}
+    for (const p of list) map[p.id] = p.name
+    projectNames.value = map
+  } catch {
+    /* best-effort */
+  }
 }
-async function act(fn:()=>Promise<unknown>){if(busy.value)return;busy.value=true;error.value='';try{await fn()}catch(e){error.value=errorMessage(e)}finally{busy.value=false}}
-async function save(){if(!item.value||!editing.value)return;const id=item.value.id,input={...editing.value,args:argsText.value?argsText.value.split(/\r?\n/):[],port:editing.value.port===null||String(editing.value.port)===''?null:Number(editing.value.port)};await act(async()=>{await api.save(id,input);editing.value=null;seed.value=null;await load()})}
-async function chooseProgram(){const target=await projectApi.pickPath(false);if(target&&editing.value)editing.value.command=target}
-async function openApplication(application:ProjectApplication){if(!item.value)return;const id=item.value.id;await act(async()=>{if(!application.available&&!await projectApi.selectApplication(application.id))return;await projectApi.openApplication(id,application.id);await load()})}
-const copyDirectory=()=>window.baoyi.app.copyText(item.value!.path)
-const labels={starting:'正在启动',running:'运行中',stopping:'正在停止',exited:'已退出',failed:'运行失败',interrupted:'上次中断'}
-const chip=ref<HTMLElement>()
-const dockStyle=useFloatingDock('project',chip,()=>!!active.value.length||showRuns.value,0)
+
+onMounted(() => {
+  void launcher.initialize()
+  void refreshProjectNames()
+})
+watch(() => item.value?.id, () => {
+  editing.value = null
+  profiles.value = []
+  applications.value = []
+  void load()
+})
+watch(showRuns, (open) => {
+  if (open) void refreshProjectNames()
+})
+watch(seed, (value) => { if (value) edit(value) })
+watch(preview, () => { remember.value = true })
+
+async function load() {
+  loading.value = true
+  try {
+    const value = await readProfiles(item.value?.id)
+    if (value === STALE) return
+    if (value) {
+      const [result, apps] = value
+      profiles.value = result
+      applications.value = apps
+    }
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+  loading.value = false
+}
+
+function edit(value?: ProjectLaunchInput | ProjectLaunchProfile) {
+  editing.value = value
+    ? {
+        ...(value.id ? { id: value.id, revision: value.revision } : {}),
+        name: value.name,
+        kind: value.kind,
+        command: value.command,
+        args: [...value.args],
+        cwd: value.cwd,
+        source: value.source,
+        sourceRef: value.sourceRef,
+        port: value.port,
+        url: value.url,
+        enabled: value.enabled
+      }
+    : { name: '', kind: 'script', command: '', args: [], cwd: '', source: 'manual', sourceRef: '', port: null, url: '', enabled: true }
+  argsText.value = editing.value.args.join('\n')
+  error.value = ''
+}
+
+async function act(fn: () => Promise<unknown>) {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  try { await fn() } catch (e) { error.value = errorMessage(e) } finally { busy.value = false }
+}
+
+async function save() {
+  if (!item.value || !editing.value) return
+  const id = item.value.id
+  const input = {
+    ...editing.value,
+    args: argsText.value ? argsText.value.split(/\r?\n/) : [],
+    port: editing.value.port === null || String(editing.value.port) === '' ? null : Number(editing.value.port)
+  }
+  await act(async () => {
+    await api.save(id, input)
+    editing.value = null
+    seed.value = null
+    await load()
+  })
+}
+
+async function chooseProgram() {
+  const target = await projectApi.pickPath(false)
+  if (target && editing.value) editing.value.command = target
+}
+
+async function openApplication(application: ProjectApplication) {
+  if (!item.value) return
+  const id = item.value.id
+  await act(async () => {
+    if (!application.available && !(await projectApi.selectApplication(application.id))) return
+    await projectApi.openApplication(id, application.id)
+    await load()
+  })
+}
+
+const copyDirectory = () => window.baoyi.app.copyText(item.value!.path)
+const labels = { starting: '正在启动', running: '运行中', stopping: '正在停止', exited: '已退出', failed: '运行失败', interrupted: '上次中断' }
+const chip = ref<HTMLElement>()
+const dockStyle = useFloatingDock('project', chip, () => !!active.value.length || showRuns.value, 0)
 </script>
 <template>
   <button ref="chip" v-if="active.length||showRuns" class="project-run-chip" :style="dockStyle" @click="showRuns=true"><Terminal :size="16"/>{{active.length?`${active.length} 个项目命令运行中`:'项目运行记录'}}</button>
@@ -55,11 +157,11 @@ const dockStyle=useFloatingDock('project',chip,()=>!!active.value.length||showRu
   </ProjectDialog>
   <ProjectDialog v-if="showRuns&&!preview&&!item" title="项目运行" wide @close="showRuns=false">
     <p class="pj-muted">Esc 关闭面板，命令继续运行。停止只作用于本次启动的进程。</p><p v-if="error" class="pj-error" role="alert">{{error}}</p><p v-if="!runs.length">还没有运行记录。</p>
-    <article v-for="run in runs.slice(0,40)" :key="run.id" class="run-item"><header><strong>{{run.profileName}}</strong><span>{{labels[run.status]}}</span><small>{{new Date(run.startedAt).toLocaleString()}}</small></header><p v-if="run.error" class="pj-error">{{run.error}}</p><pre class="run-output">{{run.lines.join('\n')||'等待命令输出…'}}</pre><div class="launch-row"><button v-if="run.status==='running'&&run.previewUrl" class="pj-button" @click="act(()=>api.openPreview(run.projectId,run.profileId,run.id))"><ExternalLink :size="14"/>打开预览</button><button v-if="['starting','running','stopping'].includes(run.status)" class="pj-button" :disabled="busy||run.status==='stopping'" @click="act(()=>api.stop(run.id))"><Square :size="14"/>{{run.status==='stopping'?'正在停止…':'停止'}}</button><button v-else class="pj-button" :disabled="busy" @click="launcher.start(run.projectId,run.profileId)"><RotateCcw :size="14"/>重跑命令</button><button class="pj-button" @click="act(()=>projectApi.openTerminal(run.projectId))"><Terminal :size="14"/>终端</button><details><summary>诊断</summary><small>运行 {{run.id}} · PID {{run.pid||'—'}} · 退出码 {{run.exitCode??'—'}}</small></details></div></article>
+    <article v-for="run in runs.slice(0,40)" :key="run.id" class="run-item"><header><span v-if="projectNames[run.projectId]" class="run-project-badge">{{projectNames[run.projectId]}}</span><strong>{{run.profileName}}</strong><span>{{labels[run.status]}}</span><small>{{new Date(run.startedAt).toLocaleString()}}</small></header><p v-if="run.error" class="pj-error">{{run.error}}</p><pre class="run-output">{{run.lines.join('\n')||'等待命令输出…'}}</pre><div class="launch-row"><button v-if="run.status==='running'&&run.previewUrl" class="pj-button" @click="act(()=>api.openPreview(run.projectId,run.profileId,run.id))"><ExternalLink :size="14"/>打开预览</button><button v-if="['starting','running','stopping'].includes(run.status)" class="pj-button" :disabled="busy||run.status==='stopping'" @click="act(()=>api.stop(run.id))"><Square :size="14"/>{{run.status==='stopping'?'正在停止…':'停止'}}</button><button v-else class="pj-button" :disabled="busy" @click="launcher.start(run.projectId,run.profileId)"><RotateCcw :size="14"/>重跑命令</button><button v-if="projectNames[run.projectId]" class="pj-button" @click="act(()=>projectApi.openTerminal(run.projectId))"><Terminal :size="14"/>终端</button><details><summary>诊断</summary><small>运行 {{run.id}} · PID {{run.pid||'—'}} · 退出码 {{run.exitCode??'—'}}</small></details></div></article>
   </ProjectDialog>
 </template>
 <style scoped>
 .launch-apps{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}.launch-apps>strong{font-size:12px;color:var(--text-sub);margin-right:8px}
-
-.project-run-chip{position:fixed;right:var(--dock-right,24px);bottom:var(--dock-bottom,20px);z-index:80;display:flex;align-items:center;gap:8px;padding:11px 16px;border:1px solid var(--divider);border-radius:10px;background:var(--bg-card);box-shadow:0 3px 18px #0002;color:var(--text-main);font-size:12px}.launch-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.launch-form{display:grid;gap:16px}.launch-form label{display:block;font-size:13px}.launch-form input:not([type=checkbox]),.launch-form select,.launch-form textarea{box-sizing:border-box;display:block;width:100%;margin-top:6px;padding:9px;border:1px solid var(--divider);border-radius:6px;background:var(--bg-card);color:var(--text-main);font:inherit}.launch-form small{color:var(--text-faint);font-size:11px}.launch-form .launch-row>label{flex:1;min-width:180px}.launch-form .launch-row>input{flex:1;min-width:180px}.launch-check{display:flex!important;align-items:center;gap:8px;margin:16px 0;font-size:12px}.launch-profile{display:flex;gap:9px;align-items:center;border-top:1px solid var(--divider);padding:18px 0}.launch-profile>div{flex:1;min-width:0}.launch-profile strong,.run-item strong{font-size:14px}.launch-profile small,.launch-profile code{display:block;color:var(--text-sub);overflow-wrap:anywhere;font-size:12px;margin-top:6px}.launch-facts{display:grid;grid-template-columns:90px 1fr;font-size:12px;gap:10px}.launch-facts dd{margin:0;overflow-wrap:anywhere}.launch-facts pre{margin:0;white-space:pre-wrap}.source-text{max-height:260px;overflow:auto;white-space:pre-wrap;font-size:12px}.run-item{padding:18px 0;border-top:1px solid var(--divider)}.run-item header{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.run-item header span{font-size:12px;color:var(--accent)}.run-item header small{margin-left:auto;color:var(--text-faint);font-size:11px}.run-output{max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.7;padding:12px;border:1px solid var(--divider);border-radius:6px;background:var(--hover-surface)}.run-item details{font-size:11px;color:var(--text-faint)}@media(max-width:800px){.launch-profile{flex-wrap:wrap}.launch-profile>div{flex-basis:100%}}
+.run-project-badge{padding:2px 7px;border-radius:var(--radius-tag);background:var(--tag-bg);color:var(--tag-text);font-size:11px}
+.project-run-chip{position:fixed;right:var(--dock-right,24px);bottom:var(--dock-bottom,20px);z-index:80;display:flex;align-items:center;gap:8px;padding:11px 16px;border:1px solid var(--divider);border-radius:10px;background:var(--bg-card);box-shadow:0 3px 18px #0002;color:var(--text-main);font-size:12px}.launch-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.launch-form{display:grid;gap:16px}.launch-form label{display:block;font-size:13px}.launch-form input:not([type=checkbox]),.launch-form select,.launch-form textarea{box-sizing:border-box;display:block;width:100%;margin-top:6px;padding:9px;border:1px solid var(--divider);border-radius:6px;background:var(--bg-card);color:var(--text-main);font:inherit}.launch-form small{color:var(--text-faint);font-size:11px}.launch-form .launch-row>label{flex:1;min-width:180px}.launch-form .launch-row>input{flex:1;min-width:180px}.launch-check{display:flex!important;align-items:center;gap:8px;margin:16px 0;font-size:12px}.launch-profile{display:flex;gap:9px;align-items:center;border-top:1px solid var(--divider);padding:18px 0}.launch-profile>div{flex:1;min-width:0}.launch-profile strong,.run-item strong{font-size:14px}.launch-profile small,.launch-profile code{display:block;color:var(--text-sub);overflow-wrap:anywhere;font-size:12px;margin-top:6px}.launch-facts{display:grid;grid-template-columns:90px 1fr;font-size:12px;gap:10px}.launch-facts dd{margin:0;overflow-wrap:anywhere}.launch-facts pre{margin:0;white-space:pre-wrap}.source-text{max-height:260px;overflow:auto;white-space:pre-wrap;font-size:12px}.run-item{padding:18px 0;border-top:1px solid var(--divider)}.run-item header{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.run-item header span:not(.run-project-badge){font-size:12px;color:var(--accent)}.run-item header small{margin-left:auto;color:var(--text-faint);font-size:11px}.run-output{max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.7;padding:12px;border:1px solid var(--divider);border-radius:6px;background:var(--hover-surface)}.run-item details{font-size:11px;color:var(--text-faint)}@media(max-width:800px){.launch-profile{flex-wrap:wrap}.launch-profile>div{flex-basis:100%}}
 </style>

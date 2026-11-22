@@ -6,12 +6,12 @@ import { createLatestGuard, errorMessage, isLocalPosterPath, plain } from '@/uti
 
 /** 侧边栏一次只选一样东西。同游戏那边的 GameSelection */
 export type VideoSelection =
-  | { kind: 'group'; value: 'all' | 'archived'; type?: 'hentai' }
+  | { kind: 'group'; value: 'all' | 'archived'; type?: 'hentai' | 'audio' }
   | { kind: 'type'; value: VideoFilterType }
   | { kind: 'status'; value: WatchStatus }
-  | { kind: 'category'; value: string }
-  | { kind: 'tag'; value: string; category?: string; type?: 'hentai' }
-  | { kind: 'collection'; value: string; type?: 'hentai' }
+  | { kind: 'category'; value: string; type?: 'audio' }
+  | { kind: 'tag'; value: string; category?: string; type?: 'hentai' | 'audio' }
+  | { kind: 'collection'; value: string; type?: 'hentai' | 'audio' }
 
 /**
  * 四态的说法。
@@ -68,18 +68,19 @@ export const useVideoStore = defineStore('video', () => {
   const selection = reactive<VideoSelection>({ kind: 'group', value: 'all' })
 
   const activeKey = computed(() => `${selection.kind}:${selection.value}`)
+  const inAudioScope = computed(() => (selection.kind === 'type' && selection.value === 'audio') || (('type' in selection) && selection.type === 'audio') || (selection.kind === 'category' && selection.value === '音频'))
   const inHentaiScope = computed(() =>
     (selection.kind === 'type' && selection.value === 'hentai') ||
     ((selection.kind === 'tag' || selection.kind === 'collection' || selection.kind === 'group') && (selection.type === 'hentai' || ('category' in selection && selection.category === '里番')))
   )
 
   const heading = computed(() => {
-    if (selection.kind === 'collection') return selection.value || '未设置收藏分组'
+    if (selection.kind === 'collection') return selection.value || (inAudioScope.value ? '未分组音频' : '未设置收藏分组')
     if (selection.kind === 'category') return selection.value === '其他' ? '其他分类' : selection.value
     if (selection.kind === 'tag') return `# ${selection.value}`
     if (selection.kind === 'status') return WATCH_STATUS_LABEL[selection.value]
     if (selection.kind === 'type') return VIDEO_TYPE_LABEL[selection.value]
-    return selection.value === 'archived' ? '已归档' : '全部影视'
+    return selection.value === 'archived' ? (inAudioScope.value ? '已归档音频' : '已归档') : (inAudioScope.value ? '音频' : '全部影视')
   })
 
   function buildQuery(): VideoQuery {
@@ -90,6 +91,7 @@ export const useVideoStore = defineStore('video', () => {
     if (selection.kind === 'category') q.category = selection.value
     if (selection.kind === 'collection') q.collection = selection.value
     if (inHentaiScope.value) q.type = 'hentai'
+    else if (inAudioScope.value) q.type = 'audio'
     if (selection.kind === 'tag') {
       q.tag = selection.value
       if (selection.category && selection.category !== '里番') q.category = selection.category
@@ -278,6 +280,7 @@ export const useVideoStore = defineStore('video', () => {
     missingPosters,
     markPosterMissing: (id: string) => { brokenPosters.value.add(id) },
     inHentaiScope,
+    inAudioScope,
     load,
     reload,
     refreshCounts,

@@ -959,7 +959,7 @@ function gameLike(id: string): GameLike | null {
  * 否则这就成了一个「让页面指定往哪儿读、往备份根写」的口子。
  * 详情页上那些路径本身是经过验证才存进去的，这里只核对它在不在名单里。
  */
-export async function backupSavePath(id: string, savePath: string): Promise<SaveBackupResult> {
+export async function backupSavePath(id: string, savePath: string, note?: string): Promise<SaveBackupResult> {
   const game = getGame(getDb(), id)
   if (!game) return { ok: false, message: '找不到这个游戏', backup: null, over: [] }
 
@@ -975,7 +975,7 @@ export async function backupSavePath(id: string, savePath: string): Promise<Save
     getDb(),
     { id: game.id, name_zh: game.name_zh, name_en: game.name_en, file_name: game.file_name },
     savePath,
-    { backupRoot: saveBackupRoot() }
+    { backupRoot: saveBackupRoot(), ...(note?.trim() ? { note: note.trim() } : {}) }
   )
   // 超出保留上限的名单只在备份成功之后算，而且只是**报告**：删不删由用户在界面上决定。
   // 失败时不报 —— 那时候没有新增任何一份，谈不上超出。
@@ -1132,7 +1132,7 @@ async function launchGameWithOptions(id: string, options:import('../../../src/ty
   if (/\.(bat|cmd|lnk)$/i.test(game.path)) {
     try {
       const failure = await shell.openPath(game.path)
-      if (!failure) recordGameLaunch(id)
+      if (!failure) { recordGameLaunch(id); endSession(getDb(), id, 0) }
       return failure ? { ok:false, message:failure } : { ok:true, message:'已打开游戏入口；脚本或快捷方式不记录游玩时长' }
     } catch (cause) { return { ok:false, message:cause instanceof Error ? cause.message : String(cause) } }
   }
@@ -1149,14 +1149,23 @@ async function launchGameWithOptions(id: string, options:import('../../../src/ty
     child.on('error', () => {
       // spawn 失败（要提权之类）时这一段游玩根本没开始，撤掉它而不是记一段假的
       playing.delete(id)
-      void shell.openPath(game.path)
+      void shell.openPath(game.path).then((failure) => {
+        if (!failure) {
+          recordGameLaunch(id)
+          const outcome = endSession(getDb(), id, 0)
+          if (outcome) sessionSink?.(id, { ...outcome, message: '已用系统方式打开，本次不统计游玩时长' })
+        }
+      })
     })
     child.once('spawn',()=>recordGameLaunch(id))
     child.on('exit', () => closeSession(id))
     child.unref()
   } catch {
     playing.delete(id)
-    void shell.openPath(game.path)
+    const failure = await shell.openPath(game.path)
+    if (failure) return { ok: false, message: failure }
+    recordGameLaunch(id)
+    endSession(getDb(), id, 0)
     // 交给系统 shell 之后就跟不到进程了，这次不记时长 —— 记不到就不装作记到了
     return { ok: true, message: '已交给系统打开，这次的时长跟不到' }
   }

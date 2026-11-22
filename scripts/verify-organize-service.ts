@@ -29,7 +29,10 @@ async function fixture() {
     },
     listCategories: () => categories, upsertCategory: (_db: unknown, c: any) => categories.push(c),
     insertScanned: (_db: unknown, files: any[]) => files.map((f, i) => add('new-' + i, path.dirname(f.exe_path))),
-    getSoftwareByPath: (_db: unknown, exe: string) => [...rows.values()].find(r => r.exe_path === exe)
+    getSoftwareByPath: (_db: unknown, exe: string) => [...rows.values()].find(r => r.exe_path === exe),
+    saveOrganizePlan: (_db: unknown, r: string, steps: any[]) => { (db as any)._plans = (db as any)._plans || new Map(); const id = 'plan-' + ((db as any)._plans.size + 1); (db as any)._plans.set(id, { id, root: r, steps: structuredClone(steps), created_at: Date.now(), undone_at: 0 }); return id },
+    getOrganizePlan: (_db: unknown, id: string) => (db as any)._plans?.get(id) ?? null,
+    markPlanUndone: (_db: unknown, id: string) => { const p = (db as any)._plans?.get(id); if (p) p.undone_at = Date.now() }
   }
   const load = createRendererLoader({ 'node:fs/promises': { default: fsp }, 'node:path': { default: path }, 'node:fs': { default: fs }, '../../../services/storage/database': { getDb: () => ({}) }, '../db.ts': db, '../../../services/taxonomy/taxonomy-store.ts': db, '../../../services/storage/settings-store.ts': db, '../../../services/storage/organize-plans.ts': db,
     '../../../services/media/iconExtractor': { extractIcon: async () => '' },
@@ -156,4 +159,27 @@ await check('uninstall leaving a directory is reported as missing its main execu
   await f.sync.syncOrganizeRoot()
   assert.equal((await f.service.listOrganized()).entries[0].exe_present, true)
   assert.equal(f.rows.size, 1)
+})
+
+await check('single-file exe in Downloads moves only that exe into a subfolder and restores on undo', async f => {
+  const downloads = path.join(f.temp, 'Downloads')
+  await fsp.mkdir(downloads, { recursive: true })
+  const exe = path.join(downloads, 'solo-tool.exe'), keep = path.join(downloads, 'keep-document.pdf')
+  await fsp.writeFile(exe, 'portable single exe'); await fsp.writeFile(keep, 'unrelated file')
+  const row = { id: 'solo', source_dir: downloads, exe_path: exe, link_target: '', category: 'Old', name_zh: '独立小工具', name_en: '', file_name: 'solo-tool.exe', is_portable: true, move_risk: 'safe', is_archived: false }
+  f.rows.set('solo', row)
+  const preview = await f.service.previewOrganize(['solo'])
+  assert.equal(preview.entries.length, 1)
+  const ran = await f.service.runOrganize([{ software_id: 'solo', action: 'move', category: 'Old', folder: '独立小工具' }], () => {})
+  assert.equal(ran.moved, 1)
+  assert.equal(fs.existsSync(keep), true, 'sibling file in Downloads must remain untouched')
+  assert.equal(fs.existsSync(exe), false)
+  assert.equal(row.exe_path, path.join(f.root, 'Old', '独立小工具', 'solo-tool.exe'))
+  assert.equal(fs.existsSync(row.exe_path), true)
+  const undone = await f.service.undoOrganize(ran.plan_id)
+  assert.equal(undone.restored, 1, undone.notes.join('; '))
+  assert.equal(undone.failed, 0)
+  assert.equal(fs.existsSync(exe), true)
+  assert.equal(row.exe_path, exe)
+  assert.equal(row.source_dir, downloads)
 })

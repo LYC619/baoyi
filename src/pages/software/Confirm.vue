@@ -69,6 +69,17 @@ const staleIds = computed(
   () => new Set(versionGroups.value.flatMap((g) => g.list.slice(1).map((i) => i.id)))
 )
 
+const unselectedStaleIds = computed(() => [...staleIds.value].filter((id) => !selected.value.includes(id)))
+
+async function confirmAndSkipOld(): Promise<void> {
+  if (selected.value.length === 0) return
+  const staleToSkip = [...unselectedStaleIds.value]
+  await confirm([...selected.value])
+  if (staleToSkip.length > 0 && items.value.length > 0) {
+    await skip(staleToSkip, false)
+  }
+}
+
 async function load(first = false): Promise<void> {
   items.value = await window.baoyi.pending.list()
   // 已经不在列表里的选中项要跟着清掉，否则「确认已选」会带上幽灵 id
@@ -435,6 +446,14 @@ async function confirmAll(): Promise<void> {
           @click="skip(selected, true)"
         >
           不注册已选
+        </button>
+        <button
+          v-if="unselectedStaleIds.length > 0 && selected.length > 0"
+          class="btn btn--ghost"
+          :disabled="busy"
+          @click="confirmAndSkipOld"
+        >
+          确认已选并忽略旧版（{{ unselectedStaleIds.length }}）
         </button>
         <button class="btn btn--ghost" :disabled="busy" @click="confirmAll">全部确认</button>
         <button

@@ -39,6 +39,8 @@ async function openAssetUrl(raw: string) {
 }
 const quickTodo = ref(""), quickDue = ref("");
 const view = usePersonalView('home', {todoView:'',todoPreference:'',todoQuery:'',stateQuery:''});
+const assetView = usePersonalView('assets', {query:'',category:'',sort:'expiry',status:'all'});
+const skillCardsRef = ref<InstanceType<typeof SkillCards>>();
 const today = usePersonalDate();
 const todoView = computed({get:() => view.todoView || (preferences.value.showCompleted ? 'all' : 'active'),set:(value:string) => {view.todoView=value}});
 const filteredTodos = computed(() => filterTodos(records.value, todoView.value, view.todoQuery, today.value));
@@ -208,7 +210,7 @@ function saved(record: PersonalRecord) {
         @click="go(tab.id)"
       >
         <component :is="tab.icon" :size="16" />{{ tab.label }}</button
-      ><small>知止而后得</small>
+      ><PersonalAssistant ref="assistant" /><small>知止而后得</small>
     </aside>
     <section class="ws-main">
       <header class="ws-header">
@@ -239,9 +241,10 @@ function saved(record: PersonalRecord) {
         ><button
           v-if="section === 'skill'"
           class="ws-button primary"
-          @click="assistant?.open('帮我建立技能卡片，先查已有记录。')"
+          @click="skillCardsRef?.openCreate()"
         >
-          建立技能卡片</button
+          <Plus :size="16" />新建技能卡片</button
+        ><button v-if="section === 'skill'" class="ws-button" @click="assistant?.open('帮我建立技能卡片，先查已有记录。')">让助理帮建</button
         >
       </header>
       <p v-if="loading" class="ws-muted" role="status">正在更新个人记录…</p>
@@ -287,7 +290,7 @@ function saved(record: PersonalRecord) {
         </div>
         <div class="personal-focus" aria-label="近期要处理">
           <button @click="view.todoView='active';go('todo')"><span>未完成待办</span><strong>{{ pendingTodos.length }}</strong><small>{{ overdueTodos.length ? overdueTodos.length + ' 项已逾期' : '按自己的节奏推进' }}</small></button>
-          <button @click="go('asset')"><span>到期事项</span><strong>{{ dueAssets.length }}</strong><small>已到期及 {{ preferences.remindDays }} 天内</small></button>
+          <button @click="assetView.status=dueAssets.length?'reminding':'all';go('asset')"><span>到期事项</span><strong>{{ dueAssets.length }}</strong><small>已到期及 {{ preferences.remindDays }} 天内</small></button>
           <button @click="router.push('/project')"><span>进行中的项目</span><strong>{{ activeProjects.length }}</strong><small>实践与维护中的工作</small></button>
         </div>
         <div class="personal-overview">
@@ -330,7 +333,7 @@ function saved(record: PersonalRecord) {
                 v-for="p in activeProjects.slice(0, 6)"
                 :key="p.id"
                 class="personal-project"
-                @click="router.push('/project/' + p.id)"
+                @click="router.push({ path: '/project/' + p.id, query: { from: route.fullPath } })"
               >
                 <span
                   ><strong>{{ p.name }}</strong
@@ -345,7 +348,7 @@ function saved(record: PersonalRecord) {
             </section>
           </div>
           <aside>
-            <section v-if="pendingTodos.length" class="personal-block"><header class="ws-section-head"><h2>下一件小事</h2><button class="ws-button" @click="go('todo')">全部待办</button></header><button v-for="todo in pendingTodos.slice(0,3)" :key="todo.id" class="personal-due" @click="edit('todo',todo)"><strong>{{ todo.name }}</strong><small>{{ dueText(todo.data.dueOn,today) }}</small></button></section>
+            <section v-if="pendingTodos.length" class="personal-block"><header class="ws-section-head"><h2>下一件小事</h2><button class="ws-button" @click="go('todo')">全部待办</button></header><div v-for="todo in pendingTodos.slice(0,3)" :key="todo.id" class="personal-due-todo"><input type="checkbox" :checked="!!todo.data.done" :disabled="busy" :aria-label="'完成 ' + todo.name" @change="toggle(todo)" /><button class="personal-due" @click="edit('todo',todo)"><strong>{{ todo.name }}</strong><small>{{ dueText(todo.data.dueOn,today) }}</small></button></div></section>
             <section v-if="preferences.showCounts" class="personal-block">
               <header class="ws-section-head">
                 <h2>我的资源</h2>
@@ -483,6 +486,7 @@ function saved(record: PersonalRecord) {
       ></template>
       <template v-else-if="section === 'skill'"
         ><SkillCards
+          ref="skillCardsRef"
           @compose="assistant?.open($event)"
           @edit="
             edit(
@@ -545,11 +549,14 @@ function saved(record: PersonalRecord) {
       />
       <AssetReminderDialog v-if="assetDialog && selected?.kind === 'asset'" :key="selected.id + ':' + assetDialog" :record="selected" :mode="assetDialog" :today="today" @close="assetDialog = null" @saved="saved" />
     </section>
-    <PersonalAssistant ref="assistant" />
+
   </main>
 </template>
 <style scoped>
 .personal-focus { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:0 0 28px; }
+.personal-due-todo { display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--divider); }
+.personal-due-todo .personal-due { border-bottom:0; flex:1; min-width:0; }
+.personal-due-todo input { width:16px; height:16px; accent-color:var(--accent); flex:none; }
 .personal-focus button { display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:18px; border:1px solid var(--card-border,var(--divider)); border-radius:var(--radius-card); color:var(--text-main); background:var(--bg-card); box-shadow:var(--shadow-card); text-align:left; transition:border-color var(--t-fast) ease,background var(--t-fast) ease; }
 .personal-focus button:hover { border-color:var(--accent); background:var(--bg-card-hover); }
 .personal-focus strong { font-size:28px; color:var(--accent-ink,var(--accent)); font-weight:600; }

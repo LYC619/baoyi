@@ -2,7 +2,8 @@ import { app, clipboard, dialog, shell, type BrowserWindow } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { IpcActivity, mainWindowIpc } from './main-window.ts'
-import { optRecord, optString, optStringArray, reqArray, reqEnum, reqId, reqNumber, reqRecord, reqString, reqStringArray } from './validate.ts'
+import { optNumber, optRecord, optString, optStringArray, reqArray, reqEnum, reqId, reqNumber, reqRecord, reqString, reqStringArray } from './validate.ts'
+import { ArchiveLibrary } from '../archive/library.ts'
 import type { AIConfig, AppSettings, Category, IdentifyLogQuery, SearchConfig, TaskRecord, TmdbConfig } from '../../src/types'
 import { assertProjectRunsStopped } from '../kinds/project/activity.ts'
 import { assertLibraryIdle } from './library-backup.ts'
@@ -101,6 +102,19 @@ export function registerSystemIpc(
 
   ipcMain.handle('app:copy', (_e, text: string) => {
     clipboard.writeText(reqString(text, 'text', { allowEmpty: true, max: 1_000_000 }))
+  })
+
+  ipcMain.handle('app:global-search', (_e, query?: string, kinds?: string[], limit?: number) => {
+    const safeQuery = optString(query, 'query', { allowEmpty: true, max: 300 }) ?? ''
+    const safeKinds = optStringArray(kinds, 'kinds', { max: 16 })
+    const safeLimit = optNumber(limit, 'limit', { min: 1, max: 60, integer: true }) ?? 24
+    const db = getDb()
+    const library = new ArchiveLibrary({
+      db,
+      hideHentai: () => getSettings(db).hide_hentai === true,
+      assets: path.join(app.getAppPath(), 'dist/pdfjs')
+    })
+    return library.search({ query: safeQuery, kinds: safeKinds, limit: safeLimit }).items
   })
 
   ipcMain.handle('app:open-url', async (_event, value: string) => {

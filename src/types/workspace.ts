@@ -196,7 +196,7 @@ export interface WorkspaceApi {
     analyzeImport(token:string,path:string):Promise<DocumentImportSuggestion>
     confirmImport(token: string, paths: string[], categoryId?: string, submodule?: DocumentSubmodule | null, customGroupId?: string, choices?: DocumentImportChoice[]): Promise<{ imported: number; errors: string[];insightStatus?:string }>
     remove(id: string): Promise<void>; relocate(id: string): Promise<DocumentItem | null>; open(id: string): Promise<void>; reveal(id: string): Promise<void>
-    content(id: string): Promise<{ format: string; text: string; data?: Uint8Array; isLarge?: boolean; size?: number }>
+    content(id: string, encoding?: string): Promise<{ format: string; text: string; data?: Uint8Array; isLarge?: boolean; size?: number }>
     textIndex(id: string, encoding?: string): Promise<NovelIndexResult>
     searchText(id:string,query:string,page?:number,start?:number,encoding?:string):Promise<{page:number;start:number;occurrence:number}|null>
     textSlice(id: string, byteOffset: number, byteLength: number, encoding?: string): Promise<{ text: string; byteOffset: number; byteLength: number }>
@@ -225,7 +225,7 @@ export interface WorkspaceApi {
   }
   personal: {
     chooseAvatar(): Promise<string | null>
-    captureState(name:string,unit:string,value:number,date:string,metricId?:string):Promise<PersonalRecord>
+    captureState(name:string,unit:string,value:number,date:string,metricId?:string,note?:string):Promise<PersonalRecord>
     list(kind?: PersonalKind): Promise<PersonalRecord[]>; save(input: PersonalInput): Promise<PersonalRecord>; remove(id: string): Promise<void>
     renew(id: string, input: AssetRenewalInput): Promise<PersonalRecord>
     snooze(id: string, until: string | null): Promise<PersonalRecord>

@@ -9,9 +9,9 @@ const emit = defineEmits<{
   remove: [record: PersonalRecord];
 }>();
 const selected = ref("");
-const view = usePersonalView('experience', {query:'', category:''});
-const categories = computed(() => [...new Set(props.records.map(r=>String(r.data.category || '经历')))]);
-const filtered = computed(() => props.records.filter(r => (!view.category || (r.data.category || '经历') === view.category) && [r.name,r.body,r.data.organization].join(' ').toLocaleLowerCase().includes(view.query.trim().toLocaleLowerCase())));
+const view = usePersonalView('experience', { query: '', category: '' });
+const categories = computed(() => [...new Set(props.records.map((r) => String(r.data.category || '经历')))]);
+const filtered = computed(() => props.records.filter((r) => (!view.category || (r.data.category || '经历') === view.category) && [r.name, r.body, r.data.organization].join(' ').toLocaleLowerCase().includes(view.query.trim().toLocaleLowerCase())));
 const groups = computed(() => {
   const years = new Map<string, PersonalRecord[]>();
   for (const row of [...filtered.value].sort((a, b) =>
@@ -22,6 +22,9 @@ const groups = computed(() => {
   }
   return [...years];
 });
+function metaLine(row: PersonalRecord): string {
+  return [row.data.date, row.data.organization].map((x) => String(x || '').trim()).filter(Boolean).join(' · ');
+}
 </script>
 <template>
   <section class="experience-timeline">
@@ -34,9 +37,7 @@ const groups = computed(() => {
           <div>
             <span class="ws-badge">{{ row.data.category || "经历" }}</span>
             <h3>{{ row.name }}</h3>
-            <small class="ws-muted"
-              >{{ row.data.date }} · {{ row.data.organization }}</small
-            >
+            <small v-if="metaLine(row)" class="ws-muted">{{ metaLine(row) }}</small>
           </div>
           <button class="ws-button" @click="emit('edit', row)">编辑</button>
         </header>
@@ -57,7 +58,7 @@ const groups = computed(() => {
       </article>
     </section>
     <p v-if="!filtered.length" class="ws-empty">
-      {{ records.length ? '没有符合条件的经历，试试其他关键词或类型。' : '记下一次经历，也可以让个人助手从已有凭证中整理。' }}
+      {{ records.length ? '没有符合条件的经历，试试其他关键词或类型。' : '记下一次经历，也可以让归档助理从已有凭证中整理。' }}
     </p>
   </section>
 </template>

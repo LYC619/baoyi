@@ -9,6 +9,7 @@ type Row = Record<string, any>
 
 export const DEFAULT_SETTINGS: AppSettings = {
   music_download_root: '',
+  video_player_path: '',
   video_updates_weekly: false,
   video_updates_last_checked: 0,
   ai: {
@@ -74,6 +75,7 @@ export function getSettings(d: SqlDb): AppSettings {
   const stored: Row = {}
   for (const r of rows) {
     // 下划线开头的是内部记账（_schema），不属于用户设置，不该透给渲染进程
+    if (r.key === '_video_preview_player' && !stored.video_player_path) { try { stored.video_player_path = JSON.parse(r.value) } catch { /* ignore */ } continue }
     if (r.key.startsWith('_')) continue
     let value
     try { value = JSON.parse(r.value) } catch { value = r.value }
@@ -92,6 +94,7 @@ export function getSettings(d: SqlDb): AppSettings {
 
 export function patchSettings(d: SqlDb, patch: Partial<AppSettings>): AppSettings {
   if(patch.music_download_root!==undefined&&(typeof patch.music_download_root!=='string'||patch.music_download_root!==''&&!path.isAbsolute(patch.music_download_root)))throw new Error('音乐保存目录必须是绝对路径')
+  if(patch.video_player_path!==undefined&&(typeof patch.video_player_path!=='string'||(patch.video_player_path!==''&&(!path.isAbsolute(patch.video_player_path)||!/\.exe$/i.test(patch.video_player_path)))))throw new Error('视频播放器路径必须是本地 .exe 程序路径')
   if(patch.video_updates_weekly!==undefined&&typeof patch.video_updates_weekly!=='boolean')throw new Error('每周检查设置必须为开关值')
   if(patch.video_updates_last_checked!==undefined&&(!Number.isSafeInteger(patch.video_updates_last_checked)||patch.video_updates_last_checked<0))throw new Error('检查时间无效')
   for(const [key,max] of [['video_download_concurrency',4],['video_download_connections',8]] as const){

@@ -55,7 +55,7 @@ export const ARCHIVE_EVAL_CASES: EvalCase[] = [
   {
     id: 'A07', group: 'turn-policy', title: '个人模块（背包/资产/经历/指标/技能卡）查询路由至 archive', tools: [],
     run: () => {
-      for (const msg of ['列出我的背包资产', '查看我的工作经历', '记录一下今天的指标测量', '看看我的技能卡进度']) {
+      for (const msg of ['列出我的背包资产', '查看我的工作经历', '记录一下今天的指标测量', '看看我的技能卡进度', 'Netflix 什么时候到期？', '我买过 Sony 耳机吗？']) {
         assert.equal(archiveTurnMode(msg, false, false), 'archive', `should route to archive: ${msg}`)
       }
     }

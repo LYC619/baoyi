@@ -4,6 +4,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 import { comicPhaseLabels, comicStatusLabels, type ComicTaskAction, type ComicTaskRow } from '@/composables/useComicDownloads'
+import { useComicIngest } from '@/composables/useComicIngest'
 import { errorMessage, formatBytes } from '@/utils'
 import ProjectDialog from '@/components/project/ProjectDialog.vue'
 import type { ComicProxy, JobLogEntry } from '@/types/comic-ingest'
@@ -13,7 +14,7 @@ const props = defineProps<{
   run: (row: ComicTaskRow, action: ComicTaskAction, proxy?: ComicProxy) => Promise<void>
   logs: (row: ComicTaskRow) => Promise<JobLogEntry[]>
 }>()
-const router = useRouter(), busy = ref(false), proxyOpen = ref(false), mode = ref<ComicProxy['mode']>('system'), custom = ref('127.0.0.1:7890')
+const router = useRouter(), ingest = useComicIngest(), busy = ref(false), proxyOpen = ref(false), mode = ref<ComicProxy['mode']>('system'), custom = ref('127.0.0.1:7890')
 const logOpen = ref(false), entries = ref<JobLogEntry[]>([])
 const actionLabels: Record<ComicTaskAction, string> = { pause: '暂停下载', cancel: '停止下载', retry: '重试剩余页', dismiss: '移除记录', open: '打开作品', logs: '查看过程', resume: '继续下载', up: '上移任务', down: '下移任务', proxy: '更换连接方式', revalidate: '重新核验', clean: '停止并清理暂存' }
 function label(kind: ComicTaskAction) {
@@ -33,7 +34,7 @@ async function action(kind: ComicTaskAction, saveProxy = false) {
   if (kind === 'clean' && !(await confirmDialog({ title: `停止「${props.row.title}」并清理暂存？`, message: '将删除已下载的临时图片文件，此操作不可撤销。', confirmText: '停止并清理', tone: 'danger' }))) return
   busy.value = true
   try {
-    if (kind === 'open') await router.push({ name: 'image-detail', params: { id: props.row.resourceId } })
+    if (kind === 'open') { ingest.open.value = false; ingest.showRecords.value = false; await router.push({ name: 'image-detail', params: { id: props.row.resourceId } }) }
     else if (kind === 'logs') { entries.value = await props.logs(props.row); logOpen.value = true }
     else if (kind === 'proxy' && !saveProxy) {
       const value = await window.baoyi.comic.defaults(); mode.value = value.proxy.mode

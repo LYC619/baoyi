@@ -21,19 +21,21 @@ import { useLibrarySelection } from '@/composables/useLibrarySelection'
 import ReportDialog from '@/components/identify/ReportDialog.vue'
 import SearchBar from '@/components/software/SearchBar.vue'
 import Sidebar from '@/components/software/Sidebar.vue'
-import type { AIResult, IdentifyReport, SoftwareQuery } from '@/types'
+import CardContextMenu, { type ContextMenuItem } from '@/components/ui/CardContextMenu.vue'
+import type { AIResult, IdentifyReport, SoftwareItem, SoftwareQuery } from '@/types'
 import { useAI } from '@/composables/useAI'
 import { useFilter } from '@/composables/useFilter'
 import { recallScroll, rememberScroll } from '@/composables/useModules'
 import { useScan } from '@/composables/useScan'
 import { useFileDrop } from '@/composables/useFileDrop'
 import DropZoneOverlay from '@/components/ui/DropZoneOverlay.vue'
-import { SOFTWARE_EXTENSIONS } from '@/utils/software-package'
+import { SOFTWARE_EXTENSIONS, isMobilePackage } from '@/utils/software-package'
 import { useToast } from '@/composables/useToast'
 import { useCategoriesStore } from '@/stores/categories'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
-import { errorMessage } from '@/utils'
+import { displayName, errorMessage } from '@/utils'
+import { previewSoftwareCategoryChanges, categoryMoveConfirmation } from '@/utils/softwareCategory'
 
 const router = useRouter()
 const store = useSoftwareStore()
@@ -57,6 +59,97 @@ const selection = useLibrarySelection(() => store.items, () => bulkBusy.value)
 const { selecting, selectedIds } = selection
 const bulkTrigger = ref<HTMLButtonElement>()
 watch(selecting, async active => { if (!active) { await nextTick(); bulkTrigger.value?.focus() } })
+watch(() => store.activeKey, () => { if (content.value) content.value.scrollTop = 0 })
+
+const ctxMenu = ref<InstanceType<typeof CardContextMenu>>()
+const ctxItem = ref<SoftwareItem | null>(null)
+const ctxMenuItems = computed<ContextMenuItem[]>(() => {
+  const s = ctxItem.value
+  if (!s) return []
+  const sName = displayName(s, settings.settings.title_lang)
+  const catChoices = bulkCategories.value.slice(0, 7)
+  return [
+    {
+      id: 'launch',
+      label: isMobilePackage(s.exe_path) ? '定位安装包' : '启动',
+      onSelect: () => launch(s.id)
+    },
+    {
+      id: 'reveal',
+      label: '打开所在文件夹',
+      onSelect: async () => {
+        try { await window.baoyi.software.revealInFolder(s.id) } catch (e) { error(errorMessage(e)) }
+      }
+    },
+    {
+      id: 'detail',
+      label: '查看详情',
+      onSelect: () => open(s.id)
+    },
+    ...catChoices.map((cat, idx) => ({
+      id: `cat:${cat}`,
+      label: `分类：${cat}`,
+      checked: s.category === cat,
+      separatorBefore: idx === 0,
+      onSelect: async () => {
+        if (s.category === cat) return
+        try {
+          const moves = await previewSoftwareCategoryChanges([s.id], cat)
+          if (moves.length) {
+            const ok = await confirmDialog({
+              title: '同步整理目录分类',
+              message: categoryMoveConfirmation(moves),
+              confirmText: '确认迁移'
+            })
+            if (!ok) return
+            const p = moves[0].preview
+            const res = await window.baoyi.organize.relocate(s.id, p.category, p.folder, p.from)
+            if (!res.ok) throw new Error(res.message)
+          } else {
+            await store.update(s.id, { category: cat })
+          }
+          await store.reload()
+          success(`已归入「${cat}」`)
+        } catch (e) { error(errorMessage(e)) }
+      }
+    })),
+    {
+      id: 'archive',
+      label: s.is_archived ? '取消归档' : '归档',
+      separatorBefore: true,
+      onSelect: async () => {
+        try {
+          await store.update(s.id, { is_archived: !s.is_archived })
+          await store.reload()
+          toast(s.is_archived ? '已取消归档' : '已归档')
+        } catch (e) { error(errorMessage(e)) }
+      }
+    },
+    {
+      id: 'remove',
+      label: '从库里移除',
+      danger: true,
+      onSelect: async () => {
+        const ok = await confirmDialog({
+          title: `从软件库移除「${sName}」？`,
+          message: s.link_target ? '整理目录中的链接会一并清理，真实软件文件保留不动。' : '仅移除抱一中的库记录，不会删除本地软件文件。',
+          confirmText: '移除记录',
+          tone: 'danger'
+        })
+        if (!ok) return
+        try {
+          const res = await store.remove(s.id)
+          if (!res.ok) error(res.message)
+          else success(res.message)
+        } catch (e) { error(errorMessage(e)) }
+      }
+    }
+  ]
+})
+function openCardContext(s: SoftwareItem, event: MouseEvent): void {
+  ctxItem.value = s
+  void nextTick(() => ctxMenu.value?.openAt(event))
+}
 const bulkItems = computed(() => store.items.map(item => ({ id: item.id, name: item.name_zh || item.name_en || item.file_name })))
 const bulkCategories = computed(() => [...new Set([...categories.list.map(item => item.name), ...store.items.map(item => item.category)])].filter(Boolean))
 const filtered = computed(() => !!store.keyword.trim() || !!store.mastery || store.selection.kind !== 'group' || store.selection.value !== 'all')
@@ -174,7 +267,7 @@ async function rescan(): Promise<void> {
     toast(`已记录 ${result.pending} 个待识别目录，随时可到设置里处理`)
     return
   }
-  void router.push({ name: 'settings', query: { tab: 'scan', focus: 'pending' } })
+  await completeAi()
 }
 
 const softwareExtSet = new Set(SOFTWARE_EXTENSIONS.map((ext) => ext.toLowerCase()))
@@ -216,7 +309,7 @@ const { dragging: dropActive, dropHandlers } = useFileDrop(async (paths) => {
           message: `当前共 ${result.pending} 个目录等待识别，是否现在开始识别？`,
           confirmText: '开始识别'
         })
-        if (ok) void router.push({ name: 'settings', query: { tab: 'scan', focus: 'pending' } })
+        if (ok) await completeAi()
       } else if (result.found === 0) {
         toast('未在拖入的文件夹中发现可执行程序')
       } else {
@@ -444,6 +537,10 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
         </span>
       </div>
 
+      <div v-if="store.keyword.trim() && (store.selection.kind !== 'group' || store.selection.value !== 'all')" class="kw-hint" role="status">
+        <span>当前同时按关键词「{{ store.keyword.trim() }}」过滤</span>
+        <button type="button" class="btn btn--subtle" @click="store.keyword = ''; store.load()">清空关键词</button>
+      </div>
       <section ref="content" class="home__content">
         <template v-if="store.items.length > 0">
           <!-- 分组模式：一个分类一个区块，区块内部照旧用当前的网格 / 列表排布 -->
@@ -461,6 +558,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
                 :selectable="selecting" :selected-ids="selectedIds" :locked="bulkBusy || store.queryPending" @select="selection.toggle"
                 @open="open"
                 @launch="launch"
+                @context="openCardContext"
               />
             </section>
           </template>
@@ -473,6 +571,7 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
             :selectable="selecting" :selected-ids="selectedIds" :locked="bulkBusy || store.queryPending" @select="selection.toggle"
             @open="open"
             @launch="launch"
+            @context="openCardContext"
           />
         </template>
         <div v-else-if="!store.loading" class="empty">
@@ -483,11 +582,13 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
       </section>
     </main>
 
+    <CardContextMenu ref="ctxMenu" label="软件卡片操作" :items="ctxMenuItems" />
     <ReportDialog v-if="report && reportOpen" :report="report" @close="reportOpen = false" />
   </div>
 </template>
 
 <style scoped>
+.kw-hint { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 20px 10px; padding: 6px 12px; border-radius: var(--radius-input); background: var(--active-surface); color: var(--accent); font-size: 12px; }
 
 .home {
   display: flex;

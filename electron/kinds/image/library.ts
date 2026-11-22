@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { closeSync, openSync, readSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { withImageCollections } from './collections.ts'
 import type { SqlDb } from '../../services/storage/schema.ts'
@@ -12,7 +13,7 @@ const visible = "(m.group_id IS NULL OR NOT EXISTS(SELECT 1 FROM image_groups g 
 function imageItem(r: Row, chapters: ImageChapter[], count: number, p: Row | undefined, cover: string): ImageItem {
   return { id: r.id, type: r.item_type, path: r.path, sourceDir: r.source_dir || '', name: r.name_zh || r.file_name, description: r.description || '', tags: JSON.parse(r.tags || '[]'),
     groupId: r.group_id, favorite: !!r.favorite, read: !!r.is_read, publication: r.publication, coverPageId: cover, source: r.source, sourceId: r.source_id,authors:JSON.parse(r.authors||'[]'),
-    pageCount: count, chapterCount: chapters.filter(c => c.pageCount).length, chapters, updatedAt: r.updated_at,
+    pageCount: count, chapterCount: chapters.filter(c => c.pageCount).length, chapters, createdAt: r.created_at, updatedAt: r.updated_at,
     progress: p ? { pageId: p.page_id, chapterId: p.chapter_id, ordinal: p.ordinal, offset: p.scroll_offset, updatedAt: p.updated_at } : null }
 }
 export class ImageLibrary {
@@ -110,11 +111,40 @@ export class ImageLibrary {
       this.db.exec('RELEASE image_bulk'); return unique.length
     } catch (cause) { this.db.exec('ROLLBACK TO image_bulk; RELEASE image_bulk'); throw cause }
   }
-  gallery(ids:string[],offset=0,limit=120) {
+  gallery(ids:string[],offset=0,limit=120,sort='') {
     if(!Array.isArray(ids)||ids.length>5000||ids.some(id=>typeof id!=='string'||id.length>128)||!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>240)throw new Error('图片浏览范围无效')
     const selected=JSON.stringify([...new Set(ids)])
     const from=`FROM json_each(?) chosen JOIN image_pages p ON p.resource_id=chosen.value JOIN resource r ON r.id=p.resource_id JOIN image_meta m ON m.resource_id=r.id WHERE p.missing=0 AND m.item_type IN ('photo','misc') AND ${visible}`
     const total=(this.db.prepare(`SELECT COUNT(*) n ${from}`).get(selected) as Row).n as number
+    if (sort === 'taken' || sort === 'taken-asc') {
+      const allRows = this.db.prepare(`SELECT p.*,r.path,r.name_zh,r.file_name,r.updated_at ${from} ORDER BY CAST(chosen.key AS INTEGER),p.ordinal,p.id`).all(selected) as Row[]
+      const exifRe = /\b((?:19|20)\d{2}):([01]\d):([0-3]\d) ([0-2]\d):([0-5]\d):([0-5]\d)\b/
+      const stampOf = (r: Row): number => {
+        if (!r.entry && typeof r.file === 'string') {
+          try {
+            if (/\.jpe?g$/i.test(r.file)) {
+              const fd = openSync(r.file, 'r')
+              try {
+                const buf = Buffer.alloc(32768)
+                const n = readSync(fd, buf, 0, buf.length, 0)
+                const m = exifRe.exec(buf.subarray(0, n).toString('latin1'))
+                if (m) {
+                  const parsed = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}`)
+                  if (Number.isFinite(parsed)) return parsed
+                }
+              } finally { closeSync(fd) }
+            }
+            return statSync(r.file).mtimeMs || Number(r.updated_at) || 0
+          } catch { return Number(r.updated_at) || 0 }
+        }
+        return Number(r.updated_at) || 0
+      }
+      const dir = sort === 'taken-asc' ? 1 : -1
+      const decorated = allRows.map(r => ({ r, t: stampOf(r) }))
+      decorated.sort((a, b) => dir * (a.t - b.t) || a.r.ordinal - b.r.ordinal)
+      const pages = decorated.slice(offset, offset + limit).map(({ r: p }) => ({ id: p.id, resourceId: p.resource_id, chapterId: p.chapter_id, ordinal: p.ordinal, size: p.size, missing: false, name: path.basename(p.entry || p.file), folder: path.dirname(p.entry || path.relative(p.path, p.file)) }))
+      return { pages, total }
+    }
     const pages=(this.db.prepare(`SELECT p.*,r.path,r.name_zh,r.file_name ${from} ORDER BY CAST(chosen.key AS INTEGER),p.ordinal,p.id LIMIT ? OFFSET ?`).all(selected,limit,offset) as Row[]).map(p=>({id:p.id,resourceId:p.resource_id,chapterId:p.chapter_id,ordinal:p.ordinal,size:p.size,missing:false,name:path.basename(p.entry||p.file),folder:path.dirname(p.entry||path.relative(p.path,p.file))}))
     return {pages,total}
   }

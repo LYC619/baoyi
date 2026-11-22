@@ -6,8 +6,9 @@ import type { PhotoView } from '@/composables/usePhotoView'
 import { useImageReader } from '@/composables/useImageReader'
 import ImageCover from './ImageCover.vue'
 import { vMasonry } from '@/composables/masonry'
-const props=defineProps<{items:ImageItem[];groups:ImageGroup[];view:PhotoView;queryKey:string}>()
-const emit=defineEmits<{manage:[]}>()
+const props=defineProps<{items:ImageItem[];groups:ImageGroup[];view:PhotoView;queryKey:string;sort?:string}>()
+const emit=defineEmits<{manage:[];bulk:[]}>()
+// emit merged above
 type Page=Awaited<ReturnType<ImageApi['gallery']>>['pages'][number]
 const pages=ref<Page[]>([]),total=ref(0),page=ref(1),busy=ref(false),error=ref(''),opening=ref(false),root=ref<HTMLElement>()
 let revision=0,disposed=false
@@ -16,11 +17,11 @@ const items=computed(()=>new Map(props.items.map(item=>[item.id,item])))
 const pageCount=computed(()=>Math.max(1,Math.ceil(total.value/pageSize)))
 async function load() {
   const token=++revision;busy.value=true;error.value='';pages.value=[]
-  try {const result=await window.baoyi.image.gallery(props.items.map(item=>item.id),(page.value-1)*pageSize,pageSize);if(token!==revision||disposed)return;pages.value=result.pages;total.value=result.total}
+  try {const result=await window.baoyi.image.gallery(props.items.map(item=>item.id),(page.value-1)*pageSize,pageSize,props.sort);if(token!==revision||disposed)return;pages.value=result.pages;total.value=result.total}
   catch(cause){if(token===revision&&!disposed)error.value=errorMessage(cause)}
   finally{if(token===revision&&!disposed)busy.value=false}
 }
-watch(()=>[props.queryKey,props.items.map(i=>i.id+':'+i.updatedAt).join('|')],()=>{page.value=1;void load()},{immediate:true})
+watch(()=>[props.queryKey,props.sort,props.items.map(i=>i.id+':'+i.updatedAt).join('|')],()=>{page.value=1;void load()},{immediate:true})
 onUnmounted(()=>{disposed=true;revision++})
 const blocks=computed(()=>{
   const blocks=new Map<string,{key:string;name:string;path:string;pages:Page[]}>()
@@ -37,14 +38,14 @@ const blocks=computed(()=>{
 })
 async function open(p:Page){
   if(opening.value)return;opening.value=true;error.value=''
-  try{const item=items.value.get(p.resourceId);if(!item)return;const all=await window.baoyi.image.pages(item.id);if(!disposed)reader.open(item,all,p.id)}
+  try{const item=items.value.get(p.resourceId);if(!item)return;const all=await window.baoyi.image.pages(item.id);if(!disposed)reader.open(item,all,p.id,props.items)}
   catch(cause){if(!disposed)error.value=errorMessage(cause)}finally{opening.value=false}
 }
 async function turn(value:number){page.value=value;await load();root.value?.scrollIntoView({block:'start'})}
 </script>
 <template>
   <section ref="root" class="photo-gallery" :aria-busy="busy">
-    <header class="gallery-summary"><span>{{total}} 张图片<span v-if="items.size>1"> · {{items.size}} 个文件夹</span></span><button class="im-button" @click="emit('manage')">管理组合</button><nav v-if="pageCount>1" aria-label="图片分页"><button class="im-button" :disabled="busy||page===1" @click="turn(page-1)">上一页</button><span>{{page}} / {{pageCount}}</span><button class="im-button" :disabled="busy||page===pageCount" @click="turn(page+1)">下一页</button></nav></header>
+    <header class="gallery-summary"><span>{{total}} 张图片<span v-if="items.size>1"> · {{items.size}} 个文件夹</span></span><button class="im-button" @click="emit('manage')">管理组合</button><button class="im-button" @click="emit('bulk')">批量整理</button><nav v-if="pageCount>1" aria-label="图片分页"><button class="im-button" :disabled="busy||page===1" @click="turn(page-1)">上一页</button><span>{{page}} / {{pageCount}}</span><button class="im-button" :disabled="busy||page===pageCount" @click="turn(page+1)">下一页</button></nav></header>
     <p v-if="error" class="im-error" role="alert">{{error}} <button class="im-button" @click="load">重试</button></p><p v-if="busy" role="status">正在载入图片…</p>
     <p v-if="!busy&&!error&&!total" class="im-empty">文件夹中暂无图片，放入新图片后会自动显示。</p>
     <section v-for="block in blocks" :key="block.key" class="photo-folder">

@@ -55,9 +55,14 @@ export function registerGameIpc(
     if (!win || win.isDestroyed()) return null
     const game = getGameItem(id)
     if (!game) throw new Error('游戏已不存在')
+    const isAndroid = /\.apk$/i.test(game.path)
+    const entryFilters = isAndroid
+      ? [{ name: 'Android 安装包', extensions: ['apk'] }]
+      : [{ name: '游戏入口', extensions: ['exe', 'lnk', 'bat', 'cmd'] }]
     const selected = await dialog.showOpenDialog(win, {
-      title: mode === 'directory' ? '选择重命名或移动后的游戏文件夹' : '选择游戏主程序',
-      properties: [mode === 'directory' ? 'openDirectory' : 'openFile']
+      title: mode === 'directory' ? '选择重命名或移动后的游戏文件夹' : isAndroid ? '选择安卓安装包' : '选择游戏主程序',
+      properties: [mode === 'directory' ? 'openDirectory' : 'openFile'],
+      ...(mode === 'file' ? { filters: entryFilters } : {})
     })
     if (selected.canceled || !selected.filePaths[0]) return null
     let file = selected.filePaths[0]
@@ -76,16 +81,16 @@ export function registerGameIpc(
         )?.isFile()
       ) {
         const picked = await dialog.showOpenDialog(win, {
-          title: '目录内未找到原入口，请选择主程序',
+          title: isAndroid ? '目录内未找到原安装包，请选择 .apk 文件' : '目录内未找到原入口，请选择主程序',
           defaultPath: directory,
           properties: ['openFile'],
-          filters: [{ name: '游戏入口', extensions: ['exe', 'lnk', 'bat', 'cmd'] }]
+          filters: entryFilters
         })
         if (picked.canceled || !picked.filePaths[0]) return null
         file = picked.filePaths[0]
       }
     }
-    return relocateGame(getDb(), id, file, directory)
+    return relocateGame(getDb(), id, file, directory, isAndroid ? 'Android' : 'Windows')
   })
 
   ipcMain.handle('game:list', (_e, query: GameQuery = {}) =>
@@ -168,8 +173,8 @@ export function registerGameIpc(
   ipcMain.handle('game:preview-backup', (_e, id: string, target: string) =>
     previewSaveBackup(reqId(id), reqString(target, 'target', { max: 4096 }))
   )
-  ipcMain.handle('game:backup-save', (_e, id: string, savePath: string) =>
-    backupSavePath(reqId(id), reqString(savePath, 'savePath', { max: 4096 }))
+  ipcMain.handle('game:backup-save', (_e, id: string, savePath: string, note?: string) =>
+    backupSavePath(reqId(id), reqString(savePath, 'savePath', { max: 4096 }), optString(note, 'note', { max: 200, trim: true }))
   )
   ipcMain.handle('game:backups', (_e, id: string) => listSaveBackups(reqId(id)))
   ipcMain.handle('game:preview-restore', (_e, id: string, target?: string) =>

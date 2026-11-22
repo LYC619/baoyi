@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { readExternalActiveAt } from '../../services/storage/activity.ts'
 import { insertCategories, insertTag } from '../../services/storage/schema.ts'
 import { FALLBACK_CATEGORY } from '../../services/taxonomy/taxonomy.ts'
-import type { Category, ConfirmResult, Launcher, MoveRisk, PendingItem, RegisterPayload, ScannedFile, SidebarCounts, SoftwareItem, SoftwareQuery } from '../../../src/types/index.ts'
+import type { Category, ConfirmResult, Launcher, MoveRisk, PendingItem, RegisterPayload, ScannedFile, SidebarCounts, SkippedItem, SoftwareItem, SoftwareQuery } from '../../../src/types/index.ts'
 import { listCategories, tagPool, pruneOrphanAiTags } from '../../services/taxonomy/taxonomy-store.ts'
 import type { SqlDb } from '../../services/storage/schema.ts'
 import { transaction } from '../../workspace/validation.ts'
@@ -155,6 +155,7 @@ function toColumnValue(key: string, value: unknown): string | number | null {
  * 一律算成「从未使用」，那是抱一还没开始记账，不是用户真的没用过。
  */
 const ACTIVE_AT = 'MAX(last_used_at, external_active_at)'
+const NOT_MOBILE_SQL = `(LOWER(exe_path) NOT LIKE '%.apk' AND LOWER(exe_path) NOT LIKE '%.apks' AND LOWER(exe_path) NOT LIKE '%.apkm' AND LOWER(exe_path) NOT LIKE '%.xapk' AND LOWER(exe_path) NOT LIKE '%.ipa' AND LOWER(exe_path) NOT LIKE '%.hap')`
 
 export function listSoftware(d: SqlDb, query: SoftwareQuery = {}): SoftwareItem[] {
 
@@ -170,7 +171,7 @@ export function listSoftware(d: SqlDb, query: SoftwareQuery = {}): SoftwareItem[
       const days = query.unused_days ?? 60
       params.cutoff = Date.now() - days * 86400_000
       // 两边都读不到时间的（= 0）同样算长期未用
-      where.push(`${ACTIVE_AT} < @cutoff`)
+      where.push(`${ACTIVE_AT} < @cutoff AND ${NOT_MOBILE_SQL}`)
     } else if (group === 'pending') {
       where.push(`ai_status IN ('pending', 'failed')`)
     } else if (group === 'portable') {
@@ -712,6 +713,26 @@ export function countSkipped(d: SqlDb): number {
 }
 
 /** 清空忽略名单：这些程序下次识别会重新出现在确认面板里 */
+
+export function listSkipped(d: SqlDb): SkippedItem[] {
+  return (
+    d.prepare('SELECT exe_path, label, source_dir, created_at FROM skip_list ORDER BY created_at DESC').all() as Row[]
+  ).map((r) => ({
+    exe_path: String(r.exe_path ?? ''),
+    label: String(r.label ?? ''),
+    source_dir: String(r.source_dir ?? ''),
+    created_at: Number(r.created_at) || 0
+  }))
+}
+
+export function removeSkipped(d: SqlDb, exePath: string): number {
+  const row = d.prepare('SELECT source_dir FROM skip_list WHERE exe_path = ?').get(exePath) as { source_dir?: string } | undefined
+  const changes = Number(d.prepare('DELETE FROM skip_list WHERE exe_path = ?').run(exePath).changes)
+  if (changes > 0 && row?.source_dir) {
+    d.prepare(`UPDATE scan_units SET status = 'pending', note = '', updated_at = ? WHERE dir = ?`).run(Date.now(), row.source_dir)
+  }
+  return changes
+}
 export function clearSkipped(d: SqlDb): number {
   return Number(d.prepare('DELETE FROM skip_list').run().changes)
 }
@@ -859,7 +880,7 @@ export function counts(d: SqlDb, unusedDays: number): SidebarCounts {
     all: one('SELECT COUNT(*) AS n FROM software WHERE is_archived = 0'),
     archived: one('SELECT COUNT(*) AS n FROM software WHERE is_archived = 1'),
     unused: one(
-      `SELECT COUNT(*) AS n FROM software WHERE is_archived = 0 AND ${ACTIVE_AT} < ?`,
+      `SELECT COUNT(*) AS n FROM software WHERE is_archived = 0 AND ${ACTIVE_AT} < ? AND ${NOT_MOBILE_SQL}`,
       cutoff
     ),
     pending: pendingItems,

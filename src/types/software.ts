@@ -262,3 +262,11 @@ export interface ScanResult {
    */
   loose_files: string[]
 }
+
+
+export interface SkippedItem {
+  exe_path: string
+  label: string
+  source_dir: string
+  created_at: number
+}

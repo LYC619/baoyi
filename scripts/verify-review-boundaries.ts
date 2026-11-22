@@ -24,7 +24,7 @@ function fixture(overrides: Record<string, any> = {}, read = false, id = 'A') {
   const loader = createRendererLoader({
     vue: { ...Vue, onMounted: (fn: () => void) => fn(), onUnmounted: (fn: () => void) => unmount.push(fn) },
     'vue-router': { useRoute: () => route, useRouter: () => ({ replace: async () => {}, push: async (to: string) => { navigations.push(to) } }) },
-    '@/stores/image': { useImageStore: () => ({ refresh: async () => {}, groups: [] }) },
+    '@/stores/image': { useImageStore: () => ({ refresh: async () => {}, groups: [], items: [], collections: [], query: {} }) },
     '@/composables/useImageReader': { useImageReader: () => ({ session: Vue.ref(null), open: (...args: any[]) => opens.push(args) }) },
     '@/components/image/image.css': {}
   }, { window: { baoyi: { image: api } }, confirm: () => true })

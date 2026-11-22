@@ -24,10 +24,10 @@ export interface ImageItem {
   authors: string[];
   collectionId?: string; collectionName?: string; collectionOrder?: number;
   id: string; type: ImageType; path: string; sourceDir: string; name: string; description: string; tags: string[]; groupId: string | null;
-  favorite: boolean; read: boolean; publication: 'unknown' | 'ongoing' | 'completed'; coverPageId: string; pageCount: number;
+  favorite: boolean; read: boolean; publication: 'unknown' | 'ongoing' | 'completed'; coverPageId: string; pageCount: number; createdAt?: number;
   chapterCount: number; chapters: ImageChapter[]; progress: ImageProgress | null; updatedAt: number; source: string; sourceId: string;
 }
-export interface ImageQuery { type?: ImageType; search?: string; groupId?: string; uncategorized?:boolean; tag?: string; sourceDir?: string; favorite?: boolean; read?: boolean; publication?: string; sort?: 'updated' | 'name' | 'read' }
+export interface ImageQuery { type?: ImageType; search?: string; groupId?: string; uncategorized?:boolean; tag?: string; sourceDir?: string; favorite?: boolean; read?: boolean | 'reading'; publication?: string; sort?: 'updated' | 'name' | 'read' | 'taken' | 'taken-asc' }
 export interface ImageBulkPatch { groupId?: string | null; read?: boolean; tags?: { mode: 'add' | 'remove' | 'replace'; values: string[] } }
 export interface ImagePatch { name?: string; description?: string; tags?: string[]; groupId?: string | null; favorite?: boolean; read?: boolean; publication?: ImageItem['publication']; coverPageId?: string }
 export interface ScannedImagePage { file: string; entry: string; size: number }
@@ -84,7 +84,7 @@ export interface ImageApi {
   update(id: string, patch: ImagePatch): Promise<ImageItem>; remove(id: string, deleteFiles?:boolean): Promise<boolean | void>;
   collections():Promise<ImageCollection[]>; saveCollection(name:string,members:string[],id?:string):Promise<ImageCollection>; removeCollection(id:string):Promise<void>;
   move(ids:string[],byCategory?:boolean,chooseTarget?:boolean):Promise<ImageMoveResult|null>;
-  gallery(ids:string[],offset:number,limit:number):Promise<{ pages: Array<ImagePage & { name:string; folder:string }>; total:number }>;
+  gallery(ids:string[],offset:number,limit:number,sort?:string):Promise<{ pages: Array<ImagePage & { name:string; folder:string }>; total:number }>;
   bulkUpdate(ids: string[], patch: ImageBulkPatch): Promise<number>;
   groups(): Promise<ImageGroup[]>; saveGroup(group: Partial<ImageGroup> & { name: string }): Promise<ImageGroup>; removeGroup(id: string): Promise<void>;
   prepareImport(type: ImageType, multiple: boolean, archive: boolean, droppedPaths?: string[]): Promise<ImageImportPreview | null>;

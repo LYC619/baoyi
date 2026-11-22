@@ -70,7 +70,7 @@ const api: BaoyiApi = {
       update:(id,patch)=>ipcRenderer.invoke('workspace:documents:update',id,plain(patch)),remove:id=>ipcRenderer.invoke('workspace:documents:remove',id),
       prepareImport:(directory,categoryId,droppedPaths)=>ipcRenderer.invoke('workspace:documents:prepare-import',directory,categoryId,droppedPaths&&plain(droppedPaths)),confirmImport:(token,paths,categoryId,submodule,customGroupId,choices)=>ipcRenderer.invoke('workspace:documents:confirm-import',token,plain(paths),categoryId,submodule,customGroupId,choices && plain(choices)),
       relocate:id=>ipcRenderer.invoke('workspace:documents:relocate',id),open:id=>ipcRenderer.invoke('workspace:documents:open',id),reveal:id=>ipcRenderer.invoke('workspace:documents:reveal',id),
-      content:id=>ipcRenderer.invoke('workspace:documents:content',id),
+      content:(id,encoding)=>ipcRenderer.invoke('workspace:documents:content',id,encoding),
       textIndex:(id,encoding)=>ipcRenderer.invoke('workspace:documents:text:index',id,encoding),
       searchText:(id,query,page,start,encoding)=>ipcRenderer.invoke('workspace:documents:text:search',id,query,page,start,encoding),
       textSlice:(id,byteOffset,byteLength,encoding)=>ipcRenderer.invoke('workspace:documents:text:slice',id,byteOffset,byteLength,encoding),
@@ -95,8 +95,8 @@ const api: BaoyiApi = {
       publish:(id,event)=>ipcRenderer.invoke('workspace:timeline:publish',id,event),dismiss:(id,event)=>ipcRenderer.invoke('workspace:timeline:dismiss',id,event),remove:(id,event)=>ipcRenderer.invoke('workspace:timeline:remove',id,event),
       check:id=>ipcRenderer.invoke('workspace:timeline:check',id),generate:(id,ai)=>ipcRenderer.invoke('workspace:timeline:generate',id,ai),cancel:id=>ipcRenderer.invoke('workspace:timeline:cancel',id),export:id=>ipcRenderer.invoke('workspace:timeline:export',id)
     },
-    skills:{list:()=>ipcRenderer.invoke('workspace:skills:list'),proposals:()=>ipcRenderer.invoke('workspace:skills:proposals'),confirm:(id,draft)=>ipcRenderer.invoke('workspace:skills:confirm',id,plain(draft)),cancel:id=>ipcRenderer.invoke('workspace:skills:cancel',id),undoRecord:id=>ipcRenderer.invoke('workspace:skills:undo-record',id)},
-    personal:{renew:(id,input)=>ipcRenderer.invoke('workspace:personal:renew',id,plain(input)),snooze:(id,until)=>ipcRenderer.invoke('workspace:personal:snooze',id,until),captureState:(name,unit,value,date,metricId)=>ipcRenderer.invoke('workspace:personal:capture-state',name,unit,value,date,metricId),chooseAvatar:()=>ipcRenderer.invoke('workspace:personal:choose-avatar'),list:kind=>ipcRenderer.invoke('workspace:personal:list',kind),save:input=>ipcRenderer.invoke('workspace:personal:save',plain(input)),remove:id=>ipcRenderer.invoke('workspace:personal:remove',id),overview:()=>ipcRenderer.invoke('workspace:personal:overview')},
+    skills:{list:()=>ipcRenderer.invoke('workspace:skills:list'),proposals:()=>ipcRenderer.invoke('workspace:skills:proposals'),save:draft=>ipcRenderer.invoke('workspace:skills:save',plain(draft)),record:input=>ipcRenderer.invoke('workspace:skills:record',plain(input)),confirm:(id,draft)=>ipcRenderer.invoke('workspace:skills:confirm',id,plain(draft)),cancel:id=>ipcRenderer.invoke('workspace:skills:cancel',id),undoRecord:id=>ipcRenderer.invoke('workspace:skills:undo-record',id)},
+    personal:{renew:(id,input)=>ipcRenderer.invoke('workspace:personal:renew',id,plain(input)),snooze:(id,until)=>ipcRenderer.invoke('workspace:personal:snooze',id,until),captureState:(name,unit,value,date,metricId,note)=>ipcRenderer.invoke('workspace:personal:capture-state',name,unit,value,date,metricId,note),chooseAvatar:()=>ipcRenderer.invoke('workspace:personal:choose-avatar'),list:kind=>ipcRenderer.invoke('workspace:personal:list',kind),save:input=>ipcRenderer.invoke('workspace:personal:save',plain(input)),remove:id=>ipcRenderer.invoke('workspace:personal:remove',id),overview:()=>ipcRenderer.invoke('workspace:personal:overview')},
     onChanged:callback=>subscribe('workspace:changed',callback)
   },
   project: {
@@ -144,7 +144,7 @@ const api: BaoyiApi = {
     saveCollection: (name,members,id) => ipcRenderer.invoke('image:save-collection',name,plain(members),id),
     removeCollection: id => ipcRenderer.invoke('image:remove-collection',id),
     move: (ids,byCategory,chooseTarget) => ipcRenderer.invoke('image:move',plain(ids),byCategory,chooseTarget),
-    gallery: (ids,offset,limit) => ipcRenderer.invoke('image:gallery',plain(ids),offset,limit),
+    gallery: (ids,offset,limit,sort) => ipcRenderer.invoke('image:gallery',plain(ids),offset,limit,sort),
     readerPreferences: (id, value) => ipcRenderer.invoke('image:reader-preferences', id, value === undefined ? undefined : plain(value)),
     bookmarks: id => ipcRenderer.invoke('image:bookmarks', id), saveBookmark: (id, pageId, offset, label) => ipcRenderer.invoke('image:save-bookmark', id, pageId, offset, label),
     removeBookmark: (id, bookmarkId) => ipcRenderer.invoke('image:remove-bookmark', id, bookmarkId),
@@ -211,14 +211,17 @@ const api: BaoyiApi = {
       }
       return (file as File & { path?: string })?.path ?? ''
     },
-    statPaths: (paths: string[]) => ipcRenderer.invoke('app:stat-paths', plain(paths))
+    statPaths: (paths: string[]) => ipcRenderer.invoke('app:stat-paths', plain(paths)),
+    globalSearch: (query?: string, kinds?: string[], limit?: number) =>
+      ipcRenderer.invoke('app:global-search', query, kinds && plain(kinds), limit)
   },
   win: {
     minimize: () => ipcRenderer.send('win:minimize'),
     toggleMaximize: () => ipcRenderer.send('win:toggle-maximize'),
     close: () => ipcRenderer.send('win:close'),
     isMaximized: () => ipcRenderer.invoke('win:is-maximized'),
-    onMaximizeChange: (cb) => subscribe('win:maximize-change', cb)
+    onMaximizeChange: (cb) => subscribe('win:maximize-change', cb),
+    onNavigate: (cb) => subscribe('win:navigate', cb)
   },
   software: {
     list: (query: SoftwareQuery = {}) => ipcRenderer.invoke('software:list', plain(query)),
@@ -234,7 +237,10 @@ const api: BaoyiApi = {
     addManual: (files?: string[]) => ipcRenderer.invoke('software:add-manual', files && plain(files)),
     pickIcon: (id: string) => ipcRenderer.invoke('software:pick-icon', id),
     clearIcon: (id: string) => ipcRenderer.invoke('software:clear-icon', id),
-    refreshIcons: () => ipcRenderer.invoke('software:refresh-icons')
+    refreshIcons: () => ipcRenderer.invoke('software:refresh-icons'),
+    relocate: (id: string, mode: 'directory' | 'file' = 'directory') =>
+      ipcRenderer.invoke('software:relocate', id, mode),
+    pickLauncher: (id: string) => ipcRenderer.invoke('software:pick-launcher', id)
   },
   game: {
     pickBackground:id=>ipcRenderer.invoke('game:background:pick',id),clearBackground:id=>ipcRenderer.invoke('game:background:clear',id),
@@ -268,8 +274,9 @@ const api: BaoyiApi = {
     running: (id: string) => ipcRenderer.invoke('game:running', id),
     onSession: (cb) => subscribe('game:session', cb),
     previewBackup: (id:string,target:string)=>ipcRenderer.invoke('game:preview-backup',id,target),
-    backupSave: (id: string, savePath: string) =>
-      ipcRenderer.invoke('game:backup-save', id, savePath),
+    backupSave: (id: string, savePath: string, note?: string) =>
+      ipcRenderer.invoke('game:backup-save', id, savePath, note),
+
     backups: (id: string) => ipcRenderer.invoke('game:backups', id),
     previewRestore: (id: string, target?: string) => ipcRenderer.invoke('game:preview-restore',id,target),
     restoreBackup: (id: string, target?: string, expected?: string) => ipcRenderer.invoke('game:restore-backup',id,target,expected),
@@ -427,7 +434,9 @@ const api: BaoyiApi = {
     confirm: (ids: string[]) => ipcRenderer.invoke('pending:confirm', plain(ids)),
     skip: (ids: string[]) => ipcRenderer.invoke('pending:skip', plain(ids)),
     skippedCount: () => ipcRenderer.invoke('pending:skipped-count'),
-    clearSkipped: () => ipcRenderer.invoke('pending:clear-skipped')
+    clearSkipped: () => ipcRenderer.invoke('pending:clear-skipped'),
+    listSkipped: () => ipcRenderer.invoke('pending:skipped-list'),
+    removeSkipped: (exePath: string) => ipcRenderer.invoke('pending:remove-skipped', exePath)
   },
   settings: {
     detectFfmpeg: () => ipcRenderer.invoke('settings:ffmpeg-detect'),

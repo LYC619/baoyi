@@ -250,6 +250,7 @@ export interface VideoQuery {
 
 export interface VideoCounts {
   audio?: number
+  audio_archived?: number
   other?: number
   all: number
   archived: number
@@ -260,12 +261,14 @@ export interface VideoCounts {
   hentai_visible?: boolean
   collections?: Array<{ name: string; count: number }>
   hentai_collections?: Array<{ name: string; count: number }>
+  audio_collections?: Array<{ name: string; count: number }>
   /** 四个观看状态各有几个。闭集，缺的那个是 0 不是不存在 */
   status: Record<WatchStatus, number>
   categories: Array<{ name: string; count: number }>
   tags: Array<{ name: string; count: number }>
   /** 仅供进入“里番”分类后的标签栏使用。 */
   hanime_tags: Array<{ name: string; count: number }>
+  audio_tags?: Array<{ name: string; count: number }>
 }
 
 /**

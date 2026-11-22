@@ -1,6 +1,6 @@
 import vm from 'node:vm'
 import {transform} from 'esbuild'
-import {createBackup,previewRestore,restoreBackup,backupScope} from '../electron/kinds/game/backup.ts'
+import {createBackup,listBackups,previewRestore,restoreBackup,backupScope} from '../electron/kinds/game/backup.ts'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -92,4 +92,23 @@ test('leaving a game cancels pending save confirmations and stale retention prom
   const c=make();let release!:()=>void,arrived!:()=>void;const gate=new Promise<void>(r=>release=r),waiting=new Promise<void>(r=>arrived=r)
   c.refreshBackups=async()=>{arrived();await gate};const pending=vm.runInContext(backup+'\nbackupSave("shared")',c)
   await waiting;c.unmount();release();await pending;assert.deepEqual(c.calls,['confirm','backup A'])
+})
+
+test('PDF header preview, bounded local markdown images, multi-sheet workbook and backup notes',async()=>{
+  const f=fixture(),outside=fs.mkdtempSync(path.join(os.tmpdir(),'baoyi-outside-'))
+  try{
+    const pdf=f.write('real.pdf',Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n'))
+    const pdfPreview=await previewGameLink([{path:pdf,label:'攻略PDF',type:'guide'}],pdf,[f.root])
+    assert.equal(pdfPreview.kind,'pdf');assert.ok(pdfPreview.data&&pdfPreview.data.byteLength>8)
+    const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')
+    f.write('map.png',png);fs.writeFileSync(path.join(outside,'secret.png'),png)
+    const md=f.write('walkthrough.md','![地图](./map.png)\n![越界](../'+path.basename(outside)+'/secret.png)\n')
+    const mdPreview=await previewGameLink([{path:md,label:'图文攻略',type:'guide'}],md,[f.root])
+    assert.equal(mdPreview.kind,'md');assert.ok(mdPreview.images?.['./map.png']?.startsWith('data:image/png;base64,'))
+    assert.equal(Object.keys(mdPreview.images||{}).length,1,'outside image must not be resolved')
+    const save=f.write('slot.sav','progress'),backupRoot=path.join(f.root,'backups')
+    const made=await createBackup(f.db,getGame(f.db,f.id)!,save,{backupRoot,note:'打最终Boss前'})
+    assert.equal(made.ok,true);assert.equal(made.backup?.note,'打最终Boss前')
+    assert.equal(listBackups(f.db,f.id)[0]?.note,'打最终Boss前')
+  }finally{f.close();fs.rmSync(outside,{recursive:true,force:true})}
 })

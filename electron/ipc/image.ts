@@ -30,7 +30,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
   const handle = (name: string, action: (...args: any[]) => unknown) => ipc.handle('image:' + name, (event, ...args) => { main(event); return action(...args) })
   handle('list', query => library().list(optRecord(query, 'query') as any))
   handle('get', id => library().get(reqId(id)))
-  handle('gallery', (ids,offset,limit) => library().gallery(reqStringArray(ids,'ids',{max:5000}),optNumber(offset,'offset',{min:0,integer:true}),optNumber(limit,'limit',{min:1,max:5000,integer:true})))
+  handle('gallery', (ids,offset,limit,sort) => library().gallery(reqStringArray(ids,'ids',{max:5000}),optNumber(offset,'offset',{min:0,integer:true}),optNumber(limit,'limit',{min:1,max:5000,integer:true}),optString(sort,'sort',{max:32})))
   handle('reveal', async (id: string) => {
     id = reqId(id)
     const item = library().get(id)
@@ -45,7 +45,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
   handle('pages', (id, chapter) => library().pages(reqId(id), optString(chapter, 'chapter', { max: 256 })).map(({ id, resourceId, chapterId, ordinal, size, missing }) => ({ id, resourceId, chapterId, ordinal, size, missing })))
   handle('save-chapter', (id, chapterId, title, move) => { library().saveChapter(reqId(id), reqId(chapterId, 'chapterId'), reqString(title, 'title', { max: 300 }), reqNumber(move, 'move', { integer: true, min: -10000, max: 10000 })); changed() })
   handle('groups', () => library().groups())
-  handle('tag-counts', () => imageTagCounts(getDb()))
+  handle('tag-counts', () => imageTagCounts(getDb(), Boolean(getSettings(getDb()).hide_hentai)))
   handle('rename-tag', (from: string, to: string | null) => { const count = renameImageTag(getDb(), reqString(from, 'from', { max: 200 }), to === null ? null : reqString(to, 'to', { max: 200 })); changed(); return count })
   handle('update', (id, patch) => { const item = library().update(reqId(id), reqRecord(patch, 'patch') as any); changed(); return item })
   handle('bulk-update', (ids, patch) => { const count = library().bulkUpdate(reqStringArray(ids, 'ids', { min: 1, max: 5000 }), reqRecord(patch, 'patch') as any); changed(); return count })

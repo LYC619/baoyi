@@ -104,10 +104,11 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   function switchSubmodule(target: DocumentSubmodule, currentScroll = 0) {
+    if (target === submodule.value) { resetFilters(); validateFilters(); persist(); return }
     saveCurrentMemory(currentScroll)
     submodule.value = target
     restoreMemory(target)
-    resetFilters()
+    // 切换阅读与资料时保留各自已选筛选，仅在同分栏再次点击时清空筛选回到全部
     validateFilters()
     persist()
   }

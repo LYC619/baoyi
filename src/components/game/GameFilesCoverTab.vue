@@ -189,6 +189,14 @@ function focusCover(event: MouseEvent) {
         >
           清除横图
         </button>
+        <button
+          v-if="item.cover_focus"
+          type="button"
+          class="btn btn--subtle"
+          @click="emit('save', { cover_focus: '' })"
+        >
+          恢复自动构图
+        </button>
         <button type="button" class="btn btn--subtle" :disabled="!item.cover_path" @click="emit('clear-cover')">
           恢复默认封面
         </button>

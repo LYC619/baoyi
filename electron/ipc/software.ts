@@ -2,7 +2,7 @@ import { dialog, type BrowserWindow } from 'electron'
 import { existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import type { mainWindowIpc } from './main-window.ts'
-import { optBool, optRecord, optString, optStringArray, reqArray, reqId, reqNumber, reqRecord, reqString, reqStringArray } from './validate.ts'
+import { optBool, optEnum, optRecord, optString, optStringArray, reqArray, reqId, reqNumber, reqRecord, reqString, reqStringArray } from './validate.ts'
 import type { OrganizeCommand, PendingItem, SoftwareItem, SoftwareQuery } from '../../src/types'
 import {
   clearSkipped,
@@ -13,6 +13,8 @@ import {
   getSoftware,
   listPending,
   listSoftware,
+  listSkipped,
+  removeSkipped,
   skipPending,
   updatePending,
   updateSoftware
@@ -37,7 +39,7 @@ import { withOrganizeMutation } from '../kinds/software/organize/mutation'
 import { addSingleExe, cancelScan, scanDirectories } from '../kinds/software/scanner'
 import { SOFTWARE_EXTENSIONS } from '../../src/utils/software-package'
 import { ICON_EXTS } from '../kinds/software/icons'
-import { clearSoftwareIcon, refreshSoftwareIcons, setSoftwareIcon } from '../kinds/software/service'
+import { appendSoftwareLauncher, clearSoftwareIcon, refreshSoftwareIcons, relocateSoftware, setSoftwareIcon } from '../kinds/software/service'
 
 type MainIpc = ReturnType<typeof mainWindowIpc>
 
@@ -81,6 +83,51 @@ export function registerSoftwareIpc(
   })
   ipcMain.handle('software:clear-icon', (_e, id: string) => clearSoftwareIcon(reqId(id)))
   ipcMain.handle('software:refresh-icons', () => refreshSoftwareIcons())
+  ipcMain.handle('software:relocate', async (_e, id: string, mode: 'directory' | 'file' = 'directory') => {
+    const safeId = reqId(id)
+    const safeMode = optEnum(mode, ['directory', 'file'] as const, 'mode') ?? 'directory'
+    const win = getWindow()
+    if (!win || win.isDestroyed()) return null
+    const current = getSoftware(getDb(), safeId)
+    if (!current) throw new Error('软件条目已不存在')
+    const selected = await dialog.showOpenDialog(win, {
+      title: safeMode === 'directory' ? '选择移动或改名后的软件文件夹' : '选择软件主程序或安装包',
+      properties: [safeMode === 'directory' ? 'openDirectory' : 'openFile'],
+      ...(safeMode === 'file' ? { filters: [{ name: '程序与安装包', extensions: SOFTWARE_EXTENSIONS }] } : {})
+    })
+    if (selected.canceled || !selected.filePaths[0]) return null
+    let file = selected.filePaths[0]
+    let directory: string | undefined
+    if (safeMode === 'directory') {
+      directory = file
+      const rel = path.relative(current.source_dir || path.dirname(current.exe_path), current.exe_path)
+      file = path.join(directory, rel)
+      if (rel.startsWith('..') || !existsSync(file) || !statSync(file).isFile()) {
+        const picked = await dialog.showOpenDialog(win, {
+          title: '文件夹内未找到原程序，请选择主程序',
+          defaultPath: directory,
+          properties: ['openFile'],
+          filters: [{ name: '程序与安装包', extensions: SOFTWARE_EXTENSIONS }]
+        })
+        if (picked.canceled || !picked.filePaths[0]) return null
+        file = picked.filePaths[0]
+      }
+    }
+    return relocateSoftware(safeId, file, directory)
+  })
+  ipcMain.handle('software:pick-launcher', async (_e, id: string) => {
+    const safeId = reqId(id)
+    const win = getWindow()
+    if (!win || win.isDestroyed()) return null
+    if (!getSoftware(getDb(), safeId)) throw new Error('软件条目已不存在')
+    const selected = await dialog.showOpenDialog(win, {
+      title: '选择附属或备用启动程序',
+      properties: ['openFile'],
+      filters: [{ name: '启动文件', extensions: ['exe', 'bat', 'cmd', 'lnk'] }]
+    })
+    if (selected.canceled || !selected.filePaths[0]) return null
+    return appendSoftwareLauncher(safeId, selected.filePaths[0])
+  })
 
   ipcMain.handle('software:add-manual', async (_e, droppedFiles?: string[]) => {
     const provided = optStringArray(droppedFiles, 'droppedFiles', { max: 500 })
@@ -129,6 +176,10 @@ export function registerSoftwareIpc(
   )
   ipcMain.handle('pending:skipped-count', () => countSkipped(getDb()))
   ipcMain.handle('pending:clear-skipped', () => clearSkipped(getDb()))
+  ipcMain.handle('pending:skipped-list', () => listSkipped(getDb()))
+  ipcMain.handle('pending:remove-skipped', (_e, exePath: string) =>
+    removeSkipped(getDb(), reqString(exePath, 'exePath', { max: 4096 }))
+  )
 
   ipcMain.handle('scan:pick-dir', async () => {
     const win = getWindow()

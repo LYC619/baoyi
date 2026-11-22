@@ -64,3 +64,17 @@ test('技能及头像随备份恢复；状态首条记录失败不残留指标',
   assert.equal(new SkillProfiles(target).list()[0].records[0].value,'用户报告的考试')
   assert.equal(new PersonalLibrary(target).get('self')?.data.avatar,png)
 })
+
+test('手动保存技能卡片无需 AI 草案即可建立与更新指标，并可直接登记实践记录', t => {
+  const db = new DatabaseSync(':memory:'); db.exec('PRAGMA foreign_keys=ON'); initSchema(db, KINDS); t.after(() => db.close())
+  const skills = new SkillProfiles(db), personal = new PersonalLibrary(db)
+  const card = skills.saveManual({ name: '指弹吉他', summary: '日常曲目练习', metrics: [{ key: 'songs', label: '完成曲目', unit: '首', type: 'number' }] })
+  assert.equal(card.name, '指弹吉他')
+  assert.equal(card.metrics.length, 1)
+  skills.record({ cardId: card.id, metricKey: 'songs', version: 1, value: 3, date: '2026-11-22', requestId: 'manual-1', evidence: '手动练习记录' })
+  const updated = skills.saveManual({ cardId: card.id, name: '指弹吉他', summary: '日常曲目与指法练习', metrics: [{ key: 'songs', label: '完成曲目', unit: '首', type: 'number' }, { key: 'hours', label: '练习时长', unit: '小时', type: 'number' }] })
+  assert.equal(updated.metrics.length, 2)
+  assert.equal(updated.records.length, 1)
+  const measured = personal.captureState('睡眠时长', '小时', 7.5, '2026-11-22', undefined, '早睡测试备注')
+  assert.equal(measured.body, '早睡测试备注')
+})

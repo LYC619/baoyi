@@ -42,6 +42,8 @@ import {
   nestedInside,
   rebase,
   rootDirOf,
+  sameVolume,
+  sanitizeFolder,
   targetDir
 } from './plan'
 import {
@@ -58,8 +60,46 @@ import {
 } from './fsops'
 import { describeRefs, hasRefs, scanRefs } from './refs'
 
-// rootDirOf / alreadyOrganized 住在 plan.ts：sync.ts 也要用它们，而那边不该反过来
-// 依赖这个编排文件。判据没变 —— 「已整理」仍然看位置，不记标记位。
+const SHARED_LEAF_DIRS = new Set(['downloads', 'desktop', 'documents', '下载', '桌面', '文档'])
+
+function isSharedLooseExe(item: SoftwareItem, allItems: SoftwareItem[], scanDirs: string[]): boolean {
+  if (isMobilePackage(item.exe_path) || item.link_target) return false
+  const from = rootDirOf(item)
+  if (!samePath(from, path.dirname(item.exe_path))) return false
+  if ((item.launchers?.length ?? 0) > 1) return false
+  const leaf = path.basename(from.replace(/[\\/]+$/, '')).toLowerCase()
+  const home = process.env.USERPROFILE || process.env.HOME || ''
+  if (SHARED_LEAF_DIRS.has(leaf) || (home && samePath(from, home))) return true
+  if (scanDirs.some((r) => r && samePath(r, from))) return true
+  return allItems.some(
+    (other) =>
+      other.id !== item.id &&
+      (samePath(rootDirOf(other), from) || samePath(path.dirname(other.exe_path), from))
+  )
+}
+
+async function moveSingleFile(fromFile: string, toFile: string): Promise<{ ok: boolean; note: string }> {
+  try {
+    const srcStat = await fsp.stat(fromFile)
+    if (!srcStat.isFile()) return { ok: false, note: `未找到源文件：${fromFile}` }
+    if (await entryExists(toFile)) return { ok: false, note: `目标文件已存在，已跳过：${toFile}` }
+    await fsp.mkdir(path.dirname(toFile), { recursive: true })
+    if (sameVolume(fromFile, toFile)) {
+      await fsp.rename(fromFile, toFile)
+      return { ok: true, note: '' }
+    }
+    await fsp.copyFile(fromFile, toFile)
+    const dstStat = await fsp.stat(toFile)
+    if (dstStat.size !== srcStat.size) {
+      await fsp.rm(toFile, { force: true }).catch(() => { /* best-effort */ })
+      return { ok: false, note: '跨盘复制大小校验不一致，已保留原文件' }
+    }
+    await fsp.rm(fromFile, { force: true })
+    return { ok: true, note: '' }
+  } catch (err: any) {
+    return { ok: false, note: `文件移动失败：${err?.code ?? err?.message ?? '未知错误'}` }
+  }
+}
 
 /**
  * 出整理方案。不动任何文件。
@@ -68,7 +108,10 @@ import { describeRefs, hasRefs, scanRefs } from './refs'
  * 绿色软件搬走没有副作用，risky 的根本不会被剪切，两种都不值得花几秒去查注册表。
  */
 export async function previewOrganize(ids?: string[]): Promise<OrganizePreview> {
-  const root = getSettings(getDb()).organize_root
+  const settings = getSettings(getDb())
+  const root = settings.organize_root
+  const libraryItems = [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })]
+  const scanDirs = settings.software_scan_dirs ?? []
   const all = ids?.length
     ? ids.map((id) => getSoftware(getDb(), id)).filter((x): x is SoftwareItem => x !== null)
     : listSoftware(getDb(), { group: 'all' })
@@ -76,21 +119,32 @@ export async function previewOrganize(ids?: string[]): Promise<OrganizePreview> 
   const entries: OrganizeEntry[] = []
 
   for (const item of all) {
-    if (!ids?.length && alreadyOrganized(item, root)) continue
+    if (!ids?.length && (alreadyOrganized(item, root) || isMobilePackage(item.exe_path))) continue
 
     const from = rootDirOf(item)
     const mobile = isMobilePackage(item.exe_path)
-    const action = mobile ? 'skip' : defaultAction(item.is_portable, item.move_risk)
-    const folder = defaultFolder(item)
+    const looseSingle = isSharedLooseExe(item, libraryItems, scanDirs)
+    const action = mobile
+      ? 'skip'
+      : looseSingle
+        ? item.is_portable === false && item.move_risk === 'risky'
+          ? 'skip'
+          : 'move'
+        : defaultAction(item.is_portable, item.move_risk)
+    const baseName = path.basename(item.exe_path, path.extname(item.exe_path))
+    const folder = looseSingle
+      ? sanitizeFolder(item.name_en || item.name_zh || baseName, baseName || 'App')
+      : defaultFolder(item)
     const to = targetDir(root, item.category, folder)
 
     const warnings: string[] = []
     if (mobile) warnings.push('手机 APP 安装包保留原文件，本次不参与电脑软件的整目录整理')
-    if (!(await exists(from))) warnings.push(`源目录已经不在了：${from}`)
-    if (nestedInside(from, to)) warnings.push('目标路径落在源目录内部，无法移动')
+    if (looseSingle) warnings.push('位于共用目录，整理时仅将该单文件移入新建子文件夹，不移动整个上级目录')
+    if (!(await exists(looseSingle ? item.exe_path : from))) warnings.push(`源路径已经不在了：${looseSingle ? item.exe_path : from}`)
+    if (!looseSingle && nestedInside(from, to)) warnings.push('目标路径落在源目录内部，无法移动')
 
     // 安装版要剪切：先把证据摆出来
-    if (action === 'move' && item.is_portable !== true) {
+    if (action === 'move' && item.is_portable !== true && !looseSingle) {
       const refs = await scanRefs(from)
       if (hasRefs(refs)) warnings.push(describeRefs(refs))
     }
@@ -101,7 +155,7 @@ export async function previewOrganize(ids?: string[]): Promise<OrganizePreview> 
     entries.push({
       software_id: item.id,
       name: item.name_en || item.name_zh || item.file_name,
-      from_dir: from,
+      from_dir: looseSingle ? item.exe_path : from,
       exe_path: item.exe_path,
       is_portable: item.is_portable,
       move_risk: item.move_risk,
@@ -136,7 +190,10 @@ export async function runOrganize(
   commands: OrganizeCommand[],
   onProgress: (p: OrganizeProgress) => void
 ): Promise<OrganizeResult> {
-  const root = getSettings(getDb()).organize_root
+  const settings = getSettings(getDb())
+  const root = settings.organize_root
+  const libraryItems = [...listSoftware(getDb(), {}), ...listSoftware(getDb(), { group: 'archived' })]
+  const scanDirs = settings.software_scan_dirs ?? []
   const steps: OrganizeStep[] = []
   const todo = commands.filter((c) => c.action !== 'skip')
 
@@ -172,8 +229,34 @@ export async function runOrganize(
       note: ''
     }
 
+    const looseSingle = isSharedLooseExe(item, libraryItems, scanDirs)
     if (isMobilePackage(item.exe_path)) {
       step.note = '手机 APP 安装包不参与电脑软件的整目录整理'
+    } else if (looseSingle) {
+      const toExe = path.join(to, path.basename(item.exe_path))
+      step.single_file = true
+      step.to_exe = toExe
+      if (cmd.action === 'junction') {
+        step.note = '共用目录下的单文件不支持整目录链接，请选择移动或跳过'
+      } else if (await entryExists(to)) {
+        step.note = `目标已存在同名目录，已跳过：${to}`
+      } else {
+        await fsp.mkdir(to, { recursive: true })
+        const outcome = await moveSingleFile(item.exe_path, toExe)
+        step.ok = outcome.ok
+        step.note = outcome.note
+        if (outcome.ok) {
+          updateSoftware(getDb(), item.id, {
+            exe_path: toExe,
+            source_dir: to,
+            launchers: (item.launchers ?? []).map((l) =>
+              samePath(l.path, item.exe_path) ? { ...l, path: toExe } : l
+            )
+          })
+        } else {
+          await fsp.rmdir(to).catch(() => { /* best-effort */ })
+        }
+      }
     } else if (cmd.action === 'move') {
       // 已经是链接的条目不能「移动」：那会把链接搬走，真实文件留在原地，
       // 而链接的相对含义已经变了。要先转实体再谈移动
@@ -250,6 +333,28 @@ export async function undoOrganize(planId: string): Promise<UndoResult> {
 
   for (const step of [...plan.steps].reverse()) {
     if (!step.ok) continue
+
+    if (step.single_file) {
+      const outcome = await moveSingleFile(step.to_exe, step.from_exe)
+      if (outcome.ok) {
+        await fsp.rmdir(step.to).catch(() => { /* best-effort */ })
+        const current = getSoftware(getDb(), step.software_id)
+        if (current) {
+          updateSoftware(getDb(), step.software_id, {
+            exe_path: step.from_exe,
+            source_dir: step.from,
+            launchers: (current.launchers ?? []).map((l) =>
+              samePath(l.path, step.to_exe) ? { ...l, path: step.from_exe } : l
+            )
+          })
+        }
+        restored++
+      } else {
+        failed++
+        notes.push(`${step.name}：${outcome.note}`)
+      }
+      continue
+    }
 
     if (step.type === 'junction') {
       const outcome = await removeJunction(step.to)

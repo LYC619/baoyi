@@ -10,6 +10,7 @@ import type {GameProjectCheck} from '@/types/game-project'
 export type GameSelection =
   | {kind:'project';value:keyof typeof PROJECT_FILTERS}
   | { kind: 'path'; value:'unavailable' }
+  | { kind: 'platform'; value: 'windows' | 'android' }
   | { kind: 'uncategorized'; value: 'uncategorized' }
   | { kind: 'group'; value: 'all' | 'archived' }
   | { kind: 'status'; value: PlayStatus }
@@ -56,7 +57,7 @@ export const useGameStore = defineStore('game', () => {
     return true
   }
   async function checkProjects(){checkingProjects.value=true;try{projectChecks.value=await window.baoyi.game.checkProjects();await reload()}catch(e){toastError(errorMessage(e))}finally{checkingProjects.value=false}}
-  const unavailableCount=ref(0)
+  const unavailableCount=ref(0), androidCount=ref(0), windowsCount=ref(0)
   const counts = ref<GameCounts>({ ...EMPTY_COUNTS })
   const loading = ref(false)
   const loadedQuery = ref('')
@@ -76,6 +77,7 @@ export const useGameStore = defineStore('game', () => {
   const heading = computed(() => {
     if(selection.kind==='project')return PROJECT_FILTERS[selection.value]
     if (selection.kind === 'path') return '路径不可用'
+    if (selection.kind === 'platform') return selection.value === 'android' ? '安卓游戏' : '电脑游戏'
     if (selection.kind === 'uncategorized') return '未分类'
     if (selection.kind === 'category') return selection.value
     if (selection.kind === 'tag') return `# ${selection.value}`
@@ -103,7 +105,7 @@ export const useGameStore = defineStore('game', () => {
     const query = buildQuery(), selected = {...selection}, key = queryKey()
     try {
       const next = await window.baoyi.game.list(query)
-      if (loadRounds.isCurrent(round)) { items.value = selected.kind==='project'?next.filter(g=>matchesProject(g,selected.value)):selected.kind==='path'?next.filter(item=>item.path_state&&item.path_state!=='present'):next; loadedQuery.value = key }
+      if (loadRounds.isCurrent(round)) { items.value = selected.kind==='project'?next.filter(g=>matchesProject(g,selected.value)):selected.kind==='path'?next.filter(item=>item.path_state&&item.path_state!=='present'):selected.kind==='platform'?next.filter(item=>selected.value==='android'?/\.apk$/i.test(item.path):!/\.apk$/i.test(item.path)):next; loadedQuery.value = key }
     } catch (err) {
       // 失败时保留旧列表，比清空再显示「游戏库是空的」诚实
       if (loadRounds.isCurrent(round)) toastError(`读取游戏列表失败：${errorMessage(err)}`)
@@ -117,7 +119,7 @@ export const useGameStore = defineStore('game', () => {
     try {
       const [next,all]=await Promise.all([window.baoyi.game.counts(),window.baoyi.game.list({group:'all'})])
       if(countsRounds.isCurrent(round))for(const key of Object.keys(PROJECT_FILTERS) as Array<keyof typeof PROJECT_FILTERS>)projectCounts.value[key]=all.filter(g=>matchesProject(g,key)).length
-      if(countsRounds.isCurrent(round))unavailableCount.value=all.filter(item=>item.path_state&&item.path_state!=='present').length
+      if(countsRounds.isCurrent(round)){unavailableCount.value=all.filter(item=>item.path_state&&item.path_state!=='present').length;androidCount.value=all.filter(item=>/\.apk$/i.test(item.path)).length;windowsCount.value=all.length-androidCount.value}
       if (countsRounds.isCurrent(round)) counts.value = next
     } catch (err) {
       if (countsRounds.isCurrent(round)) toastError(`读取统计失败：${errorMessage(err)}`)
@@ -189,7 +191,7 @@ export const useGameStore = defineStore('game', () => {
 
   return {
     projectChecks,checkingProjects,projectCounts,checkProjects,
-    unavailableCount,
+    unavailableCount,androidCount,windowsCount,
     items,
     counts,
     loading,

@@ -1,5 +1,5 @@
 import type { TmdbConfig, VideoQuery, VideoItem, VideoCounts, VideoPlayOutcome, VideoScanResult, VideoScanProgress, Episode } from './video'
-import type { SoftwareQuery, SoftwareItem, SidebarCounts, Category, Tag, PendingItem, ConfirmResult, ScanResult, ScanProgress, ScanUnit } from './software'
+import type { SoftwareQuery, SoftwareItem, SidebarCounts, Category, Tag, PendingItem, SkippedItem, ConfirmResult, ScanResult, ScanProgress, ScanUnit } from './software'
 import type { RemoveSoftwareResult, OrganizePreview, OrganizeCommand, OrganizeResult, OrganizeProgress, OrganizePlan, UndoResult, OrganizedList, OrganizeSyncReport, RelocatePreview, RelocateResult } from './organize'
 import type { GameItem, LinkedFile, GameQuery, GameCounts, GameScanResult, GameScanProgress, SavePathCheck, SavePathAlert, GameSessionEvent, SaveBackupResult, SaveBackup, SaveRestoreResult, SaveRestorePreview, GameCoverSearchResult } from './game'
 import type { VideoDownloadCatalog, VideoDownloadRequest, VideoDownloadResult, VideoSeriesCatalog, VideoSeriesDownloadRequest, VideoSeriesDownloadResult, VideoDownloadProgress, VideoSeriesDownloadProgress } from './video-download'
@@ -48,6 +48,7 @@ export interface AppSettings {
   video_updates_weekly?: boolean
   video_updates_last_checked?: number
   ffmpeg_path?: string
+  video_player_path?: string
   video_download_concurrency?: number
   video_download_connections?: number
   /** 当前生效的那份配置。切换配置就是把某个 profile 铺到这里 */
@@ -301,6 +302,7 @@ export interface BaoyiApi {
     openUrl(url: string): Promise<void>
     pathForFile(file: File): string
     statPaths(paths: string[]): Promise<Array<{ path: string; kind: 'file' | 'directory' | 'symlink' | 'missing' }>>
+    globalSearch(query?: string, kinds?: string[], limit?: number): Promise<import('./archive').ArchiveSource[]>
   }
   win: {
     minimize(): void
@@ -308,6 +310,7 @@ export interface BaoyiApi {
     close(): void
     isMaximized(): Promise<boolean>
     onMaximizeChange(cb: (maximized: boolean) => void): Unsubscribe
+    onNavigate(cb: (direction: 'back' | 'forward') => void): Unsubscribe
   }
   software: {
     list(query?: SoftwareQuery): Promise<SoftwareItem[]>
@@ -333,6 +336,8 @@ export interface BaoyiApi {
      * 被调，老条目不会自己重来，于是修好的版本装上去看起来和没修一样。
      */
     refreshIcons(): Promise<{ total: number; changed: number; manual: number; failed: number }>
+    relocate(id: string, mode?: 'directory' | 'file'): Promise<SoftwareItem | null>
+    pickLauncher(id: string): Promise<SoftwareItem | null>
   }
   game: {
     pickBackground(id:string):Promise<GameItem|null>
@@ -400,7 +405,7 @@ export interface BaoyiApi {
 
     /** 备份一条存档路径。失败时磁盘上不留半成品，也不写记录 */
     previewBackup(id:string,target:string):Promise<{path:string;files:number;bytes:number}>
-    backupSave(id: string, savePath: string): Promise<SaveBackupResult>
+    backupSave(id: string, savePath: string, note?: string): Promise<SaveBackupResult>
     /** 一个游戏的备份，新的在前 */
     backups(id: string): Promise<SaveBackup[]>
     /** 还原一份备份。会先把当前存档自动备份一份 */
@@ -610,6 +615,8 @@ export interface BaoyiApi {
     skippedCount(): Promise<number>
     /** 清空忽略名单，被否决过的程序下次识别会重新出现 */
     clearSkipped(): Promise<number>
+    listSkipped(): Promise<SkippedItem[]>
+    removeSkipped(exePath: string): Promise<number>
   }
   settings: {
     detectFfmpeg(): Promise<string | null>

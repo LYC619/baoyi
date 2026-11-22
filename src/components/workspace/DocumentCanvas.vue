@@ -45,6 +45,7 @@ const props = defineProps<{
     theme: string
     encoding: string
     mode?: 'scroll' | 'paged'
+    pdfFit?: 'width' | 'page'
   }
 }>()
 
@@ -68,6 +69,7 @@ const search = ref('')
 const searching = ref(false)
 const searchMessage = ref('')
 const loading = ref(false)
+const pageJumpInput = ref('1')
 
 const pdfMode = computed(() => props.content.format === 'pdf')
 const imageMode = computed(() => ['png', 'jpg', 'jpeg'].includes(props.content.format))
@@ -187,8 +189,22 @@ async function navigateOutline(node: OutlineNode) {
 }
 
 watch(page, (n) => {
+  pageJumpInput.value = String(n)
   if (n !== outlineTargetPage.value) outlineActive.value = ''
 })
+
+function submitPageJump() {
+  const parsed = Math.floor(Number(pageJumpInput.value))
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    pageJumpInput.value = String(page.value)
+    return
+  }
+  const target = Math.max(1, Math.min(count.value, parsed))
+  pageJumpInput.value = String(target)
+  if (target !== page.value) {
+    void jump({ page: target, offset: 0 })
+  }
+}
 
 const setPageView = (n: number, value: unknown) => {
   if (value) pageViews.set(n, value as { ensure: () => Promise<void> })
@@ -343,6 +359,7 @@ let task: ReturnType<typeof loadPdfDocument> | undefined
 let disposed = false
 let ready = false
 let scrollTimer: ReturnType<typeof setTimeout> | undefined
+let zoomSaveTimer: ReturnType<typeof setTimeout> | undefined
 let pendingFocus: DocumentAnnotation | undefined
 
 async function renderPdf() {
@@ -475,8 +492,49 @@ function select() {
 }
 
 let lastMatch: { query: string; page: number; start: number; occurrence?: number } | undefined
+
+function persistPdfZoom(nextZoom: number) {
+  if (!pdfMode.value || typeof workspace.preferences?.save !== 'function') return
+  clearTimeout(zoomSaveTimer)
+  zoomSaveTimer = setTimeout(() => {
+    void workspace.preferences.save('document', { pdfZoom: nextZoom }).catch(() => {
+      // best-effort
+    })
+  }, 300)
+}
+
 function changeZoom(delta: number) {
-  zoom.value = Math.max(0.7, Math.min(2, Math.round((zoom.value + delta) * 10) / 10))
+  zoom.value = Math.max(0.4, Math.min(2.5, Math.round((zoom.value + delta) * 10) / 10))
+  persistPdfZoom(zoom.value)
+}
+
+async function fitPdf(mode: 'width' | 'page') {
+  if (!pdfMode.value || !pdf.value) return
+  if (mode === 'width') {
+    zoom.value = 1
+    persistPdfZoom(1)
+    return
+  }
+  try {
+    const pdfPage = await pdf.value.getPage(page.value)
+    if (disposed) return
+    const vp = pdfPage.getViewport({ scale: 1 })
+    const availW = Math.max(100, (viewport.value?.clientWidth || 600) - 56)
+    const availH = Math.max(180, (viewport.value?.clientHeight || 700) - 48)
+    const ratio = vp.height / Math.max(1, vp.width)
+    const targetZoom = Math.max(0.4, Math.min(2.5, Math.round(((availH / ratio) / availW) * 100) / 100))
+    zoom.value = targetZoom
+    persistPdfZoom(targetZoom)
+  } catch {
+    // best-effort
+  }
+}
+
+function onViewportWheel(event: WheelEvent) {
+  if (!event.ctrlKey && !event.metaKey) return
+  if (!pdfMode.value && !imageMode.value) return
+  event.preventDefault()
+  changeZoom(event.deltaY < 0 ? 0.1 : -0.1)
 }
 
 function pageRendered(n: number) {
@@ -486,7 +544,17 @@ function pageRendered(n: number) {
   }
 }
 
-async function find(query: string) {
+function countOccurrenceBefore(lower: string, term: string, start: number): number {
+  let occurrence = 0
+  let cursor = lower.indexOf(term)
+  while (cursor >= 0 && cursor < start) {
+    occurrence++
+    cursor = lower.indexOf(term, cursor + term.length)
+  }
+  return occurrence
+}
+
+async function find(query: string, direction: 1 | -1 = 1) {
   query = query.trim()
   if (!query || searching.value) return
   searching.value = true
@@ -496,43 +564,76 @@ async function find(query: string) {
   try {
     const term = query.toLowerCase()
     const previous = lastMatch?.query === term ? lastMatch : undefined
-    if (streamedMode.value && props.documentId) {
-      const match = await workspace.documents.searchText(
-        props.documentId,
-        query,
-        previous?.page || page.value,
-        previous ? previous.start + query.length : 0,
-        props.novelIndex?.encoding
-      )
-      if (disposed) return
-      if (!match) {
+    if (streamedMode.value && props.documentId && props.novelIndex?.chapters.length) {
+      if (direction === 1) {
+        const match = await workspace.documents.searchText(
+          props.documentId,
+          query,
+          previous?.page || page.value,
+          previous ? previous.start + query.length : 0,
+          props.novelIndex.encoding
+        )
+        if (disposed) return
+        if (!match) {
+          searchMessage.value = '未找到匹配内容'
+          return
+        }
+        await loadChapter(match.page - 1)
+        highlightQueryInElement(prose.value, viewport.value, query, match.occurrence)
+        lastMatch = { query: term, page: match.page, start: match.start, occurrence: match.occurrence }
+        searchMessage.value = '已找到 · 第 ' + match.page + ' 章'
+      } else {
+        const chapters = props.novelIndex.chapters
+        const total = chapters.length
+        const firstIdx = Math.max(0, Math.min(total - 1, (previous?.page || page.value) - 1))
+        for (let step = 0; step <= total; step++) {
+          if (disposed) return
+          const chIdx = (firstIdx - step + total * 2) % total
+          if (step === 0 && previous && previous.page === chIdx + 1 && previous.start <= 0) continue
+          const ch = chapters[chIdx]
+          const text =
+            chIdx === activeChapter.value && currentChapterText.value
+              ? currentChapterText.value
+              : (await workspace.documents.textSlice(props.documentId, ch.byteOffset, ch.byteLength, props.novelIndex.encoding)).text
+          const lower = text.toLowerCase()
+          const found =
+            step === 0 && previous && previous.page === chIdx + 1
+              ? lower.lastIndexOf(term, previous.start - 1)
+              : lower.lastIndexOf(term)
+          if (found < 0) continue
+          const occurrence = countOccurrenceBefore(lower, term, found)
+          await loadChapter(chIdx)
+          highlightQueryInElement(prose.value, viewport.value, query, occurrence)
+          lastMatch = { query: term, page: chIdx + 1, start: found, occurrence }
+          searchMessage.value = '已找到 · 第 ' + (chIdx + 1) + ' 章'
+          return
+        }
         searchMessage.value = '未找到匹配内容'
-        return
       }
-      await loadChapter(match.page - 1)
-      highlightQueryInElement(prose.value, viewport.value, query, match.occurrence)
-      lastMatch = { query: term, page: match.page, start: match.start }
-      searchMessage.value = '已找到 · 第 ' + match.page + ' 章'
     } else if (pdfMode.value && pdf.value) {
       const instance = pdf.value
       const first = previous?.page || page.value
       for (let step = 0; step <= count.value; step++) {
         if (disposed || pdf.value !== instance) return
-        const n = ((first - 1 + step) % count.value) + 1
+        const n =
+          direction === 1
+            ? ((first - 1 + step) % count.value) + 1
+            : ((first - 1 - step + count.value * 2) % count.value) + 1
+        if (direction === -1 && step === 0 && previous && previous.page === n && previous.start <= 0) continue
         const content = await (await instance.getPage(n)).getTextContent()
         const text = content.items.map((i) => ('str' in i ? i.str : '')).join('')
         const lower = text.toLowerCase()
-        const start = lower.indexOf(term, step === 0 && previous ? previous.start + query.length : 0)
+        const start =
+          direction === 1
+            ? lower.indexOf(term, step === 0 && previous && previous.page === n ? previous.start + query.length : 0)
+            : step === 0 && previous && previous.page === n
+              ? lower.lastIndexOf(term, previous.start - 1)
+              : lower.lastIndexOf(term)
         if (start < 0) continue
         await jump({ page: n, offset: 0 })
         await pageViews.get(n)?.ensure()
         await nextTick()
-        let occurrence = 0
-        let cursor = lower.indexOf(term)
-        while (cursor >= 0 && cursor < start) {
-          occurrence++
-          cursor = lower.indexOf(term, cursor + term.length)
-        }
+        const occurrence = countOccurrenceBefore(lower, term, start)
         highlightQueryInElement(pdfLayer(n), viewport.value, query, occurrence)
         lastMatch = { query: term, page: n, start, occurrence }
         searchMessage.value = '已找到 · 第 ' + n + ' 页'
@@ -540,27 +641,33 @@ async function find(query: string) {
       }
       searchMessage.value = '未找到匹配内容（扫描页需文字层）'
     } else {
+      const len = chunks.value.length
+      if (!len) {
+        searchMessage.value = '未找到匹配内容'
+        return
+      }
       const first = previous?.page || page.value
-      for (let step = 0; step <= chunks.value.length; step++) {
-        const n = (first - 1 + step) % chunks.value.length
+      for (let step = 0; step <= len; step++) {
+        const n = direction === 1 ? (first - 1 + step) % len : (first - 1 - step + len * 2) % len
+        if (direction === -1 && step === 0 && previous && previous.page === n + 1 && previous.start <= 0) continue
         const lower = chunks.value[n]?.text.toLowerCase() || ''
-        const start = lower.indexOf(term, step === 0 && previous ? previous.start + query.length : 0)
+        const start =
+          direction === 1
+            ? lower.indexOf(term, step === 0 && previous && previous.page === n + 1 ? previous.start + query.length : 0)
+            : step === 0 && previous && previous.page === n + 1
+              ? lower.lastIndexOf(term, previous.start - 1)
+              : lower.lastIndexOf(term)
         if (start < 0) continue
         await jump({ page: n + 1, offset: 0 })
         await nextTick()
-        let occurrence = 0
-        let cursor = lower.indexOf(term)
-        while (cursor >= 0 && cursor < start) {
-          occurrence++
-          cursor = lower.indexOf(term, cursor + term.length)
-        }
+        const occurrence = countOccurrenceBefore(lower, term, start)
         highlightQueryInElement(
           prose.value?.querySelector<HTMLElement>('[data-paragraph="' + (n + 1) + '"]'),
           viewport.value,
           query,
           occurrence
         )
-        lastMatch = { query: term, page: n + 1, start }
+        lastMatch = { query: term, page: n + 1, start, occurrence }
         searchMessage.value = '已找到 · 第 ' + (n + 1) + ' 段'
         return
       }
@@ -586,6 +693,7 @@ defineExpose({
   searchMessage,
   zoom,
   changeZoom,
+  fitPdf,
 })
 
 watch(zoom, async () => {
@@ -629,6 +737,8 @@ onMounted(async () => {
       if (disposed) return
       count.value = pdf.value.numPages
       void readOutline(pdf.value)
+      if (props.initial.page > 1 || props.initial.offset > 0) await jump(props.initial)
+      else await renderPdf()
     } else if (imageMode.value) {
       imageUrl.value = URL.createObjectURL(
         new Blob([props.content.data!.slice().buffer as ArrayBuffer], {
@@ -642,7 +752,7 @@ onMounted(async () => {
     } else {
       count.value = Math.max(1, chunks.value.length)
       await nextTick()
-      await jump(props.initial)
+      if (props.initial.page > 1 || props.initial.offset > 0) await jump(props.initial)
     }
     ready = true
     record()
@@ -679,6 +789,7 @@ onBeforeUnmount(() => {
   ready = false
   observer?.disconnect()
   clearTimeout(scrollTimer)
+  clearTimeout(zoomSaveTimer)
   clearTimeout(resizeTimer)
   void task?.destroy()
   if (imageUrl.value) URL.revokeObjectURL(imageUrl.value)
@@ -728,6 +839,17 @@ onBeforeUnmount(() => {
           >
             <ChevronRight :size="18" />
           </button>
+          <form v-if="count > 1" class="pdf-page-jump" @submit.prevent="submitPageJump">
+            <input
+              v-model="pageJumpInput"
+              type="number"
+              min="1"
+              :max="count"
+              aria-label="跳转页码"
+              title="输入页码后按回车跳转"
+              @blur="submitPageJump"
+            />
+          </form>
         </template>
         <span v-else-if="!imageMode" class="ws-muted">
           第 {{ page }} / {{ count }} {{ streamedMode ? '章' : '段' }}
@@ -740,14 +862,21 @@ onBeforeUnmount(() => {
       <div
         ref="viewport"
         class="reader-viewport"
+        :class="pdfMode ? 'viewport-theme-' + (props.readerSettings?.theme || 'light') : ''"
         @scroll.passive="scroll"
+        @wheel="onViewportWheel"
         @mouseup="select"
         @keyup="select"
         @click="hitAnnotation"
       >
         <div v-if="loading" class="reader-loading" role="status">正在载入页面…</div>
 
-        <div v-if="pdfMode" ref="pdfStack" class="pdf-stack">
+        <div
+          v-if="pdfMode"
+          ref="pdfStack"
+          class="pdf-stack"
+          :class="'pdf-theme-' + (props.readerSettings?.theme || 'light')"
+        >
           <template v-if="pdf">
             <PdfReaderPage
               v-for="n in count"
@@ -866,10 +995,48 @@ onBeforeUnmount(() => {
   margin-left: auto;
   color: var(--text-sub);
 }
+.pdf-page-jump {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+}
+.pdf-page-jump input {
+  width: 52px;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 12px;
+  text-align: center;
+  border: 1px solid var(--divider);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
 .pdf-stack,
 .text-surface {
   position: relative;
   display: flow-root;
+}
+.viewport-theme-sepia {
+  background: #f6ead1;
+}
+.viewport-theme-eye {
+  background: #dfeee1;
+}
+.viewport-theme-dark {
+  background: #141417;
+}
+.pdf-theme-sepia :deep(.pdf-page canvas) {
+  filter: sepia(0.28) brightness(0.97);
+}
+.pdf-theme-eye :deep(.pdf-page canvas) {
+  filter: sepia(0.18) hue-rotate(58deg) saturate(0.6) brightness(0.95);
+}
+.pdf-theme-dark :deep(.pdf-page) {
+  background: #18181b;
+}
+.pdf-theme-dark :deep(.pdf-page canvas) {
+  filter: invert(0.88) hue-rotate(180deg);
 }
 .annotation-highlight {
   position: absolute;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { latestOnly, STALE } from '@/composables/latestOnly'
 import { errorMessage } from '@/utils'
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import {
   useRouter,
   useRoute,
@@ -33,6 +33,61 @@ import type {
 } from '@/types/workspace'
 import '@/styles/workspace.css'
 
+const UI_PREF_KEY = 'baoyi.document.readerUi.v1'
+const DOC_ENC_KEY = 'baoyi.document.encodings.v1'
+
+interface StoredReaderUiPrefs {
+  lineHeight?: number
+  theme?: ReaderSettingsModel['theme']
+  pdfFit?: 'width' | 'page'
+  toc?: boolean
+  side?: boolean
+}
+
+function loadStoredUiPrefs(): StoredReaderUiPrefs {
+  if (typeof localStorage === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(UI_PREF_KEY)
+    return raw ? (JSON.parse(raw) as StoredReaderUiPrefs) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveStoredUiPrefs(prefs: StoredReaderUiPrefs) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(UI_PREF_KEY, JSON.stringify(prefs))
+  } catch {
+    // best-effort
+  }
+}
+
+function getDocumentSavedEncoding(docId: string): string {
+  if (typeof localStorage === 'undefined') return 'auto'
+  try {
+    const raw = localStorage.getItem(DOC_ENC_KEY)
+    const map = raw ? (JSON.parse(raw) as Record<string, string>) : {}
+    return map[docId] || 'auto'
+  } catch {
+    return 'auto'
+  }
+}
+
+function setDocumentSavedEncoding(docId: string, encoding: string) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    const raw = localStorage.getItem(DOC_ENC_KEY)
+    const map = raw ? (JSON.parse(raw) as Record<string, string>) : {}
+    if (!encoding || encoding === 'auto') delete map[docId]
+    else map[docId] = encoding
+    localStorage.setItem(DOC_ENC_KEY, JSON.stringify(map))
+  } catch {
+    // best-effort
+  }
+}
+
+const storedUi = loadStoredUiPrefs()
 const archiveAssistant = useArchiveAssistant()
 const props = defineProps<{ id: string }>()
 const router = useRouter()
@@ -43,8 +98,8 @@ const annotations = ref<DocumentAnnotation[]>([])
 const canvas = ref<InstanceType<typeof DocumentCanvas>>()
 const headerRef = ref<InstanceType<typeof ReaderHeader>>()
 
-const toc = ref(false)
-const side = ref(true)
+const toc = ref(storedUi.toc ?? false)
+const side = ref(storedUi.side ?? true)
 const error = ref('')
 const contentError = ref('')
 const busy = ref(false)
@@ -63,12 +118,23 @@ const novelIndex = ref<NovelIndexResult | null>(null)
 const currentChapterIndex = ref(0)
 const readerSettings = ref<ReaderSettingsModel>({
   fontSize: 18,
-  lineHeight: 1.8,
-  theme: 'light',
-  encoding: 'auto',
+  lineHeight: storedUi.lineHeight && storedUi.lineHeight >= 1.4 && storedUi.lineHeight <= 2.6 ? storedUi.lineHeight : 1.8,
+  theme: storedUi.theme && ['light', 'sepia', 'eye', 'dark'].includes(storedUi.theme) ? storedUi.theme : 'light',
+  encoding: getDocumentSavedEncoding(props.id),
   immersive: false,
+  pdfFit: storedUi.pdfFit === 'page' ? 'page' : 'width',
 })
 const settingsOpen = ref(false)
+
+function persistUiPrefs() {
+  saveStoredUiPrefs({
+    lineHeight: readerSettings.value.lineHeight,
+    theme: readerSettings.value.theme,
+    pdfFit: readerSettings.value.pdfFit,
+    toc: toc.value,
+    side: side.value,
+  })
+}
 
 function onChapterChange(idx: number) {
   currentChapterIndex.value = idx
@@ -76,18 +142,34 @@ function onChapterChange(idx: number) {
 
 function updateReaderSettings(patch: Partial<ReaderSettingsModel>) {
   Object.assign(readerSettings.value, patch)
+  persistUiPrefs()
+  if (patch.fontSize !== undefined && typeof workspace.preferences?.save === 'function') {
+    void workspace.preferences.save('document', { fontSize: patch.fontSize }).catch(() => {
+      // best-effort
+    })
+  }
+  if (patch.encoding !== undefined) {
+    setDocumentSavedEncoding(props.id, patch.encoding)
+  }
 }
 
 const readIndex = latestOnly((encoding?: string) => workspace.documents.textIndex(props.id, encoding))
 async function reloadEncoding() {
-  if (!item.value || !novelIndex.value) return
+  if (!item.value) return
+  setDocumentSavedEncoding(props.id, readerSettings.value.encoding)
+  const enc = readerSettings.value.encoding === 'auto' ? undefined : readerSettings.value.encoding
   try {
     loading.value = true
-    const enc = readerSettings.value.encoding === 'auto' ? undefined : readerSettings.value.encoding
-    const index = await readIndex(enc)
-    if (index === STALE) return
-    novelIndex.value = index
-    pageCount.value = Math.max(1, novelIndex.value?.chapters.length || 1)
+    if (novelIndex.value && typeof workspace.documents.textIndex === 'function') {
+      const index = await readIndex(enc)
+      if (index === STALE) return
+      novelIndex.value = index
+      pageCount.value = Math.max(1, novelIndex.value?.chapters.length || 1)
+    } else if (['txt', 'md', 'markdown'].includes(item.value.format)) {
+      const nextContent = await workspace.documents.content(props.id, enc)
+      if (disposed) return
+      content.value = nextContent
+    }
   } catch (e) {
     error.value = errorMessage(e)
   }
@@ -96,6 +178,7 @@ async function reloadEncoding() {
 
 function closeSide() {
   side.value = false
+  persistUiPrefs()
   headerRef.value?.focusSideTrigger()
 }
 
@@ -129,11 +212,13 @@ onMounted(() => {
 
 function toggleToc() {
   toc.value = !toc.value
-  if (toc.value && window.innerWidth <= 850) side.value = false
+  if (toc.value && typeof window !== 'undefined' && (window.innerWidth || 1200) <= 850) side.value = false
+  persistUiPrefs()
 }
 function toggleSide() {
   side.value = !side.value
-  if (side.value && window.innerWidth <= 850) toc.value = false
+  if (side.value && typeof window !== 'undefined' && (window.innerWidth || 1200) <= 850) toc.value = false
+  persistUiPrefs()
 }
 
 const readDocument = latestOnly(async () => {
@@ -145,25 +230,28 @@ const readDocument = latestOnly(async () => {
     workspace.preferences.get('document'),
   ])
   if (lifetime.signal.aborted) return null
+  const savedEnc = getDocumentSavedEncoding(props.id)
+  const enc = savedEnc && savedEnc !== 'auto' ? savedEnc : undefined
   let c: Awaited<ReturnType<typeof workspace.documents.content>> | null = null
   let index: NovelIndexResult | null = null
   let contentFailure = ''
   if (['pdf', 'md', 'markdown', 'txt', 'png', 'jpg', 'jpeg'].includes(value.format) && value.available) {
     try {
-      c = await workspace.documents.content(props.id)
+      c = await workspace.documents.content(props.id, enc)
       if (
-        ((value.format === 'txt' && (value.type === 'novel' || c.isLarge)) ||
-          (['md', 'markdown'].includes(value.format) && c.isLarge)) &&
+        (value.format === 'txt' || (['md', 'markdown'].includes(value.format) && c.isLarge)) &&
         typeof workspace.documents.textIndex === 'function'
       ) {
-        const enc = readerSettings.value.encoding === 'auto' ? undefined : readerSettings.value.encoding
-        index = await workspace.documents.textIndex(props.id, enc)
+        const idx = await workspace.documents.textIndex(props.id, enc)
+        if (!idx.isChunked || value.type === 'novel' || c.isLarge) {
+          index = idx
+        }
       }
     } catch (e) {
       contentFailure = errorMessage(e)
     }
   }
-  return { value, notes, preferences, c, index, contentFailure }
+  return { value, notes, preferences, c, index, contentFailure, savedEnc }
 })
 
 async function load() {
@@ -183,8 +271,9 @@ async function load() {
   try {
     const result = await readDocument()
     if (result === STALE || !result || lifetime.signal.aborted) return
-    const { value, notes, preferences, c, index, contentFailure } = result
+    const { value, notes, preferences, c, index, contentFailure, savedEnc } = result
     readerSettings.value.fontSize = preferences.fontSize
+    readerSettings.value.encoding = savedEnc || 'auto'
     item.value = value
     annotations.value = notes
     position.value = { ...value.position }
@@ -283,8 +372,8 @@ function capture(text: string, loc: ReadingLocation, point: { x: number; y: numb
   quote.value = text
   quoteLocation.value = loc
   selectionPoint.value = {
-    x: Math.max(12, Math.min(window.innerWidth - 465, point.x)),
-    y: Math.max(150, Math.min(window.innerHeight - 60, point.y + 10)),
+    x: Math.max(12, Math.min((window.innerWidth || 1200) - 465, point.x)),
+    y: Math.max(150, Math.min((window.innerHeight || 800) - 60, point.y + 10)),
   }
 }
 
@@ -302,9 +391,21 @@ function outsideSelection(event: PointerEvent) {
   if (!target.closest('.settings-anchor')) settingsOpen.value = false
 }
 function selectionChanged() {
-  if (!window.getSelection()?.toString().trim() && !editing.value) quote.value = ''
+  if (!window.getSelection?.()?.toString().trim() && !editing.value) quote.value = ''
 }
-function escapeSelection(event: KeyboardEvent) {
+function onReaderKeydown(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'f') {
+    if (supported.value && content.value && !['png', 'jpg', 'jpeg'].includes(item.value?.format || '')) {
+      event.preventDefault()
+      if (readerSettings.value.immersive) {
+        readerSettings.value.immersive = false
+        void nextTick(() => headerRef.value?.focusSearch())
+      } else {
+        headerRef.value?.focusSearch()
+      }
+      return
+    }
+  }
   if (event.key === 'Escape') {
     clearSelection()
     settingsOpen.value = false
@@ -313,18 +414,18 @@ function escapeSelection(event: KeyboardEvent) {
 onMounted(() => {
   document.addEventListener('pointerdown', outsideSelection)
   document.addEventListener('selectionchange', selectionChanged)
-  document.addEventListener('keydown', escapeSelection)
+  document.addEventListener('keydown', onReaderKeydown)
 })
 onBeforeUnmount(() => {
   clearTimeout(noticeTimer)
   document.removeEventListener('pointerdown', outsideSelection)
   document.removeEventListener('selectionchange', selectionChanged)
-  document.removeEventListener('keydown', escapeSelection)
+  document.removeEventListener('keydown', onReaderKeydown)
 })
 
 function clearSelection() {
   quote.value = ''
-  window.getSelection()?.removeAllRanges()
+  window.getSelection?.()?.removeAllRanges()
 }
 function excerpt() {
   if (quote.value) {
@@ -359,6 +460,34 @@ async function saveAnnotation() {
     editing.value = null
     quote.value = ''
     message.value = '已保存标注'
+  })
+}
+const pageBookmarked = computed(() =>
+  annotations.value.some((a) => a.kind === 'bookmark' && a.location?.page === position.value.page)
+)
+async function togglePageBookmark() {
+  if (!item.value) return
+  const existing = annotations.value.find(
+    (a) => a.kind === 'bookmark' && a.location?.page === position.value.page && !a.note
+  )
+  await run(async () => {
+    if (existing) {
+      await workspace.documents.removeAnnotation(props.id, existing.id)
+      annotations.value = await workspace.documents.annotations(props.id)
+      message.value = '已移除当前页书签'
+    } else {
+      const label = novelIndex.value
+        ? novelIndex.value.chapters[currentChapterIndex.value]?.title || `第 ${position.value.page} 章`
+        : `第 ${position.value.page} ${item.value?.format === 'pdf' ? '页' : '段'}`
+      await workspace.documents.annotate(props.id, {
+        kind: 'bookmark',
+        quote: label,
+        note: '',
+        location: plain(position.value),
+      })
+      annotations.value = await workspace.documents.annotations(props.id)
+      message.value = '已添加当前页书签'
+    }
   })
 }
 async function bookmark() {
@@ -486,6 +615,10 @@ async function ask() {
   clearSelection()
   await archiveAssistant.show(text, [props.id])
 }
+function onFitPdf(mode: 'width' | 'page') {
+  updateReaderSettings({ pdfFit: mode })
+  void canvas.value?.fitPdf(mode)
+}
 </script>
 
 <template>
@@ -503,12 +636,15 @@ async function ask() {
       :settings-open="settingsOpen"
       :zoom="canvas?.zoom || 1"
       :searching="Boolean(canvas?.searching)"
+      :page-bookmarked="pageBookmarked"
       :novel-index="novelIndex"
       :current-chapter-index="currentChapterIndex"
       :reader-settings="readerSettings"
       @back="router.push(returnPath(route.query.from, '/document'))"
-      @find="(q) => canvas?.find(q)"
+      @find="(q, dir) => canvas?.find(q, dir)"
       @change-zoom="(d) => canvas?.changeZoom(d)"
+      @fit-pdf="onFitPdf"
+      @bookmark-page="togglePageBookmark"
       @prev-chapter="canvas?.prevChapter()"
       @next-chapter="canvas?.nextChapter()"
       @toggle-toc="toggleToc"
@@ -523,10 +659,10 @@ async function ask() {
       v-if="readerSettings.immersive"
       type="button"
       class="immersive-exit-button"
-      title="退出沉浸阅读"
+      title="显示顶栏"
       @click="readerSettings.immersive = false"
     >
-      <Minimize2 :size="16" />退出沉浸
+      <Minimize2 :size="16" />退出全屏
     </button>
 
     <p v-if="error" class="ws-error reader-toast" role="alert">

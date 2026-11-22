@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { FolderInput, FolderOpen, Loader2, Play, Unlink } from 'lucide-vue-next'
+import { FolderInput, FolderOpen, Loader2, Play, Plus, Trash2, Unlink } from 'lucide-vue-next'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import SoftwareTypeSelect from '@/components/software/SoftwareTypeSelect.vue'
 import { isMobilePackage } from '@/utils/software-package'
 import { formatBytes } from '@/utils'
-import type { SoftwareItem } from '@/types'
+import type { Launcher, SoftwareItem } from '@/types'
 
 defineProps<{
   item: SoftwareItem
@@ -12,11 +12,16 @@ defineProps<{
   categoryBusy: boolean
   linkBusy: boolean
   typeBusy: boolean
+  relocating?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'launch-with', path: string): void
   (e: 'set-default', path: string): void
+  (e: 'add-launcher'): void
+  (e: 'rename-launcher', launcher: Launcher, label: string): void
+  (e: 'remove-launcher', path: string): void
+  (e: 'relocate', mode: 'directory' | 'file'): void
   (e: 'copy-path', path: string): void
   (e: 'update:typeBusy', busy: boolean): void
   (e: 'type-updated', updated: SoftwareItem): void
@@ -35,10 +40,21 @@ const emit = defineEmits<{
   >
     <section class="panel">
       <h2 class="sec-title">
-        启动端
-        <span v-if="item.launchers.length > 1" class="sec-title__count">
-          {{ item.launchers.length }}
+        <span>
+          启动端
+          <span v-if="item.launchers.length > 1" class="sec-title__count">
+            {{ item.launchers.length }}
+          </span>
         </span>
+        <button
+          v-if="!isMobilePackage(item.exe_path)"
+          type="button"
+          class="sec-title__act"
+          @click="emit('add-launcher')"
+        >
+          <Plus :size="13" />
+          添加启动项
+        </button>
       </h2>
       <p class="sec-note">
         同一个软件的 32/64 位和附属程序都归在这里。点击左侧按钮直接启动，点击「设为默认」可更换主启动目标。
@@ -61,7 +77,14 @@ const emit = defineEmits<{
           <div class="launchers__body">
             <div class="launchers__line">
               <span class="launchers__name mono">{{ l.path.split('\\').pop() }}</span>
-              <TagBadge v-if="l.label" :label="l.label" tone="muted" />
+              <input
+                class="launchers__labelInput"
+                :value="l.label"
+                maxlength="20"
+                placeholder="备注名（如 64 位）"
+                aria-label="启动项名称"
+                @change="emit('rename-launcher', l, ($event.target as HTMLInputElement).value.trim())"
+              />
               <TagBadge v-if="l.is_default" label="默认" tone="success" />
               <TagBadge v-else-if="l.kind === 'extra'" label="附属" tone="muted" />
             </div>
@@ -69,20 +92,39 @@ const emit = defineEmits<{
               {{ l.path }}
             </button>
           </div>
-          <button
-            v-if="!l.is_default"
-            type="button"
-            class="launchers__set"
-            @click="emit('set-default', l.path)"
-          >
-            设为默认
-          </button>
+          <div class="launchers__ops">
+            <button
+              v-if="!l.is_default"
+              type="button"
+              class="launchers__set"
+              @click="emit('set-default', l.path)"
+            >
+              设为默认
+            </button>
+            <button
+              v-if="!l.is_default"
+              type="button"
+              class="launchers__del"
+              title="从启动列表中移除（不删除本地文件）"
+              @click="emit('remove-launcher', l.path)"
+            >
+              <Trash2 :size="13" />
+            </button>
+          </div>
         </li>
       </ul>
     </section>
 
     <section class="panel">
       <h2 class="sec-title">位置信息</h2>
+      <div class="row row--relocate">
+        <button type="button" class="btn btn--ghost" :disabled="relocating" @click="emit('relocate', 'directory')">
+          重新定位目录
+        </button>
+        <button type="button" class="btn btn--subtle" :disabled="relocating" @click="emit('relocate', 'file')">
+          {{ isMobilePackage(item.exe_path) ? '更换安装包文件' : '更换主程序' }}
+        </button>
+      </div>
       <dl class="kv">
         <dt>当前位置</dt>
         <dd>
@@ -164,6 +206,10 @@ const emit = defineEmits<{
 
 <style scoped>
 .sec-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: var(--fs-tag);
   font-weight: 500;
   letter-spacing: 0.5px;
@@ -175,6 +221,18 @@ const emit = defineEmits<{
   font-family: var(--font-mono);
   letter-spacing: 0;
 }
+.sec-title__act {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-tag);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-faint);
+}
+.sec-title__act:hover {
+  color: var(--accent);
+}
 .sec-note {
   font-size: 11px;
   line-height: 1.7;
@@ -183,6 +241,13 @@ const emit = defineEmits<{
 }
 .sec-note--foot {
   margin: 10px 0 0;
+}
+.row--relocate {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 .kv {
   display: grid;
@@ -219,7 +284,7 @@ const emit = defineEmits<{
   border: 1px solid var(--divider);
 }
 .launchers__row--extra {
-  opacity: 0.72;
+  opacity: 0.82;
 }
 .launchers__go {
   flex-shrink: 0;
@@ -251,6 +316,21 @@ const emit = defineEmits<{
   font-size: var(--fs-tag);
   color: var(--text-main);
 }
+.launchers__labelInput {
+  width: 128px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid var(--divider);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-size: 11px;
+  outline: none;
+}
+.launchers__labelInput:focus {
+  border-color: var(--accent);
+  color: var(--text-main);
+}
 .launchers__path {
   display: block;
   width: 100%;
@@ -265,9 +345,14 @@ const emit = defineEmits<{
 .launchers__path:hover {
   color: var(--text-sub);
 }
-.launchers__set {
+.launchers__ops {
   flex-shrink: 0;
   align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.launchers__set {
   font-size: 11px;
   color: var(--text-faint);
   white-space: nowrap;
@@ -275,6 +360,12 @@ const emit = defineEmits<{
 }
 .launchers__set:hover {
   color: var(--accent);
+}
+.launchers__del {
+  color: var(--text-faint);
+}
+.launchers__del:hover {
+  color: var(--danger);
 }
 .link-btn {
   display: block;

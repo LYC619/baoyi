@@ -66,8 +66,20 @@ const scrolled = ref(false)
 const notesPanel = ref<InstanceType<typeof GameNotes>>()
 const gameNotes = ref<GameNote[]>([])
 const categories = ref<string[]>([])
+const categoryOpen = ref(false)
+const guideVisited = ref(activeTab.value === 'guide')
+const closeCategoryDropdown = () => setTimeout(() => { categoryOpen.value = false }, 140)
 
 const trainers = computed(() => item.value?.linked_files.filter((f) => f.type === 'trainer') || [])
+const executableTrainers = computed(() => trainers.value.filter((f) => f.role !== 'usage' && /\.(exe|cmd|bat|lnk)$/i.test(f.path)))
+const selectedTrainers = ref<string[]>([])
+watch(executableTrainers, (list) => {
+  const defaults = list.filter((f) => f.launch_with_game).map((f) => f.path)
+  selectedTrainers.value = defaults.length ? defaults : list.length === 1 ? [list[0].path] : []
+}, { immediate: true })
+function toggleSelectedTrainer(target: string, checked: boolean): void {
+  selectedTrainers.value = checked ? [...new Set([...selectedTrainers.value, target])] : selectedTrainers.value.filter((p) => p !== target)
+}
 const guides = computed(() => item.value?.linked_files.filter((f) => f.type === 'guide') || [])
 const report = computed(() => guides.value.find((f) => f.project) || guides.value.find((f) => f.role === 'report'))
 const reportPath = ref('')
@@ -112,6 +124,7 @@ onBeforeRouteLeave(leaveNotes)
 onBeforeRouteUpdate(leaveNotes)
 
 watch(activeTab, (tab) => {
+  if (tab === 'guide') guideVisited.value = true
   if (scrollRoot.value && tabRoot.value) {
     const top = tabRoot.value.offsetTop - 52
     if (scrollRoot.value.scrollTop > top) scrollRoot.value.scrollTop = top
@@ -452,8 +465,10 @@ const { save, commitTags, toggleArchive, reveal, copyPath } = useResourceDetail(
   },
 })
 
-function removeSavePath(path: string): void {
+async function removeSavePath(path: string): Promise<void> {
   if (!item.value) return
+  const ok = await confirmDialog({ title: '移除这条存档路径？', message: `${path}\n\n仅从当前游戏记录中移除这条路径，本地存档文件和已有备份记录都会保留。`, confirmText: '移除路径', tone: 'danger' })
+  if (!ok || !item.value) return
   void save({ save_paths: item.value.save_paths.filter((s) => s.path !== path) })
 }
 
@@ -544,7 +559,7 @@ async function refreshBackups(): Promise<void> {
   await Promise.all([loadBackups(), store.refreshCounts()])
 }
 
-async function backupSave(target: string): Promise<void> {
+async function backupSave(target: string, note?: string): Promise<void> {
   if (!item.value) return
   const id = item.value.id
   const signal = beginSaveAction()
@@ -560,7 +575,7 @@ async function backupSave(target: string): Promise<void> {
     ) {
       return
     }
-    const r = await window.baoyi.game.backupSave(id, target)
+    const r = await window.baoyi.game.backupSave(id, target, note)
     if (signal.aborted) return
     if (!r.ok) {
       error(r.message)
@@ -697,7 +712,8 @@ async function launch(options: GameLaunchOptions = {}): Promise<void> {
       return
     }
     toast(r.message)
-    await refreshRunning()
+    await Promise.all([load(), refreshRunning()])
+    void store.reload()
   } catch (e) {
     error(errorMessage(e))
   }
@@ -761,8 +777,10 @@ async function removeItem(): Promise<void> {
           <span class="breadcrumb-sep" :class="{ visible: scrolled }">/</span>
           <span class="breadcrumb-title" :class="{ visible: scrolled }">{{ title }}</span>
           <div class="head__actions">
-            <button type="button" class="btn btn--ghost" @click="reveal">
-              <FolderOpen :size="14" />打开文件夹
+
+            <button type="button" :class="!isWindowsGameEntry(item.path) ? 'btn btn--primary' : 'btn btn--ghost'" @click="reveal">
+              <FolderOpen :size="14" />{{ !isWindowsGameEntry(item.path) ? '打开安装包目录' : '打开文件夹' }}
+
             </button>
             <button
               type="button"
@@ -809,7 +827,7 @@ async function removeItem(): Promise<void> {
                   {{ entry.path === item.path ? '★ ' : '' }}{{ entry.label }}
                 </button>
                 <button
-                  v-for="tool in trainers.filter((f) => f.role !== 'usage' && /\.(exe|cmd|bat|lnk)$/i.test(f.path))"
+                  v-for="tool in executableTrainers"
                   :key="tool.path"
                   type="button"
                   :disabled="launchDisabled()"
@@ -817,6 +835,26 @@ async function removeItem(): Promise<void> {
                 >
                   连同 {{ tool.label }} 启动
                 </button>
+                <template v-if="executableTrainers.length > 1">
+                  <div class="launch-trainer-group" @click.stop>
+                    <small>勾选随游戏启动的修改器</small>
+                    <label v-for="tool in executableTrainers" :key="'chk:' + tool.path" class="launch-trainer-opt">
+                      <input
+                        type="checkbox"
+                        :checked="selectedTrainers.includes(tool.path)"
+                        @change="toggleSelectedTrainer(tool.path, ($event.target as HTMLInputElement).checked)"
+                      />
+                      <span>{{ tool.label }}</span>
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    :disabled="launchDisabled() || selectedTrainers.length === 0"
+                    @click="launch({ trainers: [...selectedTrainers] })"
+                  >
+                    启动游戏 + 已勾 {{ selectedTrainers.length }} 项
+                  </button>
+                </template>
               </LibraryToolbarMenu>
             </div>
           </div>
@@ -900,17 +938,31 @@ async function removeItem(): Promise<void> {
 
             <aside class="hero-meta">
               <h3>归类</h3>
-              <label>
+              <label class="cat-combo">
                 分类
                 <input
                   :value="item.category"
-                  list="game-categories"
+                  autocomplete="off"
                   aria-label="游戏分类"
+                  @focus="categoryOpen = true"
+                  @click="categoryOpen = true"
+                  @blur="closeCategoryDropdown"
                   @change="save({ category: ($event.target as HTMLInputElement).value.trim() })"
                 />
-                <datalist id="game-categories">
-                  <option v-for="c in categories" :key="c" :value="c" />
-                </datalist>
+                <div v-if="categoryOpen && categories.length" class="cat-dropdown">
+                  <button
+                    v-for="c in categories"
+                    :key="c"
+                    type="button"
+                    class="cat-option"
+                    :class="{ active: item.category === c }"
+                    @mousedown.prevent="save({ category: c }); categoryOpen = false"
+                  >
+                    {{ c }}
+                  </button>
+                </div>
+
+
               </label>
               <div class="hero-tags">
                 <span>标签</span>
@@ -1070,7 +1122,7 @@ async function removeItem(): Promise<void> {
             tabindex="0"
           >
             <GameDocs
-              v-if="activeTab === 'guide'"
+              v-if="guideVisited || activeTab === 'guide'"
               :key="item.id"
               :game="item"
               :initial-path="reportPath"
@@ -1146,7 +1198,16 @@ async function removeItem(): Promise<void> {
 </template>
 
 <style scoped>
+.cat-combo { position: relative; }
+.cat-dropdown { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 25; max-height: 220px; overflow-y: auto; padding: 4px; border-radius: var(--radius-input); border: 1px solid var(--divider-strong); background: var(--bg-elevated); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 2px; }
+.cat-option { width: 100%; padding: 5px 8px; border-radius: 5px; font-size: var(--fs-tag); color: var(--text-main); text-align: left; }
+.cat-option:hover, .cat-option.active { background: var(--hover-surface); color: var(--accent); }
+.launch-trainer-group { display: flex; flex-direction: column; gap: 6px; padding: 6px 4px; border-top: 1px solid var(--divider); }
+.launch-trainer-group > small { font-size: 11px; color: var(--text-faint); }
+.launch-trainer-opt { display: flex; align-items: center; justify-content: flex-start !important; gap: 8px; font-size: 12px; color: var(--text-main); cursor: pointer; }
+.launch-trainer-opt input { accent-color: var(--accent); }
 .path-warning {
+  display: flex;
   display: flex;
   align-items: center;
   gap: 12px;

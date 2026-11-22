@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { activeModule, moduleTarget, MODULE_TABS, type ModuleKey } from '@/composables/useModules'
+import { activeModule, lastNonSettingsPath, moduleTarget, MODULE_TABS, type ModuleKey } from '@/composables/useModules'
+import { returnPath } from '@/utils/workspace-api'
 import { ArrowLeft, Bot, Database, Download, Eye, FolderTree, Globe, Info, Palette, ScrollText, Tags, Telescope } from 'lucide-vue-next'
 import ProjectSettings from '@/components/project/ProjectSettings.vue'
 import PersonalSettings from '@/components/personal/PersonalSettings.vue'
@@ -12,6 +13,7 @@ import VideoTaxonomySettings from '@/components/settings/VideoTaxonomySettings.v
 import ScanTab from '@/components/settings/tabs/ScanTab.vue'
 import OrganizeTab from '@/components/settings/tabs/OrganizeTab.vue'
 import AiTab from '@/components/settings/tabs/AiTab.vue'
+import ProxyTab from '@/components/settings/tabs/ProxyTab.vue'
 import SearchTab from '@/components/settings/tabs/SearchTab.vue'
 import MetadataTab from '@/components/settings/tabs/MetadataTab.vue'
 import DownloadsTab from '@/components/settings/tabs/DownloadsTab.vue'
@@ -25,14 +27,23 @@ import DataTab from '@/components/settings/tabs/DataTab.vue'
 import AboutTab from '@/components/settings/tabs/AboutTab.vue'
 
 const route = useRoute()
-
 const router = useRouter()
 
-/* -------------------------------- 分页 -------------------------------- */
+const MODULE_LABELS: Record<ModuleKey, string> = {
+  software: '软件',
+  game: '游戏',
+  video: '影视',
+  image: '图片',
+  project: '项目',
+  document: '文库',
+  personal: '个人'
+}
 
-const GLOBAL_TABS=['appearance','ai','search','data','about']
+const GLOBAL_TABS = ['appearance', 'ai', 'proxy', 'search', 'data', 'about']
 
-const globalScope=computed(()=>route.query.scope==='global'||(!route.query.scope&&GLOBAL_TABS.includes(String(route.query.tab))))
+const globalScope = computed(
+  () => route.query.scope === 'global' || (!route.query.scope && GLOBAL_TABS.includes(String(route.query.tab)))
+)
 
 const ALL_TABS = [
   { id: 'personal', label: '个人设置', icon: Tags, modules: ['personal'] },
@@ -53,90 +64,158 @@ const ALL_TABS = [
   { id: 'hentai-tags', label: '里番标签', icon: Tags, modules: ['video'] },
   { id: 'appearance', label: '外观', icon: Palette, modules: [] },
   { id: 'ai', label: 'AI 配置', icon: Bot, modules: [] },
+  { id: 'proxy', label: '网络代理', icon: Globe, modules: [] },
   { id: 'search', label: '联网搜索', icon: Globe, modules: [] },
   { id: 'data', label: '数据管理', icon: Database, modules: [] },
   { id: 'about', label: '关于', icon: Info, modules: [] }
 ] as const
 
-// 根据当前模块过滤标签页
+const moduleTabs = computed(() =>
+  ALL_TABS.filter((t) => !GLOBAL_TABS.includes(t.id) && (t.modules as readonly string[]).includes(activeModule.value))
+)
+const globalTabs = computed(() => ALL_TABS.filter((t) => GLOBAL_TABS.includes(t.id)))
 const TABS = computed(() =>
-  ALL_TABS.filter(t=>globalScope.value?GLOBAL_TABS.includes(t.id):!GLOBAL_TABS.includes(t.id)&&(t.modules as readonly string[]).includes(activeModule.value))
+  globalScope.value ? [...globalTabs.value, ...moduleTabs.value] : [...moduleTabs.value, ...globalTabs.value]
 )
 
 type TabId = (typeof ALL_TABS)[number]['id']
 
 function tabFromRoute(value: unknown): TabId {
   const raw = String(Array.isArray(value) ? value[0] : (value ?? ''))
-  const id = (({ online: 'network', taxonomy: 'categories', image: 'reader', document: 'scan' } as Record<string, string>)[raw] || raw) as TabId
+  const id = (
+    ({ online: 'network', taxonomy: 'categories', image: 'reader', document: 'scan' } as Record<string, string>)[raw] ||
+    raw
+  ) as TabId
   const availableTabs = TABS.value
   return availableTabs.some((t) => t.id === id) ? id : availableTabs[0]?.id ?? 'scan'
 }
 
-// Tab 记在 query 上，刷新和后退都还停在原来那一页，也方便从别处直接跳到 ?tab=logs。
-// 路由本身是 hash 模式，再叠一层 hash 容易读错，所以用 query 而不是 #logs
 const tab = ref<TabId>(tabFromRoute(route.query.tab))
 
 function go(id: TabId): void {
   tab.value = id
-  void router.replace({ name: 'settings', query: { tab: id, module: activeModule.value,scope:GLOBAL_TABS.includes(id)?'global':'module' } })
+  void router.replace({
+    name: 'settings',
+    query: {
+      ...(route.query.from ? { from: route.query.from } : {}),
+      tab: id,
+      module: activeModule.value,
+      scope: GLOBAL_TABS.includes(id) ? 'global' : 'module'
+    }
+  })
 }
 
 function switchScope(module: ModuleKey | 'global'): void {
-  void router.replace({ name: 'settings', query: module === 'global'
-    ? { scope: 'global', module: activeModule.value, tab: 'appearance' }
-    : { scope: 'module', module } })
+  void router.replace({
+    name: 'settings',
+    query:
+      module === 'global'
+        ? {
+            ...(route.query.from ? { from: route.query.from } : {}),
+            scope: 'global',
+            module: activeModule.value,
+            tab: 'appearance'
+          }
+        : {
+            ...(route.query.from ? { from: route.query.from } : {}),
+            scope: 'module',
+            module
+          }
+  })
 }
+
+const returnTarget = computed(
+  () => returnPath(route.query.from, '') || lastNonSettingsPath.value || moduleTarget(activeModule.value)
+)
+
 watch(
-  () => [route.query.tab, activeModule.value,route.query.scope],
+  () => [route.query.tab, activeModule.value, route.query.scope],
   ([v]) => (tab.value = tabFromRoute(v))
 )
-const tabComponent = computed(() => !globalScope.value && ['image', 'document'].includes(activeModule.value) ? undefined : ({ scan: ScanTab, organize: OrganizeTab, ai: AiTab, search: SearchTab, metadata: MetadataTab, downloads: DownloadsTab, network: NetworkTab, hentai: HentaiTab, appearance: AppearanceTab, categories: TaxonomyTab, tags: TaxonomyTab, logs: LogsTab, saves: SavesTab, data: DataTab, about: AboutTab } as Partial<Record<TabId, Component>>)[tab.value])
-const tabProps = computed(() => tab.value === 'categories' || tab.value === 'tags' ? { section: tab.value } : {})
+
+const tabComponent = computed(() =>
+  !globalScope.value && ['image', 'document'].includes(activeModule.value)
+    ? undefined
+    : (
+        {
+          scan: ScanTab,
+          organize: OrganizeTab,
+          ai: AiTab,
+          proxy: ProxyTab,
+          search: SearchTab,
+          metadata: MetadataTab,
+          downloads: DownloadsTab,
+          network: NetworkTab,
+          hentai: HentaiTab,
+          appearance: AppearanceTab,
+          categories: TaxonomyTab,
+          tags: TaxonomyTab,
+          logs: LogsTab,
+          saves: SavesTab,
+          data: DataTab,
+          about: AboutTab
+        } as Partial<Record<TabId, Component>>
+      )[tab.value]
+)
+
+const tabProps = computed(() => (tab.value === 'categories' || tab.value === 'tags' ? { section: tab.value } : {}))
 </script>
 
 <template>
-
   <div class="settings">
     <header class="head">
-      <button class="btn btn--subtle" @click="router.push(moduleTarget(activeModule))">
+      <button class="btn btn--subtle" @click="router.push(returnTarget)">
         <ArrowLeft :size="16" />
         返回
       </button>
       <h1>
-        {{globalScope?'全局设置':'模块设置'}}
+        {{ globalScope ? '全局设置' : '模块设置' }}
         <span v-if="!globalScope" class="head__module">
-          {{
-            {software:'软件',game:'游戏',video:'影视',image:'图片',project:'项目',document:'文库',personal:'个人'}[activeModule]
-          }}
+          {{ MODULE_LABELS[activeModule] }}
         </span>
       </h1>
       <nav class="scope-nav" aria-label="设置模块">
         <button :class="{ on: globalScope }" @click="switchScope('global')">全局</button>
-        <button v-for="module in MODULE_TABS" :key="module.key" :class="{ on: !globalScope && activeModule === module.key }" @click="switchScope(module.key)">{{ module.label }}</button>
+        <button
+          v-for="module in MODULE_TABS"
+          :key="module.key"
+          :class="{ on: !globalScope && activeModule === module.key }"
+          @click="switchScope(module.key)"
+        >
+          {{ module.label }}
+        </button>
       </nav>
     </header>
 
     <div class="layout">
       <nav class="nav no-select">
-        <template v-for="t in TABS" :key="t.id">
-        <div v-if="t.id === 'hentai'" class="nav__divider"><span>里番区</span></div>
-        <button
-          class="nav__item"
-          :class="{ on: tab === t.id }"
-          @click="go(t.id)"
-        >
+        <div class="nav__group-title">{{ MODULE_LABELS[activeModule] }}设置</div>
+        <template v-for="t in moduleTabs" :key="t.id">
+          <div v-if="t.id === 'hentai'" class="nav__divider"><span>里番区</span></div>
+          <button class="nav__item" :class="{ on: tab === t.id }" @click="go(t.id)">
+            <component :is="t.icon" :size="15" />
+            {{ t.label }}
+          </button>
+        </template>
+
+        <div class="nav__group-title nav__group-title--spaced">通用设置</div>
+        <button v-for="t in globalTabs" :key="t.id" class="nav__item" :class="{ on: tab === t.id }" @click="go(t.id)">
           <component :is="t.icon" :size="15" />
           {{ t.label }}
         </button>
-        </template>
       </nav>
 
       <div class="body">
-<ImageSettings v-if="!globalScope && activeModule === 'image'" :section="tab" />
+        <ImageSettings v-if="!globalScope && activeModule === 'image'" :section="tab" />
         <DocumentSettings v-else-if="!globalScope && activeModule === 'document'" :section="tab" />
-        <template v-else-if="tab === 'project'"><ModulePreferences module="project"/><ProjectSettings/></template>
-        <PersonalSettings v-else-if="tab === 'personal'"/>
-        <VideoTaxonomySettings v-else-if="tab === 'hentai-groups' || tab === 'hentai-tags'" :key="tab" :section="tab === 'hentai-groups' ? 'groups' : 'tags'" :hentai="true" />
+        <template v-else-if="tab === 'project'"><ModulePreferences module="project" /><ProjectSettings /></template>
+        <PersonalSettings v-else-if="tab === 'personal'" />
+        <VideoTaxonomySettings
+          v-else-if="tab === 'hentai-groups' || tab === 'hentai-tags'"
+          :key="tab"
+          :section="tab === 'hentai-groups' ? 'groups' : 'tags'"
+          :hentai="true"
+        />
         <KeepAlive><component v-if="tabComponent" :is="tabComponent" :key="tab === 'tags' ? 'categories' : tab" v-bind="tabProps" /></KeepAlive>
       </div>
     </div>
@@ -149,6 +228,20 @@ const tabProps = computed(() => tab.value === 'categories' || tab.value === 'tag
 .scope-nav button { padding:7px 12px; border-radius:var(--radius-btn); color:var(--text-sub); }
 
 .scope-nav button:hover, .scope-nav .on { background:var(--active-surface); color:var(--accent); }
+
+.nav__group-title {
+  padding: 2px 12px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+}
+
+.nav__group-title--spaced {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider);
+}
 
 .nav__divider { border-top:1px solid var(--divider); margin:14px 0 6px; padding:12px 12px 2px; font-size:12px; color:var(--text-faint); }
 
@@ -193,10 +286,9 @@ const tabProps = computed(() => tab.value === 'categories' || tab.value === 'tag
   display: flex;
 }
 
-/* 导航自己不滚动，右侧内容区单独滚 —— 长页面里 Tab 始终看得见 */
 .nav {
   flex: none;
-  width: 172px;
+  width: 184px;
   padding: 16px 10px;
   display: flex;
   flex-direction: column;
@@ -240,7 +332,6 @@ const tabProps = computed(() => tab.value === 'categories' || tab.value === 'tag
   gap: 16px;
 }
 
-/* 宽屏下内容贴左会显得空旷，限宽后靠 auto 外边距居中 */
 .body > :deep(*) {
   width: 100%;
   max-width: 720px;

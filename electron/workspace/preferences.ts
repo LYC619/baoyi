@@ -16,7 +16,7 @@ export class ModulePreferences {
     next.profileId=v.text(next.profileId,'模型配置',200)
     if(next.profileId&&!this.settings().ai_profiles.some(p=>p.id===next.profileId))throw new Error('所选模型配置不存在，请重新选择')
     next.instructions=v.text(next.instructions,'助手偏好',2000)
-    next.fontSize=v.number(next.fontSize,'字号',12,28);next.pdfZoom=v.number(next.pdfZoom,'PDF 缩放',.7,2)
+    next.fontSize=v.number(next.fontSize,'字号',12,28);next.pdfZoom=v.number(next.pdfZoom,'PDF 缩放',.4,2.5)
     next.remindDays=v.number(next.remindDays,'提醒天数',0,365)
     for(const key of ['showCompleted','showCounts'] as const)if(typeof next[key]!=='boolean')throw new Error('显示偏好无效')
     next.defaultCategory=v.text(next.defaultCategory,'默认分类',128)

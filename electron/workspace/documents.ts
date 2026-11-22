@@ -483,7 +483,7 @@ export class DocumentLibrary {
       ? loc.page === count && loc.offset >= .98 ? 'read' : item.readState === 'read' ? 'read' : 'reading'
       : item.readState
     this.db.prepare('UPDATE document_meta SET page=?,scroll_offset=?,page_count=?,read_state=? WHERE resource_id=?').run(loc.page, loc.offset, count, state, id)
-    this.db.prepare('UPDATE resource SET last_used_at=?,updated_at=? WHERE id=?').run(Date.now(), Date.now(), id)
+    this.db.prepare('UPDATE resource SET last_used_at=? WHERE id=?').run(Date.now(), id)
   }
 
   annotations(id: string): DocumentAnnotation[] {
@@ -541,7 +541,7 @@ export class DocumentLibrary {
     })
   }
 
-  async content(id: string): Promise<{ format: string; text: string; data?: Uint8Array; isLarge?: boolean; size?: number }> {
+  async content(id: string, encoding?: string): Promise<{ format: string; text: string; data?: Uint8Array; isLarge?: boolean; size?: number }> {
     const item = this.require(id), stat = await this.inspect(item.path)
     if (item.format === 'pdf') {
       if (stat.size > 32 * 1024 * 1024) {
@@ -556,7 +556,9 @@ export class DocumentLibrary {
       if (stat.size > 4 * 1024 * 1024) {
         return { format: item.format, text: '', isLarge: true, size: stat.size }
       }
-      return { format: item.format, text: (await fs.readFile(item.path, 'utf8')).replace(/^\uFEFF/, ''), size: stat.size }
+      const raw = await fs.readFile(item.path)
+      const enc = encoding && ['utf-8', 'utf-16le', 'utf-16be', 'gb18030'].includes(encoding) ? encoding : await this.textStream.sniffEncoding(item.path).catch(() => 'utf-8' as const)
+      return { format: item.format, text: new TextDecoder(enc).decode(raw).replace(/^\uFEFF/, ''), size: stat.size }
     }
     throw new Error('此格式请使用外部应用打开')
   }

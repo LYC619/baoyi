@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import {
   BadgeCheck,
   FolderPlus,
@@ -28,13 +29,21 @@ const emit = defineEmits<{
   (e: 'add-save-path'): void
   (e: 'copy-path', path: string): void
   (e: 'verify-save-path', path: string): void
-  (e: 'backup-save', path: string): void
+  (e: 'backup-save', path: string, note?: string): void
   (e: 'remove-save-path', path: string): void
   (e: 'open-backup', backup: SaveBackup): void
   (e: 'restore', backup: SaveBackup): void
   (e: 'drop-backup', backup: SaveBackup): void
   (e: 'update-restore-target', backupId: string, target: string | undefined): void
 }>()
+
+const noteDrafts = ref<Record<string, string>>({})
+
+function triggerBackup(target: string): void {
+  const raw = (noteDrafts.value[target] || '').trim()
+  emit('backup-save', target, raw || undefined)
+  noteDrafts.value[target] = ''
+}
 
 function isStale(target: string): boolean {
   return props.stalePaths.includes(target)
@@ -84,6 +93,15 @@ function isStale(target: string): boolean {
           <span v-else class="path__note">
             {{ s.verified_at ? `${formatDate(s.verified_at)} 验证过` : '未验证' }}
           </span>
+          <input
+            v-model="noteDrafts[s.path]"
+            type="text"
+            class="path__memo"
+            maxlength="80"
+            placeholder="备份备注（可选）"
+            aria-label="备份备注"
+            :disabled="!!backingUp || !!restoring"
+          />
           <button
             type="button"
             class="btn btn--ghost btn--sm"
@@ -102,7 +120,7 @@ function isStale(target: string): boolean {
             class="btn btn--primary btn--sm"
             title="立即备份这份存档"
             :disabled="!!backingUp || !!restoring"
-            @click="emit('backup-save', s.path)"
+            @click="triggerBackup(s.path)"
           >
             <component
               :is="backingUp === s.path ? Loader2 : Save"
@@ -145,6 +163,7 @@ function isStale(target: string): boolean {
             >
               {{ formatDateTime(b.created_at) }}
             </button>
+            <span v-if="b.note" class="backup__note">{{ b.note }}</span>
             <span class="backup__meta">
               {{ b.file_count }} 个文件　{{ formatBytes(b.size_bytes) }}
             </span>
@@ -248,6 +267,7 @@ function isStale(target: string): boolean {
 .path {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 7px 10px;
   border-radius: var(--radius-input);
@@ -255,7 +275,7 @@ function isStale(target: string): boolean {
 }
 .path__text {
   flex: 1;
-  min-width: 0;
+  min-width: 160px;
   text-align: left;
   font-size: var(--fs-tag);
   color: var(--text-sub);
@@ -267,6 +287,20 @@ function isStale(target: string): boolean {
   flex: none;
   font-size: var(--fs-tag);
   color: var(--text-faint);
+}
+.path__memo {
+  width: 148px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--divider);
+  background: var(--bg-main);
+  color: var(--text-main);
+  font-size: var(--fs-tag);
+  outline: none;
+}
+.path__memo:focus {
+  border-color: var(--accent);
 }
 .path__note--stale {
   display: inline-flex;
@@ -304,6 +338,13 @@ function isStale(target: string): boolean {
 }
 .backup__when:hover {
   color: var(--accent);
+}
+.backup__note {
+  padding: 1px 7px;
+  border-radius: var(--radius-tag);
+  background: var(--active-surface);
+  color: var(--accent);
+  font-size: var(--fs-tag);
 }
 .backup__meta {
   font-size: var(--fs-tag);

@@ -92,7 +92,7 @@ const rows = computed(() =>
         (!store.tag || i.tags.includes(store.tag)) &&
         (!store.state || (i.submodule === 'reading' && i.readable && i.readState === store.state))
     )
-    .sort((a, b) => (store.sort === 'name' ? a.name.localeCompare(b.name, 'zh') : b.updatedAt - a.updatedAt))
+    .sort((a, b) => store.sort === 'name' ? a.name.localeCompare(b.name, 'zh') : store.sort === 'read' ? (b.lastReadAt - a.lastReadAt || b.updatedAt - a.updatedAt) : b.updatedAt - a.updatedAt)
 )
 const counts = computed(() => projectCounts(store.projectReferences))
 const atHome = computed(
@@ -488,6 +488,7 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
                 排序
                 <select v-model="store.sort" aria-label="资料排序">
                   <option value="updated">最近更新</option>
+                  <option value="read">最近阅读</option>
                   <option value="name">按名称</option>
                 </select>
               </label>
@@ -549,6 +550,13 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
         </div>
       </header>
 
+      <div v-if="store.type || store.favorite || store.sourceDir || store.tag" class="active-filter-strip">
+        <span v-if="store.type" class="ws-badge">{{ currentCategoryName }}</span>
+        <span v-if="store.favorite" class="ws-badge">仅看收藏</span>
+        <span v-if="store.tag" class="ws-badge">标签：{{ store.tag }}</span>
+        <span v-if="store.sourceDir" class="ws-badge">目录筛选</span>
+        <button type="button" class="ws-button ghost small" @click="store.resetFilters(); activeGroupId = ''">显示全部{{ currentTitle }}</button>
+      </div>
       <p v-if="error || store.error" class="ws-error" role="alert">
         {{ error || store.error }}
       </p>
@@ -770,6 +778,7 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
 </template>
 
 <style scoped>
+.active-filter-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .document-home {
   position: relative;
 }

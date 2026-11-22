@@ -728,6 +728,8 @@ export function listVideos(
    * 靠调用方每一处都记得传对参数，等于把它做成了君子协定。
    */
   const inHentai = query.type === 'hentai'
+  const inAudio = query.type === 'audio'
+  if (!inAudio) where.push("media_kind != 'audio'")
   if (hideHentai || !inHentai) where.push(NOT_HENTAI)
   if (inHentai) { where.push('category = ?'); params.push(HENTAI_CATEGORY) }
   if (query.collection !== undefined) { where.push('collection_name = ?'); params.push(query.collection) }
@@ -864,12 +866,13 @@ export function videoCounts(d: SqlDb, hideHentai = false): VideoCounts {
 
   /** 拼在 `is_archived = ?` 后面的那一截。不藏时是空串，SQL 原样不变 */
   const hide = ` AND ${NOT_HENTAI}`
+  const nonAudio = `${hide} AND media_kind != 'audio'`
 
   const status = Object.fromEntries(WATCH_STATUSES.map((s) => [s, 0])) as Record<WatchStatus, number>
   const statusRows = d
     .prepare(
       `SELECT watch_status AS s, COUNT(*) AS n FROM video
-       WHERE is_archived = 0${hide} GROUP BY watch_status`
+       WHERE is_archived = 0${nonAudio} GROUP BY watch_status`
     )
     .all() as Array<{ s: string; n: number }>
   for (const r of statusRows) {
@@ -891,40 +894,43 @@ export function videoCounts(d: SqlDb, hideHentai = false): VideoCounts {
     d
       .prepare(
         `SELECT category AS name, COUNT(*) AS count FROM video
-         WHERE is_archived = 0${hide} GROUP BY category
+         WHERE is_archived = 0${nonAudio} GROUP BY category
          ORDER BY COALESCE((SELECT c.sort_order FROM categories c WHERE c.kind = 'video' AND c.name = video.category), 2147483647), name`
       )
       .all() as Array<{ name: string; count: number }>
   ).map((r) => ({ name: String(r.name ?? ''), count: Number(r.count) || 0 }))
 
-  const tagMap = new Map<string, number>(), hanimeTagMap = new Map<string, number>()
-  const tagRows = d.prepare(`SELECT tag, category, COUNT(DISTINCT resource_id) AS count FROM (
-    SELECT v.id AS resource_id,v.category,t.value AS tag FROM video v,json_each(v.tags) t WHERE v.is_archived=0
-    UNION SELECT v.id,v.category,t.value FROM video v,json_each(v.hanime_tags) t WHERE v.is_archived=0
-    UNION SELECT v.id,v.category,t.value FROM video v JOIN episode e ON e.resource_id=v.id,json_each(e.tags) t WHERE v.is_archived=0
-  ) GROUP BY tag,category`).all() as Row[]
+  const tagMap = new Map<string, number>(), hanimeTagMap = new Map<string, number>(), audioTagMap = new Map<string, number>()
+  const tagRows = d.prepare(`SELECT tag, category, media_kind, COUNT(DISTINCT resource_id) AS count FROM (
+    SELECT v.id AS resource_id,v.category,v.media_kind,t.value AS tag FROM video v,json_each(v.tags) t WHERE v.is_archived=0
+    UNION SELECT v.id,v.category,v.media_kind,t.value FROM video v,json_each(v.hanime_tags) t WHERE v.is_archived=0
+    UNION SELECT v.id,v.category,v.media_kind,t.value FROM video v JOIN episode e ON e.resource_id=v.id,json_each(e.tags) t WHERE v.is_archived=0
+  ) GROUP BY tag,category,media_kind`).all() as Row[]
   for (const row of tagRows) {
-    const map = row.category === HENTAI_CATEGORY ? hideHentai ? null : hanimeTagMap : tagMap
+    const map = row.category === HENTAI_CATEGORY ? hideHentai ? null : hanimeTagMap : row.media_kind === 'audio' ? audioTagMap : tagMap
     if (map) map.set(String(row.tag),(map.get(String(row.tag)) || 0) + Number(row.count))
   }
   return {
     audio: Number((d.prepare("SELECT COUNT(*) n FROM video WHERE is_archived=0 AND media_kind='audio'" + hide).get() as {n:number}).n),
+    audio_archived: Number((d.prepare("SELECT COUNT(*) n FROM video WHERE is_archived=1 AND media_kind='audio'" + hide).get() as {n:number}).n),
     other: Number((d.prepare("SELECT COUNT(*) n FROM video WHERE is_archived=0 AND media_kind='other'" + hide).get() as {n:number}).n),
-    all: one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 0${hide}`),
+    all: one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 0${nonAudio}`),
     hentai: hideHentai ? 0 : one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 0 AND category = ?`, HENTAI_CATEGORY),
     hentai_visible: !hideHentai,
     hentai_archived: hideHentai ? 0 : one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 1 AND category = ?`, HENTAI_CATEGORY),
     collections: d.prepare(`SELECT collection_name AS name, COUNT(*) AS count FROM video
-      WHERE is_archived = 0${hide} AND collection_name != '' GROUP BY collection_name ORDER BY collection_name`).all().map(row => ({ name: String((row as Row).name), count: Number((row as Row).count) })),
+      WHERE is_archived = 0${nonAudio} AND collection_name != '' GROUP BY collection_name ORDER BY collection_name`).all().map(row => ({ name: String((row as Row).name), count: Number((row as Row).count) })),
+    audio_collections: d.prepare(`SELECT collection_name AS name, COUNT(*) AS count FROM video WHERE is_archived = 0${hide} AND media_kind = 'audio' AND collection_name != '' GROUP BY collection_name ORDER BY collection_name`).all().map(row => ({ name: String((row as Row).name), count: Number((row as Row).count) })),
     hentai_collections: hideHentai ? [] : d.prepare(`SELECT collection_name AS name, COUNT(*) AS count FROM video
       WHERE is_archived = 0 AND category = ? AND collection_name != '' GROUP BY collection_name ORDER BY collection_name`).all(HENTAI_CATEGORY).map(row => ({ name: String((row as Row).name), count: Number((row as Row).count) })),
-    archived: one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 1${hide}`),
+    archived: one(`SELECT COUNT(*) AS n FROM video WHERE is_archived = 1${nonAudio}`),
     type,
     status,
     categories,
     tags: [...tagMap.entries()]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh')),
+    audio_tags: [...audioTagMap.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh')),
     hanime_tags: [...hanimeTagMap.entries()]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh'))

@@ -14,8 +14,10 @@ import {
   Play,
   Sparkles,
   Trash2,
+  Unlink,
 } from 'lucide-vue-next'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
 import EditableField from '@/components/ui/EditableField.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
 import SoftwareNotesTab from '@/components/software/SoftwareNotesTab.vue'
@@ -29,7 +31,7 @@ import { useCategoriesStore } from '@/stores/categories'
 import { useSoftwareStore } from '@/stores/software'
 import { previewSoftwareCategoryChanges, categoryMoveConfirmation } from '@/utils/softwareCategory'
 import { isMobilePackage } from '@/utils/software-package'
-import type { MasteryLevel, SoftwareItem } from '@/types'
+import type { Launcher, MasteryLevel, SoftwareItem } from '@/types'
 import {
   MASTERY_META,
   MASTERY_ORDER,
@@ -64,12 +66,23 @@ const { success, error, toast } = useToast()
 const ai = useAI()
 
 const item = ref<SoftwareItem | null>(null)
+const exeMissing = ref(false)
+const relocating = ref(false)
+
+async function checkExePresent(): Promise<void> {
+  if (!item.value?.exe_path) { exeMissing.value = false; return }
+  try {
+    const [st] = await window.baoyi.app.statPaths([item.value.exe_path])
+    exeMissing.value = st?.kind === 'missing'
+  } catch { exeMissing.value = false }
+}
 const loading = ref(true)
 
 async function load(): Promise<void> {
   loading.value = true
   try {
     item.value = await window.baoyi.software.get(props.id)
+    await checkExePresent()
   } catch (err) {
     error(`读取条目失败：${errorMessage(err)}`)
     item.value = null
@@ -175,9 +188,72 @@ async function setDefaultLauncher(launcherPath: string): Promise<void> {
     if (updated) {
       item.value = updated
       success('已切换默认启动端')
+      await checkExePresent()
     }
   } catch {
     error('切换失败：该程序已登记在另一个条目下')
+  }
+}
+
+async function relocate(mode: 'directory' | 'file' = 'directory'): Promise<void> {
+  if (!item.value || relocating.value) return
+  relocating.value = true
+  try {
+    const updated = await window.baoyi.software.relocate(item.value.id, mode)
+    if (updated) {
+      item.value = updated
+      await Promise.all([store.reload(), checkExePresent()])
+      success('软件路径已更新')
+    }
+  } catch (err) {
+    error(errorMessage(err))
+  } finally {
+    relocating.value = false
+  }
+}
+
+async function addLauncher(): Promise<void> {
+  if (!item.value) return
+  try {
+    const updated = await window.baoyi.software.pickLauncher(item.value.id)
+    if (updated) {
+      item.value = updated
+      void store.load()
+      success('已添加启动项')
+    }
+  } catch (err) {
+    error(errorMessage(err))
+  }
+}
+
+async function renameLauncher(launcher: Launcher, label: string): Promise<void> {
+  if (!item.value || launcher.label === label) return
+  const launchers = item.value.launchers.map((l) => (l.path === launcher.path ? { ...l, label } : l))
+  try {
+    const updated = await store.update(item.value.id, { launchers })
+    if (updated) item.value = updated
+  } catch (err) {
+    error(errorMessage(err))
+  }
+}
+
+async function removeLauncher(targetPath: string): Promise<void> {
+  if (!item.value) return
+  const target = item.value.launchers.find((l) => l.path === targetPath)
+  if (!target || target.is_default) return
+  const ok = await confirmDialog({
+    title: `移除启动项「${target.label || target.path.split('\\').pop()}」？`,
+    message: '仅从当前软件的启动列表中移除，不会删除本地程序文件。',
+    confirmText: '移除启动项',
+    tone: 'danger',
+  })
+  if (!ok || !item.value) return
+  const launchers = item.value.launchers.filter((l) => l.path !== targetPath)
+  try {
+    const updated = await store.update(item.value.id, { launchers })
+    if (updated) item.value = updated
+  } catch (err) {
+    error(errorMessage(err))
   }
 }
 
@@ -332,11 +408,18 @@ async function dropLink(): Promise<void> {
         </button>
 
         <div class="head__actions">
-          <button type="button" class="btn btn--primary" @click="launch">
+          <div class="split-launch">
+            <button type="button" class="btn btn--primary" @click="launch">
             <FolderOpen v-if="isMobilePackage(item.exe_path)" :size="14" />
             <Play v-else :size="14" fill="currentColor" />
             {{ isMobilePackage(item.exe_path) ? '定位安装包' : '启动' }}
           </button>
+            <LibraryToolbarMenu v-if="item.launchers.length > 1" icon="chevron" label="选择启动项">
+              <button v-for="l in item.launchers" :key="l.path" type="button" @click="launchWith(l.path)">
+                {{ l.is_default ? '★ ' : '' }}{{ l.label || l.path.split('\\').pop() }}
+              </button>
+            </LibraryToolbarMenu>
+          </div>
           <button type="button" class="btn btn--ghost" @click="reveal">
             <FolderOpen :size="14" />
             打开所在文件夹
@@ -367,6 +450,12 @@ async function dropLink(): Promise<void> {
       </header>
 
       <div class="body detail-body">
+        <div v-if="exeMissing" class="path-alert" role="alert">
+          <Unlink :size="15" />
+          <span>主程序或安装包路径不可用，可能已改名或移动到其他目录。</span>
+          <button type="button" class="btn btn--ghost" @click="checkExePresent">重新检查</button>
+          <button type="button" class="btn btn--primary" :disabled="relocating" @click="relocate('directory')">重新定位</button>
+        </div>
         <section class="hero panel">
           <div class="hero__icon">
             <AppIcon :item="item" :size="64" />
@@ -527,6 +616,11 @@ async function dropLink(): Promise<void> {
           :category-busy="categoryBusy"
           :link-busy="linkBusy"
           :type-busy="typeBusy"
+          :relocating="relocating"
+          @add-launcher="addLauncher"
+          @rename-launcher="renameLauncher"
+          @remove-launcher="removeLauncher"
+          @relocate="relocate"
           @launch-with="launchWith"
           @set-default="setDefaultLauncher"
           @copy-path="copyPath"
@@ -541,6 +635,9 @@ async function dropLink(): Promise<void> {
 </template>
 
 <style scoped>
+.split-launch { display: inline-flex; align-items: center; gap: 2px; }
+.path-alert { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 16px; border-radius: var(--radius-card); background: var(--warning-bg); color: var(--warning); font-size: var(--fs-body); }
+.path-alert span { flex: 1; min-width: 180px; }
 .detail {
   display: flex;
   flex-direction: column;

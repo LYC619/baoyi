@@ -123,9 +123,11 @@ export class PersonalLibrary {
     value: number,
     date: string,
     metricId?: string,
+    note = '',
   ): PersonalRecord {
     name = v.name(name);
     unit = v.text(unit, "单位", 50);
+    const body = v.text(note || '', '备注', 4000);
     const selected = metricId ? this.get(metricId) : null;
     if (metricId && (!selected || selected.kind !== 'metric' || selected.name !== name)) throw new Error('所选指标已变化，请重新选择');
     const existing = selected ? [selected] : this.list("metric").filter((m) => m.name === name);
@@ -140,7 +142,7 @@ export class PersonalLibrary {
       return this.save({
         kind: "measurement",
         name: name + "记录",
-        body: "",
+        body,
         data: { metricId: metric.id, value, date },
       });
     });

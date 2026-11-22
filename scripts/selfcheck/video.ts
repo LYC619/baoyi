@@ -4871,6 +4871,44 @@ export async function hanimeChannelSection(): Promise<void> {
     d.close()
   })
 
+  await check('音频子模块与全部影视隔离：音频不混入影视海报墙、视频计数与普通标签', () => {
+    const d = new DatabaseSync(':memory:')
+    d.exec('PRAGMA foreign_keys = ON')
+    initSchema(d as any, KINDS)
+    const base = {
+      video_type: 'movie' as const,
+      name_en: '', description: '', official_url: '', source_dir: 'D:\\M',
+      file_size: 1, year: 0, end_year: 0, rating: 0, duration_sec: 0,
+      resolution: '', video_codec: '', source: '', release_group: '',
+      audio_tracks: [], subtitle_tracks: [], parts: [], linked_files: [],
+      tmdb_id: '', imdb_id: '', douban_id: '', douban_rating: 0,
+      poster_path: '', fanart_path: '', watch_status: 'unwatched', episodes: []
+    }
+    const movId = insertVideo(d as any, {
+      ...base, path: 'D:\\M\\dune.mkv', name_zh: '沙丘', summary: 'x',
+      category: '欧美', tags: ['科幻']
+    } as any).id
+    const audId = insertVideo(d as any, {
+      ...base, path: 'D:\\A\\track.flac', name_zh: '山间晨曲', summary: 'x',
+      category: '音频', tags: ['器乐']
+    } as any).id
+    updateVideo(d as any, movId, { collection_name: '科幻片单' })
+    updateVideo(d as any, audId, { media_kind: 'audio', collection_name: '晨间歌单' })
+
+    assert.deepEqual(listVideos(d as any).map((v: any) => v.id), [movId], '默认全部影视不返回音频条目')
+    assert.deepEqual(listVideos(d as any, { type: 'audio' }).map((v: any) => v.id), [audId], '音频范围准确返回音频条目')
+
+    const c = videoCounts(d as any)
+    assert.equal(c.all, 1)
+    assert.equal(c.audio, 1)
+    assert.equal(c.categories.find((cat) => cat.name === '音频'), undefined)
+    assert.deepEqual(c.tags, [{ name: '科幻', count: 1 }])
+    assert.deepEqual(c.audio_tags, [{ name: '器乐', count: 1 }])
+    assert.deepEqual(c.collections, [{ name: '科幻片单', count: 1 }])
+    assert.deepEqual(c.audio_collections, [{ name: '晨间歌单', count: 1 }])
+    d.close()
+  })
+
   await check('库里没有里番时那一格不出现 —— 「没有就不显示」是白拿的隐私', () => {
     // 分类是开集，侧栏那段是 v-if="categories.length > 0" + 后端只返回有条目的分类。
     // 所以不需要做「隐藏成人内容」的开关：库里没有就看不见

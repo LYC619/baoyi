@@ -18,7 +18,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, readFileSync } from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { Stats } from 'node:fs'
@@ -406,7 +406,8 @@ export async function createBackup(
     backup_dir: dir,
     size_bytes: bytes,
     file_count: files,
-    created_at: at
+    created_at: at,
+    ...(opts.note ? { note: opts.note } : {})
   }
   d.prepare(
     `INSERT INTO save_backups
@@ -428,6 +429,16 @@ export async function createBackup(
 
 /* ============================== 读 ============================== */
 
+function readManifestNoteSync(dir: string): string {
+  if (!dir) return ''
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(dir, MANIFEST), 'utf-8')) as Partial<Manifest>
+    return typeof parsed?.note === 'string' ? parsed.note : ''
+  } catch {
+    return ''
+  }
+}
+
 function rowToBackup(row: Record<string, any>): SaveBackup {
   return {
     id: String(row.id),
@@ -436,7 +447,10 @@ function rowToBackup(row: Record<string, any>): SaveBackup {
     backup_dir: String(row.backup_dir ?? ''),
     size_bytes: Number(row.size_bytes) || 0,
     file_count: Number(row.file_count) || 0,
-    created_at: Number(row.created_at) || 0
+    created_at: Number(row.created_at) || 0,
+    ...(readManifestNoteSync(String(row.backup_dir ?? ''))
+      ? { note: readManifestNoteSync(String(row.backup_dir ?? '')) }
+      : {})
   }
 }
 

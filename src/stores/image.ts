@@ -27,9 +27,9 @@ export const useImageStore = defineStore('image', () => {
   const shown = computed(() => {
     const q = query.value, needle = q.search?.trim().toLocaleLowerCase()
     return items.value.filter(i => (!q.type || i.type === q.type) && (!q.groupId || i.groupId === q.groupId) && (!q.uncategorized || !i.groupId) && (!q.favorite || i.favorite)
-      && (q.read === undefined || i.read === q.read) && (!q.publication || i.publication === q.publication) && (!q.tag || i.tags.includes(q.tag)) && (!q.sourceDir || i.sourceDir===q.sourceDir)
+      && (q.read === undefined || (q.read === 'reading' ? !i.read && !!i.progress : i.read === q.read)) && (!q.publication || i.publication === q.publication) && (!q.tag || i.tags.includes(q.tag)) && (!q.sourceDir || i.sourceDir===q.sourceDir)
       && (!needle || `${i.name} ${i.description} ${i.tags.join(' ')}`.toLocaleLowerCase().includes(needle)))
-      .sort((a,b) => q.sort === 'name' ? a.name.localeCompare(b.name,'zh-CN',{ numeric:true }) : q.sort === 'read' ? (b.progress?.updatedAt || 0) - (a.progress?.updatedAt || 0) : b.updatedAt-a.updatedAt)
+      .sort((a,b) => q.sort === 'name' ? a.name.localeCompare(b.name,'zh-CN',{ numeric:true }) : q.sort === 'read' ? (b.progress?.updatedAt || 0) - (a.progress?.updatedAt || 0) : q.sort === 'taken-asc' ? (a.createdAt || a.updatedAt) - (b.createdAt || b.updatedAt) : b.updatedAt-a.updatedAt)
   })
   return { items, groups, collections, loading, error, count, query, shelfPage, shown, refresh }
 })

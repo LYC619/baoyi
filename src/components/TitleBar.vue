@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Copy, Minus, Square, X, Settings, MessageSquare } from 'lucide-vue-next'
+import { Copy, Minus, Square, X, Settings, MessageSquare, Search } from 'lucide-vue-next'
+import { useGlobalSearch } from '@/composables/useGlobalSearch'
 import {useArchiveAssistant} from '@/composables/useArchiveAssistant'
 import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
 import TaskCenter from '@/components/tasks/TaskCenter.vue'
@@ -20,6 +21,7 @@ import { useDocumentsStore } from '@/stores/documents'
 
 const route = useRoute()
 const archiveAssistant=useArchiveAssistant()
+const globalSearch = useGlobalSearch()
 const router = useRouter()
 const software = useSoftwareStore()
 const game = useGameStore()
@@ -35,6 +37,7 @@ onMounted(async () => {
   maximized.value = await window.baoyi.win.isMaximized()
   unsubscribe = window.baoyi.win.onMaximizeChange((v) => (maximized.value = v))
   // 顶栏一直在，游戏页和影视页却未必进过 —— 数字得自己去取一次，不能等那一页来喂
+  void software.refreshCounts()
   void game.refreshCounts()
   void video.refreshCounts()
   void images.refresh()
@@ -103,6 +106,7 @@ function go(key: ModuleKey): void {
     </nav>
 
     <TaskCenter />
+    <button v-if="showTabs" class="ctl titlebar-settings" title="全局搜索 · Ctrl K" aria-label="全局搜索" @click="globalSearch.openGlobalSearch()"><Search :size="16"/></button>
     <button v-if="showTabs" class="ctl titlebar-settings" :class="{'assistant-active':archiveAssistant.busy.value}" title="归档助理 · Ctrl J" aria-label="归档助理" @click="archiveAssistant.open.value?archiveAssistant.open.value=false:archiveAssistant.show()"><MessageSquare :size="17"/></button>
     <button v-if="showTabs" class="ctl titlebar-settings" title="设置" aria-label="设置" @click="router.push({ name: 'settings', query: { module: activeModule, scope: 'module' } })"><Settings :size="16"/></button>
 

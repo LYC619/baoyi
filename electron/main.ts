@@ -159,6 +159,15 @@ function createWindow(): void {
   mainWindow.on('closed', () => (mainWindow = null))
   mainWindow.on('maximize', () => mainWindow?.webContents.send('win:maximize-change', true))
   mainWindow.on('unmaximize', () => mainWindow?.webContents.send('win:maximize-change', false))
+  mainWindow.on('app-command', (event, cmd) => {
+    if (cmd === 'browser-backward') {
+      event.preventDefault()
+      mainWindow?.webContents.send('win:navigate', 'back')
+    } else if (cmd === 'browser-forward') {
+      event.preventDefault()
+      mainWindow?.webContents.send('win:navigate', 'forward')
+    }
+  })
 
   const openExternal = (url: string) => {
     if (isWebNavigation(url)) void shell.openExternal(url).catch(cause => console.error('[打开外链]', cause))

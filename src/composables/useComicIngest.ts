@@ -24,7 +24,8 @@ function reconcile(value:ComicJobView[]){
   if(next.length!==jobs.value.length||next.some((job,index)=>job!==jobs.value[index]))jobs.value=next
 }
 export function useComicIngest(){
-  const settings=useSettingsStore(),visible=computed(()=>settings.loaded&&!settings.settings.hide_hentai)
+  let settings:ReturnType<typeof useSettingsStore>|null=null;try{settings=useSettingsStore()}catch{settings=null}
+  const visible=computed(()=>settings?settings.loaded&&!settings.settings.hide_hentai:true)
   async function refresh(){
     pending=true;if(refreshing)return refreshing
     refreshing=(async()=>{

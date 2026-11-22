@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   ArrowLeft,
+  Bookmark,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   ExternalLink,
   Maximize2,
   Minus,
@@ -21,9 +23,10 @@ export interface ReaderSettingsModel {
   theme: 'light' | 'sepia' | 'eye' | 'dark'
   encoding: string
   immersive: boolean
+  pdfFit?: 'width' | 'page'
 }
 
-defineProps<{
+const props = defineProps<{
   item: DocumentItem | null
   supported: boolean
   hasContent: boolean
@@ -34,6 +37,7 @@ defineProps<{
   settingsOpen: boolean
   zoom: number
   searching: boolean
+  pageBookmarked?: boolean
   novelIndex: NovelIndexResult | null
   currentChapterIndex: number
   readerSettings: ReaderSettingsModel
@@ -41,8 +45,10 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'back'): void
-  (e: 'find', query: string): void
+  (e: 'find', query: string, direction?: 1 | -1): void
   (e: 'change-zoom', delta: number): void
+  (e: 'fit-pdf', mode: 'width' | 'page'): void
+  (e: 'bookmark-page'): void
   (e: 'prev-chapter'): void
   (e: 'next-chapter'): void
   (e: 'toggle-toc'): void
@@ -55,12 +61,20 @@ const emit = defineEmits<{
 
 const searchQuery = ref('')
 const sideTrigger = ref<HTMLButtonElement>()
+const searchInputRef = ref<HTMLInputElement>()
+const isImage = computed(() => ['png', 'jpg', 'jpeg'].includes(props.item?.format || ''))
+const isPdf = computed(() => props.item?.format === 'pdf')
+const isText = computed(() => !isPdf.value && !isImage.value)
 
 function focusSideTrigger() {
   sideTrigger.value?.focus()
 }
+function focusSearch() {
+  searchInputRef.value?.focus()
+  searchInputRef.value?.select()
+}
 
-defineExpose({ focusSideTrigger })
+defineExpose({ focusSideTrigger, focusSearch })
 
 function patchSetting<K extends keyof ReaderSettingsModel>(key: K, value: ReaderSettingsModel[K]) {
   emit('update:readerSettings', { [key]: value })
@@ -95,29 +109,56 @@ function onEncodingChange(e: Event) {
 
     <div class="header-reader-tools">
       <form
-        v-if="supported && hasContent && !['png', 'jpg', 'jpeg'].includes(item?.format || '')"
+        v-if="supported && hasContent && !isImage"
         class="reader-search"
-        @submit.prevent="emit('find', searchQuery)"
+        @submit.prevent="emit('find', searchQuery, 1)"
       >
-        <input v-model="searchQuery" type="search" aria-label="搜索正文" placeholder="搜索正文…" />
+        <input
+          ref="searchInputRef"
+          v-model="searchQuery"
+          type="search"
+          aria-label="搜索正文"
+          placeholder="搜索正文…"
+          @keydown.enter.shift.prevent="emit('find', searchQuery, -1)"
+        />
+        <button
+          v-if="searchQuery.trim()"
+          type="button"
+          class="ws-icon"
+          aria-label="查找上一处"
+          title="查找上一处（Shift+Enter）"
+          :disabled="searching"
+          @click="emit('find', searchQuery, -1)"
+        >
+          <ChevronUp :size="15" />
+        </button>
         <button
           type="submit"
           class="ws-icon"
           aria-label="查找下一处"
-          title="查找下一处"
+          title="查找下一处（Enter）"
           :disabled="!searchQuery.trim() || searching"
         >
           <Search :size="16" />
         </button>
       </form>
 
-      <div v-if="item?.format === 'pdf'" class="pdf-zoom-tools">
+      <div v-if="supported && hasContent && (isPdf || isImage)" class="pdf-zoom-tools">
         <button type="button" class="ws-icon" aria-label="缩小页面" title="缩小页面" @click="emit('change-zoom', -0.1)">
           <Minus :size="16" />
         </button>
         <span>{{ Math.round(zoom * 100) }}%</span>
         <button type="button" class="ws-icon" aria-label="放大页面" title="放大页面" @click="emit('change-zoom', 0.1)">
           <Plus :size="16" />
+        </button>
+        <button
+          v-if="isPdf"
+          type="button"
+          class="ws-button small pdf-fit-btn"
+          :title="readerSettings.pdfFit === 'page' ? '切换为适合页宽' : '切换为适合整页'"
+          @click="emit('fit-pdf', readerSettings.pdfFit === 'page' ? 'width' : 'page')"
+        >
+          {{ readerSettings.pdfFit === 'page' ? '适宽' : '整页' }}
         </button>
       </div>
 
@@ -148,6 +189,21 @@ function onEncodingChange(e: Event) {
       </template>
 
       <button
+        v-if="supported && hasContent"
+        type="button"
+        class="ws-icon"
+        :class="{ active: pageBookmarked }"
+        :aria-pressed="!!pageBookmarked"
+        aria-label="添加当前页书签"
+        :title="pageBookmarked ? '移除当前位置书签' : '添加当前位置书签'"
+        :disabled="busy"
+        @click="emit('bookmark-page')"
+      >
+        <Bookmark :size="17" />
+      </button>
+
+      <button
+        v-if="!isImage"
         type="button"
         class="ws-icon"
         :class="{ active: toc }"
@@ -158,7 +214,7 @@ function onEncodingChange(e: Event) {
         <PanelLeft :size="18" />
       </button>
 
-      <div class="settings-anchor">
+      <div v-if="!isImage" class="settings-anchor">
         <button
           type="button"
           class="ws-icon"
@@ -171,7 +227,7 @@ function onEncodingChange(e: Event) {
         </button>
 
         <div v-if="settingsOpen" class="reader-settings-panel">
-          <div v-if="item?.format !== 'pdf'" class="setting-row">
+          <div v-if="isText" class="setting-row">
             <span>字号</span>
             <div class="setting-controls">
               <button
@@ -186,7 +242,7 @@ function onEncodingChange(e: Event) {
               <button
                 type="button"
                 class="ws-icon"
-                :disabled="readerSettings.fontSize >= 32"
+                :disabled="readerSettings.fontSize >= 28"
                 @click="patchSetting('fontSize', readerSettings.fontSize + 2)"
               >
                 <Plus :size="13" />
@@ -194,7 +250,7 @@ function onEncodingChange(e: Event) {
             </div>
           </div>
 
-          <div v-if="item?.format !== 'pdf'" class="setting-row">
+          <div v-if="isText" class="setting-row">
             <span>行距</span>
             <div class="setting-controls">
               <button
@@ -287,8 +343,8 @@ function onEncodingChange(e: Event) {
       <button
         type="button"
         class="ws-icon"
-        aria-label="沉浸模式"
-        title="沉浸阅读（隐藏工具栏）"
+        aria-label="全屏阅读"
+        title="专注阅读（隐藏顶栏）"
         @click="patchSetting('immersive', true)"
       >
         <Maximize2 :size="16" />
@@ -321,6 +377,13 @@ function onEncodingChange(e: Event) {
 .pdf-zoom-tools span {
   font-size: 12px;
   min-width: 36px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pdf-fit-btn {
+  height: 26px;
+  padding: 0 7px;
+  font-size: 11px;
 }
 .reader-header {
   display: flex;

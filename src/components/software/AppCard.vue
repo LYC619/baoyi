@@ -25,6 +25,7 @@ const emit = defineEmits<{
   (e: 'open', id: string): void
   (e: 'launch', id: string): void
   (e: 'select', id: string): void
+  (e: 'context', item: SoftwareItem, event: MouseEvent): void
 }>()
 
 const settings = useSettingsStore()
@@ -32,7 +33,7 @@ const lang = computed(() => settings.settings.title_lang)
 const name = computed(() => displayName(props.item, lang.value))
 const subtitle = computed(() => subtitleName(props.item, lang.value))
 const activity = computed(() => activityOf(props.item))
-const isUnused = computed(() => daysSince(activity.value.at) > props.unusedDays)
+const isUnused = computed(() => !mobilePackage.value && daysSince(activity.value.at) > props.unusedDays)
 const pending = computed(() => props.item.ai_status !== 'done')
 const mobilePackage = computed(() => isMobilePackage(props.item.exe_path))
 
@@ -83,6 +84,7 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
     @keydown.space.self.prevent="onClick"
     @click="onClick"
     @dblclick="onDblClick"
+    @contextmenu="!selectable && !locked && emit('context', item, $event)"
   >
     <input v-if="selectable" class="card__select" type="checkbox" :checked="selected" :disabled="locked" :aria-label="`选择 ${name}`" @click.stop @dblclick.stop @change="emit('select', item.id)" />
     <AppIcon :item="item" :size="view === 'grid' ? 44 : 32" />

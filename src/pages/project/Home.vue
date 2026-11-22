@@ -37,6 +37,12 @@ const tags=computed(()=>[...new Set(store.items.flatMap(item=>item.tags))].sort(
 const icon = (category: string) => category === '软件项目' ? Code2 : category === '调研写作' ? BookOpen : category === '资料处理' ? Wrench : FolderKanban
 function clearFilters() { store.search = ''; store.category = ''; store.group = ''; store.source = ''; store.state = ''; store.pinned = false; store.availability = '';store.tag='' }
 function detail(item: ProjectItem) { if (selecting.value) { if (!store.loading && !store.error) selection.toggle(item.id) } else void router.push('/project/' + item.id) }
+function onCardClick(item: ProjectItem, event: MouseEvent) {
+  if (bulkBusy.value) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest('button, input, select, a, summary, details, label, [popover]')) return
+  detail(item)
+}
 async function bulkCompleted(failedIds: string[]) { selectedIds.value = new Set(failedIds); await store.refresh() }
 async function open(item: ProjectItem,entryId?:string) { if(opening.value.has(item.id))return;opening.value.add(item.id);try { await window.baoyi.project.open(item.id,entryId) } catch (e) { toastError(errorMessage(e)) } finally{opening.value.delete(item.id)} }
 function openChoice(item:ProjectItem,event:Event){const input=event.target as HTMLSelectElement;if(input.value)void open(item,input.value);input.value=''}
@@ -93,7 +99,7 @@ async function refreshGit(id:string){try{await window.baoyi.project.git(id,{refr
         <button v-else class="pj-button pj-primary" @click="importer = true">添加项目</button>
       </div>
       <div v-else class="pj-grid" :class="{'pj-list':store.layout==='list'}">
-        <article v-for="item in store.shown" :key="item.id" class="pj-card" :class="{ 'pj-card-selected': selectedIds.has(item.id) }" :data-project-id="item.id">
+        <article v-for="item in store.shown" :key="item.id" class="pj-card" :class="{ 'pj-card-selected': selectedIds.has(item.id) }" :data-project-id="item.id" @click="onCardClick(item, $event)">
           <div class="pj-card-top">
             <input v-if="selecting" type="checkbox" :checked="selectedIds.has(item.id)" :disabled="bulkBusy || store.loading || !!store.error" :aria-label="`选择 ${item.name}`" @change="selection.toggle(item.id)" />
             <div class="pj-project-symbol" :class="{ 'pj-symbol-research': item.category === '调研写作' }"><component :is="icon(item.category)" :size="25" /></div>

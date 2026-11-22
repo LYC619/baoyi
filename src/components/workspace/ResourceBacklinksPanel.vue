@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowUpRight, Link2, Plus, Sparkles } from 'lucide-vue-next'
+import { ArrowUpRight, Link2, Plus, Search as SearchIcon, Sparkles } from 'lucide-vue-next'
 import { latestOnly, STALE } from '@/composables/latestOnly'
 import { useArchiveAssistant } from '@/composables/useArchiveAssistant'
 import { useToast } from '@/composables/useToast'
@@ -45,7 +45,7 @@ const pickerOpen = ref(false)
 const loadingOptions = ref(false)
 const saving = ref(false)
 const filterText = ref('')
-const selectedKey = ref('')
+const filterInput = ref<HTMLInputElement>()
 const targetOptions = ref<LinkTargetOption[]>([])
 
 const hasWorkspaceApi = typeof window !== 'undefined' && !!window.baoyi?.workspace?.links
@@ -94,19 +94,12 @@ const filteredTargets = computed(() => {
   )
 })
 
-watch(filteredTargets, (list) => {
-  if (!list.some((o) => o.key === selectedKey.value)) {
-    selectedKey.value = list[0]?.key ?? ''
-  }
-})
-
 async function togglePicker(): Promise<void> {
   if (pickerOpen.value) {
     pickerOpen.value = false
     return
   }
   pickerOpen.value = true
-  selectedKey.value = ''
   filterText.value = ''
   if (!hasWorkspaceApi) return
   loadingOptions.value = true
@@ -137,7 +130,8 @@ async function togglePicker(): Promise<void> {
       })
     }
     targetOptions.value = opts
-    selectedKey.value = filteredTargets.value[0]?.key ?? ''
+    await nextTick()
+    filterInput.value?.focus()
   } catch (cause) {
     toastError(errorMessage(cause))
   } finally {
@@ -145,19 +139,30 @@ async function togglePicker(): Promise<void> {
   }
 }
 
-async function addLink(): Promise<void> {
-  const chosen = filteredTargets.value.find((o) => o.key === selectedKey.value)
-  if (!chosen || saving.value || !hasWorkspaceApi) return
+async function addLinkTarget(chosen?: LinkTargetOption): Promise<void> {
+  const target = chosen ?? filteredTargets.value[0]
+  if (!target || saving.value || !hasWorkspaceApi) return
   saving.value = true
   try {
-    await window.baoyi.workspace.links.add(chosen.ownerType, chosen.ownerId, props.resourceId)
-    success(`已关联到「${chosen.name}」`)
+    await window.baoyi.workspace.links.add(target.ownerType, target.ownerId, props.resourceId)
+    success(`已关联到「${target.name}」`)
     pickerOpen.value = false
     await loadBacklinks()
   } catch (cause) {
     toastError(errorMessage(cause))
   } finally {
     saving.value = false
+  }
+}
+
+function onFilterKeydown(event: KeyboardEvent): void {
+  if (event.isComposing) return
+  if (event.key === 'Enter' && filteredTargets.value.length) {
+    event.preventDefault()
+    void addLinkTarget(filteredTargets.value[0])
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    pickerOpen.value = false
   }
 }
 
@@ -192,11 +197,11 @@ function askAssistant(): void {
 </script>
 
 <template>
-  <section class="backlinks-panel" aria-label="关联与流转">
+  <section class="backlinks-panel" aria-label="关联的项目与个人记录">
     <header class="backlinks-panel__head">
       <div class="backlinks-panel__title">
         <Link2 :size="15" />
-        <h2>关联的项目与记录</h2>
+        <h2>关联的项目与个人记录</h2>
         <span v-if="backlinks.length" class="backlinks-panel__count">{{ backlinks.length }}</span>
       </div>
       <div class="backlinks-panel__actions">
@@ -214,38 +219,41 @@ function askAssistant(): void {
         <p class="backlinks-panel__empty">正在读取可关联的项目与个人记录…</p>
       </template>
       <template v-else-if="!targetOptions.length">
-        <p class="backlinks-panel__empty">暂无进行中的项目或个人技能/经历/背包记录，可先前往「项目」或「我」建立。</p>
+        <p class="backlinks-panel__empty">暂无进行中的项目或个人技能/经历/背包记录，可先前往「项目」或「个人」建立。</p>
       </template>
       <template v-else-if="!unlinkedTargets.length">
         <p class="backlinks-panel__empty">当前可关联的项目与个人记录均已建立关联。</p>
       </template>
-      <form v-else class="backlinks-picker__form" @submit.prevent="addLink">
-        <input
-          v-model="filterText"
-          type="search"
-          class="input backlinks-picker__filter"
-          placeholder="筛选项目或个人记录…"
-          aria-label="筛选关联目标"
-        />
-        <select
-          v-if="filteredTargets.length"
-          v-model="selectedKey"
-          class="input backlinks-picker__select"
-          aria-label="选择关联目标"
-        >
-          <option v-for="opt in filteredTargets" :key="opt.key" :value="opt.key">
-            {{ opt.groupLabel }} · {{ opt.name }}
-          </option>
-        </select>
-        <span v-else class="backlinks-panel__empty">没有匹配的关联目标</span>
-        <button
-          type="submit"
-          class="btn btn--primary btn--sm"
-          :disabled="saving || !filteredTargets.length || !selectedKey"
-        >
-          {{ saving ? '保存中…' : '保存关联' }}
-        </button>
-      </form>
+      <div v-else class="backlinks-picker__body">
+        <search class="backlinks-picker__search">
+          <SearchIcon :size="14" />
+          <input
+            ref="filterInput"
+            v-model="filterText"
+            type="search"
+            placeholder="输入关键词筛选，点击下方条目直接关联（回车关联首项）…"
+            aria-label="筛选关联目标"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false"
+            @keydown="onFilterKeydown"
+          />
+        </search>
+        <div v-if="filteredTargets.length" class="backlinks-picker__candidates">
+          <button
+            v-for="opt in filteredTargets"
+            :key="opt.key"
+            type="button"
+            class="backlinks-candidate"
+            :disabled="saving"
+            @click="addLinkTarget(opt)"
+          >
+            <span class="backlinks-candidate__kind">{{ opt.groupLabel }}</span>
+            <span class="backlinks-candidate__name">{{ opt.name }}</span>
+          </button>
+        </div>
+        <p v-else class="backlinks-panel__empty">没有匹配的关联目标</p>
+      </div>
     </div>
 
     <div v-if="backlinks.length" class="backlinks-list">
@@ -262,7 +270,7 @@ function askAssistant(): void {
       </button>
     </div>
     <p v-else-if="!pickerOpen" class="backlinks-panel__empty">
-      尚未关联项目或个人记录。可将此条目挂到相关项目、技能或背包资产下，打通「物 · 事 · 我」脉络。
+      尚未关联项目或个人记录。可以把当前条目挂到相关项目、技能或背包记录里，方便来回查看。
     </p>
   </section>
 </template>
@@ -329,23 +337,75 @@ function askAssistant(): void {
   border: 1px solid var(--divider);
 }
 
-.backlinks-picker__form {
+.backlinks-picker__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.backlinks-picker__search {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 0 10px;
+  height: 32px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--divider);
+  background: var(--bg-card);
+  color: var(--text-faint);
+}
+
+.backlinks-picker__search input {
+  flex: 1;
+  min-inline-size: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  font-size: var(--fs-tag);
+  outline: none;
+}
+
+.backlinks-picker__candidates {
+  display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
 }
 
-.backlinks-picker__filter {
-  flex: 1 1 160px;
-  min-inline-size: 0;
-  height: 32px;
+.backlinks-candidate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--divider);
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-size: var(--fs-tag);
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
 }
 
-.backlinks-picker__select {
-  flex: 2 1 220px;
+.backlinks-candidate:hover,
+.backlinks-candidate:focus-visible {
+  border-color: var(--accent);
+  background: var(--active-surface);
+}
+
+.backlinks-candidate__kind {
+  flex: none;
+  font-size: var(--fs-micro);
+  color: var(--accent-ink, var(--accent));
+}
+
+.backlinks-candidate__name {
   min-inline-size: 0;
-  height: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .backlinks-list {

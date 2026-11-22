@@ -48,6 +48,8 @@ export interface SkillRecordInput {
 export interface SkillApi {
   list(): Promise<SkillCard[]>;
   proposals(): Promise<SkillProposal[]>;
+  save(draft: SkillDraft): Promise<SkillCard>;
+  record(input: SkillRecordInput): Promise<SkillRecord>;
   confirm(id: string, draft?: SkillDraft): Promise<SkillCard>;
   cancel(id: string): Promise<void>;
   undoRecord(id: string): Promise<void>;

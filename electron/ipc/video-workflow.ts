@@ -15,7 +15,7 @@ import { atomicWrite } from '../kinds/video/bundle.ts'
 import { getVideoWorkLibrary, relocateVideoAsset, setDefaultVideoAsset } from '../kinds/video/library.ts'
 import { syncVideoWorkFiles } from '../kinds/video/local-sync.ts'
 import { previewVideoCollectionName, renameVideoCollection } from '../kinds/video/collection-name.ts'
-import { getVideoItem, getVideoLibrary, updateVideoEpisode, updateVideoItem } from '../kinds/video/service.ts'
+import { getVideoItem, getVideoLibrary, openWithPlayer, updateVideoEpisode, updateVideoItem } from '../kinds/video/service.ts'
 import { getEpisode } from '../kinds/video/db.ts'
 import type { VideoDownloadJob, VideoEnqueueRequest, VideoJobRetry } from '../../src/types/video-workflow.ts'
 import { createDiscoveryCatalogue } from '../kinds/video/discovery/catalogue.ts'
@@ -190,8 +190,8 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     const item = getVideoItem(asset.resource_id)
     let exists = false; try { exists = fs.statSync(asset.path).isFile() } catch { /* Show missing state. */ }
     if (!exists) { getVideoWorkLibrary(getDb(), asset.resource_id); return { ok: false, message: '视频文件无法访问，请连接磁盘或重新定位', item, episode: null } }
-    const error = await shell.openPath(asset.path)
-    if (error) return { ok: false, message: '无法打开播放器：' + error, item, episode: null }
+    const error = await openWithPlayer(asset.path, item?.media_kind === 'audio')
+    if (error) return { ok: false, message: error, item, episode: null }
     const link = getDb().prepare('SELECT episode_id FROM video_episode_assets WHERE asset_id = ? LIMIT 1').get(assetId) as { episode_id: string } | undefined
     const episode = link ? getEpisode(getDb(), link.episode_id) : null
     if (episode) updateVideoEpisode(episode.id, { watched_at: Date.now(), ...(episode.watch_status === 'unwatched' ? { watch_status: 'watching' } : {}) })

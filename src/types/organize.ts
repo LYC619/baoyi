@@ -77,6 +77,8 @@ export interface OrganizeStep {
   ok: boolean
   /** 失败或跳过的原因 */
   note: string
+  /** 共用目录下的单文件移动（不移动上级目录） */
+  single_file?: boolean
 }
 
 /** 一次整理的完整记录。既是执行结果，也是撤销依据 */

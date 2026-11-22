@@ -37,6 +37,7 @@ export const MODULE_TABS: ModuleTab[] = [
  * 从软件库进设置，顶栏还应该是「软件」亮着，而不是两个都灭掉。
  */
 export const activeModule = ref<ModuleKey>('software')
+export const lastNonSettingsPath = ref('')
 
 const lastPath: Record<ModuleKey, string> = { software: '', game: '', video: '', image: '', project: '', personal:'', document:'' }
 const scrollTop: Record<ModuleKey, number> = { software: 0, game: 0, video: 0, image: 0, project: 0, personal:0, document:0 }
@@ -73,6 +74,7 @@ export function trackRoute(to: { fullPath: string; meta: { module?: unknown } })
   if (!key) return
   activeModule.value = key
   lastPath[key] = to.fullPath
+  lastNonSettingsPath.value = to.fullPath
 }
 
 /**

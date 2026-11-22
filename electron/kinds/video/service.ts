@@ -8,6 +8,7 @@
  */
 
 import fs, { existsSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import { app, nativeImage, net, shell } from 'electron'
@@ -356,9 +357,22 @@ export interface PlayOutcome {
  * `shell.openPath` 的返回值是**空串表示成功**，出错时是一句错误描述。
  * 这个约定反直觉，但它是 Electron 的，别「修」成 boolean。
  */
-async function openWithPlayer(filePath: string): Promise<string> {
+export async function openWithPlayer(filePath: string, forceSystem = false): Promise<string> {
   if (!filePath) return '这一条没有记下文件路径'
   if (!existsSync(filePath)) return `文件不在了：${filePath}`
+  if (!forceSystem) {
+    const customPlayer = getSettings(getDb()).video_player_path?.trim() || ''
+    if (customPlayer && existsSync(customPlayer)) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn(customPlayer, [filePath], { shell: false, detached: true, stdio: 'ignore' })
+          child.once('error', reject)
+          child.once('spawn', () => { child.unref(); resolve() })
+        })
+        return ''
+      } catch { /* 指定播放器已移除或无法拉起时回退系统默认关联 */ }
+    }
+  }
   // 目录也能走到这儿（剧集的 path 是目录）。调用方保证传的是文件，
   // 这里不再判一次 —— 判了也只能给同一句话
   const err = await shell.openPath(filePath)
@@ -380,7 +394,8 @@ export async function playVideoEpisode(episodeId: string): Promise<PlayOutcome> 
   const ep = getEpisode(d, episodeId)
   if (!ep) return { ok: false, message: '找不到这一集', item: null, episode: null }
 
-  const err = await openWithPlayer(ep.path)
+  const owner = getVideo(d, ep.resource_id)
+  const err = await openWithPlayer(ep.path, owner?.media_kind === 'audio')
   if (err) return { ok: false, message: err, item: null, episode: ep }
 
   const patch: Partial<Episode> = { watched_at: Date.now() }
@@ -422,7 +437,7 @@ export async function playVideo(id: string): Promise<PlayOutcome> {
     return playVideoEpisode(ep.id)
   }
 
-  const err = await openWithPlayer(item.path)
+  const err = await openWithPlayer(item.path, item.media_kind === 'audio')
   if (err) return { ok: false, message: err, item, episode: null }
 
   // 电影的进度记在 video_meta 上，见 schema.ts。同样只从 unwatched 抬到 watching

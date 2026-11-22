@@ -13,7 +13,7 @@ const range = computed(() => {
   const values = rows.value.map((r) => r.value);
   const min = Math.min(...values),
     max = Math.max(...values);
-  return min===max ? {min:min-0.5,max:max+0.5,span:1} : {min,max,span:max-min};
+  return min === max ? { min: min - 0.5, max: max + 0.5, span: 1 } : { min, max, span: max - min };
 });
 const dots = computed(() =>
   rows.value.map((r, i) => ({
@@ -40,6 +40,7 @@ const average = computed(() =>
       viewBox="0 0 600 165"
       role="img"
       :aria-label="label + '的最近记录趋势'"
+      @mouseleave="active = ''"
     >
       <template v-for="(y, i) in [25, 75, 125]" :key="y">
         <line
@@ -51,7 +52,7 @@ const average = computed(() =>
           stroke-dasharray="4 4"
         />
         <text x="53" :y="y + 4" text-anchor="end">
-          {{ (range.max - (i * (range.max - range.min)) / 2).toLocaleString(undefined,{maximumSignificantDigits:4}) }}
+          {{ (range.max - (i * (range.max - range.min)) / 2).toLocaleString(undefined, { maximumSignificantDigits: 4 }) }}
         </text>
       </template>
       <polyline
@@ -71,14 +72,16 @@ const average = computed(() =>
         tabindex="0"
         :aria-label="dot.date + ' ' + dot.value + ' ' + unit"
         @mouseenter="active = dot.id"
+        @mouseleave="active = ''"
         @focus="active = dot.id"
+        @blur="active = ''"
       />
       <text x="60" y="155">{{ rows[0].date }}</text>
       <text x="560" y="155" text-anchor="end">{{ rows.at(-1)?.date }}</text>
     </svg>
     <p aria-live="polite">
-      {{ selected?.date }} · <strong>{{ selected?.value }} {{ unit }}</strong
-      ><span>平均 {{ average.toFixed(2) }} {{ unit }} · 按记录顺序展示</span>
+      {{ selected?.date }} · <strong>{{ selected?.value }} {{ unit }}</strong>
+      <span>平均 {{ average.toFixed(2) }} {{ unit }} · {{ active ? '悬停查看' : '最近一次记录' }}</span>
     </p>
   </div>
   <p v-else class="ws-muted">暂无数值记录</p>

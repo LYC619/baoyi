@@ -5,7 +5,7 @@ import { formatBytes, formatPosition } from '@/utils'
 import { WATCH_STATUS_LABEL } from '@/stores/video'
 import type { WatchStatus } from '@/types'
 
-const props = withDefaults(defineProps<{ preview: VideoOrganizePreview | VideoRelocatePreview; fileNames: Record<string, string>; episodeNumbers?: VideoOrganizeRequest['episodeNumbers']; copyFiles?: boolean; disabled?: boolean; withoutSeason?: boolean }>(), { disabled: false, copyFiles: false, episodeNumbers: () => ({}), withoutSeason: false })
+const props = withDefaults(defineProps<{ preview: VideoOrganizePreview | VideoRelocatePreview; fileNames: Record<string, string>; episodeNumbers?: VideoOrganizeRequest['episodeNumbers']; copyFiles?: boolean; disabled?: boolean; withoutSeason?: boolean; audio?: boolean }>(), { disabled: false, copyFiles: false, episodeNumbers: () => ({}), withoutSeason: false, audio: false })
 defineEmits<{ rename: [id: string, name: string]; number: [id: string, season: number, episode: number] }>()
 const actionLabels = { move: '移动，校验后移除原件', copy: '复制，保留原件', keep: '保留原位置', verify: '核对后重绑', none: '仅合并关联' }
 const stateLabels = { present: '可用', missing: '文件缺失', offline: '磁盘离线', unchecked: '尚未检查' }
@@ -22,12 +22,12 @@ const collisions = computed(() => props.preview.collisions.filter(collision => p
   <section class="organize-preview" aria-label="整理预览">
     <template v-if="preview.kind === 'organize'">
       <section class="organize-episodes">
-        <header><h3>合集内容 <span>{{ preview.episodes.length }} 集</span></h3><p>原名、单集简介、笔记和观看进度随各集保留。可以直接调整编号。</p></header>
+        <header><h3>{{ audio ? '专辑曲目' : '合集内容' }} <span>{{ preview.episodes.length }} {{ audio ? '首' : '集' }}</span></h3><p>{{ audio ? '原曲名、笔记和播放进度随各曲保留，可直接调整曲序编号。' : '原名、单集简介、笔记和观看进度随各集保留。可以直接调整编号。' }}</p></header>
         <ul aria-label="合集集数">
           <li v-for="episode in orderedEpisodes" :key="episode.id">
             <div class="organize-episode-title"><strong>{{ episode.title || '未命名内容' }}</strong><small>{{ preview.works.find(work => work.resourceId === episode.resourceId)?.name }}</small></div>
             <label v-if="showSeasons"><span>季</span><input type="number" min="0" max="1000" :value="episodeNumbers[episode.id]?.season ?? episode.season" :aria-label="(episode.title || '未命名内容') + ' 的季数'" :disabled="disabled" @input="$emit('number', episode.id, Number(($event.target as HTMLInputElement).value), episodeNumbers[episode.id]?.episode ?? episode.episode)" /></label>
-            <label><span>第</span><input type="number" min="0" max="10000" :value="episodeNumbers[episode.id]?.episode ?? episode.episode" :aria-label="(episode.title || '未命名内容') + ' 的集数'" :disabled="disabled" @input="$emit('number', episode.id, episodeNumbers[episode.id]?.season ?? episode.season, Number(($event.target as HTMLInputElement).value))" /><span>集</span></label>
+            <label><span>{{ audio ? '曲序 #' : '第' }}</span><input type="number" min="0" max="10000" :value="episodeNumbers[episode.id]?.episode ?? episode.episode" :aria-label="(episode.title || '未命名内容') + (audio ? ' 的曲序' : ' 的集数')" :disabled="disabled" @input="$emit('number', episode.id, episodeNumbers[episode.id]?.season ?? episode.season, Number(($event.target as HTMLInputElement).value))" /><span v-if="!audio">集</span></label>
           </li>
         </ul>
       </section>

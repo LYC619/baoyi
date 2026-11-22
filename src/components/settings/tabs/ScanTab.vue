@@ -14,8 +14,9 @@ import { useToast } from '@/composables/useToast'
 import { useSettingsStore } from '@/stores/settings'
 import { useSoftwareStore } from '@/stores/software'
 import { useGameStore } from '@/stores/game'
-import { errorMessage, plain, shortenPath } from '@/utils'
-import type { IdentifyReport } from '@/types'
+import { errorMessage, formatDate, plain, shortenPath } from '@/utils'
+import type { IdentifyReport, SkippedItem } from '@/types'
+
 
 const route = useRoute()
 
@@ -275,10 +276,30 @@ async function showReport(id: string): Promise<void> {
 }
 
 /* ------------------------------ 忽略名单 ------------------------------ */
+const skippedItems = ref<SkippedItem[]>([])
+const skippedExpanded = ref(false)
 const skippedCount = ref(0)
 
 async function loadSkipped(): Promise<void> {
-  skippedCount.value = await window.baoyi.pending.skippedCount()
+  const [count, list] = await Promise.all([
+    window.baoyi.pending.skippedCount(),
+    window.baoyi.pending.listSkipped().catch(() => [] as SkippedItem[])
+  ])
+  skippedCount.value = count
+  skippedItems.value = list
+}
+
+async function restoreOneSkipped(item: SkippedItem): Promise<void> {
+  try {
+    const n = await window.baoyi.pending.removeSkipped(item.exe_path)
+    if (n > 0) {
+      await Promise.all([loadSkipped(), loadUnits(), store.refreshCounts()])
+      success(`已从忽略名单恢复「${item.label || item.exe_path}」，下次识别时会重新列出`)
+    }
+  } catch (err) {
+    error(errorMessage(err))
+  }
+
 }
 
 async function clearSkipped(): Promise<void> {
@@ -432,6 +453,22 @@ function openAi(): void { void router.replace({ name: 'settings', query: { tab: 
       清空名单
     </button>
     <span class="hint">当前 {{ skippedCount }} 项</span>
+    <button v-if="skippedItems.length > 0" type="button" class="btn btn--subtle" @click="skippedExpanded = !skippedExpanded">
+      {{ skippedExpanded ? '收起明细' : '查看并单条恢复' }}
+    </button>
+    <ul v-if="skippedExpanded && skippedItems.length > 0" class="notes" style="flex-basis: 100%">
+      <li v-for="sk in skippedItems" :key="sk.exe_path">
+        <div class="notes__line">
+          <strong>{{ sk.label || sk.exe_path.split('\\').pop() }}</strong>
+          <span class="mono truncate" :title="sk.exe_path">{{ sk.exe_path }}</span>
+          <button type="button" class="btn btn--subtle" :disabled="busy" @click="restoreOneSkipped(sk)">
+            <RotateCcw :size="13" />
+            恢复
+          </button>
+        </div>
+        <span class="notes__reason">加入于 {{ formatDate(sk.created_at) }}</span>
+      </li>
+    </ul>
   </div>
 </section>
 <Teleport to=".settings"><ReportDialog v-if="runReport" :report="runReport" @close="runReport = null" /></Teleport>

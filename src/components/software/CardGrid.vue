@@ -18,6 +18,7 @@ defineEmits<{
   (e: 'open', id: string): void
   (e: 'launch', id: string): void
   (e: 'select', id: string): void
+  (e: 'context', item: SoftwareItem, event: MouseEvent): void
 }>()
 </script>
 
@@ -37,6 +38,7 @@ defineEmits<{
       @open="$emit('open', $event)"
       @launch="$emit('launch', $event)"
       @select="$emit('select', $event)"
+      @context="(it, ev) => $emit('context', it, ev)"
     />
   </div>
 </template>

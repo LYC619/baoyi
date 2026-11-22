@@ -29,10 +29,11 @@ const review = ref<HTMLElement | null>(null)
 const resultHeading = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
 let unlisten: (() => void) | undefined
-const title = computed(() => props.mode === 'history' ? '整理记录' : props.mode === 'relocate' ? '作品目录管理' : '组建合集')
+const isAudio = computed(() => works.value.length > 0 && works.value.every(work => work.media_kind === 'audio'))
+const title = computed(() => props.mode === 'history' ? '整理记录' : props.mode === 'relocate' ? (isAudio.value ? '音频目录管理' : '作品目录管理') : (isAudio.value ? '合并为专辑' : '组建合集'))
 const mutation = computed(() => busy.value === 'apply' || busy.value === 'retry' || busy.value === 'rollback')
 const inputLocked = computed(() => mutation.value || busy.value === 'pick' || busy.value === 'history')
-const applyLabel = computed(() => (collectionAction.value === 'join' ? '加入合集' : '创建合集') + (copyFiles.value ? transfer.value === 'move' ? '并移动文件' : '并复制文件' : ''))
+const applyLabel = computed(() => (isAudio.value ? (collectionAction.value === 'join' ? '并入专辑' : '合并为专辑') : (collectionAction.value === 'join' ? '加入合集' : '创建合集')) + (copyFiles.value ? transfer.value === 'move' ? '并移动文件' : '并复制文件' : ''))
 const fileAction = computed({
   get: () => copyFiles.value ? transfer.value : 'none',
   set: (value: string) => { transfer.value = value === 'move' ? 'move' : 'copy'; copyFiles.value = value !== 'none' }
@@ -107,9 +108,9 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <div class="organize-overlay" @click.self="$emit('close')">
       <section ref="panel" class="organize-panel" role="dialog" aria-modal="true" aria-labelledby="organize-title" tabindex="-1">
-        <header class="organize-panel__head"><div><h2 id="organize-title">{{ title }}</h2><p>{{ mode === 'organize' ? '选好名称和集数，让同一部作品集中显示。' : '核对目录与文件，保留原有资料和观看记录。' }}</p></div><button class="btn btn--subtle" type="button" aria-label="关闭整理面板" @click="$emit('close')"><X :size="18" /></button></header>
+        <header class="organize-panel__head"><div><h2 id="organize-title">{{ title }}</h2><p>{{ mode === 'organize' ? (isAudio ? '填写专辑名称并调整曲序，把多首曲目归到同一张专辑。' : '选好名称和集数，让同一部作品集中显示。') : '核对目录与文件，保留原有资料和观看记录。' }}</p></div><button class="btn btn--subtle" type="button" aria-label="关闭整理面板" @click="$emit('close')"><X :size="18" /></button></header>
         <nav class="organize-tabs no-select" aria-label="整理步骤">
-          <button v-if="mode !== 'history'" type="button" :aria-current="tab === 'preview' ? 'step' : undefined" @click="showSelection">{{ mode === 'organize' ? '合集内容' : '目录与预览' }}</button>
+          <button v-if="mode !== 'history'" type="button" :aria-current="tab === 'preview' ? 'step' : undefined" @click="showSelection">{{ mode === 'organize' ? (isAudio ? '专辑曲目' : '合集内容') : '目录与预览' }}</button>
           <button type="button" :aria-current="tab === 'history' ? 'step' : undefined" :disabled="!!busy" @click="showHistory">整理记录</button>
         </nav>
         <div ref="body" class="organize-panel__body" :aria-busy="!!busy">
@@ -119,13 +120,13 @@ onBeforeUnmount(() => {
           <template v-if="tab === 'preview'">
             <form class="organize-form" @submit.prevent="generatePreview">
               <template v-if="mode === 'organize'">
-                <fieldset class="collection-mode" :disabled="inputLocked"><legend class="sr-only">合集方式</legend><label :class="{ active: collectionAction === 'create' }"><input v-model="collectionAction" type="radio" value="create" />创建新合集</label><label :class="{ active: collectionAction === 'join' }"><input v-model="collectionAction" type="radio" value="join" />加入已有合集</label></fieldset>
-                <label v-if="collectionAction === 'create'" class="organize-field collection-name"><span>合集名称</span><input v-model="collectionTitle" maxlength="240" :disabled="inputLocked" placeholder="例如：某部作品的系列名称" /></label>
+                <fieldset class="collection-mode" :disabled="inputLocked"><legend class="sr-only">合集方式</legend><label :class="{ active: collectionAction === 'create' }"><input v-model="collectionAction" type="radio" value="create" />{{ isAudio ? '新建专辑' : '创建新合集' }}</label><label :class="{ active: collectionAction === 'join' }"><input v-model="collectionAction" type="radio" value="join" />{{ isAudio ? '并入已有专辑' : '加入已有合集' }}</label></fieldset>
+                <label v-if="collectionAction === 'create'" class="organize-field collection-name"><span>{{ isAudio ? '专辑名称' : '合集名称' }}</span><input v-model="collectionTitle" maxlength="240" :disabled="inputLocked" :placeholder="isAudio ? '例如：专辑、播客或合集名称' : '例如：某部作品的系列名称'" /></label>
                 <template v-else>
-                  <label class="organize-field"><span>加入哪个合集</span><select v-model="survivorId" :disabled="inputLocked"><option disabled value="">请选择已选作品中的合集</option><option v-for="work in works" :key="work.id" :value="work.id">{{ videoTitle(work) }}{{ work.episode_total > 1 ? `（已有 ${work.episode_total} 集）` : '' }}</option></select></label>
-                  <p class="organize-hint">现有合集也需要一并选中。它的名称、封面和整体简介继续保留。</p>
+                  <label class="organize-field"><span>{{ isAudio ? '并入哪张专辑' : '加入哪个合集' }}</span><select v-model="survivorId" :disabled="inputLocked"><option disabled value="">{{ isAudio ? '请选择已选音频中的目标专辑' : '请选择已选作品中的合集' }}</option><option v-for="work in works" :key="work.id" :value="work.id">{{ videoTitle(work) }}{{ work.episode_total > 1 ? `（已有 ${work.episode_total} ${isAudio ? '首' : '集'}）` : '' }}</option></select></label>
+                  <p class="organize-hint">{{ isAudio ? '目标专辑也需要一并勾选。它的名称、封面和整体简介继续保留。' : '现有合集也需要一并选中。它的名称、封面和整体简介继续保留。' }}</p>
                 </template>
-                <p class="organize-selection-count">已选 {{ works.length }} 部作品<span>更改后自动核对</span></p>
+                <p class="organize-selection-count">已选 {{ works.length }} {{ isAudio ? '项音频' : '部作品' }}<span>更改后自动核对</span></p>
                 <div class="organize-file-options">
                   <fieldset class="organize-file-actions" :disabled="inputLocked"><legend>文件整理</legend><label><input v-model="fileAction" type="radio" value="none" />保留位置</label><label><input v-model="fileAction" type="radio" value="move" />移动</label><label><input v-model="fileAction" type="radio" value="copy" />复制</label></fieldset>
                   <template v-if="copyFiles">
@@ -146,7 +147,7 @@ onBeforeUnmount(() => {
               <div v-if="mode !== 'organize' || error" class="organize-preview-action"><span v-if="!works.length" class="organize-hint">当前没有可见的已选作品。</span><button class="btn btn--ghost" type="submit" :disabled="previewDisabled">{{ mode === 'organize' || preview ? '重新预览' : '生成预览' }}</button></div>
             </form>
             <p v-if="preview && stale && mode !== 'organize'" class="organize-notice" role="status">预览已失效，重新预览后才能执行。</p>
-            <div v-if="preview" ref="review" :data-preview-stale="stale" tabindex="-1"><OrganizePreview :preview="preview" :file-names="fileNames" :episode-numbers="episodeNumbers" :without-season="works.every(work => work.category === '里番')" :copy-files="mode === 'relocate' || copyFiles" :disabled="inputLocked" @number="(id, season, episode) => episodeNumbers = { ...episodeNumbers, [id]: { season, episode } }" @rename="(id, name) => fileNames = { ...fileNames, [id]: name }" /></div>
+            <div v-if="preview" ref="review" :data-preview-stale="stale" tabindex="-1"><OrganizePreview :preview="preview" :file-names="fileNames" :episode-numbers="episodeNumbers" :audio="isAudio" :without-season="isAudio || works.every(work => work.category === '里番')" :copy-files="mode === 'relocate' || copyFiles" :disabled="inputLocked" @number="(id, season, episode) => episodeNumbers = { ...episodeNumbers, [id]: { season, episode } }" @rename="(id, name) => fileNames = { ...fileNames, [id]: name }" /></div>
             <p v-else class="organize-empty">{{ mode === 'organize' ? canPreview ? '正在整理集数与原作品资料…' : '填写合集名称并选择作品后，将自动显示内容。' : '预览会列出各文件的当前位置与目标位置。' }}</p>
           </template>
           <template v-else>

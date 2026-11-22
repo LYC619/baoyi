@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
+import { footerHeight } from '@/composables/useFloatingDock'
 import { useToast } from '@/composables/useToast'
 
 const { toasts, dismiss, pause, resume } = useToast()
@@ -79,6 +80,7 @@ watch(
     role="region"
     aria-label="系统提示"
     class="toast-host"
+    :style="{ bottom: (footerHeight + 20) + 'px' }"
   >
     <TransitionGroup name="fade" @after-leave="syncHideWhenEmpty">
       <div

@@ -5,7 +5,7 @@ import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { PersonalLibrary, validatePersonal } from '../electron/workspace/personal.ts'
 import { filterAssets } from '../src/utils/personal-assets.ts'
-import { matchesExpiry, isReminding, renewalDate } from '../src/utils/personal-assets.ts'
+import { matchesExpiry, isReminding, renewalDate, formatAssetPrice } from '../src/utils/personal-assets.ts'
 import { buildLibraryBackup, restoreLibraryBackup } from '../electron/services/storage/library-backup.ts'
 import { VIDEO_JOBS_SQL } from '../electron/kinds/video/download/jobs.ts'
 import { daysUntil, filterTodos } from '../src/utils/personal-view.ts'
@@ -124,4 +124,14 @@ test('choosing a specific metric distinguishes equal names with different units'
     assert.equal(lib.captureState('体重','lb',154,'2026-11-04',lb.id).data.metricId,lb.id)
     assert.throws(()=>lib.captureState('体重','lb',154,'2026-11-04',kg.id),/单位/)
   } finally {db.close()}
+})
+
+test('reminding and snoozed expiry views keep snoozed subscriptions reachable and format prices cleanly', () => {
+  const snoozed = row('暂缓订阅', { expiresOn: '2026-11-12', snoozedUntil: '2026-11-20', cost: 20, currency: 'CNY' })
+  const due = row('待续费订阅', { expiresOn: '2026-11-12', cost: 9.9, currency: 'USD' })
+  assert.equal(matchesExpiry(snoozed, 'reminding', '2026-11-10', 7), false)
+  assert.equal(matchesExpiry(snoozed, 'snoozed', '2026-11-10', 7), true)
+  assert.equal(matchesExpiry(due, 'reminding', '2026-11-10', 7), true)
+  assert.equal(formatAssetPrice(20, 'CNY'), '¥20 CNY')
+  assert.equal(formatAssetPrice(9.9, 'USD'), '$9.9 USD')
 })

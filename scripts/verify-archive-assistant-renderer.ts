@@ -54,3 +54,34 @@ test('an opening view cannot restore the old privacy scope after delayed session
   pending.resolve([]);await opening
   assert.equal(a.selected.value,'');assert.equal(a.error.value,'')
 })
+
+
+test('show with explicit resource ids opens a clean session instead of mixing into an unrelated idle session',async()=>{
+  const {a}=fixture({
+    source:async(id:string)=>({id,kind:'document',name:'当前文档',path:'',summary:'',tags:[],updatedAt:1}),
+    session:async(id:string)=>({session:{id,title:'旧对话',started_at:1,last_active:1,message_count:2},messages:[{id:1,role:'user',content:'旧内容',timestamp:1}],lastRun:null})
+  })
+  await a.load('old-session')
+  assert.equal(a.selected.value,'old-session')
+  await a.show('整理这份文档',['doc-1'])
+  assert.equal(a.selected.value,'')
+  assert.equal(a.messages.value.length,0)
+  assert.equal(a.context.value.length,1)
+  assert.equal(a.context.value[0].id,'doc-1')
+})
+
+test('undoAll reverses all applied actions in order and refreshes audit list',async()=>{
+  const undone:string[]=[]
+  const list=[
+    {id:'act-2',targetId:'d1',kind:'document',name:'文档1',reason:'改标签',before:{},after:{},state:'applied',createdAt:2},
+    {id:'act-1',targetId:'d1',kind:'document',name:'文档1',reason:'改备注',before:{},after:{},state:'applied',createdAt:1}
+  ]
+  const {a}=fixture({
+    actions:async()=>list.map(x=>({...x,state:undone.includes(x.id)?'undone':'applied'})),
+    undo:async(id:string)=>{undone.push(id);return {ok:true,reason:'已撤销'}}
+  })
+  await a.undoAll()
+  assert.deepEqual(undone,['act-2','act-1'])
+  assert.ok(a.actions.value.every((x:any)=>x.state==='undone'))
+  assert.equal(a.notice.value,'已撤回 2 项修改')
+})

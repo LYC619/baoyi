@@ -11,6 +11,7 @@ import DetailTabs from '@/components/ui/DetailTabs.vue'
 import ProjectDialog from '@/components/project/ProjectDialog.vue'
 import ImageCover from '@/components/image/ImageCover.vue'
 import { useImageReader } from '@/composables/useImageReader'
+import { useComicIngest } from '@/composables/useComicIngest'
 import ImageIntegrityPanel from '@/components/image/ImageIntegrityPanel.vue'
 import ImageUpdatePanel from '@/components/image/ImageUpdatePanel.vue'
 import ResourceBacklinksPanel from '@/components/workspace/ResourceBacklinksPanel.vue'
@@ -25,7 +26,22 @@ watch(()=>route.query.tab,tab=>{activeTab.value=detailTabs.some(t=>t.id===tab)?S
 watch(activeTab,tab=>{if(route.query.tab!==tab)void router.replace({query:{...route.query,tab}})})
 async function choosePage(id:string){if(choosingCover.value){if(await patch({coverPageId:id}))choosingCover.value=false}else read(id)}
 const selectedChapter=ref<string|null>(null)
-const reader=useImageReader()
+const reader=useImageReader(), comicIngest=useComicIngest()
+const siblings=computed<ImageItem[]>(()=>{
+  const cur=item.value; if(!cur)return []
+  if(cur.type==='comic'){
+    if(!cur.collectionId)return []
+    const col=(store.collections||[]).find(c=>c.id===cur.collectionId)
+    return col?col.members.map(id=>(store.items||[]).find(i=>i.id===id)).filter((x):x is ImageItem=>!!x):[]
+  }
+  return (store.items||[]).filter(i=>i.type===cur.type)
+})
+function goBack(){
+  if(item.value && store.query && store.query.type !== item.value.type){
+    store.query = { type: item.value.type, sort: 'updated' }
+  }
+  void router.push('/image')
+}
 const previewPages=computed(()=>item.value?.type==='comic' && selectedChapter.value?pages.value.filter(p=>p.chapterId===selectedChapter.value):pages.value)
 const shown=computed(()=>previewPages.value.slice(0,limit.value))
 const previewChapter=computed(()=>item.value?.chapters.find(c=>c.id===selectedChapter.value))
@@ -88,7 +104,7 @@ async function patch(value: ImagePatch) {
   }
 }
 function read(id = '') {
-  if (currentReady.value && item.value) reader.open(item.value, pages.value, id)
+  if (currentReady.value && item.value) reader.open(item.value, pages.value, id, siblings.value)
 }
 watch(reader.session, value => { if (!value && !lifetime.signal.aborted) void load(false, true) })
 async function rescan(relocate = false) {
@@ -118,7 +134,7 @@ async function remove(deleteFiles = false) {
     const remaining = await window.baoyi.image.get(target.id)
     if (!target.current() || remaining) return
     await store.refresh()
-    if (target.current()) await router.push('/image')
+    if (target.current()) goBack()
   } catch (cause) {
     if (target.current()) error.value = errorMessage(cause)
   } finally {
@@ -154,16 +170,16 @@ async function reveal() {
 onMounted(() => { void load(route.query.read === '1') })
 onUnmounted(() => lifetime.abort())
 </script>
-<template><main class="im-page image-detail"><header class="detail-toolbar"><button class="im-button" @click="router.push('/image')"><ArrowLeft :size="17"/>{{item?.type!=='comic'?'返回相册':'返回书架'}}</button><span/><button class="im-button" :disabled="!canRecover" @click="rescan()"><RefreshCw :size="16"/>重新扫描</button><button class="im-button" :disabled="!canRecover" @click="rescan(true)"><FolderOpen :size="17"/>重新定位</button><button class="im-icon" aria-label="移除图片资源" :disabled="busy || !currentReady" @click="remove()"><Trash2 :size="18"/></button></header><p v-if="error" role="alert" class="im-error">{{error}}</p>
-  <div v-if="status==='loading'" class="im-empty" role="status"><Images :size="40"/><h2>正在读取资源…</h2></div><div v-else-if="status==='error'" class="im-empty"><h2>读取失败</h2><button class="im-button" @click="load()">重试</button></div><div v-else-if="status==='missing'" class="im-empty"><Images :size="40"/><h2>资源不可用</h2><p>资源可能已移除，或所属类型已隐藏。</p></div><template v-else-if="item"><section class="detail-info"><button class="detail-cover-button" :class="{photo:item.type!=='comic'}" :disabled="busy || !currentReady || !pages.length" aria-label="选择或替换封面" title="选择或替换封面" @click="coverLimit=120;choosingCover=true"><ImageCover :page-id="item.coverPageId" :name="item.name" :photo="item.type!=='comic'"/><span>更换封面</span></button><div class="detail-fields"><input class="detail-title" :disabled="busy || !currentReady" :value="item.name" aria-label="图片资源名称" @change="patch({name:($event.target as HTMLInputElement).value})"/><p class="detail-meta">{{item.type==='comic'?'漫画':item.type==='misc'?'杂图':'照片'}} · {{item.chapterCount?item.chapterCount+' 章 · ':''}}{{item.pageCount}} 页 <span v-if="item.source">· {{item.source==='pica'?'哔咔':item.source==='jm'?'JM':item.source}}</span></p><p v-if="item.authors?.length" class="detail-meta">作者：{{item.authors.join("、")}}</p><p class="detail-path">{{item.path}}</p><div class="detail-actions"><button class="im-button im-primary" :disabled="busy || !currentReady || !pages.length" @click="read()"><BookOpen :size="18"/>{{item.type!=='comic'?'浏览照片':item.progress?'继续阅读':'开始阅读'}}</button><button class="im-button" :disabled="busy || !currentReady" :class="{favorite:item.favorite}" @click="patch({favorite:!item.favorite})"><Heart :size="17"/>{{item.favorite?'已收藏':'收藏'}}</button><span v-if="item.progress && item.type==='comic'">读到第 {{item.progress.ordinal+1}} 页</span></div></div></section>
+<template><main class="im-page image-detail"><header class="detail-toolbar"><button class="im-button" @click="goBack"><ArrowLeft :size="17"/>{{item?.type!=='comic'?'返回相册':'返回书架'}}</button><span/><button class="im-button" :disabled="!canRecover" @click="rescan()"><RefreshCw :size="16"/>重新扫描</button><button class="im-button" :disabled="!canRecover" @click="rescan(true)"><FolderOpen :size="17"/>重新定位</button><button class="im-icon" aria-label="移除图片资源" :disabled="busy || !currentReady" @click="remove()"><Trash2 :size="18"/></button></header><p v-if="error" role="alert" class="im-error">{{error}}</p>
+  <div v-if="status==='loading'" class="im-empty" role="status"><Images :size="40"/><h2>正在读取资源…</h2></div><div v-else-if="status==='error'" class="im-empty"><h2>读取失败</h2><button class="im-button" @click="load()">重试</button></div><div v-else-if="status==='missing'" class="im-empty"><Images :size="40"/><h2>资源不可用</h2><p>资源可能已移除，或所属类型已隐藏。</p></div><template v-else-if="item"><section class="detail-info"><button class="detail-cover-button" :class="{photo:item.type!=='comic'}" :disabled="busy || !currentReady || !pages.length" aria-label="选择或替换封面" title="选择或替换封面" @click="coverLimit=120;choosingCover=true"><ImageCover :page-id="item.coverPageId" :name="item.name" :photo="item.type!=='comic'"/><span>更换封面</span></button><div class="detail-fields"><input class="detail-title" :disabled="busy || !currentReady" :value="item.name" aria-label="图片资源名称" @change="patch({name:($event.target as HTMLInputElement).value})"/><p class="detail-meta">{{item.type==='comic'?'漫画':item.type==='misc'?'杂图':'照片'}} · {{item.chapterCount?item.chapterCount+' 章 · ':''}}{{item.pageCount}} {{item.type==='comic'?'页':'张'}} <span v-if="item.source">· {{item.source==='pica'?'哔咔':item.source==='jm'?(item.sourceId?'JM'+item.sourceId.replace(/^jm/i,''):'JM'):item.source}}</span></p><p v-if="item.authors?.length" class="detail-meta">作者：{{item.authors.join("、")}}</p><p class="detail-path">{{item.path}}</p><div class="detail-actions"><button class="im-button im-primary" :disabled="busy || !currentReady || !pages.length" @click="read()"><BookOpen :size="18"/>{{item.type!=='comic'?'浏览照片':item.progress?'继续阅读':'开始阅读'}}</button><button class="im-button" :disabled="busy || !currentReady" :class="{favorite:item.favorite}" @click="patch({favorite:!item.favorite})"><Heart :size="17"/>{{item.favorite?'已收藏':'收藏'}}</button><button v-if="item.type==='comic' && item.source==='jm' && item.sourceId && comicIngest.visible.value" class="im-button" @click="comicIngest.show(item.sourceId)"><RefreshCw :size="16"/>检查更新 / 补章</button><span v-if="item.progress && item.type==='comic'">读到第 {{item.progress.ordinal+1}} 页</span></div></div></section>
   <DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="image" label="图片详情"/>
   <div id="image-panel-files" v-show="activeTab==='files'" role="tabpanel" aria-labelledby="image-tab-files"><div class="detail-utilities" aria-label="作品工具">
-    <button class="im-button" :disabled="busy || !currentReady" @click="reveal"><FolderOpen :size="16"/>打开所在文件夹</button><button class="im-button" :disabled="busy || !currentReady" @click="move"><FolderOpen :size="16"/>整理和移动</button><button class="im-button" :disabled="busy || !currentReady" @click="remove(true)"><Trash2 :size="16"/>删除原文件夹</button><label class="detail-read-state"><input type="checkbox" :checked="item.read" @change="patch({read:($event.target as HTMLInputElement).checked})"/>已读</label>
+    <button class="im-button" :disabled="busy || !currentReady" @click="reveal"><FolderOpen :size="16"/>打开所在文件夹</button><button class="im-button" :disabled="busy || !currentReady" @click="move"><FolderOpen :size="16"/>整理和移动</button><button class="im-button" :disabled="busy || !currentReady" @click="remove(true)"><Trash2 :size="16"/>删除原文件夹</button><label v-if="item.type==='comic'" class="detail-read-state"><input type="checkbox" :checked="item.read" @change="patch({read:($event.target as HTMLInputElement).checked})"/>已读</label><span v-else style="margin-right:auto"/>
     <ImageIntegrityPanel :key="item.id" :resource-id="item.id" compact @repaired="load(false, true)"/>
     <ImageUpdatePanel v-if="item.type==='comic' && item.source==='pica'" :key="'updates:'+item.id" :resource-id="item.id" compact @updated="load(false, true)"/>
   </div>
   </div><div id="image-panel-pages" v-show="activeTab==='pages'" role="tabpanel" aria-labelledby="image-tab-pages"><section v-if="item.type==='comic'" class="detail-chapters"><header><h2>章节 <small>选择章节查看预览</small></h2><button class="im-button chapter-all" :aria-pressed="selectedChapter===''" @click="selectChapter('')">全部页面</button></header><div><button v-for="c in item.chapters" :key="c.id" :class="{current:c.id===selectedChapter}" :aria-pressed="c.id===selectedChapter" @click="selectChapter(c.id)"><BookOpen :size="18"/><strong>{{c.title}}<small v-if="c.id===item.progress?.chapterId">上次阅读</small></strong><span>{{c.pageCount?c.pageCount+' 页':'页面缺失'}}</span></button></div></section>
-  <section class="detail-pages"><header><h2>{{item.type!=='comic'?'相册照片':previewChapter?previewChapter.title+' · 预览':'全部页面'}}<small>{{previewPages.length}} 页 · {{item.type!=='comic'?'点击浏览':'点击阅读'}}，右键设为封面</small></h2><button v-if="previewChapter" class="im-button" :disabled="!previewPages.length" @click="read(previewPages[0]?.id)"><BookOpen :size="16"/>阅读本章</button></header><p v-if="!previewPages.length" class="preview-empty">本章暂无本地页面，可通过文件检查查看缺失情况。</p><div><button v-for="p in shown" :key="p.id" :aria-label="`打开第 ${p.ordinal+1} 页`" @click="read(p.id)" @contextmenu.prevent="patch({coverPageId:p.id})"><ImageCover :page-id="p.id" :name="`第 ${p.ordinal+1} 页`" :photo="item.type!=='comic'"/><span>{{p.ordinal+1}}</span></button></div><button v-if="limit<previewPages.length" class="im-button detail-more" @click="limit+=120">显示更多（{{limit}} / {{previewPages.length}}）</button></section>
+  <section class="detail-pages"><header><h2>{{item.type!=='comic'?'相册照片':previewChapter?previewChapter.title+' · 预览':'全部页面'}}<small>{{previewPages.length}} {{item.type==='comic'?'页':'张'}} · {{item.type!=='comic'?'点击浏览':'点击阅读'}}，右键设为封面</small></h2><button v-if="previewChapter" class="im-button" :disabled="!previewPages.length" @click="read(previewPages[0]?.id)"><BookOpen :size="16"/>阅读本章</button></header><p v-if="!previewPages.length" class="preview-empty">本章暂无本地页面，可通过文件检查查看缺失情况。</p><div><button v-for="p in shown" :key="p.id" :aria-label="`打开第 ${p.ordinal+1} 页`" @click="read(p.id)" @contextmenu.prevent="patch({coverPageId:p.id})"><ImageCover :page-id="p.id" :name="`第 ${p.ordinal+1} 页`" :photo="item.type!=='comic'"/><span>{{p.ordinal+1}}</span></button></div><button v-if="limit<previewPages.length" class="im-button detail-more" @click="limit+=120">显示更多（{{limit}} / {{previewPages.length}}）</button></section>
   </div><section id="image-panel-info" v-show="activeTab==='info'" role="tabpanel" aria-labelledby="image-tab-info"><label class="im-field">简介<textarea :value="item.description" placeholder="添加说明…" @change="patch({description:($event.target as HTMLTextAreaElement).value})"/></label><div class="detail-options"><label class="im-field">分类<select :value="item.groupId||''" @change="patch({groupId:($event.target as HTMLSelectElement).value||null})"><option value="">未分类</option><option v-for="group in store.groups.filter(g=>!g.hidden && g.type===item?.type)" :key="group.id" :value="group.id">{{group.name}}</option></select></label><label class="im-field detail-tags">标签<input v-model="tagText" placeholder="用逗号分隔" @change="patch({tags:tagText.split(/[，,]/).map(t=>t.trim()).filter(Boolean)})"/></label></div><ImagePhotoInfo v-if="item.type!=='comic'" :pages="pages" :cover="item.coverPageId"/><p v-else class="detail-path">{{item.chapterCount}} 章 · {{item.pageCount}} 页 · {{item.source==='pica'?'哔咔来源':item.source==='jm'?'JM 来源':'本地导入'}}</p><p class="detail-path">{{item.path}}</p><ResourceBacklinksPanel :resource-id="item.id" style="margin-top:18px"/></section>
   <ProjectDialog v-if="choosingCover" title="选择封面" wide @close="choosingCover=false"><p class="detail-path">点击一张图片作为封面。关闭窗口不会更改当前封面。</p><p v-if="error" class="im-error" role="alert">{{error}}</p><div class="cover-picker"><button v-for="p in pages.slice(0,coverLimit)" :key="p.id" :aria-label="`设第 ${p.ordinal+1} 页为封面`" :aria-pressed="item.coverPageId===p.id" @click="choosePage(p.id)"><ImageCover :page-id="p.id" :name="`第 ${p.ordinal+1} 页`" :photo="item.type!=='comic'"/><span>{{p.ordinal+1}}</span></button></div><button v-if="coverLimit<pages.length" class="im-button" @click="coverLimit+=120">显示更多</button></ProjectDialog>
   </template>

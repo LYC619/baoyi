@@ -18,7 +18,10 @@ import type { GameProjectPreview } from '@/types/game-project'
 import LibraryBulkPanel from '@/components/library/LibraryBulkPanel.vue'
 import { useLibrarySelection } from '@/composables/useLibrarySelection'
 import Sidebar from '@/components/game/Sidebar.vue'
-import type { GameQuery } from '@/types'
+import CardContextMenu, { type ContextMenuItem } from '@/components/ui/CardContextMenu.vue'
+import { confirmDialog } from '@/composables/useDialog'
+import type { GameItem, GameQuery } from '@/types'
+
 import { recallScroll, rememberScroll } from '@/composables/useModules'
 import { useToast } from '@/composables/useToast'
 import { useMediaScan } from '@/composables/useMediaScan'
@@ -41,10 +44,19 @@ const searchInput=ref<HTMLInputElement>(),pathDismissed=ref(false)
 const resumeGame=computed(()=>store.selection.kind==='group'&&store.selection.value==='all'&&!store.keyword.trim()&&store.sort==='played'&&!selecting.value?store.items.find(g=>isWindowsGameEntry(g.path)&&g.play_status==='playing'&&g.last_played_at>0):undefined)
 function searchKey(e:KeyboardEvent){if(e.isComposing||document.querySelector?.('dialog[open]'))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();searchInput.value?.focus()}}
 const launching=ref(false)
-async function resumeLaunch(withTools=false){if(!resumeGame.value||launching.value)return;launching.value=true;try{const result=await window.baoyi.game.launch(resumeGame.value.id,withTools?{trainers:resumeGame.value.linked_files.filter(f=>f.type==='trainer'&&f.role!=='usage'&&/\.(exe|bat|cmd|lnk)$/i.test(f.path)).map(f=>f.path)}:{});if(result.ok)toast(result.message);else error(result.message)}catch(cause){error(errorMessage(cause))}finally{launching.value=false}}
+async function resumeLaunch(withTools=false){if(!resumeGame.value||launching.value)return;launching.value=true;try{const allTools=resumeGame.value.linked_files.filter(f=>f.type==='trainer'&&f.role!=='usage'&&/\.(exe|bat|cmd|lnk)$/i.test(f.path));const preferred=allTools.filter(f=>f.launch_with_game);const trainers=(preferred.length?preferred:allTools).map(f=>f.path);const result=await window.baoyi.game.launch(resumeGame.value.id,withTools?{trainers}:{});if(result.ok){toast(result.message);void store.reload()}else error(result.message)}catch(cause){error(errorMessage(cause))}finally{launching.value=false}}
 onMounted(()=>window.addEventListener('keydown',searchKey));onBeforeUnmount(()=>window.removeEventListener('keydown',searchKey))
 const { grouping, cardSize,coverShape } = useLibraryView('game')
-const blocks = computed(() => libraryBlocks(store.items, grouping.value, item => ['其他','未分类'].includes(item.category) ? '' : item.category, item => item.source_dir, settings.settings.game_scan_dirs))
+const blocks = computed(() => {
+  const raw = libraryBlocks(store.items, grouping.value, item => ['其他','未分类'].includes(item.category) ? '' : item.category, item => item.source_dir, settings.settings.game_scan_dirs)
+  if (grouping.value !== 'category' || !savedCategories.value.length) return raw
+  const order = new Map(savedCategories.value.map((name, idx) => [name, idx]))
+  return [...raw].sort((a, b) => {
+    const oa = order.get(a.name) ?? (a.name === '未分类' ? 999999 : 99999)
+    const ob = order.get(b.name) ?? (b.name === '未分类' ? 999999 : 99999)
+    return oa !== ob ? oa - ob : a.name.localeCompare(b.name, 'zh-CN', { numeric: true })
+  })
+})
 const unavailable = computed(() => store.items.filter(item=>item.path_state && item.path_state !== 'present'))
 
 const operation = useMediaScan('game')
@@ -66,6 +78,94 @@ const selection = useLibrarySelection(() => store.items, () => bulkBusy.value ||
 const { selecting, selectedIds } = selection
 const bulkTrigger = ref<HTMLButtonElement>()
 watch(selecting, async active => { if (!active) { await nextTick(); bulkTrigger.value?.focus() } })
+watch(() => store.activeKey, () => { if (content.value) content.value.scrollTop = 0 })
+
+const ctxMenu = ref<InstanceType<typeof CardContextMenu>>()
+const ctxItem = ref<GameItem | null>(null)
+const ctxMenuItems = computed<ContextMenuItem[]>(() => {
+  const g = ctxItem.value
+  if (!g) return []
+  const gTitle = gameTitle(g)
+  const canLaunch = isWindowsGameEntry(g.path) && (!g.path_state || g.path_state === 'present')
+  const catChoices = bulkCategories.value.slice(0, 7)
+  return [
+    {
+      id: 'launch',
+      label: isWindowsGameEntry(g.path) ? '启动游戏' : '打开安装包目录',
+      disabled: !isWindowsGameEntry(g.path) ? g.path_state !== undefined && g.path_state !== 'present' : !canLaunch,
+      onSelect: async () => {
+        if (!isWindowsGameEntry(g.path)) {
+          try { await window.baoyi.game.revealInFolder(g.id) } catch (e) { error(errorMessage(e)) }
+          return
+        }
+        try {
+          const r = await window.baoyi.game.launch(g.id)
+          if (r.ok) { toast(r.message); void store.reload() } else error(r.message)
+        } catch (e) { error(errorMessage(e)) }
+      }
+    },
+    {
+      id: 'reveal',
+      label: '打开所在文件夹',
+      onSelect: async () => {
+        try { await window.baoyi.game.revealInFolder(g.id) } catch (e) { error(errorMessage(e)) }
+      }
+    },
+    {
+      id: 'detail',
+      label: '查看详情',
+      onSelect: () => open(g.id)
+    },
+    ...catChoices.map((cat, idx) => ({
+      id: `cat:${cat}`,
+      label: `分类：${cat}`,
+      checked: (g.category || '其他') === cat,
+      separatorBefore: idx === 0,
+      onSelect: async () => {
+        if (g.category === cat) return
+        try {
+          await store.update(g.id, { category: cat })
+          await store.reload()
+          success(`已归入「${cat}」`)
+        } catch (e) { error(errorMessage(e)) }
+      }
+    })),
+    {
+      id: 'archive',
+      label: g.is_archived ? '取消归档' : '归档',
+      separatorBefore: true,
+      onSelect: async () => {
+        try {
+          await store.update(g.id, { is_archived: !g.is_archived })
+          await store.reload()
+          toast(g.is_archived ? '已取消归档' : '已归档')
+        } catch (e) { error(errorMessage(e)) }
+      }
+    },
+    {
+      id: 'remove',
+      label: '从库里移除',
+      danger: true,
+      onSelect: async () => {
+        const ok = await confirmDialog({
+          title: `从游戏库移除「${gTitle}」？`,
+          message: '仅移除抱一中的库记录，本地游戏文件与已有存档备份均会保留。',
+          confirmText: '移除记录',
+          tone: 'danger'
+        })
+        if (!ok) return
+        try {
+          await store.remove(g.id)
+          success('已从游戏库移除')
+        } catch (e) { error(errorMessage(e)) }
+      }
+    }
+  ]
+})
+function openCardContext(g: GameItem, event: MouseEvent): void {
+  ctxItem.value = g
+  void nextTick(() => ctxMenu.value?.openAt(event))
+}
 const bulkItems = computed(() => store.items.map(item => ({ id: item.id, name: item.name_zh || item.name_en || item.file_name })))
 const bulkCategories = computed(() => [...new Set([...savedCategories.value, ...store.items.map(item => item.category), '其他'])])
 const filtered = computed(() => !!store.keyword.trim() || store.selection.kind !== 'group' || store.selection.value !== 'all')
@@ -425,12 +525,16 @@ const emptyHint = computed(() => {
       </Transition>
 
       <p v-if="coverSummary" class="cover-summary" role="status">{{ coverSummary }}</p>
+      <div v-if="store.keyword.trim() && (store.selection.kind !== 'group' || store.selection.value !== 'all')" class="kw-hint" role="status">
+        <span>当前同时按关键词「{{ store.keyword.trim() }}」过滤</span>
+        <button type="button" class="btn btn--subtle" @click="clearKeyword">清空关键词</button>
+      </div>
       <div v-if="unavailable.length&&!pathDismissed" class="path-alert" role="status"><AlertTriangle :size="16"/><p><strong>{{unavailable.length}} 个游戏</strong>的程序路径不可用，重新定位后可继续启动。</p><button class="btn btn--sm" @click="store.select({kind:'path',value:'unavailable'})">只看这些</button><button class="btn btn--sm" @click="store.reload()">重新检查</button><button class="btn btn--sm btn--icon" aria-label="关闭路径提示" @click="pathDismissed=true"><X :size="14"/></button></div>
 
       <section ref="content" class="home__content">
         <div v-if="resumeGame" class="resume"><div class="resume__cover"><GameCover :item="resumeGame"/></div><div><small>继续游玩</small><h2>{{gameTitle(resumeGame)}}</h2><p>{{formatRelative(resumeGame.last_played_at)}}</p></div><button v-if="resumeGame.linked_files.some(f=>f.type==='trainer'&&f.role!=='usage'&&/\.(exe|bat|cmd|lnk)$/i.test(f.path))" class="btn btn--subtle" :disabled="launching||!!resumeGame.path_state&&resumeGame.path_state!=='present'" @click="resumeLaunch(true)">连同修改器</button><button class="btn btn--subtle" @click="open(resumeGame.id)">查看详情</button><button class="btn btn--primary" :disabled="launching||!!resumeGame.path_state&&resumeGame.path_state!=='present'" @click="resumeLaunch()"><Play :size="15"/>启动</button></div>
         <template v-if="store.items.length > 0"><section v-for="block in blocks" :key="block.key" class="game-group"><h2 v-if="block.name">{{block.name}} <small>{{block.items.length}}</small></h2><div class="wall" :style="{gridTemplateColumns:`repeat(auto-fill, minmax(${coverShape==='landscape'?Math.round(cardSize*1.55):cardSize}px, 1fr))`}">
-          <GameCard v-for="g in block.items" :key="g.id" :item="g" :cover-shape="coverShape" :selectable="selecting" :selected="selectedIds.has(g.id)" :locked="bulkBusy || coversBusy || store.queryPending" @open="open" @select="toggleSelected" />
+          <GameCard v-for="g in block.items" :key="g.id" :item="g" :cover-shape="coverShape" :selectable="selecting" :selected="selectedIds.has(g.id)" :locked="bulkBusy || coversBusy || store.queryPending" @open="open" @select="toggleSelected" @context="openCardContext" />
         </div></section></template>
         <div v-else-if="!store.loading" class="empty">
           <h2>{{ emptyHint.title }}</h2>
@@ -439,10 +543,12 @@ const emptyHint = computed(() => {
         </div>
       </section>
     </main>
+    <CardContextMenu ref="ctxMenu" label="游戏卡片操作" :items="ctxMenuItems" />
   </div>
 </template>
 
 <style scoped>
+.kw-hint { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 24px 10px; padding: 6px 12px; border-radius: var(--radius-input); background: var(--active-surface); color: var(--accent); font-size: 12px; }
 .card-size{display:flex;align-items:center;gap:7px;color:var(--text-sub);font-size:12px}.card-size input{width:90px;accent-color:var(--accent)}.game-group{margin-bottom:26px}.game-group h2{font-size:17px;font-weight:500;margin-bottom:14px}.game-group small{font-size:12px;color:var(--text-faint);margin-left:7px}
 .home {
   display: flex;

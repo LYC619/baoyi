@@ -58,7 +58,7 @@ const emit = defineEmits<{
         :key="category.id"
         type="button"
         :class="{ active: selectedType === category.id }"
-        @click="emit('select-category', category.id)"
+        @click="emit('select-category', selectedType === category.id ? '' : category.id)"
       >
         {{ category.name }}
         <span>{{ items.filter((i) => i.submodule === submodule && i.type === category.id).length }}</span>

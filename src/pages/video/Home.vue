@@ -88,7 +88,7 @@ function pendingReasons(item: VideoItem): string[] {
 const pendingItems = computed(() => visibleItems.value.filter(item => pendingReasons(item).length))
 const shownItems = computed(() => pendingOnly.value ? pendingItems.value.filter(item => issue.value === 'any' || pendingReasons(item).includes(issue.value)) : visibleItems.value)
 const missingPosterIds = computed(() => store.missingPosters.filter(id => visibleItems.value.some(item => item.id === id)))
-const audioScope = computed(() => (store.selection.kind === 'type' && store.selection.value === 'audio') || (store.selection.kind === 'category' && (store.selection.value === '音频' || (shownItems.value.length > 0 && shownItems.value.every(item => item.media_kind === 'audio')))))
+const audioScope = computed(() => store.inAudioScope)
 const seriesScope = computed(() => !audioScope.value && (store.inHentaiScope || (store.selection.kind === 'group' && store.selection.value === 'all') || (store.selection.kind === 'type' && store.selection.value === 'series') || (store.selection.kind === 'category' && ['剧集','里番'].includes(store.selection.value))))
 const scopedUpdateRows = computed(() => store.queryPending ? [] : videoUpdates.state.value.rows.filter(row => shownItems.value.some(item => item.id === row.id)))
 const scopedUpdateCount = computed(() => scopedUpdateRows.value.filter(row => row.newEpisodes > 0 || row.missingFiles > 0).length)
@@ -390,7 +390,7 @@ const emptyHint = computed(() => {
       <header class="toolbar">
         <div class="toolbar__title">
           <h1>{{ heading }}</h1>
-          <span class="toolbar__count">{{ shownItems.length }} 部作品</span>
+          <span class="toolbar__count">{{ shownItems.length }} {{ audioScope ? '项音频' : '部作品' }}</span>
         </div>
 
         <div class="library-search">
@@ -432,11 +432,11 @@ const emptyHint = computed(() => {
 
 
           <LibraryToolbarMenu label="视图">
-          <template v-if="audioScope && !selecting"><button class="btn btn--subtle" :aria-pressed="audioView==='cards'" @click="audioView='cards'">音频卡片视图</button><button class="btn btn--subtle" :aria-pressed="audioView==='list'" @click="audioView='list'">音频曲目列表</button></template>
-          <button v-if="!audioScope || selecting" class="btn btn--subtle" :title="compact ? '海报视图' : '紧凑列表'" :aria-label="compact ? '海报视图' : '紧凑列表'" :aria-pressed="compact" @click="compact = !compact">
+          <template v-if="audioScope"><button class="btn btn--subtle" :aria-pressed="audioView==='cards'" @click="audioView='cards'">音频卡片视图</button><button class="btn btn--subtle" :aria-pressed="audioView==='list'" @click="audioView='list'">音频曲目列表</button></template>
+          <button v-if="!audioScope" class="btn btn--subtle" :title="compact ? '海报视图' : '紧凑列表'" :aria-label="compact ? '海报视图' : '紧凑列表'" :aria-pressed="compact" @click="compact = !compact">
             <List :size="16" />
           </button>
-<label v-if="audioScope && !selecting ? audioView==='cards' : !compact">卡片大小<input v-model.number="cardSize" class="card-size" type="range" min="110" max="320" step="10" title="卡片大小" aria-label="卡片大小" @change="settings.patch({ video_card_size: cardSize })" /></label>
+<label v-if="audioScope ? audioView==='cards' : !compact">卡片大小<input v-model.number="cardSize" class="card-size" type="range" min="110" max="320" step="10" title="卡片大小" aria-label="卡片大小" @change="settings.patch({ video_card_size: cardSize })" /></label>
           </LibraryToolbarMenu>
           <LibraryToolbarMenu label="更多">
           <button v-if="seriesScope && store.selection.kind==='group' && store.selection.value==='all'" :disabled="videoUpdates.state.value.running" @click="videoUpdates.start()">检查全部系列更新</button>
@@ -463,7 +463,7 @@ const emptyHint = computed(() => {
       <div class="library-summary">
         <button v-if="seriesScope && scopedUpdateCount" class="btn btn--ghost" @click="showUpdateResults">{{scopedUpdateCount}} 部作品有新集或文件缺失</button>
         <template v-if="selecting">
-          <span role="status" title="Shift 点击可连选，仅操作当前结果">已选 {{ selectedWorks.length }} 部作品</span>
+          <span role="status" title="Shift 点击可连选，仅操作当前结果">已选 {{ selectedWorks.length }} {{ audioScope ? '项音频' : '部作品' }}</span>
 
           <button type="button" class="selection-action" :disabled="bulkBusy || store.queryPending" @click="selectAll">全选当前范围</button>
           <button type="button" class="selection-action" :disabled="bulkBusy || !selectedWorks.length" @click="selectedIds = []">清空选择</button>
@@ -477,7 +477,7 @@ const emptyHint = computed(() => {
         <div class="library-summary__actions">
           <button v-if="selecting && bulkOpen && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || scanning || reviewingSelected || !selectedWorks.length" @click="reviewSelected">{{ reviewingSelected ? '正在复查…' : '智能复查所选' }}</button>
           <button v-if="pendingOnly && !selecting" type="button" :disabled="store.queryPending || bulkBusy" @click="selectReview">选择待复查作品</button>
-          <button v-if="selecting && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || !selectedWorks.length" @click="organize('organize')">创建合集</button>
+          <button v-if="selecting && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || !selectedWorks.length" @click="organize('organize')">{{ audioScope ? '合并为专辑' : '创建合集' }}</button>
 
 
           <button v-if="!selecting && videoImport.pendingCount.value" type="button" class="import-pending" @click="videoImport.show()"><CircleAlert :size="13" />导入待确认 {{ videoImport.pendingCount.value }}</button>
@@ -486,7 +486,7 @@ const emptyHint = computed(() => {
       </div>
 
       <p v-if="store.queryPending" class="query-status" role="status">{{ store.loadFailed ? '读取失败，刷新成功后可继续选择和操作。' : '正在更新查询结果，暂不可批量操作。' }} <button class="btn btn--ghost" :disabled="store.loading" @click="store.load()">刷新结果</button></p>
-      <VideoBulkPanel v-if="selecting && bulkOpen" :ids="selectedWorks.map(item => item.id)" :pending="store.queryPending" :groups="[...(store.counts.collections || []), ...(store.inHentaiScope ? store.counts.hentai_collections || [] : [])].map(g => g.name)" @busy="bulkBusy = $event" @changed="store.reload" @remove="requestRemoval" />
+      <VideoBulkPanel v-if="selecting && bulkOpen" :audio="audioScope" :ids="selectedWorks.map(item => item.id)" :pending="store.queryPending" :groups="(audioScope ? (store.counts.audio_collections || []) : [...(store.counts.collections || []), ...(store.inHentaiScope ? store.counts.hentai_collections || [] : [])]).map(g => g.name)" @busy="bulkBusy = $event" @changed="store.reload" @remove="requestRemoval" />
       <Transition name="fade">
         <div v-if="scanning" class="progress">
           <div class="progress__bar"><i :style="{ width: `${busyPercent}%` }" /></div>
@@ -496,13 +496,13 @@ const emptyHint = computed(() => {
       </Transition>
 
       <section ref="content" class="home__content" :aria-busy="store.loading">
-        <AudioLibrary v-if="audioScope && !selecting" :items="shownItems" :view="audioView" @open="openAudio"/><div v-else-if="shownItems.length > 0" :class="compact ? 'list' : 'wall'">
+        <AudioLibrary v-if="audioScope" :items="shownItems" :view="audioView" :selecting="selecting" :selected-ids="selectedIds" @open="openAudio" @select="selectWork"/><div v-else-if="shownItems.length > 0" :class="compact ? 'list' : 'wall'">
           <div v-for="v in shownItems" :key="v.id" class="work-group">
-            <div class="work-card">
+            <div class="work-card" :class="{ 'work-card--expanded': expanded[v.id] && !selecting }">
               <VideoCard :item="v" :show-published="store.sort === 'published' || store.sort === 'published-asc'" :status="itemStatus(v)" :recent="recentContent(v)" :selectable="selecting" :locked="store.queryPending || bulkBusy" :selected="selectedIds.includes(v.id)" @select="selectWork" @open="open" @poster-error="store.markPosterMissing" />
               <button v-if="v.episode_total > 1 && !selecting" class="collection-expand" :aria-expanded="!!expanded[v.id]" :aria-controls="'collection-' + v.id" @click="toggleCollection(v.id)">{{ expanded[v.id] ? '收起单集' : '展开 ' + v.episode_total + ' 集' }}</button>
             </div>
-            <div v-if="expanded[v.id] && !selecting" :id="'collection-' + v.id" class="collection-episodes" role="group" :aria-label="(v.name_zh || v.file_name) + '的单集'">
+            <div v-if="expanded[v.id] && !selecting" :id="'collection-' + v.id" class="collection-episodes" role="group" :aria-label="(v.name_zh || v.file_name) + '的单集'"><p class="collection-episodes__title">《{{ v.name_zh || v.file_name }}》共 {{ v.episode_total }} 集</p>
               <VideoCard v-for="ep in matchingEpisodes(v.id)" :key="ep.id" :item="v" :episode="ep" @open="router.push({ name: 'video-detail', params: { id: v.id }, query: { episode: ep.id } })" />
               <p v-if="!matchingEpisodes(v.id).length" class="collection-empty">当前条件未命中单集；作品本身的资料匹配。</p>
             </div>
@@ -525,8 +525,11 @@ const emptyHint = computed(() => {
 <style scoped>
 .query-status{flex:none;margin:0;padding:6px 20px;font-size:12px;color:var(--text-sub)}
 .work-group, .work-card { min-width: 0; }
-.wall .work-group, .wall .collection-episodes { display: contents; }
-.collection-expand { width: 100%; padding: 9px; color: var(--text-sub); font-size: 12px; }
+.wall .work-group { display: contents; }
+.wall .collection-episodes { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; row-gap: 14px; padding-block: 12px 14px; margin-block: 2px 6px; border-block: 1px solid var(--divider); background: color-mix(in srgb, var(--bg-card) 68%, transparent); }
+.collection-episodes__title { grid-column: 1 / -1; margin: 0; font-size: var(--fs-tag); color: var(--text-sub); }
+.collection-expand { width: 100%; padding: 7px 9px; margin-top: 4px; border-radius: var(--radius-btn); color: var(--text-sub); font-size: 12px; transition: background var(--t-fast), color var(--t-fast); }
+.collection-expand:hover, .work-card--expanded .collection-expand { background: var(--active-surface); color: var(--accent-ink, var(--accent)); }
 .collection-empty { grid-column: 1 / -1; padding: 12px; color: var(--text-sub); font-size: var(--fs-tag); }
 .home {
   display: flex;

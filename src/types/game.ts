@@ -69,6 +69,7 @@ export interface SaveBackup {
   size_bytes: number
   file_count: number
   created_at: number
+  note?: string
 }
 
 /** 备份一次的结果。失败时 backup 为 null，磁盘上不会留下半成品 */

@@ -126,3 +126,81 @@ export async function refreshSoftwareIcons(): Promise<{
   }
   return out
 }
+
+
+function withinDir(root: string, target: string): boolean {
+  const rel = path.relative(root, target)
+  return !rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel)
+}
+
+export function relocateSoftware(
+  id: string,
+  entry: string,
+  directory?: string
+): SoftwareItem {
+  const db = getDb()
+  const item = getSoftware(db, id)
+  if (!item) throw new Error('软件条目已不存在')
+  const file = path.resolve(entry)
+  const stat = fs.statSync(file)
+  if (!stat.isFile()) throw new Error('请选择有效的程序或安装包文件')
+  const conflict = db
+    .prepare('SELECT id FROM resource WHERE path = ? COLLATE NOCASE AND id <> ?')
+    .get(file, id)
+  if (conflict) throw new Error('所选文件已登记在另一条记录下，请先处理重复条目')
+
+  const oldRoot = path.resolve(item.source_dir || path.dirname(item.exe_path))
+  let newRoot = directory ? path.resolve(directory) : path.dirname(file)
+  const oldRel = path.relative(oldRoot, item.exe_path)
+  if (
+    !directory &&
+    withinDir(oldRoot, item.exe_path) &&
+    file.toLowerCase().endsWith((path.sep + oldRel).toLowerCase())
+  ) {
+    newRoot = file.slice(0, -(oldRel.length + 1))
+  }
+  if (!fs.statSync(newRoot).isDirectory() || !withinDir(newRoot, file)) {
+    throw new Error('主程序必须位于所选软件目录内')
+  }
+  const rebasePath = (p: string): string =>
+    p && withinDir(oldRoot, path.resolve(p)) ? path.join(newRoot, path.relative(oldRoot, p)) : p
+
+  const launchers = item.launchers.map((l) => {
+    if (l.path.toLowerCase() === item.exe_path.toLowerCase()) {
+      return { ...l, path: file }
+    }
+    return { ...l, path: rebasePath(l.path) }
+  })
+
+  const updated = updateSoftware(db, id, {
+    exe_path: file,
+    source_dir: newRoot,
+    file_name: path.basename(file),
+    file_size: stat.size,
+    launchers
+  })
+  if (!updated) throw new Error('更新软件路径失败')
+  return updated
+}
+
+export function appendSoftwareLauncher(id: string, targetPath: string): SoftwareItem {
+  const db = getDb()
+  const item = getSoftware(db, id)
+  if (!item) throw new Error('软件条目已不存在')
+  const file = path.resolve(targetPath)
+  const stat = fs.statSync(file)
+  if (!stat.isFile() || !/\.(?:exe|bat|cmd|lnk)$/i.test(file)) {
+    throw new Error('请选择 .exe、.bat、.cmd 或 .lnk 启动文件')
+  }
+  if (item.launchers.some((l) => l.path.toLowerCase() === file.toLowerCase())) {
+    throw new Error('这个启动文件已在当前条目的启动列表中')
+  }
+  const label = path.basename(file, path.extname(file))
+  const launchers = [
+    ...item.launchers,
+    { path: file, label, kind: 'extra' as const, is_default: false }
+  ]
+  const updated = updateSoftware(db, id, { launchers })
+  if (!updated) throw new Error('添加启动项失败')
+  return updated
+}

@@ -1,6 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import type { SqlDb } from "../services/storage/schema.ts";
 import { PersonalLibrary } from "./personal.ts";
+import type { PersonalRecord } from "../../src/types/workspace.ts";
 import type {
   SkillCard,
   SkillDraft,
@@ -80,6 +81,71 @@ export class SkillProfiles {
         .digest("hex"),
     };
   }
+  private checkHierarchyAndUnique(draft: SkillDraft) {
+    if (
+      this.list().some(
+        (c) =>
+          c.id !== draft.cardId &&
+          c.name.toLocaleLowerCase() === draft.name.toLocaleLowerCase(),
+      )
+    )
+      throw new Error("已有同名技能，请在已有卡片追加记录");
+    if (draft.parentId && !this.list().some((c) => c.id === draft.parentId))
+      throw new Error("父技能不存在");
+    let parent = draft.parentId;
+    const visited = new Set<string>();
+    while (parent) {
+      if (parent === draft.cardId || visited.has(parent))
+        throw new Error("技能层级不能形成循环");
+      visited.add(parent);
+      parent = this.list().find((c) => c.id === parent)?.parentId;
+    }
+  }
+  private persistCardMetrics(
+    draft: SkillDraft,
+    previous: { item: PersonalRecord; stamp: string } | null,
+  ): string {
+    const card = new PersonalLibrary(this.db).save({
+      ...(previous ? { id: previous.item.id } : {}),
+      kind: "skill",
+      name: draft.name,
+      body: draft.summary,
+      data: previous?.item.data || {},
+    });
+    this.db
+      .prepare(
+        "INSERT INTO skill_card(id,parent_id) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id,revision=revision+1",
+      )
+      .run(card.id, draft.parentId || "");
+    for (const m of draft.metrics) {
+      const prior = this.db
+        .prepare(
+          "SELECT * FROM skill_metric WHERE card_id=? AND metric_key=? ORDER BY version DESC LIMIT 1",
+        )
+        .get(card.id, m.key) as any;
+      if (
+        prior &&
+        prior.label === m.label &&
+        prior.unit === m.unit &&
+        prior.value_type === m.type
+      )
+        continue;
+      this.db
+        .prepare(
+          "INSERT INTO skill_metric(id,card_id,metric_key,label,unit,value_type,version) VALUES(?,?,?,?,?,?,?)",
+        )
+        .run(
+          randomUUID(),
+          card.id,
+          m.key,
+          m.label,
+          m.unit,
+          m.type,
+          (prior?.version || 0) + 1,
+        );
+    }
+    return card.id;
+  }
   list(): SkillCard[] {
     return (
       this.db
@@ -156,6 +222,17 @@ export class SkillProfiles {
       .run(id, JSON.stringify(draft), Date.now());
     return { id, draft, state: "proposed", cardId: "" };
   }
+  saveManual(input: SkillDraft): SkillCard {
+    const draft = validateSkillDraft(input);
+    const previous = draft.cardId ? this.existingDraft(draft.cardId) : null;
+    if (previous && draft.sourceStamp && previous.stamp !== draft.sourceStamp)
+      throw new Error("技能已被其他位置修改，请刷新后重试");
+    this.checkHierarchyAndUnique(draft);
+    return v.transaction(this.db, () => {
+      const cardId = this.persistCardMetrics(draft, previous);
+      return this.list().find((c) => c.id === cardId)!;
+    });
+  }
   confirm(id: string, edited?: SkillDraft): SkillCard {
     const row = this.db
       .prepare("SELECT * FROM skill_proposal WHERE id=?")
@@ -176,70 +253,15 @@ export class SkillProfiles {
     const previous = draft.cardId ? this.existingDraft(draft.cardId) : null;
     if (previous && previous.stamp !== draft.sourceStamp)
       throw new Error("技能已有人工修改，此草案已过期，请重新生成");
-    if (
-      this.list().some(
-        (c) =>
-          c.id !== draft.cardId &&
-          c.name.toLocaleLowerCase() === draft.name.toLocaleLowerCase(),
-      )
-    )
-      throw new Error("已有同名技能，请在已有卡片追加记录");
-    if (draft.parentId && !this.list().some((c) => c.id === draft.parentId))
-      throw new Error("父技能不存在");
-    let parent = draft.parentId;
-    const visited = new Set<string>();
-    while (parent) {
-      if (parent === draft.cardId || visited.has(parent))
-        throw new Error("技能层级不能形成循环");
-      visited.add(parent);
-      parent = this.list().find((c) => c.id === parent)?.parentId;
-    }
+    this.checkHierarchyAndUnique(draft);
     return v.transaction(this.db, () => {
-      const card = new PersonalLibrary(this.db).save({
-        ...(previous ? { id: previous.item.id } : {}),
-        kind: "skill",
-        name: draft.name,
-        body: draft.summary,
-        data: previous?.item.data || {},
-      });
-      this.db
-        .prepare(
-          "INSERT INTO skill_card(id,parent_id) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id,revision=revision+1",
-        )
-        .run(card.id, draft.parentId || "");
-      for (const m of draft.metrics) {
-        const prior = this.db
-          .prepare(
-            "SELECT * FROM skill_metric WHERE card_id=? AND metric_key=? ORDER BY version DESC LIMIT 1",
-          )
-          .get(card.id, m.key) as any;
-        if (
-          prior &&
-          prior.label === m.label &&
-          prior.unit === m.unit &&
-          prior.value_type === m.type
-        )
-          continue;
-        this.db
-          .prepare(
-            "INSERT INTO skill_metric(id,card_id,metric_key,label,unit,value_type,version) VALUES(?,?,?,?,?,?,?)",
-          )
-          .run(
-            randomUUID(),
-            card.id,
-            m.key,
-            m.label,
-            m.unit,
-            m.type,
-            (prior?.version || 0) + 1,
-          );
-      }
+      const cardId = this.persistCardMetrics(draft, previous);
       this.db
         .prepare(
           "UPDATE skill_proposal SET state='applied',card_id=?,draft_json=? WHERE id=?",
         )
-        .run(card.id, JSON.stringify(draft), id);
-      return this.list().find((c) => c.id === card.id)!;
+        .run(cardId, JSON.stringify(draft), id);
+      return this.list().find((c) => c.id === cardId)!;
     });
   }
   cancel(id: string) {

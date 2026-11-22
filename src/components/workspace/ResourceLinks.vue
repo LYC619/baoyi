@@ -2,27 +2,270 @@
 import { confirmDialog } from '@/composables/useDialog'
 import { errorMessage } from '@/utils'
 import { latestOnly, STALE } from '@/composables/latestOnly'
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import { useRouter,useRoute } from 'vue-router'
-import { Plus,Link2,X } from 'lucide-vue-next'
+import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { Plus, Link2, Search as SearchIcon, X } from 'lucide-vue-next'
 import ProjectDialog from '@/components/project/ProjectDialog.vue'
 import ProjectFiles from './ProjectFiles.vue'
-import { workspace,openResource,kindLabels } from '@/utils/workspace-api'
-import type { LinkOwner,ResourceLink,ResourceOption,DocumentAnnotation } from '@/types/workspace'
-const props=withDefaults(defineProps<{owner:LinkOwner;id:string;title?:string}>(),{title:'相关实践与资源'})
-const router=useRouter(),route=useRoute(),rows=ref<ResourceLink[]>([]),options=ref<ResourceOption[]>([]),show=ref(false),selected=ref(''),annotation=ref(''),annotations=ref<DocumentAnnotation[]>([]),query=ref(''),busy=ref(false),error=ref('')
-const readLinks=latestOnly((owner:LinkOwner,id:string)=>workspace.links.list(owner,id))
-const readAnnotations=latestOnly((id:string)=>options.value.find(x=>x.id===id)?.kind==='document'?workspace.documents.annotations(id):Promise.resolve([]))
-const filtered=computed(()=>options.value.filter(r=>r.id!==props.id&&`${r.name} ${kindLabels[r.kind]}`.toLowerCase().includes(query.value.toLowerCase())).slice(0,300))
-async function load(){try{const value=await readLinks(props.owner,props.id);if(value!==STALE)rows.value=value}catch(e){error.value=errorMessage(e)}}
-watch(()=>[props.owner,props.id],()=>{rows.value=[];show.value=false;error.value='';void load()},{immediate:true})
-const unsubscribe=workspace.onChanged(()=>void load());onBeforeUnmount(unsubscribe)
-async function start(){error.value='';try{options.value=await workspace.links.resources();selected.value='';query.value='';show.value=true}catch(e){error.value=errorMessage(e)}}
-watch(selected,async id=>{annotations.value=[];annotation.value='';try{const value=await readAnnotations(id);if(value!==STALE)annotations.value=value}catch(e){error.value=errorMessage(e)}})
-async function add(){if(busy.value||!selected.value)return;busy.value=true;error.value='';try{await workspace.links.add(props.owner,props.id,selected.value,annotation.value||undefined);await load();show.value=false}catch(e){error.value=errorMessage(e)}finally{busy.value=false}}
-async function remove(row:ResourceLink){if(!(await confirmDialog({ title: '解除这条关联？', message: '仅解除引用关系，原资料、本地文件与所属记录均会保留。', confirmText: '解除关联' })))return;try{await workspace.links.remove(props.owner,props.id,row.id);await load()}catch(e){error.value=errorMessage(e)}}
-async function open(row:ResourceLink){try{const q={...route.query};delete q.from;const clean=router.resolve({path:route.path,query:q}).fullPath||route.path;await openResource(router,row,clean)}catch(e){error.value=errorMessage(e)}}
+import { workspace, openResource, kindLabels } from '@/utils/workspace-api'
+import type { LinkOwner, ResourceLink, ResourceOption, DocumentAnnotation } from '@/types/workspace'
+
+const props = withDefaults(defineProps<{ owner: LinkOwner; id: string; title?: string }>(), {
+  title: '相关实践与资源'
+})
+
+const router = useRouter()
+const route = useRoute()
+const rows = ref<ResourceLink[]>([])
+const options = ref<ResourceOption[]>([])
+const show = ref(false)
+const selected = ref('')
+const annotation = ref('')
+const annotations = ref<DocumentAnnotation[]>([])
+const query = ref('')
+const filterInput = ref<HTMLInputElement>()
+const busy = ref(false)
+const error = ref('')
+
+const readLinks = latestOnly((owner: LinkOwner, id: string) => workspace.links.list(owner, id))
+const readAnnotations = latestOnly((id: string) =>
+  options.value.find((x) => x.id === id)?.kind === 'document'
+    ? workspace.documents.annotations(id)
+    : Promise.resolve([])
+)
+
+const linkedIds = computed(() => new Set(rows.value.map((r) => r.resourceId).filter(Boolean)))
+
+const filtered = computed(() => {
+  const needle = query.value.trim().toLowerCase()
+  return options.value
+    .filter(
+      (r) =>
+        r.id !== props.id &&
+        (!needle || `${r.name} ${kindLabels[r.kind] || r.kind} ${r.path || ''}`.toLowerCase().includes(needle))
+    )
+    .slice(0, 200)
+})
+
+async function load() {
+  try {
+    const value = await readLinks(props.owner, props.id)
+    if (value !== STALE) rows.value = value
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+}
+
+watch(
+  () => [props.owner, props.id],
+  () => {
+    rows.value = []
+    show.value = false
+    error.value = ''
+    void load()
+  },
+  { immediate: true }
+)
+
+const unsubscribe = workspace.onChanged(() => void load())
+onBeforeUnmount(unsubscribe)
+
+async function start() {
+  error.value = ''
+  try {
+    options.value = await workspace.links.resources()
+    selected.value = ''
+    annotation.value = ''
+    annotations.value = []
+    query.value = ''
+    show.value = true
+    await nextTick()
+    filterInput.value?.focus()
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+}
+
+watch(selected, async (id) => {
+  annotations.value = []
+  annotation.value = ''
+  if (!id) return
+  try {
+    const value = await readAnnotations(id)
+    if (value !== STALE) annotations.value = value
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+})
+
+async function saveResourceLink(resourceId: string, annotationId?: string) {
+  if (busy.value || !resourceId) return
+  busy.value = true
+  error.value = ''
+  try {
+    await workspace.links.add(props.owner, props.id, resourceId, annotationId || undefined)
+    await load()
+    show.value = false
+  } catch (e) {
+    error.value = errorMessage(e)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function clickCandidate(item: ResourceOption) {
+  if (item.kind !== 'document') {
+    await saveResourceLink(item.id)
+    return
+  }
+  selected.value = item.id
+  try {
+    const docNotes = await workspace.documents.annotations(item.id)
+    annotations.value = docNotes
+    if (!docNotes.length) {
+      await saveResourceLink(item.id)
+    }
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+}
+
+function add() {
+  return saveResourceLink(selected.value, annotation.value)
+}
+
+function onSearchKeydown(event: KeyboardEvent) {
+  if (event.isComposing) return
+  if (event.key === 'Enter' && filtered.value.length) {
+    event.preventDefault()
+    void clickCandidate(filtered.value[0])
+  }
+}
+
+async function remove(row: ResourceLink) {
+  if (
+    !(await confirmDialog({
+      title: '解除这条关联？',
+      message: '仅解除引用关系，原资料、本地文件与所属记录均会保留。',
+      confirmText: '解除关联'
+    }))
+  )
+    return
+  try {
+    await workspace.links.remove(props.owner, props.id, row.id)
+    await load()
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+}
+
+async function open(row: ResourceLink) {
+  try {
+    const q = { ...route.query }
+    delete q.from
+    const clean = router.resolve({ path: route.path, query: q }).fullPath || route.path
+    await openResource(router, row, clean)
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+}
 </script>
-<template><section class="ws-links"><header class="ws-section-head"><h3>{{title}} <span class="ws-muted">{{rows.length}}</span></h3><button class="ws-icon" :aria-label="'添加'+title" @click="start"><Plus :size="17"/></button></header><p v-if="error&&!show" class="ws-error" role="alert">{{error}}</p><p v-if="!rows.length" class="ws-muted">关联项目、资料或摘录，留下可以回看的来源。</p><article v-for="row in rows" :key="row.id" class="ws-link"><Link2 :size="16"/><button class="ws-link-main" @click="open(row)"><strong>{{row.name}}</strong><small>{{kindLabels[row.kind]}}<template v-if="row.missing"> · 原文件或索引暂不可用</template></small><p v-if="row.quote" class="ws-pre">{{row.quote}}</p></button><button class="ws-icon" :aria-label="'移除关联 '+row.name" @click="remove(row)"><X :size="14"/></button></article>
-<ProjectFiles v-if="owner==='project'" :project-id="id"/>
-<ProjectDialog v-if="show" title="关联资源" :busy="busy" @close="show=false"><div class="ws ws-form"><p v-if="error" class="ws-error" role="alert">{{error}}</p><label>筛选资源<input v-model="query" placeholder="名称或资源类型"/></label><label>资源<select v-model="selected" aria-label="选择关联资源"><option value="">请选择</option><option v-for="r in filtered" :key="r.id" :value="r.id">{{kindLabels[r.kind]}} · {{r.name}}</option></select></label><label v-if="annotations.length">摘录或书签<select v-model="annotation" aria-label="选择关联摘录"><option value="">关联整份资料</option><option v-for="a in annotations" :key="a.id" :value="a.id">第 {{a.location.page}} 页/段 · {{(a.quote||a.note||'书签').slice(0,70)}}</option></select></label><p class="ws-muted">选择摘录会保留原文位置。此操作只添加关联。</p></div><template #footer><div class="ws"><button class="ws-button primary" :disabled="busy||!selected" @click="add">保存关联</button></div></template></ProjectDialog></section></template>
+<template>
+  <section class="ws-links">
+    <header class="ws-section-head">
+      <h3>{{ title }} <span class="ws-muted">{{ rows.length }}</span></h3>
+      <div class="ws-links-actions">
+        <ProjectFiles v-if="owner === 'project'" :project-id="id" inline />
+        <button class="ws-button" :aria-label="'添加' + title" @click="start"><Plus :size="15" />添加关联</button>
+      </div>
+    </header>
+    <p v-if="error && !show" class="ws-error" role="alert">{{ error }}</p>
+    <p v-if="!rows.length" class="ws-muted">关联项目、文库资料、软件或摘录，随时从这里直接跳转。</p>
+    <div v-else class="ws-link-grid">
+      <article v-for="row in rows" :key="row.id" class="ws-link">
+        <Link2 :size="15" />
+        <button class="ws-link-main" @click="open(row)">
+          <strong>{{ row.name }}</strong>
+          <small>{{ kindLabels[row.kind] || row.kind }}<template v-if="row.missing"> · 原文件或索引暂不可用</template></small>
+          <p v-if="row.quote" class="ws-pre">{{ row.quote }}</p>
+        </button>
+        <button class="ws-icon" :aria-label="'移除关联 ' + row.name" @click="remove(row)"><X :size="14" /></button>
+      </article>
+    </div>
+
+    <ProjectDialog v-if="show" title="关联资源" :busy="busy" @close="show = false">
+      <div class="ws ws-form">
+        <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
+        <search class="ws-candidate-search">
+          <SearchIcon :size="15" />
+          <input
+            ref="filterInput"
+            v-model="query"
+            type="search"
+            aria-label="搜索可关联资源"
+            placeholder="输入名称或类型筛选，点击条目直接关联…"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false"
+            @keydown="onSearchKeydown"
+          />
+        </search>
+        <div class="ws-candidate-list" role="listbox" aria-label="选择关联资源">
+          <p v-if="!filtered.length" class="ws-muted">没有匹配的条目，试试其他关键词。</p>
+          <div
+            v-for="r in filtered"
+            :key="r.id"
+            class="ws-candidate-row"
+            :class="{ selected: selected === r.id }"
+          >
+            <button
+              type="button"
+              class="ws-candidate-main"
+              :disabled="busy"
+              @click="clickCandidate(r)"
+            >
+              <span class="ws-badge">{{ kindLabels[r.kind] || r.kind }}</span>
+              <strong>{{ r.name }}</strong>
+              <small v-if="linkedIds.has(r.id)" class="ws-muted">已关联</small>
+            </button>
+            <button
+              type="button"
+              class="ws-button"
+              :disabled="busy"
+              @click="saveResourceLink(r.id)"
+            >
+              直接关联
+            </button>
+          </div>
+        </div>
+        <label v-if="selected && annotations.length">
+          摘录或书签（可选）
+          <select v-model="annotation" aria-label="选择关联摘录">
+            <option value="">关联整份资料</option>
+            <option v-for="a in annotations" :key="a.id" :value="a.id">
+              第 {{ a.location.page }} 页/段 · {{ (a.quote || a.note || '书签').slice(0, 70) }}
+            </option>
+          </select>
+        </label>
+        <p class="ws-muted">点击条目即可一步建立关联；若文库资料含书签或摘录，可进一步指定具体段落。</p>
+      </div>
+      <template v-if="selected && annotations.length" #footer>
+        <div class="ws">
+          <button class="ws-button primary" :disabled="busy || !selected" @click="add">保存关联</button>
+        </div>
+      </template>
+    </ProjectDialog>
+  </section>
+</template>
+<style scoped>
+.ws-links { margin-bottom: 20px; padding: 14px 16px; border: 1px solid var(--divider); border-radius: 8px; background: var(--bg-card); }
+.ws-links-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ws-link-grid { display: grid; gap: 6px; margin-top: 8px; }
+.ws-candidate-search { display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--divider); border-radius: 6px; background: var(--bg-main); }
+.ws-candidate-search input { flex: 1; border: 0; background: transparent; padding: 9px 0; outline: none; color: var(--text-main); font: inherit; }
+.ws-candidate-list { max-height: 260px; overflow-y: auto; border: 1px solid var(--divider); border-radius: 7px; padding: 4px; background: var(--bg-main); display: grid; gap: 2px; }
+.ws-candidate-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+.ws-candidate-row:hover, .ws-candidate-row.selected { background: var(--active-surface); }
+.ws-candidate-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 4px; color: var(--text-main); }
+.ws-candidate-main strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: 13px; }
+</style>
