@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import * as Vue from 'vue'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -68,7 +69,7 @@ for (const primary of [true, false]) {
   const app = {
     commandLine: { appendSwitch: () => {} }, requestSingleInstanceLock: () => { events.push('lock'); return primary },
     whenReady: () => Promise.resolve(), on: () => {}, quit: () => events.push('quit'), exit: (code: number) => events.push('exit:' + code),
-    getPath: () => root
+    getPath: () => root, getPreferredSystemLanguages: () => ['zh-CN']
   }
   const loadMain = createRendererLoader({
     electron: { app, BrowserWindow: class { constructor() { events.push('window') } static getAllWindows() { return [] } }, dialog: { showErrorBox: (_title: string, detail: string) => messages.push(detail) }, protocol: { registerSchemesAsPrivileged: () => {}, handle: () => {} }, net: {}, shell: {} },
@@ -92,9 +93,9 @@ for (const primary of [true, false]) {
   const messages: string[] = [], logged: unknown[] = []
   const listeners = new Map<string, (event: { reason: unknown }) => void>()
   let now = 10000
-  const app = { config: { errorHandler: undefined as undefined | ((error: unknown) => void) }, use() {}, mount() {} }
+  const app = { config: { globalProperties: {}, errorHandler: undefined as undefined | ((error: unknown) => void) }, use() {}, mount() {} }
   const loadRenderer = createRendererLoader({
-    vue: { createApp: () => app }, pinia: { createPinia: () => ({}) },
+    vue: { ...Vue, createApp: () => app }, pinia: { createPinia: () => ({}) },
     './router': { default: { isReady: async () => {} } },
     './boot-error': { showBootError: (error: unknown) => { throw error } },
     './stores/categories': { useCategoriesStore: () => ({ load: async () => {} }) },

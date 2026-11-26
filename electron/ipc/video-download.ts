@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { app, dialog, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import path from 'node:path'
 import { getVideoItem } from '../kinds/video/service.ts'
@@ -41,7 +42,7 @@ export function registerVideoDownloadIpc(
       if (!parent || parent.isDestroyed()) return null
       const result = await dialog.showSaveDialog(parent, {
         defaultPath,
-        filters: [{ name: '视频文件', extensions: [extension] }],
+        filters: [{ name: tr("视频文件"), extensions: [extension] }],
         properties: ['showOverwriteConfirmation']
       })
       return result.canceled ? null : result.filePath
@@ -50,7 +51,7 @@ export function registerVideoDownloadIpc(
       const parent = getWindow()
       if (!parent || parent.isDestroyed()) return null
       const result = await dialog.showOpenDialog(parent, {
-        title: '选择系列视频保存目录',
+        title: tr("选择系列视频保存目录"),
         properties: ['openDirectory', 'createDirectory']
       })
       return result.canceled ? null : result.filePaths[0] ?? null

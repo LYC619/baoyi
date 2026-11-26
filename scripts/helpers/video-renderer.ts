@@ -10,7 +10,10 @@ import { loadPlaywright, findChromiumExecutable } from './playwright.ts'
 
 const { chromium } = loadPlaywright()
 const entry = String.raw`
-import { createApp, h, Transition } from 'vue'
+import { createApp as createVueApp, h, Transition } from 'vue'
+import { installI18n, applyLanguage } from '@/i18n'
+const createApp = (...args) => { const app = createVueApp(...args); installI18n(app); return app }
+applyLanguage('zh-CN')
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory, RouterView } from 'vue-router'
 import Home from '@/pages/video/Home.vue'

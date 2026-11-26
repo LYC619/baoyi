@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { dialog, type BrowserWindow } from 'electron'
 import { existsSync, statSync } from 'node:fs'
 import path from 'node:path'
@@ -73,9 +74,9 @@ export function registerSoftwareIpc(
     const win = getWindow()
     if (!win) return null
     const result = await dialog.showOpenDialog(win, {
-      title: '选择图标图片（正方形效果更好）',
+      title: tr("选择图标图片（正方形效果更好）"),
       properties: ['openFile'],
-      filters: [{ name: '图片', extensions: ICON_EXTS.map((e) => e.slice(1)) }]
+      filters: [{ name: tr("图片"), extensions: ICON_EXTS.map((e) => e.slice(1)) }]
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const outcome = setSoftwareIcon(safeId, result.filePaths[0])
@@ -91,9 +92,9 @@ export function registerSoftwareIpc(
     const current = getSoftware(getDb(), safeId)
     if (!current) throw new Error('软件条目已不存在')
     const selected = await dialog.showOpenDialog(win, {
-      title: safeMode === 'directory' ? '选择移动或改名后的软件文件夹' : '选择软件主程序或安装包',
+      title: safeMode === 'directory' ? tr("选择移动或改名后的软件文件夹") : tr("选择软件主程序或安装包"),
       properties: [safeMode === 'directory' ? 'openDirectory' : 'openFile'],
-      ...(safeMode === 'file' ? { filters: [{ name: '程序与安装包', extensions: SOFTWARE_EXTENSIONS }] } : {})
+      ...(safeMode === 'file' ? { filters: [{ name: tr("程序与安装包"), extensions: SOFTWARE_EXTENSIONS }] } : {})
     })
     if (selected.canceled || !selected.filePaths[0]) return null
     let file = selected.filePaths[0]
@@ -104,10 +105,10 @@ export function registerSoftwareIpc(
       file = path.join(directory, rel)
       if (rel.startsWith('..') || !existsSync(file) || !statSync(file).isFile()) {
         const picked = await dialog.showOpenDialog(win, {
-          title: '文件夹内未找到原程序，请选择主程序',
+          title: tr("文件夹内未找到原程序，请选择主程序"),
           defaultPath: directory,
           properties: ['openFile'],
-          filters: [{ name: '程序与安装包', extensions: SOFTWARE_EXTENSIONS }]
+          filters: [{ name: tr("程序与安装包"), extensions: SOFTWARE_EXTENSIONS }]
         })
         if (picked.canceled || !picked.filePaths[0]) return null
         file = picked.filePaths[0]
@@ -121,9 +122,9 @@ export function registerSoftwareIpc(
     if (!win || win.isDestroyed()) return null
     if (!getSoftware(getDb(), safeId)) throw new Error('软件条目已不存在')
     const selected = await dialog.showOpenDialog(win, {
-      title: '选择附属或备用启动程序',
+      title: tr("选择附属或备用启动程序"),
       properties: ['openFile'],
-      filters: [{ name: '启动文件', extensions: ['exe', 'bat', 'cmd', 'lnk'] }]
+      filters: [{ name: tr("启动文件"), extensions: ['exe', 'bat', 'cmd', 'lnk'] }]
     })
     if (selected.canceled || !selected.filePaths[0]) return null
     return appendSoftwareLauncher(safeId, selected.filePaths[0])
@@ -148,9 +149,9 @@ export function registerSoftwareIpc(
       const win = getWindow()
       if (!win) return []
       const result = await dialog.showOpenDialog(win, {
-        title: '选择要添加的程序',
+        title: tr("选择要添加的程序"),
         properties: ['openFile', 'multiSelections'],
-        filters: [{ name: '程序与手机 APP 安装包', extensions: SOFTWARE_EXTENSIONS }]
+        filters: [{ name: tr("程序与手机 APP 安装包"), extensions: SOFTWARE_EXTENSIONS }]
       })
       if (result.canceled) return []
       filePaths = result.filePaths
@@ -185,7 +186,7 @@ export function registerSoftwareIpc(
     const win = getWindow()
     if (!win) return null
     const result = await dialog.showOpenDialog(win, {
-      title: '选择要扫描的目录',
+      title: tr("选择要扫描的目录"),
       properties: ['openDirectory']
     })
     return result.canceled ? null : result.filePaths[0]
@@ -208,7 +209,7 @@ export function registerSoftwareIpc(
     const win = getWindow()
     if (!win) return null
     const result = await dialog.showOpenDialog(win, {
-      title: '选择整理目标根目录',
+      title: tr("选择整理目标根目录"),
       properties: ['openDirectory', 'createDirectory']
     })
     return result.canceled ? null : result.filePaths[0]

@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { app, dialog, shell, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'electron'
 import Database from 'better-sqlite3'
 import fs from 'node:fs'
@@ -31,8 +32,8 @@ export function registerLibrarySnapshotIpc(getWindow: () => BrowserWindow | null
     const safeId = reqString(id, 'id', { max: 64, trim: true })
     if (!/^\d{13}-[0-9a-f-]{36}$/.test(safeId)) throw new IpcError('INVALID_ARGUMENT', '参数 id 无效：快照编号无效', 'id')
     const selection = await dialog.showSaveDialog(getWindow()!, {
-      title: '导出可还原的数据库快照', defaultPath: path.join(app.getPath('documents'), 'baoyi-snapshot-' + safeId + '.db'),
-      filters: [{ name: 'SQLite 数据库', extensions: ['db'] }], buttonLabel: '导出数据库'
+      title: tr("导出可还原的数据库快照"), defaultPath: path.join(app.getPath('documents'), 'baoyi-snapshot-' + safeId + '.db'),
+      filters: [{ name: tr("SQLite 数据库"), extensions: ['db'] }], buttonLabel: tr("导出数据库")
     })
     if (selection.canceled || !selection.filePath) return null
     guard(event)

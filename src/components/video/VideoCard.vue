@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 /**
  * 海报墙的一格。竖版 2:3 —— 影视海报本来就是这个比例，和游戏封面同一个框。
  *
@@ -29,12 +31,12 @@ function stopFrames(){frameController.abort();hover.leave();clearTimeout(leaveTi
 async function startFrames(){
   if(props.selectable||props.item.media_kind&&props.item.media_kind!=='video')return
   stopFrames()
-  claimVideoHover(stopFrames);frameController=new AbortController();const {signal}=frameController;position.value=0;frameActive.value=true;frameMessage.value='正在查找本地视频…'
+  claimVideoHover(stopFrames);frameController=new AbortController();const {signal}=frameController;position.value=0;frameActive.value=true;frameMessage.value=tr("正在查找本地视频…")
   try{
     const choices=await window.baoyi.video.preview.choices(props.item.id,props.episode?.id);if(signal.aborted)return
     const remembered=recentVideoAsset(props.item.id,props.episode?.id),selected=choices.assets.find(asset=>asset.key===remembered)
     const episode=choices.assets[0]?.episodeId,versions=choices.assets.filter(asset=>asset.episodeId===episode),asset=selected||versions[0]
-    if(!asset){frameMessage.value='没有可用的本地视频';return}
+    if(!asset){frameMessage.value=tr("没有可用的本地视频");return}
     const session=await window.baoyi.video.preview.open(props.item.id,asset.key)
     if(signal.aborted){await window.baoyi.video.preview.release(session.token);return}
     frameSession.value=session;frameMessage.value='';await frames.start(session.token)
@@ -52,7 +54,7 @@ defineEmits<{ (e: 'open', id: string): void; (e: 'poster-error', id: string): vo
 
 const title = computed(() => props.episode ? props.episode.title || props.episode.original_title || videoEpisodeLabel(props.episode, props.item.category === '里番') : videoTitle(props.item))
 const watchStatus = computed(() => props.episode?.watch_status || props.item.watch_status)
-const episodeAvailability = computed(() => props.episode?.assets.some(asset => asset.role === 'video' && asset.state === 'present') ? '本地可播放' : props.episode?.path ? '本地文件缺失' : '待下载')
+const episodeAvailability = computed(() => props.episode?.assets.some(asset => asset.role === 'video' && asset.state === 'present') ? tr("本地可播放") : props.episode?.path ? tr("本地文件缺失") : tr("待下载"))
 
 /** 占位海报上的那个字。中文取首字，英文取首字母 */
 const initial = computed(() => title.value.trim().charAt(0).toUpperCase() || '?')
@@ -84,15 +86,15 @@ const isSeries = computed(() => !props.episode && props.item.video_type === 'ser
  */
 const episodeLine = computed(() => {
   const { episode_watched: watched, episode_total: discovered } = props.item
-  return discovered > 0 ? `已发现 ${discovered} 项 · 已看 ${watched} 项` : '内容总数尚未确定'
+  return discovered > 0 ? tr("已发现 {p0} 项 · 已看 {p1} 项", {p0: (discovered), p1: (watched)}) : tr("内容总数尚未确定")
 })
 const videoCount = computed(() => typeof props.item.available_files === 'number'
-  ? `已有 ${props.item.available_files} 个视频` : '视频文件待检查')
+  ? tr("已有 {p0} 个视频", {p0: (props.item.available_files)}) : tr("视频文件待检查"))
 </script>
 
 <template>
   <article class="card" :class="{ 'card--selected': selectable && selected }" :title="title" @pointerenter="enter" @pointerleave="leaveFrames" @focusout="!($event.relatedTarget&&($event.currentTarget as HTMLElement).contains($event.relatedTarget as Node))&&leaveFrames()">
-    <button class="card__open" :disabled="selectable && locked" type="button" :aria-label="(selectable?'选择作品：':'打开作品：')+title" :aria-pressed="selectable ? selected : undefined" @click="selectable ? $emit('select', item.id, $event) : $emit('open', item.id)" @keydown.space="space">
+    <button class="card__open" :disabled="selectable && locked" type="button" :aria-label="(selectable?$t('选择作品：'):$t('打开作品：'))+title" :aria-pressed="selectable ? selected : undefined" @click="selectable ? $emit('select', item.id, $event) : $emit('open', item.id)" @keydown.space="space">
     <div ref="anchor" class="card__poster" :style="{ '--hue': hue }">
       <img v-if="poster && !posterFailed" :src="poster" :alt="title" class="card__img"
         @error="posterFailed = true; !episode && $emit('poster-error', item.id)" />
@@ -104,7 +106,7 @@ const videoCount = computed(() => typeof props.item.available_files === 'number'
       </span>
 
       <!-- 右上角只标类型。和左下的状态角标对开，两个同时出现也不叠 -->
-      <span class="card__type" :title="episode ? '单集' : isSeries ? '剧集' : '电影'">
+      <span class="card__type" :title="episode ? $t('单集') : isSeries ? $t('剧集') : $t('电影')">
         <Tv v-if="isSeries" :size="11" />
         <Film v-else :size="11" />
       </span>
@@ -114,19 +116,19 @@ const videoCount = computed(() => typeof props.item.available_files === 'number'
       <p class="card__name">{{ title }}</p>
       <template v-if="episode">
         <p class="card__meta"><span>{{ videoEpisodeLabel(episode, item.category === '里番') }}</span><span v-if="episode.duration_sec > 0">{{ formatDuration(episode.duration_sec) }}</span></p>
-        <p class="card__detail"><span v-if="episode.air_date">发行 {{ videoDateLabel(episode.air_date) }}</span><span v-else-if="episode.published_at">发布 {{ videoDateLabel(episode.published_at) }}</span><span v-else>{{ episodeAvailability }}</span></p>
+        <p class="card__detail"><span v-if="episode.air_date">{{ $t("发行 {p0}", {p0: (videoDateLabel(episode.air_date))}) }}</span><span v-else-if="episode.published_at">{{ $t("发布 {p0}", {p0: (videoDateLabel(episode.published_at))}) }}</span><span v-else>{{ episodeAvailability }}</span></p>
       </template>
       <template v-else>
       <p class="card__meta"><span v-if="item.year > 0" class="card__year">{{ item.year }}</span><span>{{ videoCount }}</span></p>
       <p v-if="isSeries" class="card__detail">{{ episodeLine }}</p>
-      <p v-if="showPublished" class="card__detail">{{item.published_end ? '发布 ' + videoDateLabel(item.published_end) : '发布日期未知'}}</p>
+      <p v-if="showPublished" class="card__detail">{{item.published_end ? $t('发布 ') + videoDateLabel(item.published_end) : $t('发布日期未知')}}</p>
       <p v-if="status" class="card__pending">{{ status }}</p>
-      <p v-if="item.matched_content" class="card__match">命中内容：{{ item.matched_content }}</p>
-      <p v-else-if="recent" class="card__detail">最近新增：{{ recent }}</p>
+      <p v-if="item.matched_content" class="card__match">{{ $t("命中内容：{p0}", {p0: (item.matched_content)}) }}</p>
+      <p v-else-if="recent" class="card__detail">{{ $t("最近新增：{p0}", {p0: (recent)}) }}</p>
       </template>
     </div>
     </button>
-    <button v-if="!selectable&&(!item.media_kind||item.media_kind==='video')" class="card__preview" aria-label="试看视频" title="内嵌试看" @click="previewFromFrame"><Play :size="15"/></button>
+    <button v-if="!selectable&&(!item.media_kind||item.media_kind==='video')" class="card__preview" :aria-label="$t('试看视频')" :title="$t('内嵌试看')" @click="previewFromFrame"><Play :size="15"/></button>
     <VideoHoverPreview v-if="frameActive&&anchor" :anchor="anchor" :closing="frameClosing" :state="frames.state.value" :message="frameMessage||frames.error.value" :label="frameSession?.asset.label||frameSession?.asset.name||''" :position="position" @enter="keepFrames" @leave="leaveFrames" @close="stopFrames" @seek="position=$event" @play="previewFromFrame" @open="stopFrames();$emit('open',item.id)"/>
   </article>
 </template>

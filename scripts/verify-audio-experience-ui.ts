@@ -55,6 +55,32 @@ try{
     await page.locator('.audio-album-drawer').getByRole('button',{name:'收起',exact:true}).click()
     assert.equal(await page.locator('.audio-album-drawer').count(),0)
   })
+  await check('音频与里番切换时，等待新列表期间不把旧封面放进另一种卡片',async()=>{
+    await app.evaluate(({ipcMain}:any)=>{
+      const original=ipcMain._invokeHandlers.get('video:list')
+      ;(globalThis as any).__listBeforeScopeCheck=original
+      ipcMain.removeHandler('video:list')
+      ipcMain.handle('video:list',async(...args:any[])=>{
+        await new Promise(resolve=>(globalThis as any).__releaseScopeList=resolve)
+        return original(...args)
+      })
+    })
+    try {
+      await page.getByRole('button',{name:/^里番\s+\d/}).first().click()
+      await page.locator('.home__content[aria-busy="true"]').waitFor()
+      assert.equal(await page.locator('.work-card').count(),0,'等待里番时不能把音频封面渲染为竖版海报')
+      await app.evaluate(()=>(globalThis as any).__releaseScopeList())
+      await page.locator('.home__content[aria-busy="false"]').waitFor()
+    } finally {
+      await app.evaluate(({ipcMain}:any)=>{
+        ;(globalThis as any).__releaseScopeList?.()
+        ipcMain.removeHandler('video:list')
+        ipcMain.handle('video:list',(globalThis as any).__listBeforeScopeCheck)
+      })
+      await page.getByRole('button',{name:/^音频\s+\d/}).first().click()
+      await page.locator('.audio-cards').waitFor()
+    }
+  })
   await check('卡片进入音频专用详情，歌词真实读取且没有影视专用操作',async()=>{
     await page.getByRole('button',{name:'查看音频 沿途 / 山间电台',exact:true}).click();await detail().waitFor()
     await detail().getByText('城市慢慢醒来',{exact:true}).waitFor()

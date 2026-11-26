@@ -8,7 +8,7 @@ watch(() => [props.pageId,props.revision], () => { failed.value = false })
 <template>
   <div class="image-cover" :class="[{ 'image-cover--photo': photo },shape?'image-cover--'+shape:'']">
     <img v-if="pageId && !failed" :src="`baoyi://image/${pageId}?thumb=1&v=${revision||0}`" :alt="name" loading="lazy" draggable="false" @error="failed=true" />
-    <div v-else class="image-cover__empty"><Images v-if="photo" :size="30" /><BookOpen v-else :size="30" /><span>{{ failed ? '图片不可用' : name.slice(0,10) }}</span></div>
+    <div v-else class="image-cover__empty"><Images v-if="photo" :size="30" /><BookOpen v-else :size="30" /><span>{{ failed ? $t('图片不可用') : name.slice(0,10) }}</span></div>
   </div>
 </template>
 <style scoped>

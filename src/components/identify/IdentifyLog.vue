@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { locale as appLocale } from '../../i18n/index.ts'
+
+import { tr } from "../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 import { latestOnly, STALE } from '@/composables/latestOnly'
 /**
@@ -39,16 +43,16 @@ const { success, toast } = useToast()
 type Filter = 'all' | IdentifyLogStatus
 
 const FILTERS: Array<{ value: Filter; label: string }> = [
-  { value: 'all', label: '全部' },
-  { value: 'success', label: '成功' },
-  { value: 'skipped', label: '跳过' },
-  { value: 'failed', label: '失败' }
+  { value: 'all', get label() { return tr("全部") } },
+  { value: 'success', get label() { return tr("成功") } },
+  { value: 'skipped', get label() { return tr("跳过") } },
+  { value: 'failed', get label() { return tr("失败") } }
 ]
 
 const STATUS_META: Record<IdentifyLogStatus, { label: string; icon: any; tone: string }> = {
-  success: { label: '已注册', icon: CheckCircle2, tone: 'ok' },
-  skipped: { label: '未注册', icon: MinusCircle, tone: 'warn' },
-  failed: { label: '失败', icon: AlertTriangle, tone: 'bad' }
+  success: { get label() { return tr("已注册") }, icon: CheckCircle2, tone: 'ok' },
+  skipped: { get label() { return tr("未注册") }, icon: MinusCircle, tone: 'warn' },
+  failed: { get label() { return tr("失败") }, icon: AlertTriangle, tone: 'bad' }
 }
 
 const logs = ref<IdentifyLog[]>([])
@@ -127,21 +131,21 @@ function toggleFull(key: string): void {
  */
 async function copyLog(log: IdentifyLog): Promise<void> {
   await window.baoyi.app.copyText(logToText(log))
-  success('已复制')
+  success(tr("已复制"))
 }
 
 async function clearAll(): Promise<void> {
-  if (!(await confirmDialog({ title: '清空识别日志与报告？', message: '仅清空日志记录，已收录的条目与本地原文件均不受影响。', confirmText: '清空日志', tone: 'danger' }))) return
+  if (!(await confirmDialog({ title: tr('清空识别日志与报告？'), message: tr("仅清空日志记录，已收录的条目与本地原文件均不受影响。"), confirmText: tr('清空日志'), tone: 'danger' }))) return
   const n = await window.baoyi.logs.clear(props.resourceKind)
   await load()
   reports.value = await window.baoyi.logs.reports(props.resourceKind)
-  success(`已清空 ${n} 条日志`)
+  success(tr("已清空 {p0} 条日志", {p0: (n)}))
 }
 
 /** 退回待识别的实际动作交给设置页 —— 它还要顺带刷新计数和待识别列表 */
 function retry(log: IdentifyLog): void {
   if (log.kind !== 'unit') {
-    toast('单条补全请到卡片详情页重新识别')
+    toast(tr("单条补全请到卡片详情页重新识别"))
     return
   }
   emit('retry', log.dir)
@@ -206,8 +210,8 @@ function isLong(text: string): boolean {
 
 function cost(log: IdentifyLog): string {
   const seconds = (log.duration_ms / 1000).toFixed(1)
-  const turns = log.stop_reason === 'max_turns' ? `${log.rounds} 轮（达到上限）` : `${log.rounds} 轮`
-  return `${turns}，${seconds}s，${log.tokens.toLocaleString()} tokens`
+  const turns = log.stop_reason === 'max_turns' ? tr("{p0} 轮（达到上限）", {p0: (log.rounds)}) : tr("{p0} 轮", {p0: (log.rounds)})
+  return `${turns}，${seconds}s，${log.tokens.toLocaleString(appLocale.value)} tokens`
 }
 
 const empty = computed(() => !loading.value && logs.value.length === 0)
@@ -216,22 +220,16 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
 <template>
   <section class="panel" :class="{ 'panel--task': taskScoped }">
     <div class="sec-head">
-      <h2>识别日志</h2>
+      <h2>{{ $t("识别日志") }}</h2>
       <button v-if="logs.length && !taskScoped" class="btn btn--subtle" @click="clearAll">
-        <Eraser :size="14" />
-        清空
-      </button>
+        <Eraser :size="14" />{{ $t("清空") }}</button>
     </div>
-    <p v-if="taskScoped" class="sec-desc">本次任务的识别过程。展开记录可查看来源查询、返回资料和入库结果。</p>
-    <p v-else class="sec-desc">
-      每跑一次识别留一条记录，记下 AI 调用了哪些工具、读到了什么信息、最后如何判断。
-      识别结果不对时，翻这里比猜要快 —— 你能直接看到它是在哪一步走偏的。
-      只保留最近 300 条。
-    </p>
+    <p v-if="taskScoped" class="sec-desc">{{ $t("本次任务的识别过程。展开记录可查看来源查询、返回资料和入库结果。") }}</p>
+    <p v-else class="sec-desc">{{ $t("每跑一次识别留一条记录，记下 AI 调用了哪些工具、读到了什么信息、最后如何判断。 识别结果不对时，翻这里比猜要快 —— 你能直接看到它是在哪一步走偏的。 只保留最近 300 条。") }}</p>
 
     <!-- 历史汇总报告。逐条日志说细节，报告说整体，两个都要够得着 -->
     <div v-if="reports.length > 0" class="reports">
-      <p class="reports__title">历史汇总报告</p>
+      <p class="reports__title">{{ $t("历史汇总报告") }}</p>
       <button
         v-for="r in reports.slice(0, 8)"
         :key="r.id"
@@ -241,10 +239,9 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
         <FileBarChart :size="13" />
         <span class="reports__time mono">{{ formatDateTime(r.created_at) }}</span>
         <span class="reports__sum">
-          {{ r.processed }} 个目录 · 成功 {{ r.registered }} · 跳过 {{ r.skipped }} · 失败
-          {{ r.failed }}
+          {{ $t("{p0} 个目录 · 成功 {p1} · 跳过 {p2} · 失败 {p3}", {p0: (r.processed), p1: (r.registered), p2: (r.skipped), p3: (r.failed)}) }}
         </span>
-        <span class="reports__cost mono">{{ r.tokens.toLocaleString() }} tk</span>
+        <span class="reports__cost mono">{{ r.tokens.toLocaleString($locale) }} tk</span>
         <ChevronRight :size="13" />
       </button>
     </div>
@@ -262,17 +259,15 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
       </div>
       <label class="finder">
         <Search :size="14" />
-        <input v-model="keyword" placeholder="搜索目录名" @keyup.enter="load" @blur="blurSearch" />
+        <input v-model="keyword" :placeholder="$t('搜索目录名')" @keyup.enter="load" @blur="blurSearch" />
       </label>
     </div>
 
     <p v-if="loading" class="state">
-      <Loader2 :size="14" class="spin" />
-      读取中…
-    </p>
-    <p v-else-if="loadError" class="state" role="alert">读取识别日志失败：{{ loadError }}</p>
+      <Loader2 :size="14" class="spin" />{{ $t("读取中…") }}</p>
+    <p v-else-if="loadError" class="state" role="alert">{{ $t("读取识别日志失败：{p0}", {p0: (loadError)}) }}</p>
     <p v-else-if="empty" class="state">
-      {{ taskScoped ? '本次任务暂无识别日志。仅导入本地资料、跳过未变化文件时不会生成识别过程。' : '还没有日志。跑一次识别后，过程就会记录在这里。' }}
+      {{ taskScoped ? $t('本次任务暂无识别日志。仅导入本地资料、跳过未变化文件时不会生成识别过程。') : $t('还没有日志。跑一次识别后，过程就会记录在这里。') }}
     </p>
 
     <ul v-else class="logs">
@@ -292,14 +287,12 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
         <div v-if="opened.has(log.id)" class="trace">
           <div class="trace__top">
             <p class="trace__dir mono truncate" :title="log.dir">{{ log.dir }}</p>
-            <button class="btn btn--subtle" title="复制这条日志的完整内容" @click="copyLog(log)">
-              <Clipboard :size="13" />
-              复制
-            </button>
+            <button class="btn btn--subtle" :title="$t('复制这条日志的完整内容')" @click="copyLog(log)">
+              <Clipboard :size="13" />{{ $t("复制") }}</button>
           </div>
 
           <div v-for="round in groupRounds(log.events)" :key="round.index" class="round">
-            <p class="round__no">轮次 {{ round.index }}</p>
+            <p class="round__no">{{ $t("轮次 {p0}", {p0: (round.index)}) }}</p>
 
             <template v-for="{ event, i } in round.events" :key="i">
               <div v-if="event.type === 'tool_call'" class="step step--call">
@@ -323,7 +316,7 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
                   class="step__more"
                   @click="toggleFull(`${log.id}:${i}`)"
                 >
-                  {{ spread.has(`${log.id}:${i}`) ? '收起' : '展开全文' }}
+                  {{ spread.has(`${log.id}:${i}`) ? $t('收起') : $t('展开全文') }}
                 </button>
               </div>
 
@@ -331,16 +324,12 @@ const empty = computed(() => !loading.value && logs.value.length === 0)
             </template>
           </div>
 
-          <p v-if="log.stop_reason === 'max_turns'" class="trace__stop">
-            已达最大分析轮数，识别提前结束 —— AI 尚未给出最终结论，可调整设置或手动确认。
-          </p>
+          <p v-if="log.stop_reason === 'max_turns'" class="trace__stop">{{ $t("已达最大分析轮数，识别提前结束 —— AI 尚未给出最终结论，可调整设置或手动确认。") }}</p>
 
           <div v-if="log.kind === 'unit' && log.status !== 'success'" class="trace__act">
             <button v-if="!taskScoped" class="btn btn--ghost" @click="retry(log)">
-              <RotateCcw :size="14" />
-              退回待识别
-            </button>
-            <span class="hint">下次点「开始识别」时会重跑这个目录</span>
+              <RotateCcw :size="14" />{{ $t("退回待识别") }}</button>
+            <span class="hint">{{ $t("下次点「开始识别」时会重跑这个目录") }}</span>
           </div>
         </div>
       </li>

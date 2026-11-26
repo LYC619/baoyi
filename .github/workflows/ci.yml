@@ -36,6 +36,12 @@ jobs:
       - name: Verify architecture & IPC documentation sync
         run: npm run docs:check
 
+      - name: Verify translations and public website
+        run: |
+          npm run i18n:check
+          npm run site:build
+          npm run site:check
+
       - name: Verify release config and strict test runner
         run: |
           node scripts/verify-release-config.cjs

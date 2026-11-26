@@ -12,35 +12,35 @@ onBeforeUnmount(() => dialog.value?.close())
 </script>
 <template>
   <Teleport to="body"><dialog ref="dialog" class="agent-organize" aria-labelledby="agent-organize-title" @cancel.prevent="session.open.value = false">
-    <header><div><h2 id="agent-organize-title"><Bot :size="20" />智能整理</h2><p>处理已选的 {{ works.length }} 部作品。先核对计划，再执行。</p></div><button aria-label="关闭智能整理" @click="session.open.value = false"><X :size="19" /></button></header>
+    <header><div><h2 id="agent-organize-title"><Bot :size="20" />{{ $t("智能整理") }}</h2><p>{{ $t("处理已选的 {p0} 部作品。先核对计划，再执行。", {p0: (works.length)}) }}</p></div><button :aria-label="$t('关闭智能整理')" @click="session.open.value = false"><X :size="19" /></button></header>
     <div class="agent-organize__body">
-      <fieldset :disabled="!!busy || !!plan"><legend>选择整理内容</legend>
-        <label><input v-model="actions.merge" type="checkbox" />把同系列的单集合并成合集<span>核对片名和集数，保留每集的资料与观看进度。</span></label>
-        <label><input v-model="actions.artwork" type="checkbox" />刮削缺失封面<span>优先使用已有来源；缺少来源时自动联网查找，已有封面保留。</span></label>
-        <label><input v-model="actions.metadata" type="checkbox" />补充缺失简介、标签和来源<span>保留已填写的资料。</span></label>
-        <label v-if="actions.merge" class="file-transfer">文件整理<select v-model="actions.transfer"><option value="none">保留文件位置</option><option value="move">移动到整理根目录 / 合集名</option><option value="copy">复制到整理根目录 / 合集名</option></select></label>
+      <fieldset :disabled="!!busy || !!plan"><legend>{{ $t("选择整理内容") }}</legend>
+        <label><input v-model="actions.merge" type="checkbox" />{{ $t("把同系列的单集合并成合集") }}<span>{{ $t("核对片名和集数，保留每集的资料与观看进度。") }}</span></label>
+        <label><input v-model="actions.artwork" type="checkbox" />{{ $t("刮削缺失封面") }}<span>{{ $t("优先使用已有来源；缺少来源时自动联网查找，已有封面保留。") }}</span></label>
+        <label><input v-model="actions.metadata" type="checkbox" />{{ $t("补充缺失简介、标签和来源") }}<span>{{ $t("保留已填写的资料。") }}</span></label>
+        <label v-if="actions.merge" class="file-transfer">{{ $t("文件整理") }}<select v-model="actions.transfer"><option value="none">{{ $t("保留文件位置") }}</option><option value="move">{{ $t("移动到整理根目录 / 合集名") }}</option><option value="copy">{{ $t("复制到整理根目录 / 合集名") }}</option></select></label>
       </fieldset>
-      <p v-if="error" class="agent-error" role="alert">{{ error }}</p>
-      <p v-if="busy" class="agent-progress" role="status"><Loader2 :size="15" class="spin" />{{ progress?.current }} {{ progress?.message || (busy === 'prepare' ? '正在生成整理建议…' : '正在处理…') }}</p>
+      <p v-if="error" class="agent-error" role="alert">{{ $systemMessage(error) }}</p>
+      <p v-if="busy" class="agent-progress" role="status"><Loader2 :size="15" class="spin" />{{ progress?.current }} {{ progress?.message || (busy === 'prepare' ? $t('正在生成整理建议…') : $t('正在处理…')) }}</p>
       <template v-if="plan">
-        <div class="agent-plan-heading"><h3>整理预览</h3><span>{{ plan.groups.length }} 个建议合集 · {{ plan.tokens.toLocaleString() }} tokens</span></div>
+        <div class="agent-plan-heading"><h3>{{ $t("整理预览") }}</h3><span>{{ $t("{p0} 个建议合集 · {p1} tokens", {p0: (plan.groups.length), p1: (plan.tokens.toLocaleString($locale))}) }}</span></div>
         <div v-if="plan.warnings.length" class="agent-warnings" role="status">
-          <strong>{{ plan.groupingStatus === 'failed' ? '分组分析未完成' : '已保留有效分组，以下建议未采纳' }}</strong>
-          <ul><li v-for="(warning, index) in plan.warnings" :key="index">{{ warning }}</li></ul>
-          <p>可重新生成预览。补封面、补资料仍按勾选范围执行。</p>
+          <strong>{{ plan.groupingStatus === 'failed' ? $t('分组分析未完成') : $t('已保留有效分组，以下建议未采纳') }}</strong>
+          <ul><li v-for="(warning, index) in plan.warnings" :key="index">{{ $systemMessage(warning) }}</li></ul>
+          <p>{{ $t("可重新生成预览。补封面、补资料仍按勾选范围执行。") }}</p>
         </div>
-        <p v-else-if="plan.actions.merge && !plan.groups.length" class="agent-note">{{ plan.groupingStatus === 'no-candidates' ? '未找到片名和集数明确的同系列单集，已有合集不参与单集合并。' : '未发现适合合并的同系列单集，原作品会保持独立。' }}</p>
+        <p v-else-if="plan.actions.merge && !plan.groups.length" class="agent-note">{{ plan.groupingStatus === 'no-candidates' ? $t('未找到片名和集数明确的同系列单集，已有合集不参与单集合并。') : $t('未发现适合合并的同系列单集，原作品会保持独立。') }}</p>
         <section v-for="group in plan.groups" :key="group.id" class="agent-group">
-          <label><input v-model="groupIds" type="checkbox" :value="group.id" :disabled="!!busy || !!result || !(plan.actions.transfer === 'none' ? group.preview.canMerge : group.preview.canOrganize)" /><strong>{{ group.title }}</strong><span>{{ group.resourceIds.length }} 部作品</span></label><p>{{ group.reason }}</p>
+          <label><input v-model="groupIds" type="checkbox" :value="group.id" :disabled="!!busy || !!result || !(plan.actions.transfer === 'none' ? group.preview.canMerge : group.preview.canOrganize)" /><strong>{{ group.title }}</strong><span>{{ $t("{p0} 部作品", {p0: (group.resourceIds.length)}) }}</span></label><p>{{ $systemMessage(group.reason) }}</p>
           <ul><li v-for="work in group.preview.works" :key="work.resourceId">{{ work.name }}</li></ul>
-          <details><summary>查看各集、文件去向与冲突</summary><OrganizePreview :preview="group.preview" :file-names="{}" :copy-files="plan.actions.transfer !== 'none'" :without-season="works.filter(work => group.resourceIds.includes(work.id)).every(work => work.category === '里番')" disabled /></details>
+          <details><summary>{{ $t("查看各集、文件去向与冲突") }}</summary><OrganizePreview :preview="group.preview" :file-names="{}" :copy-files="plan.actions.transfer !== 'none'" :without-season="works.filter(work => group.resourceIds.includes(work.id)).every(work => work.category === '里番')" disabled /></details>
         </section>
-        <p v-if="plan.actions.artwork || plan.actions.metadata" class="agent-note">确认后，为这 {{ plan.works.length }} 部所选作品{{ plan.actions.artwork ? '补封面' : '' }}{{ plan.actions.artwork && plan.actions.metadata ? '、' : '' }}{{ plan.actions.metadata ? '补资料' : '' }}。合并后的各集仍分别处理。</p>
+        <p v-if="plan.actions.artwork || plan.actions.metadata" class="agent-note">{{ $t("确认后，为这 {p0} 部所选作品{p1}{p2}{p3}。合并后的各集仍分别处理。", {p0: (plan.works.length), p1: (plan.actions.artwork ? $t('补封面') : ''), p2: (plan.actions.artwork && plan.actions.metadata ? '、' : ''), p3: (plan.actions.metadata ? $t('补资料') : '')}) }}</p>
       </template>
-      <details v-if="plan?.log || analysisLog" class="agent-log"><summary>分析日志</summary><pre>{{ plan?.log || analysisLog }}</pre></details>
-      <section v-if="result" class="agent-results" aria-label="智能整理结果"><h3>{{ result.cancelled ? '已停止，已完成的结果保留' : '处理结果' }}</h3><ul><li v-for="(outcome, index) in result.outcomes" :key="index"><strong>{{ outcome.title }}</strong><p :class="{ 'agent-error': !outcome.ok }">{{ outcome.message }}</p></li></ul></section>
+      <details v-if="plan?.log || analysisLog" class="agent-log"><summary>{{ $t("分析日志") }}</summary><pre>{{ plan?.log || analysisLog }}</pre></details>
+      <section v-if="result" class="agent-results" :aria-label="$t('智能整理结果')"><h3>{{ result.cancelled ? $t('已停止，已完成的结果保留') : $t('处理结果') }}</h3><ul><li v-for="(outcome, index) in result.outcomes" :key="index"><strong>{{ outcome.title }}</strong><p :class="{ 'agent-error': !outcome.ok }">{{ $systemMessage(outcome.message) }}</p></li></ul></section>
     </div>
-    <footer><button v-if="busy" class="btn btn--ghost" @click="session.cancel">停止后续处理</button><button v-if="plan && !busy" class="btn btn--ghost" @click="session.reset">重新选择操作</button><button v-if="plan?.warnings.length && !busy && !result" class="btn btn--ghost" @click="session.prepare">重新生成预览</button><button v-if="!plan" class="btn btn--primary" :disabled="!!busy || !works.length || !actions.merge && !actions.artwork && !actions.metadata" @click="session.prepare">生成整理预览</button><button v-else-if="!result" class="btn btn--primary" :disabled="!canRun" @click="session.run">确认执行所选操作</button><button v-else class="btn btn--primary" @click="session.open.value = false">完成</button></footer>
+    <footer><button v-if="busy" class="btn btn--ghost" @click="session.cancel">{{ $t("停止后续处理") }}</button><button v-if="plan && !busy" class="btn btn--ghost" @click="session.reset">{{ $t("重新选择操作") }}</button><button v-if="plan?.warnings.length && !busy && !result" class="btn btn--ghost" @click="session.prepare">{{ $t("重新生成预览") }}</button><button v-if="!plan" class="btn btn--primary" :disabled="!!busy || !works.length || !actions.merge && !actions.artwork && !actions.metadata" @click="session.prepare">{{ $t("生成整理预览") }}</button><button v-else-if="!result" class="btn btn--primary" :disabled="!canRun" @click="session.run">{{ $t("确认执行所选操作") }}</button><button v-else class="btn btn--primary" @click="session.open.value = false">{{ $t("完成") }}</button></footer>
   </dialog></Teleport>
 </template>
 <style scoped>

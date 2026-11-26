@@ -1,4 +1,6 @@
+import { tr, setNativeLanguage } from '../services/system/language.ts'
 import { app, clipboard, dialog, shell, type BrowserWindow } from 'electron'
+import { validateLanguageSetting } from './validate.ts'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { IpcActivity, mainWindowIpc } from './main-window.ts'
@@ -186,9 +188,11 @@ export function registerSystemIpc(
   ipcMain.handle('settings:get', () => getSettings(getDb()))
   ipcMain.handle('settings:patch', async (_e, patch: Partial<AppSettings>) => {
     patch = reqRecord(patch, 'patch') as Partial<AppSettings>
+    if ('language' in patch) patch.language = validateLanguageSetting(patch.language)
     if ('video_online_proxy' in patch) parseProxyInput(patch.video_online_proxy ?? 'system://')
     const previousPrivacy = getSettings(getDb()).hide_hentai
     const next = patchSettings(getDb(), patch)
+    if ('language' in patch) setNativeLanguage(next.language, app.getPreferredSystemLanguages())
     if (previousPrivacy !== next.hide_hentai) {
       await Promise.all([closeVideoPreview(), closeArchiveAssistant(), stopComicIngest()])
       if (!next.hide_hentai) reopenComicIngest()
@@ -263,7 +267,7 @@ export function registerSystemIpc(
     const win = getWindow()
     if (!win) return null
     const result = await dialog.showOpenDialog(win, {
-      title: '选择存档备份存放目录',
+      title: tr("选择存档备份存放目录"),
       properties: ['openDirectory', 'createDirectory']
     })
     return result.canceled ? null : result.filePaths[0]
@@ -288,10 +292,12 @@ export function registerSystemIpc(
         ]
         for (const entry of entries) await removeProfileEntry(profile, entry)
         const summary = resetData(all ? 'all' : 'library')
+        const settings = getSettings(getDb())
+        setNativeLanguage(settings.language, app.getPreferredSystemLanguages())
         resetVideoHistory()
         imageSource.reset(all)
         await resetComic(all)
-        return { summary, settings: getSettings(getDb()) }
+        return { summary, settings }
       } finally {
         reopenComicIngest()
       }
@@ -302,7 +308,7 @@ export function registerSystemIpc(
     const win = getWindow()
     if (!win) return null
     const result = await dialog.showSaveDialog(win, {
-      title: '导出为 Markdown',
+      title: tr("导出为 Markdown"),
       defaultPath: path.join('抱一.md'),
       filters: [{ name: 'Markdown', extensions: ['md'] }]
     })

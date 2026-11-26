@@ -13,7 +13,7 @@ const emit = defineEmits<{ select: [id: string] }>();
         {{ card.name }}
       </button>
       <details v-if="cards.some((c) => c.parentId === card.id)">
-        <summary>子技能</summary>
+        <summary>{{ $t("子技能") }}</summary>
         <SkillTree
           :cards="cards"
           :parent-id="card.id"

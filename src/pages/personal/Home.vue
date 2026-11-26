@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 import { errorMessage } from '@/utils'
 import { ref, computed, onBeforeUnmount } from "vue";
@@ -34,7 +36,7 @@ import type { PersonalRecord, PersonalKind } from "@/types/workspace";
 import type { ProjectItem } from "@/types/project";
 import "@/styles/workspace.css";
 async function openAssetUrl(raw: string) {
-  try { const input=raw.trim(); const url=new URL(/^[a-z][a-z0-9+.-]*:/i.test(input)?input:'https://'+input); if(!['http:','https:'].includes(url.protocol))throw new Error('管理入口仅支持 HTTP 或 HTTPS 链接'); await window.baoyi.app.openUrl(url.href) }
+  try { const input=raw.trim(); const url=new URL(/^[a-z][a-z0-9+.-]*:/i.test(input)?input:'https://'+input); if(!['http:','https:'].includes(url.protocol))throw new Error(tr('管理入口仅支持 HTTP 或 HTTPS 链接')); await window.baoyi.app.openUrl(url.href) }
   catch(cause){error.value=errorMessage(cause)}
 }
 const quickTodo = ref(""), quickDue = ref("");
@@ -79,12 +81,12 @@ const router = useRouter(),
   editRecord = ref<PersonalRecord>(),
   metricId = ref("");
 const tabs = [
-  { id: "overview", label: "总览", icon: UserRound },
-  { id: "skill", label: "技能", icon: Sprout },
-  { id: "asset", label: "背包", icon: Backpack },
-  { id: "state", label: "状态", icon: Activity },
-  { id: "experience", label: "奖项与经历", icon: Award },
-  { id: "todo", label: "待办", icon: CheckSquare },
+  { id: "overview", get label() { return tr("总览") }, icon: UserRound },
+  { id: "skill", get label() { return tr("技能") }, icon: Sprout },
+  { id: "asset", get label() { return tr("背包") }, icon: Backpack },
+  { id: "state", get label() { return tr("状态") }, icon: Activity },
+  { id: "experience", get label() { return tr("奖项与经历") }, icon: Award },
+  { id: "todo", get label() { return tr("待办") }, icon: CheckSquare },
 ];
 const section = computed(() =>
     tabs.some((t) => t.id === route.query.section)
@@ -121,7 +123,7 @@ async function load() {
   error.value=''; warning.value='';
   const [prefs,personal,overview,project,skills] = result;
   if(personal.status === 'fulfilled') records.value=personal.value;
-  else error.value='个人记录读取失败：' + errorMessage(personal.reason);
+  else error.value=tr("个人记录读取失败：") + errorMessage(personal.reason);
   if(prefs.status === 'fulfilled') {
     const nextPreference=String(prefs.value.showCompleted);
     // A changed default updates general views, while explicit date/completed filters stay selected.
@@ -132,11 +134,11 @@ async function load() {
   if(overview.status === 'fulfilled') counts.value=overview.value.counts;
   if(skills.status === 'fulfilled') skillCards.value=skills.value;
   if(project.status === 'fulfilled') projects.value=project.value;
-  if(result.some((r,i)=>i !== 1 && r.status === 'rejected')) warning.value='部分概览暂未载入，已有个人记录仍可使用。';
+  if(result.some((r,i)=>i !== 1 && r.status === 'rejected')) warning.value=tr("部分概览暂未载入，已有个人记录仍可使用。");
   const next = project.status === 'fulfilled' ? await Promise.allSettled(project.value.filter(x=>x.state !== 'archived').map(async x => ({id:x.id,name:x.name,...await workspace.timeline.context(x.id)}))) : [];
   if(run !== revision) return;
   if(project.status === 'fulfilled') nextSteps.value=next.flatMap(r=>r.status==='fulfilled' && r.value.next ? [r.value] : []);
-  if(next.some(r=>r.status==='rejected')) warning.value='部分项目的下一步读取失败，个人记录已载入。';
+  if(next.some(r=>r.status==='rejected')) warning.value=tr("部分项目的下一步读取失败，个人记录已载入。");
   loading.value=false;
 }
 void load();
@@ -173,7 +175,7 @@ async function action(fn: () => Promise<unknown>) {
   }
 }
 async function remove(record: PersonalRecord) {
-  if (!(await confirmDialog({ title: `删除个人记录「${record.name}」？`, message: '仅删除这条个人记录，已关联的外部资料与本地文件均会保留。', confirmText: '删除记录', tone: 'danger' }))) return;
+  if (!(await confirmDialog({ title: tr('删除个人记录「{p0}」？', {p0: record.name}), message: tr("仅删除这条个人记录，已关联的外部资料与本地文件均会保留。"), confirmText: tr('删除记录'), tone: 'danger' }))) return;
   await action(async () => {
     await workspace.personal.remove(record.id);
     if (selected.value?.id === record.id) go(section.value);
@@ -202,7 +204,7 @@ function saved(record: PersonalRecord) {
 <template>
   <main class="ws ws-layout personal-home">
     <aside class="ws-sidebar">
-      <h2>我</h2>
+      <h2>{{ $t("我") }}</h2>
       <button
         v-for="tab in tabs"
         :key="tab.id"
@@ -210,7 +212,7 @@ function saved(record: PersonalRecord) {
         @click="go(tab.id)"
       >
         <component :is="tab.icon" :size="16" />{{ tab.label }}</button
-      ><PersonalAssistant ref="assistant" /><small>知止而后得</small>
+      ><PersonalAssistant ref="assistant" /><small>{{ $t("知止而后得") }}</small>
     </aside>
     <section class="ws-main">
       <header class="ws-header">
@@ -219,16 +221,16 @@ function saved(record: PersonalRecord) {
           <p class="ws-muted">
             {{
               section === "overview"
-                ? "我拥有的、做过的，以及正在成为的。"
+                ? $t('我拥有的、做过的，以及正在成为的。')
                 : section === "skill"
-                  ? "从具体实践回看自己。"
+                  ? $t('从具体实践回看自己。')
                   : section === "asset"
-                    ? "记住用途、费用与到期时间。"
+                    ? $t('记住用途、费用与到期时间。')
                     : section === "state"
-                      ? "只和自己的昨天相比。"
+                      ? $t('只和自己的昨天相比。')
                       : section === "experience"
-                        ? "留下值得回看的时刻。"
-                        : "下一步，从一件小事开始。"
+                        ? $t('留下值得回看的时刻。')
+                        : $t('下一步，从一件小事开始。')
             }}
           </p>
         </div>
@@ -237,25 +239,25 @@ function saved(record: PersonalRecord) {
           class="ws-button primary"
           @click="edit(section as PersonalKind)"
         >
-          <Plus :size="16" />添加{{ title }}</button
+          <Plus :size="16" />{{ $t("添加{p0}", {p0: (title)}) }}</button
         ><button
           v-if="section === 'skill'"
           class="ws-button primary"
           @click="skillCardsRef?.openCreate()"
         >
-          <Plus :size="16" />新建技能卡片</button
-        ><button v-if="section === 'skill'" class="ws-button" @click="assistant?.open('帮我建立技能卡片，先查已有记录。')">让助理帮建</button
+          <Plus :size="16" />{{ $t("新建技能卡片") }}</button
+        ><button v-if="section === 'skill'" class="ws-button" @click="assistant?.open($t('帮我建立技能卡片，先查已有记录。'))">{{ $t("让助理帮建") }}</button
         >
       </header>
-      <p v-if="loading" class="ws-muted" role="status">正在更新个人记录…</p>
-      <div v-if="error || warning" class="ws-toolbar"><p :class="error ? 'ws-error' : 'ws-muted'" role="alert">{{ error || warning }}</p><button class="ws-button" :disabled="loading" @click="load">重新加载</button></div>
+      <p v-if="loading" class="ws-muted" role="status">{{ $t("正在更新个人记录…") }}</p>
+      <div v-if="error || warning" class="ws-toolbar"><p :class="error ? 'ws-error' : 'ws-muted'" role="alert">{{ error || warning }}</p><button class="ws-button" :disabled="loading" @click="load">{{ $t("重新加载") }}</button></div>
       <template v-if="section === 'overview'"
         ><section class="personal-identity">
           <span class="personal-avatar"
             ><img
               v-if="profile?.data.avatar"
               :src="String(profile.data.avatar)"
-              alt="个人头像"
+              :alt="$t('个人头像')"
               style="
                 width: 100%;
                 height: 100%;
@@ -264,16 +266,16 @@ function saved(record: PersonalRecord) {
               " /><UserRound v-else :size="33"
           /></span>
           <div>
-            <h2>{{ profile?.name || "从认识自己开始" }}</h2>
+            <h2>{{ profile?.name || $t('从认识自己开始') }}</h2>
             <p>
               {{
-                profile?.data.motto || "实践、资源与经历，都在这里慢慢积累。"
+                profile?.data.motto || $t('实践、资源与经历，都在这里慢慢积累。')
               }}
             </p>
           </div>
           <button
             class="ws-icon"
-            aria-label="编辑个人信息"
+            :aria-label="$t('编辑个人信息')"
             @click="edit('profile', profile)"
           >
             <Pencil :size="17" />
@@ -283,22 +285,21 @@ function saved(record: PersonalRecord) {
           <button
             class="ws-button"
             @click="edit('asset')"
-          >
-            记一项资产</button
-          ><button class="ws-button" @click="go('state')">记录状态</button
-          ><button class="ws-button" @click="go('todo')">记一件待办</button>
+          >{{ $t("记一项资产") }}</button
+          ><button class="ws-button" @click="go('state')">{{ $t("记录状态") }}</button
+          ><button class="ws-button" @click="go('todo')">{{ $t("记一件待办") }}</button>
         </div>
-        <div class="personal-focus" aria-label="近期要处理">
-          <button @click="view.todoView='active';go('todo')"><span>未完成待办</span><strong>{{ pendingTodos.length }}</strong><small>{{ overdueTodos.length ? overdueTodos.length + ' 项已逾期' : '按自己的节奏推进' }}</small></button>
-          <button @click="assetView.status=dueAssets.length?'reminding':'all';go('asset')"><span>到期事项</span><strong>{{ dueAssets.length }}</strong><small>已到期及 {{ preferences.remindDays }} 天内</small></button>
-          <button @click="router.push('/project')"><span>进行中的项目</span><strong>{{ activeProjects.length }}</strong><small>实践与维护中的工作</small></button>
+        <div class="personal-focus" :aria-label="$t('近期要处理')">
+          <button @click="view.todoView='active';go('todo')"><span>{{ $t("未完成待办") }}</span><strong>{{ pendingTodos.length }}</strong><small>{{ overdueTodos.length ? overdueTodos.length + $t(' 项已逾期') : $t('按自己的节奏推进') }}</small></button>
+          <button @click="assetView.status=dueAssets.length?'reminding':'all';go('asset')"><span>{{ $t("到期事项") }}</span><strong>{{ dueAssets.length }}</strong><small>{{ $t("已到期及 {p0} 天内", {p0: (preferences.remindDays)}) }}</small></button>
+          <button @click="router.push('/project')"><span>{{ $t("进行中的项目") }}</span><strong>{{ activeProjects.length }}</strong><small>{{ $t("实践与维护中的工作") }}</small></button>
         </div>
         <div class="personal-overview">
           <div>
             <section class="personal-block">
               <header class="ws-section-head">
-                <h2>最近的实践</h2>
-                <button class="ws-button" @click="go('skill')">所有技能</button>
+                <h2>{{ $t("最近的实践") }}</h2>
+                <button class="ws-button" @click="go('skill')">{{ $t("所有技能") }}</button>
               </header>
               <div class="personal-cards">
                 <button
@@ -309,25 +310,21 @@ function saved(record: PersonalRecord) {
                 >
                   <h3>{{ skill.name }}</h3>
                   <p class="ws-muted">
-                    {{ skill.records.at(-1)?.date || '实践与自评' }}
+                    {{ skill.records.at(-1)?.date || $t('实践与自评') }}
                   </p>
                   <p class="ws-pre">
                     {{
-                      skill.summary.slice(0, 110) || "尚未补充事实摘要"
+                      skill.summary.slice(0, 110) || $t('尚未补充事实摘要')
                     }}
                   </p>
                 </button>
               </div>
-              <p v-if="!recentSkills.length" class="ws-muted">
-                从一次实践开始，记录你用过什么、做出了什么。
-              </p>
+              <p v-if="!recentSkills.length" class="ws-muted">{{ $t("从一次实践开始，记录你用过什么、做出了什么。") }}</p>
             </section>
             <section class="personal-block">
               <header class="ws-section-head">
-                <h2>正在做的事</h2>
-                <button class="ws-button" @click="router.push('/project')">
-                  全部项目
-                </button>
+                <h2>{{ $t("正在做的事") }}</h2>
+                <button class="ws-button" @click="router.push('/project')">{{ $t("全部项目") }}</button>
               </header>
               <button
                 v-for="p in activeProjects.slice(0, 6)"
@@ -342,16 +339,14 @@ function saved(record: PersonalRecord) {
                   }}</small></span
                 ><ArrowUpRight :size="16" />
               </button>
-              <p v-if="!activeProjects.length" class="ws-muted">
-                登记一个项目，把资料与实践连起来。
-              </p>
+              <p v-if="!activeProjects.length" class="ws-muted">{{ $t("登记一个项目，把资料与实践连起来。") }}</p>
             </section>
           </div>
           <aside>
-            <section v-if="pendingTodos.length" class="personal-block"><header class="ws-section-head"><h2>下一件小事</h2><button class="ws-button" @click="go('todo')">全部待办</button></header><div v-for="todo in pendingTodos.slice(0,3)" :key="todo.id" class="personal-due-todo"><input type="checkbox" :checked="!!todo.data.done" :disabled="busy" :aria-label="'完成 ' + todo.name" @change="toggle(todo)" /><button class="personal-due" @click="edit('todo',todo)"><strong>{{ todo.name }}</strong><small>{{ dueText(todo.data.dueOn,today) }}</small></button></div></section>
+            <section v-if="pendingTodos.length" class="personal-block"><header class="ws-section-head"><h2>{{ $t("下一件小事") }}</h2><button class="ws-button" @click="go('todo')">{{ $t("全部待办") }}</button></header><div v-for="todo in pendingTodos.slice(0,3)" :key="todo.id" class="personal-due-todo"><input type="checkbox" :checked="!!todo.data.done" :disabled="busy" :aria-label="$t('完成 ') + todo.name" @change="toggle(todo)" /><button class="personal-due" @click="edit('todo',todo)"><strong>{{ todo.name }}</strong><small>{{ dueText(todo.data.dueOn,today) }}</small></button></div></section>
             <section v-if="preferences.showCounts" class="personal-block">
               <header class="ws-section-head">
-                <h2>我的资源</h2>
+                <h2>{{ $t("我的资源") }}</h2>
                 <Backpack :size="19" />
               </header>
               <button
@@ -366,10 +361,10 @@ function saved(record: PersonalRecord) {
             </section>
             <section class="personal-block">
               <header class="ws-section-head">
-                <h2>近期到期</h2>
+                <h2>{{ $t("近期到期") }}</h2>
                 <button
                   class="ws-icon"
-                  aria-label="查看背包"
+                  :aria-label="$t('查看背包')"
                   @click="go('asset')"
                 >
                   <ArrowUpRight :size="17" />
@@ -388,17 +383,15 @@ function saved(record: PersonalRecord) {
                   >{{ dueLabel(a) }}</small
                 >
               </button>
-              <p v-if="!dueAssets.length" class="ws-muted">
-                暂无已到期或提醒范围内的资产。
-              </p>
+              <p v-if="!dueAssets.length" class="ws-muted">{{ $t("暂无已到期或提醒范围内的资产。") }}</p>
             </section>
           </aside>
         </div></template
       >
       <template v-else-if="section === 'state'">
         <StateCapture :metrics="list('metric')" />
-        <div class="ws-toolbar"><input v-model="view.stateQuery" aria-label="搜索状态指标" placeholder="搜索指标或单位" /><small class="ws-muted">{{ metrics.length }} / {{ list('metric').length }} 项指标</small></div>
-        <p v-if="!metrics.length" class="ws-empty">{{ list('metric').length ? '没有符合条件的指标。' : '在上方填写指标名称、单位和数值，开始第一条记录。' }}</p>
+        <div class="ws-toolbar"><input v-model="view.stateQuery" :aria-label="$t('搜索状态指标')" :placeholder="$t('搜索指标或单位')" /><small class="ws-muted">{{ $t("{p0} / {p1} 项指标", {p0: (metrics.length), p1: (list('metric').length)}) }}</small></div>
+        <p v-if="!metrics.length" class="ws-empty">{{ list('metric').length ? $t('没有符合条件的指标。') : $t('在上方填写指标名称、单位和数值，开始第一条记录。') }}</p>
         <div class="personal-state-grid">
           <section
             v-for="metric in metrics"
@@ -406,15 +399,12 @@ function saved(record: PersonalRecord) {
             class="ws-panel"
           >
             <div class="ws-toolbar">
-              <button class="ws-button" @click="edit('metric', metric)">
-                编辑指标</button
+              <button class="ws-button" @click="edit('metric', metric)">{{ $t("编辑指标") }}</button
               ><button
                 class="ws-button danger"
                 :disabled="busy"
                 @click="remove(metric)"
-              >
-                移除指标
-              </button>
+              >{{ $t("移除指标") }}</button>
             </div>
             <StateHistory
               :metric="metric"
@@ -428,55 +418,53 @@ function saved(record: PersonalRecord) {
       <template v-else-if="section === 'todo'"
         ><div class="personal-todos">
           <div class="ws-toolbar">
-            <input v-model="view.todoQuery" aria-label="搜索待办" placeholder="搜索待办名称或备注" />
-            <select v-model="todoView" aria-label="待办视图">
-              <option value="active">未完成</option>
-              <option value="overdue">已逾期</option>
-              <option value="today">今日</option>
-              <option value="upcoming">未来七天</option>
-              <option value="completed">已完成</option>
-              <option value="all">全部</option>
+            <input v-model="view.todoQuery" :aria-label="$t('搜索待办')" :placeholder="$t('搜索待办名称或备注')" />
+            <select v-model="todoView" :aria-label="$t('待办视图')">
+              <option value="active">{{ $t("未完成") }}</option>
+              <option value="overdue">{{ $t("已逾期") }}</option>
+              <option value="today">{{ $t("今日") }}</option>
+              <option value="upcoming">{{ $t("未来七天") }}</option>
+              <option value="completed">{{ $t("已完成") }}</option>
+              <option value="all">{{ $t("全部") }}</option>
             </select>
           </div>
           <form class="ws-toolbar" @submit.prevent="captureTodo">
             <input
               v-model="quickTodo"
-              aria-label="快速添加待办"
-              placeholder="记下一件小事，按 Enter 添加"
+              :aria-label="$t('快速添加待办')"
+              :placeholder="$t('记下一件小事，按 Enter 添加')"
               maxlength="300"
-            /><input v-model="quickDue" aria-label="快速待办日期" type="date" /><button
+            /><input v-model="quickDue" :aria-label="$t('快速待办日期')" type="date" /><button
               class="ws-button primary"
               :disabled="busy || !quickTodo.trim()"
-            >
-              添加
-            </button>
+            >{{ $t("添加") }}</button>
           </form>
-          <p class="ws-muted" role="status">当前视图 {{ filteredTodos.length }} 项 · 按截止日排序</p>
-          <p v-if="!filteredTodos.length" class="ws-empty">当前视图没有待办，可以调整筛选或在上方添加。</p>
+          <p class="ws-muted" role="status">{{ $t("当前视图 {p0} 项 · 按截止日排序", {p0: (filteredTodos.length)}) }}</p>
+          <p v-if="!filteredTodos.length" class="ws-empty">{{ $t("当前视图没有待办，可以调整筛选或在上方添加。") }}</p>
           <article v-for="todo in filteredTodos" :key="todo.id">
             <input
               type="checkbox"
               :checked="!!todo.data.done"
               :disabled="busy"
-              :aria-label="'完成 ' + todo.name"
+              :aria-label="$t('完成 ') + todo.name"
               @change="toggle(todo)"
             />
             <div>
               <strong :class="{ done: todo.data.done }">{{ todo.name }}</strong>
               <p class="ws-muted">
-                {{ todo.data.dueOn || "未设置日期" }}<span v-if="!todo.data.done && todo.data.dueOn"> · {{ dueText(todo.data.dueOn,today) }}</span>
+                {{ todo.data.dueOn || $t('未设置日期') }}<span v-if="!todo.data.done && todo.data.dueOn"> · {{ dueText(todo.data.dueOn,today) }}</span>
               </p>
               <p v-if="todo.body" class="ws-pre">{{ todo.body }}</p>
             </div>
             <button
               class="ws-icon"
-              aria-label="编辑待办"
+              :aria-label="$t('编辑待办')"
               @click="edit('todo', todo)"
             >
               <Pencil :size="15" /></button
             ><button
               class="ws-icon"
-              aria-label="删除待办"
+              :aria-label="$t('删除待办')"
               @click="remove(todo)"
             >
               ×
@@ -513,29 +501,25 @@ function saved(record: PersonalRecord) {
           @select="go('asset', $event.id)"
         />
         <article v-if="selected" class="ws-panel asset-detail">
-          <button class="ws-button" @click="go('asset')">返回背包列表</button>
+          <button class="ws-button" @click="go('asset')">{{ $t("返回背包列表") }}</button>
           <header class="ws-section-head">
             <h2>{{ selected.name }}</h2>
-            <button class="ws-button" @click="edit('asset', selected)">
-              编辑
-            </button>
+            <button class="ws-button" @click="edit('asset', selected)">{{ $t("编辑") }}</button>
           </header>
-          <dl class="asset-facts"><div><dt>类别 / 提供方</dt><dd>{{ selected.data.category || '其他' }} · {{ selected.data.provider || '未填写' }}</dd></div><div><dt>费用 / 周期</dt><dd>{{ typeof selected.data.cost === 'number' ? selected.data.cost + ' ' + (selected.data.currency || '') : '费用未填写' }} · {{ ({monthly:'每月',yearly:'每年',once:'一次性',other:'其他周期'} as Record<string,string>)[String(selected.data.cycle)] || '未设置周期' }}</dd></div><div><dt>到期</dt><dd>{{ selected.data.expiresOn || '未设到期日' }} <small>{{ selected.data.expiresOn ? dueLabel(selected) : '' }}</small></dd></div></dl>
-          <div class="asset-reminder-actions"><button class="ws-button" :disabled="busy" @click="assetDialog = 'renew'">已续费</button><button v-if="isSnoozed(selected, today)" class="ws-button" :disabled="busy" @click="action(() => workspace.personal.snooze(selected!.id, null))">取消暂缓</button><button v-else class="ws-button" :disabled="busy" @click="assetDialog = 'snooze'">暂缓提醒</button><small v-if="isSnoozed(selected, today)" class="ws-muted">已暂缓至 {{ selected.data.snoozedUntil }}</small></div>
-          <section v-if="selected.data.renewals?.length" class="asset-renewals"><h3>续费记录</h3><ul><li v-for="(renewal, index) in [...selected.data.renewals].reverse()" :key="index"><time>{{ renewal.on }}</time><span>{{ renewal.from || '未设到期日' }} → {{ renewal.to }}</span><span>{{ renewal.cost === undefined ? '费用未填写' : renewal.cost + ' ' + (renewal.currency || '') }}</span></li></ul></section>
-          <p class="ws-pre">{{ selected.body || '尚未补充用途或备注' }}</p>
-          <button v-if="selected.data.url" class="ws-button" @click="openAssetUrl(String(selected.data.url))">管理入口</button><ResourceLinks
+          <dl class="asset-facts"><div><dt>{{ $t("类别 / 提供方") }}</dt><dd>{{ selected.data.category || $t('其他') }} · {{ selected.data.provider || $t('未填写') }}</dd></div><div><dt>{{ $t("费用 / 周期") }}</dt><dd>{{ typeof selected.data.cost === 'number' ? selected.data.cost + ' ' + (selected.data.currency || '') : $t('费用未填写') }} · {{ ({monthly:$t('每月'),yearly:$t('每年'),once:$t('一次性'),other:$t('其他周期')} as Record<string,string>)[String(selected.data.cycle)] || $t('未设置周期') }}</dd></div><div><dt>{{ $t("到期") }}</dt><dd>{{ selected.data.expiresOn || $t('未设到期日') }} <small>{{ selected.data.expiresOn ? dueLabel(selected) : '' }}</small></dd></div></dl>
+          <div class="asset-reminder-actions"><button class="ws-button" :disabled="busy" @click="assetDialog = 'renew'">{{ $t("已续费") }}</button><button v-if="isSnoozed(selected, today)" class="ws-button" :disabled="busy" @click="action(() => workspace.personal.snooze(selected!.id, null))">{{ $t("取消暂缓") }}</button><button v-else class="ws-button" :disabled="busy" @click="assetDialog = 'snooze'">{{ $t("暂缓提醒") }}</button><small v-if="isSnoozed(selected, today)" class="ws-muted">{{ $t("已暂缓至 {p0}", {p0: (selected.data.snoozedUntil)}) }}</small></div>
+          <section v-if="selected.data.renewals?.length" class="asset-renewals"><h3>{{ $t("续费记录") }}</h3><ul><li v-for="(renewal, index) in [...selected.data.renewals].reverse()" :key="index"><time>{{ renewal.on }}</time><span>{{ renewal.from || $t('未设到期日') }} → {{ renewal.to }}</span><span>{{ renewal.cost === undefined ? $t('费用未填写') : renewal.cost + ' ' + (renewal.currency || '') }}</span></li></ul></section>
+          <p class="ws-pre">{{ selected.body || $t('尚未补充用途或备注') }}</p>
+          <button v-if="selected.data.url" class="ws-button" @click="openAssetUrl(String(selected.data.url))">{{ $t("管理入口") }}</button><ResourceLinks
             owner="asset"
             :id="selected.id"
             :key="selected.id"
-            title="相关资料"
+            :title="$t('相关资料')"
           /><button
             class="ws-button danger"
             :disabled="busy"
             @click="remove(selected)"
-          >
-            删除这条记录
-          </button>
+          >{{ $t("删除这条记录") }}</button>
         </article></template
       >
       <PersonalEditor

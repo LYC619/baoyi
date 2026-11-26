@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 import { computed, ref } from 'vue'
 import { Eye, EyeOff, Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
@@ -50,7 +52,7 @@ async function saveAi(): Promise<void> {
     p.id === settings.settings.ai_profile_id ? { ...p, ...ai } : p
   )
   await settings.patch({ ai, ai_profiles: profiles })
-  success(activeProfile.value ? `已保存到「${activeProfile.value.name}」` : 'AI 配置已保存')
+  success(activeProfile.value ? tr("已保存到「{p0}」", {p0: (activeProfile.value.name)}) : tr("AI 配置已保存"))
 }
 
 async function testConnection(): Promise<void> {
@@ -96,7 +98,7 @@ async function switchProfile(id: string): Promise<void> {
   await settings.patch({ ai: cfg, ai_profile_id: id })
   testResult.value = null
   modelList.value = []
-  success(`已切换到「${p.name}」`)
+  success(tr("已切换到「{p0}」", {p0: (p.name)}))
 }
 
 /**
@@ -106,22 +108,23 @@ async function switchProfile(id: string): Promise<void> {
 const profileName = ref(activeProfile.value?.name ?? '')
 
 /** 名字空着时拿域名兜一个，省得每次都要自己想 */
-const namePlaceholder = computed(() => {
+const profileHost = computed(() => {
   try {
-    return new URL(apiUrl.value.trim()).hostname.replace(/^api\./, '') || '配置名'
+    return new URL(apiUrl.value.trim()).hostname.replace(/^api\./, '')
   } catch {
-    return '配置名' // 地址未填完整时使用默认名称。
+    return '' // 地址未填完整时请用户填写名称。
   }
 })
+const namePlaceholder = computed(() => profileHost.value || tr("配置名"))
 
 const canRename = computed(
   () => !!activeProfile.value && !!profileName.value.trim() && profileName.value.trim() !== activeProfile.value.name
 )
 
 async function addProfile(): Promise<void> {
-  const name = profileName.value.trim() || namePlaceholder.value
-  if (name === '配置名') {
-    error('先给这套配置起个名字')
+  const name = profileName.value.trim() || profileHost.value
+  if (!name) {
+    error(tr("先给这套配置起个名字"))
     return
   }
   // ponytail: 时间戳做 id 就够 —— 存一套要点一次按钮，人手点不出同毫秒的两条。
@@ -134,7 +137,7 @@ async function addProfile(): Promise<void> {
     ai_profiles: [...profiles.value, profile],
     ai_profile_id: profile.id
   })
-  success(`已存为「${name}」`)
+  success(tr("已存为「{p0}」", {p0: (name)}))
 }
 
 async function renameProfile(): Promise<void> {
@@ -144,7 +147,7 @@ async function renameProfile(): Promise<void> {
   await settings.patch({
     ai_profiles: profiles.value.map((x) => (x.id === p.id ? { ...x, name } : x))
   })
-  success(`已改名为「${name}」`)
+  success(tr("已改名为「{p0}」", {p0: (name)}))
 }
 
 /**
@@ -155,14 +158,14 @@ async function removeProfile(): Promise<void> {
   const p = activeProfile.value
   if (!p) return
   // confirm 在 Electron 里是能用的（prompt 才是空实现），删除这种不可逆操作值得拦一道
-  if (!(await confirmDialog({ title: `删除模型预设「${p.name}」？`, message: '当前表单里已填写的连接信息不会被清空。', confirmText: '删除预设', tone: 'danger' }))) return
+  if (!(await confirmDialog({ title: tr('删除模型预设「{p0}」？', {p0: p.name}), message: tr("当前表单里已填写的连接信息不会被清空。"), confirmText: tr('删除预设'), tone: 'danger' }))) return
   await settings.patch({
     ai_profiles: profiles.value.filter((x) => x.id !== p.id),
     ai_profile_id: ''
   })
   // 名字框留着已删掉的名字会让人以为没删干净
   profileName.value = ''
-  success(`已删除「${p.name}」`)
+  success(tr("已删除「{p0}」", {p0: (p.name)}))
 }
 
 /* ------------------------------ 模型列表 ------------------------------ */
@@ -178,7 +181,7 @@ async function loadModels(): Promise<void> {
     modelList.value = r.models
     // 失败原因得说出来：中转站不实现 /models 是常事，静默清空只会让人以为 Key 废了
     if (!r.ok) error(r.message)
-    else if (!r.models.includes(model.value.trim())) toast(`${r.message}，点开模型框挑一个`)
+    else if (!r.models.includes(model.value.trim())) toast(tr("{p0}，点开模型框挑一个", {p0: (r.message)}))
   } finally {
     modelsLoading.value = false
   }
@@ -188,10 +191,10 @@ async function loadModels(): Promise<void> {
 <template>
 <section class="panel">
   <div class="sec-head">
-    <h2>AI 模型配置</h2>
+    <h2>{{ $t("AI 模型配置") }}</h2>
     <label class="switch">
       <input v-model="enabled" type="checkbox" @change="saveAi" />
-      <span>{{ enabled ? '已启用' : '已关闭' }}</span>
+      <span>{{ enabled ? $t('已启用') : $t('已关闭') }}</span>
     </label>
   </div>
 
@@ -202,7 +205,7 @@ async function loadModels(): Promise<void> {
       @change="switchProfile(($event.target as HTMLSelectElement).value)"
     >
       <option value="" disabled>
-        {{ profiles.length ? '选择已存的配置…' : '还没有存过配置' }}
+        {{ profiles.length ? $t('选择已存的配置…') : $t('还没有存过配置') }}
       </option>
       <option v-for="p in profiles" :key="p.id" :value="p.id">
         {{ p.name }} · {{ p.model }}
@@ -215,14 +218,12 @@ async function loadModels(): Promise<void> {
       :placeholder="namePlaceholder"
       @keydown.enter="renameProfile"
     />
-    <button class="btn btn--subtle" title="把当前填的存成一套" @click="addProfile">
-      <Plus :size="14" />
-      存为新配置
-    </button>
+    <button class="btn btn--subtle" :title="$t('把当前填的存成一套')" @click="addProfile">
+      <Plus :size="14" />{{ $t("存为新配置") }}</button>
     <button
       class="btn btn--subtle"
       :disabled="!canRename"
-      title="用左边的名字重命名当前配置"
+      :title="$t('用左边的名字重命名当前配置')"
       @click="renameProfile"
     >
       <Pencil :size="14" />
@@ -230,7 +231,7 @@ async function loadModels(): Promise<void> {
     <button
       class="btn btn--subtle"
       :disabled="!activeProfile"
-      title="删除当前配置"
+      :title="$t('删除当前配置')"
       @click="removeProfile"
     >
       <Trash2 :size="14" />
@@ -239,7 +240,7 @@ async function loadModels(): Promise<void> {
 
   <div class="form">
     <label class="field">
-      <span class="field__label">接口地址</span>
+      <span class="field__label">{{ $t("接口地址") }}</span>
       <input
         v-model="apiUrl"
         class="input mono"
@@ -261,7 +262,7 @@ async function loadModels(): Promise<void> {
         <button
           class="field__eye"
           type="button"
-          :title="keyVisible ? '隐藏' : '显示'"
+          :title="keyVisible ? $t('隐藏') : $t('显示')"
           @click="keyVisible = !keyVisible"
         >
           <EyeOff v-if="keyVisible" :size="14" />
@@ -270,7 +271,7 @@ async function loadModels(): Promise<void> {
       </span>
     </label>
     <label class="field">
-      <span class="field__label">模型</span>
+      <span class="field__label">{{ $t("模型") }}</span>
       <span class="field__wrap">
         <input
           v-model="model"
@@ -287,7 +288,7 @@ async function loadModels(): Promise<void> {
           class="field__eye"
           type="button"
           :disabled="modelsLoading"
-          title="拉取模型列表"
+          :title="$t('拉取模型列表')"
           @click="loadModels"
         >
           <Loader2 v-if="modelsLoading" :size="14" class="spin" />
@@ -298,25 +299,17 @@ async function loadModels(): Promise<void> {
   </div>
 
   <div class="row">
-    <button class="btn btn--primary" @click="saveAi">保存配置</button>
+    <button class="btn btn--primary" @click="saveAi">{{ $t("保存配置") }}</button>
     <button class="btn btn--ghost" :disabled="testing" @click="testConnection">
-      <Loader2 v-if="testing" :size="14" class="spin" />
-      测试连接
-    </button>
-    <span v-if="aiDirty" class="dirty">「{{ activeProfile?.name }}」有未保存的改动</span>
+      <Loader2 v-if="testing" :size="14" class="spin" />{{ $t("测试连接") }}</button>
+    <span v-if="aiDirty" class="dirty">{{ $t("「{p0}」有未保存的改动", {p0: (activeProfile?.name)}) }}</span>
   </div>
 
   <p v-if="testResult" class="result" :class="{ 'result--bad': !testResult.ok }">
-    {{ testResult.message }}
+    {{ $systemMessage(testResult.message) }}
   </p>
 
-  <p class="sec-desc sec-desc--foot">
-    需要<b>支持工具调用</b>的模型，兼容 OpenAI 接口格式的服务商均可使用。
-    deepseek-chat、qwen-plus、gpt-4o-mini 都够用。
-    「测试连接」会真的发一次工具调用来验证，而不只是看能不能连通 ——
-    模型列表里哪些支持工具调用，接口不会告诉你，挑完还是得测一次。
-    多套配置存在本地库里，Key 明文存放，和其他设置一样。
-  </p>
+  <p class="sec-desc sec-desc--foot">{{ $t("需要") }}<b>{{ $t("支持工具调用") }}</b>{{ $t("的模型，兼容 OpenAI 接口格式的服务商均可使用。 deepseek-chat、qwen-plus、gpt-4o-mini 都够用。 「测试连接」会真的发一次工具调用来验证，而不只是看能不能连通 —— 模型列表里哪些支持工具调用，接口不会告诉你，挑完还是得测一次。 多套配置存在本地库里，Key 明文存放，和其他设置一样。") }}</p>
 </section>
 </template>
 

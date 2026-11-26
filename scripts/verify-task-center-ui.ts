@@ -55,11 +55,14 @@ const center = load('src/composables/useTaskCenter.ts').useTaskCenter()
 const activeModule = load('src/composables/useModules.ts').activeModule
 activeModule.value = 'video'
 const app = renderer.createApp(load('src/components/tasks/TaskCenter.vue').default)
+const i18n = load('src/i18n/index.ts')
+i18n.installI18n(app)
 app.config.errorHandler = error => { console.error(error); throw error }
 app.config.warnHandler = message => { throw new Error('Unexpected Vue warning: ' + message) }
 app.mount(root)
 const click = async (n: Node) => { n.props.onClick({ stopPropagation: () => {} }); await Vue.nextTick() }
 const trigger = classed('task-trigger')
+assert.match(text(trigger), /日志/, 'the title bar entry uses its translated label')
 assert.equal(trigger.props['aria-expanded'], false)
 await click(trigger)
 assert.equal(trigger.props['aria-expanded'], true)
@@ -80,6 +83,15 @@ assert.equal(find(n => n.props.role === 'progressbar').props['aria-valuenow'], 5
 assert.ok(text(body).includes('D:/library/test.mkv'))
 assert.match(text(body), /敏感字符作为文本/)
 assert.equal(all(body).some(n => n.type === 'script'), false)
+i18n.locale.value = 'en'
+assert.equal(i18n.tr('日志'), 'Logs')
+await Vue.nextTick()
+assert.match(text(classed('task-trigger')), /Logs/)
+assert.match(text(body), /Video scan/)
+assert.ok(text(body).includes('D:/library/test.mkv'))
+assert.match(text(body), /敏感字符作为文本/)
+i18n.locale.value = 'zh-CN'
+await Vue.nextTick()
 const videoDownload = center.start('video-download', '下载：站点标题')
 center.update(videoDownload, { total: 1024 * 1024, processed: 512 * 1024, message: '正在下载' })
 await Vue.nextTick()
@@ -119,6 +131,5 @@ const source = fs.readFileSync('src/components/tasks/TaskCenter.vue', 'utf8')
 assert.match(source, /-webkit-app-region: no-drag/)
 assert.match(source, /prefers-reduced-motion/)
 assert.ok(fs.readFileSync('src/components/TitleBar.vue', 'utf8').includes('<TaskCenter />'))
-assert.match(source, /日志<\/span>/, 'the title bar entry is called 日志 now')
 assert.match(source, /下载记录/); assert.match(source, /整理记录/); assert.match(source, /识别与调用/)
 console.log('Task center UI: render, live counts/progress, escaped logs, clear, keyboard, outside click and cleanup passed')

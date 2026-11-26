@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowDown, FolderOpen, Loader2, X } from 'lucide-vue-next'
 import type { VideoItem } from '@/types'
@@ -34,8 +36,8 @@ async function save(): Promise<void> {
   busy.value = true
   try {
     const result = await window.baoyi.video.renameCollection(props.item.id, name.value.trim())
-    if (result.warnings.length) toast('合集已更名；' + result.warnings[0])
-    else success('合集名称与目录已同步更新')
+    if (result.warnings.length) toast(tr("合集已更名；") + result.warnings[0])
+    else success(tr("合集名称与目录已同步更新"))
     emit('changed'); emit('close')
   } catch (error) { failure.value = errorMessage(error) }
   finally { busy.value = false }
@@ -48,12 +50,12 @@ onBeforeUnmount(() => { disposed = true; clearTimeout(timer); request++; dialog.
   <Teleport to="body">
     <dialog ref="dialog" class="collection-name" aria-labelledby="collection-name-title" @cancel.prevent="!busy && emit('close')" @click="($event.target === dialog && !busy) && emit('close')">
       <form @submit.prevent="save">
-        <header><div><h2 id="collection-name-title">修改合集名称</h2><p>合集标题、文件夹和本地资料一起更新。</p></div><button type="button" :disabled="busy" aria-label="关闭更名窗口" @click="emit('close')"><X :size="18" /></button></header>
-        <label class="collection-name__field">合集名称<input v-model="name" class="input" maxlength="240" :disabled="busy" aria-label="合集名称" /></label>
-        <div v-if="preview" class="collection-name__preview" aria-label="目录更名预览"><p><FolderOpen :size="15" /><span>{{ preview.from }}</span></p><ArrowDown :size="16" /><p><FolderOpen :size="15" /><strong>{{ preview.to }}</strong></p></div>
-        <p v-else-if="checking" class="collection-name__checking">正在检查目录…</p>
+        <header><div><h2 id="collection-name-title">{{ $t("修改合集名称") }}</h2><p>{{ $t("合集标题、文件夹和本地资料一起更新。") }}</p></div><button type="button" :disabled="busy" :aria-label="$t('关闭更名窗口')" @click="emit('close')"><X :size="18" /></button></header>
+        <label class="collection-name__field">{{ $t("合集名称") }}<input v-model="name" class="input" maxlength="240" :disabled="busy" :aria-label="$t('合集名称')" /></label>
+        <div v-if="preview" class="collection-name__preview" :aria-label="$t('目录更名预览')"><p><FolderOpen :size="15" /><span>{{ preview.from }}</span></p><ArrowDown :size="16" /><p><FolderOpen :size="15" /><strong>{{ preview.to }}</strong></p></div>
+        <p v-else-if="checking" class="collection-name__checking">{{ $t("正在检查目录…") }}</p>
         <p v-if="failure" class="collection-name__error" role="alert">{{ failure }}</p>
-        <footer><button type="button" class="btn btn--ghost" :disabled="busy" @click="emit('close')">取消</button><button type="submit" class="btn btn--primary" :disabled="!canSave"><Loader2 v-if="busy" class="spin" :size="14" />{{ busy ? '正在更名…' : '保存名称并更名目录' }}</button></footer>
+        <footer><button type="button" class="btn btn--ghost" :disabled="busy" @click="emit('close')">{{ $t("取消") }}</button><button type="submit" class="btn btn--primary" :disabled="!canSave"><Loader2 v-if="busy" class="spin" :size="14" />{{ busy ? $t('正在更名…') : $t('保存名称并更名目录') }}</button></footer>
       </form>
     </dialog>
   </Teleport>

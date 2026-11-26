@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ArrowUpRight, Check, ChevronDown, ChevronUp, ListPlus, Loader2, Music2, Pause, Play } from 'lucide-vue-next'
 import { useAudioStore } from '@/stores/audio'
@@ -47,7 +49,7 @@ async function load() {
         try {
           return audioTracks(item, await window.baoyi.video.library(item.id))
         } catch {
-          if (round === revision) failure.value = '部分曲目暂时无法读取，请重试'
+          if (round === revision) failure.value = tr("部分曲目暂时无法读取，请重试")
           return []
         }
       })
@@ -121,7 +123,7 @@ function playAlbum(item: VideoItem) {
 function enqueueItem(item: VideoItem) {
   const own = ownTracks(item).filter(t => t.available !== false)
   const added = audio.enqueue(own)
-  if (added > 0) success(`已加入播放清单（${added} 首）`)
+  if (added > 0) success(tr("已加入播放清单（{p0} 首）", {p0: (added)}))
 }
 
 function playAllVisible() {
@@ -135,24 +137,21 @@ function toggleExpand(id: string) {
 </script>
 
 <template>
-  <section class="audio-library" aria-label="我的音频">
+  <section class="audio-library" :aria-label="$t('我的音频')">
     <header class="audio-header">
       <div class="audio-disc"><Music2 :size="30" /></div>
       <div class="audio-header-main">
-        <span class="audio-eyebrow">音乐 · 播客 · 有声书</span>
-        <h2>我的音频</h2>
-        <p>{{ items.length }} 项音频 · {{ loading ? '正在读取曲目…' : tracks.length + ' 首曲目' }}</p>
+        <span class="audio-eyebrow">{{ $t("音乐 · 播客 · 有声书") }}</span>
+        <h2>{{ $t("我的音频") }}</h2>
+        <p>{{ $t("{p0} 项音频 · {p1}", {p0: (items.length), p1: (loading ? $t('正在读取曲目…') : tracks.length + $t(' 首曲目'))}) }}</p>
       </div>
       <div v-if="items.length" class="audio-header-tools">
-        <div v-if="albumCount > 0 && singleCount > 0" class="audio-kind-pills" role="group" aria-label="音频形态筛选">
-          <button type="button" :class="{ active: kindFilter === 'all' }" @click="kindFilter = 'all'">
-            全部 {{ items.length }}
+        <div v-if="albumCount > 0 && singleCount > 0" class="audio-kind-pills" role="group" :aria-label="$t('音频形态筛选')">
+          <button type="button" :class="{ active: kindFilter === 'all' }" @click="kindFilter = 'all'">{{ $t("全部 {p0}", {p0: (items.length)}) }}
           </button>
-          <button type="button" :class="{ active: kindFilter === 'albums' }" @click="kindFilter = 'albums'">
-            专辑 / 合集 {{ albumCount }}
+          <button type="button" :class="{ active: kindFilter === 'albums' }" @click="kindFilter = 'albums'">{{ $t("专辑 / 合集 {p0}", {p0: (albumCount)}) }}
           </button>
-          <button type="button" :class="{ active: kindFilter === 'singles' }" @click="kindFilter = 'singles'">
-            单曲 {{ singleCount }}
+          <button type="button" :class="{ active: kindFilter === 'singles' }" @click="kindFilter = 'singles'">{{ $t("单曲 {p0}", {p0: (singleCount)}) }}
           </button>
         </div>
         <button
@@ -162,27 +161,23 @@ function toggleExpand(id: string) {
           :disabled="loading || !filteredTracks.some(t => t.available !== false)"
           @click="playAllVisible"
         >
-          <Play :size="15" />全部播放
-        </button>
+          <Play :size="15" />{{ $t("全部播放") }}</button>
       </div>
     </header>
 
     <p v-if="failure" class="audio-error" role="alert">
-      {{ failure }} <button class="btn btn--ghost" @click="load">重试</button>
+      {{ failure }} <button class="btn btn--ghost" @click="load">{{ $t("重试") }}</button>
     </p>
-    <p v-if="!items.length" class="audio-empty">
-      点右上角「找音乐」在线搜索试听，或把本地专辑、播客、单曲直接拖进来。
-    </p>
-    <p v-else-if="!filteredItems.length" class="audio-empty">
-      当前筛选下没有音频。<button type="button" class="btn btn--ghost" @click="kindFilter = 'all'">查看全部</button>
+    <p v-if="!items.length" class="audio-empty">{{ $t("点右上角「找音乐」在线搜索试听，或把本地专辑、播客、单曲直接拖进来。") }}</p>
+    <p v-else-if="!filteredItems.length" class="audio-empty">{{ $t("当前筛选下没有音频。") }}<button type="button" class="btn btn--ghost" @click="kindFilter = 'all'">{{ $t("查看全部") }}</button>
     </p>
 
     <template v-else-if="view === 'cards'">
-      <div v-if="expandedItem && !selecting" class="audio-album-drawer" role="region" :aria-label="title(expandedItem) + ' 曲目列表'">
+      <div v-if="expandedItem && !selecting" class="audio-album-drawer" role="region" :aria-label="title(expandedItem) + $t(' 曲目列表')">
         <header>
           <div>
             <strong>{{ title(expandedItem) }}</strong>
-            <span>共 {{ ownTracks(expandedItem).length }} 首曲目</span>
+            <span>{{ $t("共 {p0} 首曲目", {p0: (ownTracks(expandedItem).length)}) }}</span>
           </div>
           <div class="audio-album-drawer-actions">
             <button
@@ -191,20 +186,16 @@ function toggleExpand(id: string) {
               :disabled="!ownTracks(expandedItem).some(t => t.available !== false)"
               @click="playAlbum(expandedItem)"
             >
-              <Play :size="14" />播放本辑
-            </button>
+              <Play :size="14" />{{ $t("播放本辑") }}</button>
             <button
               type="button"
               class="btn btn--ghost"
               :disabled="!ownTracks(expandedItem).some(t => t.available !== false)"
               @click="enqueueItem(expandedItem)"
             >
-              <ListPlus :size="14" />加入清单
-            </button>
-            <button type="button" class="btn btn--ghost" @click="emit('open', expandedItem)">
-              专辑详情
-            </button>
-            <button type="button" class="btn btn--subtle" @click="expandedId = ''">收起</button>
+              <ListPlus :size="14" />{{ $t("加入清单") }}</button>
+            <button type="button" class="btn btn--ghost" @click="emit('open', expandedItem)">{{ $t("专辑详情") }}</button>
+            <button type="button" class="btn btn--subtle" @click="expandedId = ''">{{ $t("收起") }}</button>
           </div>
         </header>
         <ul class="audio-drawer-tracks">
@@ -223,13 +214,13 @@ function toggleExpand(id: string) {
               <Play v-else-if="audio.current?.id === track.id" :size="14" />
               <span v-else class="audio-drawer-idx">{{ String(idx + 1).padStart(2, '0') }}</span>
               <span class="audio-drawer-name">{{ track.title }}</span>
-              <small v-if="track.available === false">文件缺失</small>
+              <small v-if="track.available === false">{{ $t("文件缺失") }}</small>
               <span v-else class="audio-drawer-dur">{{ formatPosition(track.duration) || '—' }}</span>
             </button>
             <button
               type="button"
               class="audio-drawer-detail"
-              :title="'查看歌词与详情：' + track.title"
+              :title="$t('查看歌词与详情：') + track.title"
               @click="emit('open', expandedItem, track.episode)"
             >
               <ArrowUpRight :size="14" />
@@ -252,7 +243,7 @@ function toggleExpand(id: string) {
           <div class="audio-card-art">
             <button
               class="audio-card-open"
-              :aria-label="(selecting ? '选择音频 ' : '查看音频 ') + title(item)"
+              :aria-label="(selecting ? $t('选择音频 ') : $t('查看音频 ')) + title(item)"
               @click="selecting ? emit('select', item.id, $event) : emit('open', item)"
             >
               <img
@@ -275,15 +266,15 @@ function toggleExpand(id: string) {
                 v-if="ownTracks(item).some(t => t.available !== false)"
                 type="button"
                 class="audio-card-enqueue"
-                :title="'加入播放清单：' + title(item)"
-                :aria-label="'加入播放清单 ' + title(item)"
+                :title="$t('加入播放清单：') + title(item)"
+                :aria-label="$t('加入播放清单 ') + title(item)"
                 @click.stop="enqueueItem(item)"
               >
                 <ListPlus :size="15" />
               </button>
               <button
                 class="audio-card-play"
-                :aria-label="(audio.current?.resource.id === item.id && audio.playing ? '暂停 ' : '播放 ') + title(item)"
+                :aria-label="(audio.current?.resource.id === item.id && audio.playing ? $t('暂停 ') : $t('播放 ')) + title(item)"
                 :disabled="loading || !ownTracks(item).some(t => t.available !== false)"
                 @click="playAlbum(item)"
               >
@@ -300,7 +291,7 @@ function toggleExpand(id: string) {
             {{ title(item) }}
           </button>
           <div class="audio-card-meta">
-            <span class="truncate">{{ item.collection_name || item.tags.slice(0, 2).join(' · ') || item.category || '音频' }}</span>
+            <span class="truncate">{{ item.collection_name || item.tags.slice(0, 2).join(' · ') || item.category || $t('音频') }}</span>
             <button
               v-if="isAlbum(item) && !selecting"
               type="button"
@@ -308,11 +299,11 @@ function toggleExpand(id: string) {
               :aria-expanded="expandedId === item.id"
               @click="toggleExpand(item.id)"
             >
-              {{ expandedId === item.id ? '收起' : `${item.episode_total || ownTracks(item).length} 首` }}
+              {{ expandedId === item.id ? $t('收起') : $t('{p0} 首', {p0: item.episode_total || ownTracks(item).length}) }}
               <ChevronUp v-if="expandedId === item.id" :size="13" />
               <ChevronDown v-else :size="13" />
             </button>
-            <span v-else class="audio-card-count">{{ item.episode_total || 1 }} 首</span>
+            <span v-else class="audio-card-count">{{ $t("{p0} 首", {p0: (item.episode_total || 1)}) }}</span>
           </div>
         </article>
       </div>
@@ -320,7 +311,7 @@ function toggleExpand(id: string) {
 
     <div v-else class="audio-table">
       <div class="audio-row audio-head">
-        <span>#</span><span>曲目</span><span>专辑 / 来源</span><span>时长</span><span />
+        <span>#</span><span>{{ $t("曲目") }}</span><span>{{ $t("专辑 / 来源") }}</span><span>{{ $t("时长") }}</span><span />
       </div>
       <div
         v-for="(track, i) in filteredTracks"
@@ -334,7 +325,7 @@ function toggleExpand(id: string) {
       >
         <button
           v-if="!selecting"
-          :aria-label="(audio.current?.id === track.id && audio.playing ? '暂停 ' : '播放 ') + track.title"
+          :aria-label="(audio.current?.id === track.id && audio.playing ? $t('暂停 ') : $t('播放 ')) + track.title"
           :disabled="track.available === false"
           @click="play(track)"
         >
@@ -346,7 +337,7 @@ function toggleExpand(id: string) {
           <Check v-if="selectedIds.includes(track.resource.id)" :size="13" />
         </span>
         <button class="audio-name" @click.stop="selecting ? emit('select', track.resource.id, $event) : emit('open', track.resource, track.episode)">
-          {{ track.title }}<small v-if="track.available === false">文件缺失</small>
+          {{ track.title }}<small v-if="track.available === false">{{ $t("文件缺失") }}</small>
         </button>
         <button class="audio-album" @click.stop="selecting ? emit('select', track.resource.id, $event) : emit('open', track.resource)">
           {{ title(track.resource) }}
@@ -356,15 +347,15 @@ function toggleExpand(id: string) {
           <button
             v-if="!selecting && track.available !== false"
             type="button"
-            :title="'加入播放清单：' + track.title"
-            :aria-label="'加入播放清单 ' + track.title"
-            @click.stop="audio.enqueue([track]) && success('已加入播放清单')"
+            :title="$t('加入播放清单：') + track.title"
+            :aria-label="$t('加入播放清单 ') + track.title"
+            @click.stop="audio.enqueue([track]) && success($t('已加入播放清单'))"
           >
             <ListPlus :size="15" />
           </button>
           <button
             v-if="!selecting"
-            :aria-label="'查看 ' + track.title"
+            :aria-label="$t('查看 ') + track.title"
             @click.stop="emit('open', track.resource, track.episode)"
           >
             <ArrowUpRight :size="16" />

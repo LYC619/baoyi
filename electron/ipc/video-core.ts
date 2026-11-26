@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { dialog, shell, type BrowserWindow } from 'electron'
 import type { mainWindowIpc } from './main-window.ts'
 import { optBool, optRecord, optStringArray, reqArray, reqBool, reqEnum, reqId, reqRecord, reqString, reqStringArray } from './validate.ts'
@@ -88,7 +89,7 @@ export function registerVideoCoreIpc(
     const win = getWindow()
     if (!win) return []
     const result = await dialog.showOpenDialog(win, {
-      title: '选择影视目录（可多选）',
+      title: tr("选择影视目录（可多选）"),
       properties: ['openDirectory', 'multiSelections']
     })
     return result.canceled ? [] : result.filePaths
@@ -114,9 +115,9 @@ export function registerVideoCoreIpc(
     const win = getWindow()
     if (!win || win.isDestroyed()) return null
     const picked = await dialog.showOpenDialog(win, {
-      title: safeRole === 'poster' ? '选择单集封面' : '选择单集预览图',
+      title: safeRole === 'poster' ? tr("选择单集封面") : tr("选择单集预览图"),
       properties: ['openFile'],
-      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
+      filters: [{ name: tr("图片"), extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
     })
     if (picked.canceled || !picked.filePaths[0]) return null
     return setVideoEpisodeArtwork(safeEpisodeId, picked.filePaths[0], safeRole)
@@ -156,7 +157,7 @@ export function registerVideoCoreIpc(
     const win = getWindow()
     if (!win) return null
     const result = await dialog.showOpenDialog(win, {
-      title: '导入视频目录（支持本地视频或抱一资源包）',
+      title: tr("导入视频目录（支持本地视频或抱一资源包）"),
       properties: ['openDirectory']
     })
     if (result.canceled || !result.filePaths[0]) return null
@@ -189,9 +190,9 @@ export function registerVideoCoreIpc(
     const win = getWindow()
     if (!win || win.isDestroyed()) return null
     const result = await dialog.showOpenDialog(win, {
-      title: getVideoItem(safeId)?.media_kind === 'audio' ? '选择音频封面（方形效果最好）' : '选择海报图（竖版 2:3 效果最好）',
+      title: getVideoItem(safeId)?.media_kind === 'audio' ? tr("选择音频封面（方形效果最好）") : tr("选择海报图（竖版 2:3 效果最好）"),
       properties: ['openFile'],
-      filters: [{ name: '图片', extensions: POSTER_EXTS.map((e) => e.slice(1)) }]
+      filters: [{ name: tr("图片"), extensions: POSTER_EXTS.map((e) => e.slice(1)) }]
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const outcome = setVideoPoster(safeId, result.filePaths[0])

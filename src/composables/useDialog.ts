@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { ref } from 'vue'
 
 export interface ConfirmDialogOptions {
@@ -73,7 +75,7 @@ export function settleActiveDialog(confirmed: boolean, value?: string): void {
 
 export function confirmDialog(options: string | ConfirmDialogOptions): Promise<boolean> {
   const normalized: ConfirmDialogOptions =
-    typeof options === 'string' ? { title: '确认操作', message: options } : options
+    typeof options === 'string' ? { title: tr('确认操作'), message: options } : options
   const fallbackText = [normalized.title, normalized.message].filter(Boolean).join('\n\n')
 
   if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
@@ -91,8 +93,8 @@ export function confirmDialog(options: string | ConfirmDialogOptions): Promise<b
       kind: 'confirm',
       title: normalized.title,
       message: normalized.message ?? '',
-      confirmText: normalized.confirmText ?? '确认',
-      cancelText: normalized.cancelText ?? '取消',
+      confirmText: normalized.confirmText ?? tr("确认"),
+      cancelText: normalized.cancelText ?? tr("取消"),
       tone: normalized.tone ?? 'default',
       inputValue: '',
       placeholder: '',
@@ -117,8 +119,8 @@ export function promptDialog(options: PromptDialogOptions): Promise<string | nul
       kind: 'prompt',
       title: options.title,
       message: options.message ?? '',
-      confirmText: options.confirmText ?? '确认',
-      cancelText: options.cancelText ?? '取消',
+      confirmText: options.confirmText ?? tr("确认"),
+      cancelText: options.cancelText ?? tr("取消"),
       tone: 'default',
       inputValue: options.defaultValue ?? '',
       placeholder: options.placeholder ?? '',

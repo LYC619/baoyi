@@ -1,3 +1,5 @@
+
+import { tr } from '../i18n/index.ts'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 export interface OutlineNode {
   id: string
@@ -26,7 +28,7 @@ export function normalizeOutline(outline: unknown) {
       const id = prefix + i
       nodes.push({
         id,
-        title: String(item.title || '未命名章节'),
+        title: String(item.title || tr("未命名章节")),
         dest: item.dest ?? null,
         children: visit(item.items, depth + 1, id + '.'),
       })

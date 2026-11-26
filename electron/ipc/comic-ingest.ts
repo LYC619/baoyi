@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import {app,dialog,session,type BrowserWindow,type IpcMain} from 'electron'
 import path from 'node:path'
 import {randomUUID} from 'node:crypto'
@@ -64,7 +65,7 @@ export function registerComicIngestIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
     await loaded
     if(root!==undefined){const target=await validateDownloadRoot(root);const id=await queue.enqueue(token,chapters,target,directory,groupId);await rememberDownloadRoot(app.getPath('userData'),'jm',target);return id}
     const lib=new ImageLibrary(getDb()),group=lib.groups().find(g=>g.id===groupId)
-    const selected=await dialog.showOpenDialog(getWindow()!,{title:'选择漫画存放根目录（补章请选择原根目录）',defaultPath:group?.directory||defaults.root||undefined,properties:['openDirectory','createDirectory']})
+    const selected=await dialog.showOpenDialog(getWindow()!,{title:tr("选择漫画存放根目录（补章请选择原根目录）"),defaultPath:group?.directory||defaults.root||undefined,properties:['openDirectory','createDirectory']})
     restoreWindowFocus(getWindow());if(selected.canceled||!selected.filePaths[0])return null
     const id=await queue.enqueue(token,chapters,selected.filePaths[0],directory,groupId)
     await remember({root:selected.filePaths[0]});return id
@@ -75,14 +76,14 @@ export function registerComicIngestIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
     id=reqId(id);token=reqString(token,'token',{max:256});root=optString(root,'root',{max:4096})
     const job=queue.list().find(j=>j.id===id);if(!job)throw new Error('漫画任务不可用')
     if(root!==undefined){await queue.revalidate(id,token,await validateDownloadRoot(root));return true}
-    const selected=await dialog.showOpenDialog(getWindow()!,{title:'重新选择并核验任务原根目录',defaultPath:job.root,properties:['openDirectory']})
+    const selected=await dialog.showOpenDialog(getWindow()!,{title:tr("重新选择并核验任务原根目录"),defaultPath:job.root,properties:['openDirectory']})
     restoreWindowFocus(getWindow());if(selected.canceled||!selected.filePaths[0])return false
     await queue.revalidate(id,token,selected.filePaths[0]);await remember({root:selected.filePaths[0]});return true
   })
   handle('clean',async(id:string)=>{
     id=reqId(id)
     const job=queue.list().find(j=>j.id===id);if(!job)throw new Error('漫画任务不可用')
-    const choice=await dialog.showMessageBox(getWindow()!,{type:'question',title:'清理漫画暂存',message:'停止并清理“'+job.name+'”的未入库页面？',detail:'已入库章节会保留。清理后需重新下载剩余页面；未知文件不会删除。',buttons:['保留暂存','停止并清理'],defaultId:0,cancelId:0})
+    const choice=await dialog.showMessageBox(getWindow()!,{type:'question',title:tr("清理漫画暂存"),message:tr("停止并清理“")+job.name+tr("”的未入库页面？"),detail:tr("已入库章节会保留。清理后需重新下载剩余页面；未知文件不会删除。"),buttons:[tr("保留暂存"),tr("停止并清理")],defaultId:0,cancelId:0})
     restoreWindowFocus(getWindow());if(choice.response===1)await queue.clean(id)
   })
   return async(all:boolean)=>{

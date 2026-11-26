@@ -1,4 +1,7 @@
+
+import { tr } from "../i18n/index.ts"
 import { defineStore } from 'pinia'
+import { applyLanguage } from '../i18n/index.ts'
 import { computed, ref } from 'vue'
 import { plain } from '@/utils'
 import type { AppSettings, ScanUnit } from '@/types'
@@ -35,6 +38,7 @@ const FALLBACK: AppSettings = {
   hanime_hosts_active_ip: '',
   hide_hentai: false,
   theme: 'dark',
+  language: 'system',
   view_mode: 'grid',
   video_card_size: 150,
   group_by_category: false,
@@ -56,9 +60,9 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function retryScanUnit(dir: string): Promise<void> {
     const ok = await window.baoyi.scan.retry(dir)
-    if (!ok) { useToast().toast('这个目录已经不在扫描列表里了'); return }
+    if (!ok) { useToast().toast(tr('这个目录已经不在扫描列表里了')); return }
     await Promise.all([loadScanUnits(), useSoftwareStore().refreshCounts()])
-    useToast().success('已退回待识别，点「开始识别」重跑')
+    useToast().success(tr('已退回待识别，点「开始识别」重跑'))
   }
 
   function applyTheme(): void {
@@ -70,6 +74,7 @@ export const useSettingsStore = defineStore('settings', () => {
   async function load(): Promise<AppSettings> {
     settings.value = await window.baoyi.settings.getAll()
     applyTheme()
+    applyLanguage(settings.value.language)
     loaded.value = true
     return settings.value
   }
@@ -77,6 +82,7 @@ export const useSettingsStore = defineStore('settings', () => {
   async function patch(p: Partial<AppSettings>): Promise<AppSettings> {
     settings.value = await window.baoyi.settings.patch(plain(p))
     applyTheme()
+    applyLanguage(settings.value.language)
     return settings.value
   }
 

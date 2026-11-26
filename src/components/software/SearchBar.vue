@@ -31,11 +31,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       v-model="text"
       class="search__input"
       type="text"
-      aria-label="搜索软件"
-      placeholder="搜索名称、说明或标签…"
+      :aria-label="$t('搜索软件')"
+      :placeholder="$t('搜索名称、说明或标签…')"
       spellcheck="false"
     />
-    <button v-if="text" class="search__clear" title="清除" @click="clear">
+    <button v-if="text" class="search__clear" :title="$t('清除')" @click="clear">
       <X :size="13" />
     </button>
     <kbd v-else class="search__kbd">Ctrl K</kbd>

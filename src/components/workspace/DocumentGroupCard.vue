@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed } from 'vue'
 import { Folder, ChevronRight, Layers } from 'lucide-vue-next'
 import type { DocumentItem, DocumentCustomGroup, DocumentSubmodule } from '@/types/workspace'
@@ -27,7 +29,7 @@ const emptySlotsCount = computed(() => Math.max(0, 4 - recentItems.value.length)
 const tags = computed(() => [...new Set(props.items.flatMap(i => i.tags))].slice(0, 3))
 const countLabel = computed(() => {
   const n = props.items.length
-  return props.submodule === 'reading' ? `${n} 本` : `${n} 份`
+  return props.submodule === 'reading' ? tr('{p0} 本', {p0: n}) : tr('{p0} 份', {p0: n})
 })
 </script>
 
@@ -37,7 +39,7 @@ const countLabel = computed(() => {
     :class="{ 'grid-mode': view === 'grid', 'list-mode': view === 'list' }"
     tabindex="0"
     role="button"
-    :aria-label="`分组 ${group.name}，包含 ${items.length} 份资料`"
+    :aria-label="$t('分组 {p0}，包含 {p1} 份资料', {p0: group.name, p1: items.length})"
     @click="bulk ? emit('toggleCheck') : emit('open')"
     @keydown.enter.self="emit('open')"
     @keydown.space.prevent.self="emit('open')"
@@ -48,7 +50,7 @@ const countLabel = computed(() => {
       type="checkbox"
       class="bulk-checkbox"
       :checked="checked"
-      :aria-label="`选择分组 ${group.name} 的全部内容`"
+      :aria-label="$t('选择分组 {p0} 的全部内容', {p0: group.name})"
       @click.stop="emit('toggleCheck')"
     />
 
@@ -105,15 +107,11 @@ const countLabel = computed(() => {
     <div class="group-card-info">
       <div class="group-title-row">
         <strong class="group-title" :title="group.name">{{ group.name }}</strong>
-        <span class="ws-badge group-badge">分组</span>
+        <span class="ws-badge group-badge">{{ $t("分组") }}</span>
         <span v-if="categoryName" class="ws-badge category-badge">{{ categoryName }}</span>
       </div>
 
-      <small class="group-subtitle">
-        合集 · 共 {{ countLabel }}
-        <template v-if="submodule === 'reading' && items.some(i => i.author)">
-          · {{ items.map(i => i.author).filter(Boolean)[0] }} 等
-        </template>
+      <small class="group-subtitle">{{ $t("合集 · 共 {p0}", {p0: (countLabel)}) }}<template v-if="submodule === 'reading' && items.some(i => i.author)">{{ $t("· {p0} 等", {p0: (items.map(i => i.author).filter(Boolean)[0])}) }}</template>
       </small>
 
       <span v-if="tags.length" class="row-tags ws-muted" :title="tags.join(' · ')">
@@ -126,7 +124,7 @@ const countLabel = computed(() => {
       v-if="view === 'list'"
       type="button"
       class="ws-icon group-open-btn"
-      :aria-label="`展开分组 ${group.name}`"
+      :aria-label="$t('展开分组 {p0}', {p0: group.name})"
       @click.stop="emit('open')"
     >
       <ChevronRight :size="18" />

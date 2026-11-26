@@ -86,7 +86,7 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
     @dblclick="onDblClick"
     @contextmenu="!selectable && !locked && emit('context', item, $event)"
   >
-    <input v-if="selectable" class="card__select" type="checkbox" :checked="selected" :disabled="locked" :aria-label="`选择 ${name}`" @click.stop @dblclick.stop @change="emit('select', item.id)" />
+    <input v-if="selectable" class="card__select" type="checkbox" :checked="selected" :disabled="locked" :aria-label="$t('选择 {p0}', {p0: name})" @click.stop @dblclick.stop @change="emit('select', item.id)" />
     <AppIcon :item="item" :size="view === 'grid' ? 44 : 32" />
 
     <div class="card__body">
@@ -96,7 +96,7 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
       </header>
 
       <p class="card__summary">
-        {{ item.summary || (pending ? '待 AI 识别' : item.file_description || '暂无说明') }}
+        {{ item.summary || (pending ? $t('待 AI 识别') : item.file_description || $t('暂无说明')) }}
       </p>
 
       <footer class="card__foot">
@@ -123,7 +123,7 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
       </footer>
     </div>
 
-    <button v-if="!selectable" class="card__play" :title="mobilePackage ? '定位安装包（或双击卡片）' : '启动（或双击卡片）'" :aria-label="`${mobilePackage ? '定位安装包' : '启动'} ${name}`" @click="onLaunchClick">
+    <button v-if="!selectable" class="card__play" :title="mobilePackage ? $t('定位安装包（或双击卡片）') : $t('启动（或双击卡片）')" :aria-label="`${mobilePackage ? $t('定位安装包') : $t('启动')} ${name}`" @click="onLaunchClick">
       <FolderOpen v-if="mobilePackage" :size="13" />
       <Play v-else :size="13" fill="currentColor" />
     </button>
@@ -132,7 +132,7 @@ onUnmounted(() => clickTimer && clearTimeout(clickTimer))
       绿色软件标识。和启动按钮占同一个角 —— 悬浮时让位给它：
       鼠标已经在卡片上了，那一刻用户想的是「打开它」，不是「它是不是绿色的」。
     -->
-    <Leaf v-if="item.is_portable === true && !selectable" :size="13" class="card__leaf" title="绿色软件" />
+    <Leaf v-if="item.is_portable === true && !selectable" :size="13" class="card__leaf" :title="$t('绿色软件')" />
   </article>
 </template>
 

@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
 import type { Episode, VideoCounts, VideoFilterType, VideoItem, VideoLibraryFilters, VideoQuery, WatchStatus } from '@/types'
@@ -21,16 +23,16 @@ export type VideoSelection =
  * 「弃」留着的理由见 types 里 WatchStatus 的注释 —— 它和「在看」是两件事。
  */
 export const WATCH_STATUS_LABEL: Record<WatchStatus, string> = {
-  unwatched: '想看',
-  watching: '在看',
-  watched: '看完',
-  dropped: '弃'
+  get unwatched() { return tr('想看') },
+  get watching() { return tr('在看') },
+  get watched() { return tr('看完') },
+  get dropped() { return tr('弃') }
 }
 
 export const VIDEO_TYPE_LABEL: Record<VideoFilterType, string> = {
-  movie: '电影',
-  series: '剧集',
-  hentai: '里番', other: '其他', audio: '音频'
+  get movie() { return tr('电影') },
+  get series() { return tr('剧集') },
+  get hentai() { return tr('里番') }, get other() { return tr('其他') }, get audio() { return tr('音频') }
 }
 
 
@@ -52,6 +54,8 @@ export const useVideoStore = defineStore('video', () => {
   const loadFailed = ref(false)
   const querySignature = computed(() => JSON.stringify(buildQuery()))
   const queryPending = computed(() => loading.value || loadFailed.value || loadedQuery.value !== querySignature.value)
+  // Only render records belonging to the selected query; same-query refresh keeps its cards.
+  const currentItems = computed(() => loadedQuery.value === querySignature.value ? items.value : [])
   const brokenPosters = ref(new Set<string>())
 
   // 快慢两个查询并发时，晚到的旧响应不许覆盖新结果。同 game / software store
@@ -75,12 +79,12 @@ export const useVideoStore = defineStore('video', () => {
   )
 
   const heading = computed(() => {
-    if (selection.kind === 'collection') return selection.value || (inAudioScope.value ? '未分组音频' : '未设置收藏分组')
-    if (selection.kind === 'category') return selection.value === '其他' ? '其他分类' : selection.value
+    if (selection.kind === 'collection') return selection.value || (inAudioScope.value ? tr('未分组音频') : tr('未设置收藏分组'))
+    if (selection.kind === 'category') return selection.value === '其他' ? tr('其他分类') : selection.value
     if (selection.kind === 'tag') return `# ${selection.value}`
     if (selection.kind === 'status') return WATCH_STATUS_LABEL[selection.value]
     if (selection.kind === 'type') return VIDEO_TYPE_LABEL[selection.value]
-    return selection.value === 'archived' ? (inAudioScope.value ? '已归档音频' : '已归档') : (inAudioScope.value ? '音频' : '全部影视')
+    return selection.value === 'archived' ? (inAudioScope.value ? tr('已归档音频') : tr('已归档')) : (inAudioScope.value ? tr('音频') : tr('全部影视'))
   })
 
   function buildQuery(): VideoQuery {
@@ -124,7 +128,7 @@ export const useVideoStore = defineStore('video', () => {
               loadFailed.value = false
             }
           } catch (err) {
-            if (loadRounds.isCurrent(round)) { loadFailed.value = true; toastError(`读取影视列表失败：${errorMessage(err)}`) }
+            if (loadRounds.isCurrent(round)) { loadFailed.value = true; toastError(tr("读取影视列表失败：{p0}", {p0: (errorMessage(err))})) }
           }
         }
       } finally { loading.value = false; loadingRequest = null }
@@ -147,7 +151,7 @@ export const useVideoStore = defineStore('video', () => {
               if (next.hentai_visible === false && inHentaiScope.value) select({ kind: 'group', value: 'all' })
             }
           } catch (err) {
-            if (countsRounds.isCurrent(round)) toastError(`读取统计失败：${errorMessage(err)}`)
+            if (countsRounds.isCurrent(round)) toastError(tr("读取统计失败：{p0}", {p0: (errorMessage(err))}))
           }
         }
       } finally { countsRequest = null }
@@ -212,7 +216,7 @@ export const useVideoStore = defineStore('video', () => {
   async function play(id: string): Promise<boolean> {
     const r = await window.baoyi.video.play(id)
     if (!r.ok) {
-      toastError(r.message || '打不开这个文件')
+      toastError(r.message || tr("打不开这个文件"))
       return false
     }
     merge(r.item)
@@ -224,7 +228,7 @@ export const useVideoStore = defineStore('video', () => {
   async function playEpisode(episodeId: string): Promise<Episode | null> {
     const r = await window.baoyi.video.playEpisode(episodeId)
     if (!r.ok) {
-      toastError(r.message || '打不开这个文件')
+      toastError(r.message || tr("打不开这个文件"))
       return null
     }
     merge(r.item)
@@ -264,6 +268,7 @@ export const useVideoStore = defineStore('video', () => {
 
   return {
     items,
+    currentItems,
     counts,
     loading,
     querySignature,

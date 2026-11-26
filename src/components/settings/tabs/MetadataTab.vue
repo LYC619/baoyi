@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../../i18n/index.ts'
+
 import { computed, ref } from 'vue'
 import { activeModule } from '@/composables/useModules'
 import { Loader2 } from 'lucide-vue-next'
@@ -44,7 +46,7 @@ async function saveTmdb(): Promise<void> {
   const autoOn = !settings.settings.tmdb.api_key.trim() && tmdbUsable.value && !tmdbEnabled.value
   if (autoOn) tmdbEnabled.value = true
   await settings.patch({ tmdb: currentTmdbConfig() })
-  success(autoOn ? 'TMDB 配置已保存，并已自动启用' : 'TMDB 配置已保存')
+  success(autoOn ? tr("TMDB 配置已保存，并已自动启用") : tr("TMDB 配置已保存"))
 }
 
 async function toggleTmdb(): Promise<void> {
@@ -70,11 +72,11 @@ async function testTmdbConn(): Promise<void> {
 <!-- TMDB 用于影视资料补全；首轮本地入库不依赖它。 -->
 <section v-if="activeModule === 'video'" class="panel">
   <div class="sec-head">
-    <h2>TMDB 刮削（影视）</h2>
+    <h2>{{ $t("TMDB 刮削（影视）") }}</h2>
     <label
       class="switch"
       :class="{ 'switch--off': !tmdbUsable }"
-      :title="tmdbUsable ? '' : '请先填入 API Key'"
+      :title="tmdbUsable ? '' : $t('请先填入 API Key')"
     >
       <input
         v-model="tmdbEnabled"
@@ -82,15 +84,11 @@ async function testTmdbConn(): Promise<void> {
         :disabled="!tmdbUsable"
         @change="toggleTmdb"
       />
-      <span>{{ tmdbEnabled && tmdbUsable ? '已启用' : '已关闭' }}</span>
+      <span>{{ tmdbEnabled && tmdbUsable ? $t('已启用') : $t('已关闭') }}</span>
     </label>
   </div>
-  <p class="sec-desc">
-    用于补全影视条目的官方标题、简介、评分、海报和季集表。
-    个人 Key 是免费的，在 themoviedb.org 注册后于「设置 › API」页面申领。
-    本地扫描不需要填写 Key，已有的 NFO、下载器资料和图片会直接保留。
-  </p>
-  <p v-if="!tmdbUsable" class="hint hint--block">请先填入 API Key。</p>
+  <p class="sec-desc">{{ $t("用于补全影视条目的官方标题、简介、评分、海报和季集表。 个人 Key 是免费的，在 themoviedb.org 注册后于「设置 › API」页面申领。 本地扫描不需要填写 Key，已有的 NFO、下载器资料和图片会直接保留。") }}</p>
+  <p v-if="!tmdbUsable" class="hint hint--block">{{ $t("请先填入 API Key。") }}</p>
 
   <div class="form">
     <label class="field">
@@ -99,7 +97,7 @@ async function testTmdbConn(): Promise<void> {
         v-model="tmdbKey"
         class="input mono"
         type="password"
-        placeholder="TMDB 的 API Key（v3 auth）"
+        :placeholder="$t('TMDB 的 API Key（v3 auth）')"
       />
     </label>
     <!--
@@ -107,32 +105,26 @@ async function testTmdbConn(): Promise<void> {
       而国内的反代方案常常只代理其中一个
     -->
     <label class="field">
-      <span class="field__label">接口域名（可留空用官方）</span>
+      <span class="field__label">{{ $t("接口域名（可留空用官方）") }}</span>
       <input v-model="tmdbApiDomain" class="input mono" placeholder="api.themoviedb.org" />
     </label>
     <label class="field">
-      <span class="field__label">图片域名（可留空用官方）</span>
+      <span class="field__label">{{ $t("图片域名（可留空用官方）") }}</span>
       <input v-model="tmdbImageDomain" class="input mono" placeholder="image.tmdb.org" />
     </label>
   </div>
 
   <div class="row">
-    <button class="btn btn--primary" @click="saveTmdb">保存配置</button>
+    <button class="btn btn--primary" @click="saveTmdb">{{ $t("保存配置") }}</button>
     <button class="btn btn--ghost" :disabled="tmdbTesting || !tmdbUsable" @click="testTmdbConn">
-      <Loader2 v-if="tmdbTesting" :size="14" class="spin" />
-      测试连接
-    </button>
+      <Loader2 v-if="tmdbTesting" :size="14" class="spin" />{{ $t("测试连接") }}</button>
   </div>
 
   <p v-if="tmdbResult" class="result" :class="{ 'result--bad': !tmdbResult.ok }">
-    {{ tmdbResult.message }}
+    {{ $systemMessage(tmdbResult.message) }}
   </p>
 
-  <p class="sec-desc sec-desc--foot">
-    两个地址都只填域名，不带 <span class="mono">https://</span> 和路径。
-    官方的 <span class="mono">api.themoviedb.org</span> 在国内多数网络下连不上，
-    填自己的反代能解决；海报下载只允许走这里填的图片域名，别处的地址一概不收。
-  </p>
+  <p class="sec-desc sec-desc--foot">{{ $t("两个地址都只填域名，不带") }}<span class="mono">https://</span>{{ $t("和路径。 官方的") }}<span class="mono">api.themoviedb.org</span>{{ $t("在国内多数网络下连不上， 填自己的反代能解决；海报下载只允许走这里填的图片域名，别处的地址一概不收。") }}</p>
 </section>
 </template>
 

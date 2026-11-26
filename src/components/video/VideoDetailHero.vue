@@ -141,28 +141,28 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
           type="button"
           class="hero__posterBtn"
           :disabled="posterBusy"
-          title="依次查找：同目录海报图 → 已记录的在线海报"
+          :title="$t('依次查找：同目录海报图 → 已记录的在线海报')"
           @click="emit('fetch-poster')"
         >
           <Loader2 v-if="posterBusy" :size="13" class="spin" />
           <ImageDown v-else :size="13" />
-          {{ posterBusy ? '查找中' : '找海报' }}
+          {{ posterBusy ? $t('查找中') : $t('找海报') }}
         </button>
         <button
           type="button"
           class="hero__posterBtn"
-          :title="item.poster_path ? '更换海报' : '选择海报图片'"
+          :title="item.poster_path ? $t('更换海报') : $t('选择海报图片')"
           @click="emit('pick-poster')"
         >
           <Image :size="13" />
-          {{ item.poster_path ? '更换' : '选图' }}
+          {{ item.poster_path ? $t('更换') : $t('选图') }}
         </button>
         <button
           v-if="item.poster_path"
           type="button"
           class="hero__posterBtn"
-          title="撤掉海报，恢复文字占位"
-          aria-label="撤掉海报"
+          :title="$t('撤掉海报，恢复文字占位')"
+          :aria-label="$t('撤掉海报')"
           @click="emit('clear-poster')"
         >
           <ImageOff :size="13" />
@@ -171,12 +171,10 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
           v-if="episodeArtworkAvailable"
           type="button"
           class="hero__posterBtn hero__posterBtn--wide"
-          title="从本作品的单集封面或预览图中选用一张作为主海报"
+          :title="$t('从本作品的单集封面或预览图中选用一张作为主海报')"
           @click="emit('open-episode-artwork')"
         >
-          <Clapperboard :size="13" />
-          从单集选
-        </button>
+          <Clapperboard :size="13" />{{ $t("从单集选") }}</button>
       </div>
     </div>
 
@@ -184,17 +182,17 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
       <template v-if="editing">
         <textarea
           class="hero__name"
-          aria-label="片名"
+          :aria-label="$t('片名')"
           rows="2"
           :value="item.name_zh"
-          placeholder="片名"
+          :placeholder="$t('片名')"
           @change="emit('save', { name_zh: ($event.target as HTMLTextAreaElement).value.trim() })"
         />
         <input
           class="hero__en"
-          aria-label="原名 / 英文名"
+          :aria-label="$t('原名 / 英文名')"
           :value="item.name_en"
-          placeholder="原名 / 英文名"
+          :placeholder="$t('原名 / 英文名')"
           @change="emit('save', { name_en: ($event.target as HTMLInputElement).value.trim() })"
         />
       </template>
@@ -205,9 +203,9 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
             <Clapperboard :size="12" />
             {{
               item.media_kind === 'other'
-                ? '其他'
+                ? $t('其他')
                 : item.category === HENTAI_CATEGORY
-                  ? '里番'
+                  ? $t('里番')
                   : VIDEO_TYPE_LABEL[item.video_type]
             }}
           </span>
@@ -217,36 +215,33 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
 
       <div class="hero__meta">
         <span v-if="yearText">{{ yearText }}</span>
-        <span v-if="singleEpisode?.air_date">发行 {{ videoDateLabel(singleEpisode.air_date) }}</span>
-        <span v-if="singleEpisode?.published_at">发布 {{ videoDateLabel(singleEpisode.published_at) }}</span>
-        <span v-if="publicationRange.collection" class="hero__publication">
-          发布时间：最早 {{ publicationRange.first || '未知' }} · 最晚 {{ publicationRange.last || '未知' }}
+        <span v-if="singleEpisode?.air_date">{{ $t("发行 {p0}", {p0: (videoDateLabel(singleEpisode.air_date))}) }}</span>
+        <span v-if="singleEpisode?.published_at">{{ $t("发布 {p0}", {p0: (videoDateLabel(singleEpisode.published_at))}) }}</span>
+        <span v-if="publicationRange.collection" class="hero__publication">{{ $t("发布时间：最早 {p0} · 最晚 {p1}", {p0: (publicationRange.first || $t('未知')), p1: (publicationRange.last || $t('未知'))}) }}
         </span>
-        <span v-else-if="!singleEpisode?.published_at && !singleEpisode?.air_date" class="hero__publication">
-          发布时间：{{ publicationRange.first || '未知' }}
+        <span v-else-if="!singleEpisode?.published_at && !singleEpisode?.air_date" class="hero__publication">{{ $t("发布时间：{p0}", {p0: (publicationRange.first || $t('未知'))}) }}
         </span>
         <span v-if="item.resolution">{{ item.resolution }}</span>
-        <span>{{ presentCount }} 个视频文件可用</span>
+        <span>{{ $t("{p0} 个视频文件可用", {p0: (presentCount)}) }}</span>
         <span v-if="!isSeries && item.duration_sec > 0">{{ formatDuration(item.duration_sec) }}</span>
-        <span v-if="item.rating > 0" class="hero__rating" title="TMDB 评分">
+        <span v-if="item.rating > 0" class="hero__rating" :title="$t('TMDB 评分')">
           <Star :size="11" />{{ item.rating.toFixed(1) }}
         </span>
-        <span v-if="item.douban_rating > 0" class="hero__rating" title="豆瓣评分">
-          豆 {{ item.douban_rating.toFixed(1) }}
+        <span v-if="item.douban_rating > 0" class="hero__rating" :title="$t('豆瓣评分')">{{ $t("豆 {p0}", {p0: (item.douban_rating.toFixed(1))}) }}
         </span>
       </div>
 
       <input
         v-if="editing"
         class="hero__summary"
-        aria-label="一句话说明"
+        :aria-label="$t('一句话说明')"
         :value="item.summary"
-        placeholder="一句话说明"
+        :placeholder="$t('一句话说明')"
         @change="emit('save', { summary: ($event.target as HTMLInputElement).value.trim() })"
       />
       <p v-else-if="item.summary" class="hero__summary-text">{{ item.summary }}</p>
 
-      <div class="statuses" role="group" aria-label="作品观看状态">
+      <div class="statuses" role="group" :aria-label="$t('作品观看状态')">
         <button
           v-for="s in STATUSES"
           :key="s"
@@ -266,7 +261,7 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
         >
           <Check v-if="editing" :size="13" />
           <Pencil v-else :size="13" />
-          {{ editing ? '完成编辑' : '编辑资料' }}
+          {{ editing ? $t('完成编辑') : $t('编辑资料') }}
         </button>
       </div>
 
@@ -274,7 +269,7 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
         v-if="library?.directory?.path || item.path"
         class="hero__location"
         type="button"
-        :title="'复制作品位置：' + (library?.directory?.path || item.path)"
+        :title="$t('复制作品位置：') + (library?.directory?.path || item.path)"
         @click="emit('copy-path', library?.directory?.path || item.path)"
       >
         <FolderOpen :size="12" />
@@ -282,32 +277,28 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
       </button>
     </div>
 
-    <aside class="hero__facts" aria-label="作品信息">
+    <aside class="hero__facts" :aria-label="$t('作品信息')">
       <span v-if="item.category && item.category !== HENTAI_CATEGORY" class="hero__category">
         {{ item.category }}
       </span>
-      <label v-if="editing" class="hero__field">
-        类型
-        <select
+      <label v-if="editing" class="hero__field">{{ $t("类型") }}<select
           class="input"
-          aria-label="视频类型"
+          :aria-label="$t('视频类型')"
           :value="item.media_kind === 'other' ? item.media_kind : item.category === HENTAI_CATEGORY ? 'hentai' : item.video_type"
           @change="emit('change-type', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="movie">电影</option>
-          <option value="series">剧集</option>
-          <option value="hentai">里番</option>
-          <option value="other">其他</option>
-          <option value="audio">音频</option>
+          <option value="movie">{{ $t("电影") }}</option>
+          <option value="series">{{ $t("剧集") }}</option>
+          <option value="hentai">{{ $t("里番") }}</option>
+          <option value="other">{{ $t("其他") }}</option>
+          <option value="audio">{{ $t("音频") }}</option>
         </select>
       </label>
-      <label v-if="editing && item.category !== HENTAI_CATEGORY" class="hero__field">
-        分类
-        <input
+      <label v-if="editing && item.category !== HENTAI_CATEGORY" class="hero__field">{{ $t("分类") }}<input
           class="input"
           :value="item.category"
           list="video-category-options"
-          aria-label="视频分类"
+          :aria-label="$t('视频分类')"
           @change="emit('save', { category: ($event.target as HTMLInputElement).value.trim() })"
         />
       </label>
@@ -319,8 +310,7 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
         />
       </datalist>
 
-      <div class="hero__tag-heading">
-        作品标签<span v-if="(library?.contents.length || 0) > 1"> · 各集标签独立保存</span>
+      <div class="hero__tag-heading">{{ $t("作品标签") }}<span v-if="(library?.contents.length || 0) > 1">{{ $t("· 各集标签独立保存") }}</span>
       </div>
       <div v-if="visibleTags.length" class="hero__tag-area">
         <div
@@ -336,7 +326,7 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
             clickable
             :inert="!tagsExpanded && index >= tagVisibleCount"
             :aria-hidden="!tagsExpanded && index >= tagVisibleCount ? true : undefined"
-            :title="`筛选含「${tag}」的作品`"
+            :title="$t('筛选含「{p0}」的作品', {p0: tag})"
             @click="emit('filter-tag', tag)"
           />
         </div>
@@ -346,23 +336,20 @@ onBeforeUnmount(() => tagsObserver?.disconnect())
           type="button"
           :aria-expanded="tagsExpanded"
           aria-controls="video-work-tags"
-          :aria-label="tagsExpanded ? '收起标签' : '展开全部标签'"
+          :aria-label="tagsExpanded ? $t('收起标签') : $t('展开全部标签')"
           @click="tagsExpanded = !tagsExpanded"
         >
-          {{ tagsExpanded ? '收起' : '...' }}
+          {{ tagsExpanded ? $t('收起') : '...' }}
         </button>
       </div>
-      <p v-else class="hero__empty-tags">暂无标签</p>
+      <p v-else class="hero__empty-tags">{{ $t("暂无标签") }}</p>
       <EditableField
         v-if="editing"
         :model-value="item.tags.join('、')"
-        placeholder="用顿号隔开，最多 8 个"
+        :placeholder="$t('用顿号隔开，最多 8 个')"
         @commit="emit('commit-tags', $event)"
       />
-      <p v-if="library?.contents.length" class="hero__progress">
-        已看 {{ library.contents.filter((episode) => episode.watch_status === 'watched').length }} /
-        {{ library.contents.length }} 集
-      </p>
+      <p v-if="library?.contents.length" class="hero__progress">{{ $t("已看 {p0} / {p1} 集", {p0: (library.contents.filter((episode) => episode.watch_status === 'watched').length), p1: (library.contents.length)}) }}</p>
     </aside>
   </section>
 </template>

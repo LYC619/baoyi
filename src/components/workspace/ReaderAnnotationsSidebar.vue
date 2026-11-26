@@ -44,12 +44,11 @@ function toggleAll(checked: boolean) {
 <template>
   <aside class="reader-annotations" @keydown.esc.stop="emit('close')">
     <header class="ws-section-head">
-      <h2>
-        标注与书签 <small class="ws-muted">{{ annotations.length }}</small>
+      <h2>{{ $t("标注与书签") }}<small class="ws-muted">{{ annotations.length }}</small>
       </h2>
-      <button type="button" class="ws-icon" aria-label="收起标注栏" @click="emit('close')">×</button>
+      <button type="button" class="ws-icon" :aria-label="$t('收起标注栏')" @click="emit('close')">×</button>
     </header>
-    <p v-if="!annotations.length" class="ws-muted">选中原文即可高亮，或补充自己的想法。</p>
+    <p v-if="!annotations.length" class="ws-muted">{{ $t("选中原文即可高亮，或补充自己的想法。") }}</p>
     <article
       v-for="a in annotations"
       :id="'annotation-' + a.id"
@@ -58,7 +57,7 @@ function toggleAll(checked: boolean) {
       :class="{ active: a.id === activeAnnotation }"
       tabindex="0"
       role="button"
-      :aria-label="'定位标注 ' + (a.quote || a.note || a.location.page)"
+      :aria-label="$t('定位标注 ') + (a.quote || a.note || a.location.page)"
       @click="emit('focus', a)"
       @keydown.enter.self="emit('focus', a)"
     >
@@ -66,28 +65,24 @@ function toggleAll(checked: boolean) {
         <input
           type="checkbox"
           :checked="selected.includes(a.id)"
-          :aria-label="'选择标注 ' + (a.quote || a.note || a.location.page)"
+          :aria-label="$t('选择标注 ') + (a.quote || a.note || a.location.page)"
           @click.stop
           @change="toggleOne(a.id)"
         />
         <span>
-          {{ a.kind === 'bookmark' ? '书签' : '标注' }} · 第 {{ a.location.page
-          }}{{ a.location.anchor?.pages?.length ? '–' + a.location.anchor.pages.at(-1)!.page : '' }}
-          {{ isNovel ? '章' : format === 'pdf' ? '页' : '段' }}
+          {{ $t("{p0} · 第 {p1}{p2} {p3}", {p0: (a.kind === 'bookmark' ? $t('书签') : $t('标注')), p1: (a.location.page), p2: (a.location.anchor?.pages?.length ? '–' + a.location.anchor.pages.at(-1)!.page : ''), p3: (isNovel ? $t('章') : format === 'pdf' ? $t('页') : $t('段'))}) }}
         </span>
-        <button type="button" class="ws-icon" aria-label="编辑标注" @click.stop="emit('edit', a)">
+        <button type="button" class="ws-icon" :aria-label="$t('编辑标注')" @click.stop="emit('edit', a)">
           <Pencil :size="13" />
         </button>
-        <button type="button" class="ws-icon" aria-label="移除标注" @click.stop="emit('remove', a)">
+        <button type="button" class="ws-icon" :aria-label="$t('移除标注')" @click.stop="emit('remove', a)">
           <Trash2 :size="13" />
         </button>
       </div>
       <blockquote v-if="a.quote">{{ a.quote }}</blockquote>
       <p v-if="a.note" class="ws-pre annotation-note">{{ a.note }}</p>
-      <p v-if="locationStates[a.id] === 'changed'" class="annotation-location">原文位置已变化</p>
-      <p v-else-if="locationStates[a.id] === 'coarse'" class="annotation-location">
-        仅保留页/段位置，原句无法唯一定位
-      </p>
+      <p v-if="locationStates[a.id] === 'changed'" class="annotation-location">{{ $t("原文位置已变化") }}</p>
+      <p v-else-if="locationStates[a.id] === 'coarse'" class="annotation-location">{{ $t("仅保留页/段位置，原句无法唯一定位") }}</p>
       <AnnotationProjectLinks
         v-if="a.kind === 'excerpt'"
         :document-id="documentId"
@@ -101,22 +96,17 @@ function toggleAll(checked: boolean) {
       <label>
         <input
           type="checkbox"
-          aria-label="全选标注"
+          :aria-label="$t('全选标注')"
           :checked="selected.length === annotations.length"
           @change="toggleAll(($event.target as HTMLInputElement).checked)"
-        />
-        全选
-      </label>
+        />{{ $t("全选") }}</label>
       <button type="button" class="ws-button danger" :disabled="busy || !selected.length" @click="emit('remove-selected')">
-        <Trash2 :size="14" />删除所选标注
-      </button>
-      <span class="ws-muted">已选择 {{ selected.length }} 条</span>
+        <Trash2 :size="14" />{{ $t("删除所选标注") }}</button>
+      <span class="ws-muted">{{ $t("已选择 {p0} 条", {p0: (selected.length)}) }}</span>
       <button type="button" class="ws-button" :disabled="busy || !selected.length" @click="emit('copy-selected')">
-        <Copy :size="14" />复制 Markdown
-      </button>
+        <Copy :size="14" />{{ $t("复制 Markdown") }}</button>
       <button type="button" class="ws-button" :disabled="busy || !selected.length" @click="emit('export-selected')">
-        <Download :size="14" />导出所选
-      </button>
+        <Download :size="14" />{{ $t("导出所选") }}</button>
     </footer>
   </aside>
 </template>

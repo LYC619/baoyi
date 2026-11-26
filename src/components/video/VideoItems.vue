@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { locale as appLocale } from '../../i18n/index.ts'
+
+import { tr } from "../../i18n/index.ts"
+
 import { computed, ref, watch } from 'vue'
 import { Check, Clapperboard, Eye, FolderOpen, LayoutGrid, List, ListOrdered, LocateFixed, Loader2, Play, RefreshCw } from 'lucide-vue-next'
 import type { VideoAsset, VideoItem, WatchStatus } from '@/types'
@@ -51,7 +55,7 @@ async function saveNumbering(): Promise<void> {
 const seasonGroups = computed(() => {
   const seasons = [...new Set(rows.value.map(row => row.content?.season ?? 0))].sort((a, b) => a - b)
   if (!seasons.some(season => season > 0)) return [{ season: 0, label: '', rows: rows.value }]
-  return seasons.map(season => ({ season, label: videoSeasonLabel(season, withoutSeason.value) || (withoutSeason.value ? '未分部' : '未分季'), rows: rows.value.filter(row => (row.content?.season ?? 0) === season) }))
+  return seasons.map(season => ({ season, label: videoSeasonLabel(season, withoutSeason.value) || (withoutSeason.value ? tr("未分部") : tr("未分季")), rows: rows.value.filter(row => (row.content?.season ?? 0) === season) }))
 })
 const busy = ref('')
 const selectedVersions = ref<Record<string, string>>({})
@@ -66,7 +70,7 @@ type ContentRow = { id: string; title: string; label: string; poster: string; co
 const rows = computed<ContentRow[]>(() => {
   const contents = (props.library?.contents ?? []).filter(registeredVideoContent)
   const episodes = contents.map(content => ({
-    id: content.id, title: content.original_title || content.title || content.display_label || '未命名内容',
+    id: content.id, title: content.original_title || content.title || content.display_label || tr("未命名内容"),
     label: videoEpisodeLabel(content, props.item.category === '里番'), poster: (content.thumbnail_path || content.poster_path) ? posterUrl((content.thumbnail_path || content.poster_path)!) : '',
     content, assets: content.assets.filter(asset => asset.role === 'video'), path: content.path,
     watched: content.watch_status === 'watched', duration: content.duration_sec
@@ -74,13 +78,13 @@ const rows = computed<ContentRow[]>(() => {
   const linked = new Set(contents.flatMap(content => content.assets.map(asset => asset.id)))
   const loose = (props.library?.assets ?? []).filter(asset => asset.role === 'video' && !linked.has(asset.id)).map(asset => ({
     id: asset.id, title: props.item.parts.find(part => part.path === asset.path)?.label || (props.library!.assets.filter(value => value.role === 'video').length === 1 ? props.item.name_zh || props.item.name_en || props.item.file_name : basename(asset.path)),
-    label: contents.length ? '未归集文件' : '', poster: '', content: null, assets: [asset], path: asset.path,
+    label: contents.length ? tr("未归集文件") : '', poster: '', content: null, assets: [asset], path: asset.path,
     watched: props.item.watch_status === 'watched', duration: props.item.duration_sec
   }))
   return [...episodes, ...loose]
 })
 const available = computed(() => rows.value.filter(row => row.assets.some(asset => asset.state === 'present')).length)
-const stateLabels = { present: '文件可用', missing: '文件缺失', offline: '磁盘离线', unchecked: '尚未检查' }
+const stateLabels = { get present() { return tr('文件可用') }, get missing() { return tr('文件缺失') }, get offline() { return tr('磁盘离线') }, get unchecked() { return tr('尚未检查') } }
 function basename(path: string): string { return path.split(/[\\/]/).pop() || path }
 function selected(row: ContentRow): VideoAsset | undefined {
   return row.assets.find(asset => asset.id === selectedVersions.value[row.id])
@@ -90,7 +94,7 @@ function versionLabel(asset: VideoAsset): string {
   return [asset.quality, basename(asset.path), asset.file_size ? formatBytes(asset.file_size) : '', asset.state === 'present' ? '' : stateLabels[asset.state]].filter(Boolean).join(' · ')
 }
 function checkedAt(asset?: VideoAsset): string {
-  return asset?.checked_at ? `检查于 ${new Date(asset.checked_at).toLocaleString('zh-CN', { hour12: false })}` : '尚未检查'
+  return asset?.checked_at ? tr("检查于 {p0}", {p0: (new Date(asset.checked_at).toLocaleString(appLocale.value, { hour12: false }))}) : tr("尚未检查")
 }
 watch(() => props.library, () => {
   const next: Record<string, string> = {}
@@ -106,7 +110,7 @@ async function play(row: ContentRow): Promise<void> {
   busy.value = row.id
   try {
     const outcome = await window.baoyi.video.playAsset(asset.id)
-    if (!outcome.ok) error(outcome.message || '无法打开文件')
+    if (!outcome.ok) error(outcome.message || tr("无法打开文件"))
     emit('changed')
   } catch (cause) { error(errorMessage(cause)) }
   finally { busy.value = '' }
@@ -116,14 +120,14 @@ async function setDefault(row: ContentRow): Promise<void> {
   if (!asset || asset.state !== 'present' || !row.content || busy.value) return
   busy.value = row.id
   try {
-    if (await window.baoyi.video.setDefaultAsset(row.content.id, asset.id)) { success('已设为默认版本'); emit('changed') }
-    else error('未能设置默认版本，请重新检查文件')
+    if (await window.baoyi.video.setDefaultAsset(row.content.id, asset.id)) { success(tr("已设为默认版本")); emit('changed') }
+    else error(tr("未能设置默认版本，请重新检查文件"))
   } catch (cause) { error(errorMessage(cause)) }
   finally { busy.value = '' }
 }
 const resourcePaths = useResourcePaths({
   reveal: (id: string) => window.baoyi.video.revealAsset(id),
-  copied: '文件路径已复制', copyTone: 'success', copyErrorPrefix: ''
+  copied: () => tr("文件路径已复制"), copyTone: 'success', copyErrorPrefix: ''
 })
 async function reveal(row: ContentRow): Promise<void> {
   const asset = selected(row)
@@ -134,7 +138,7 @@ async function relocate(row: ContentRow): Promise<void> {
   if (!asset || busy.value) return
   busy.value = row.id
   try {
-    if (await window.baoyi.video.relocateAsset(asset.id)) { success('已更新文件位置'); emit('changed') }
+    if (await window.baoyi.video.relocateAsset(asset.id)) { success(tr("已更新文件位置")); emit('changed') }
   } catch (cause) { error(errorMessage(cause)) }
   finally { busy.value = '' }
 }
@@ -147,68 +151,68 @@ async function copyPath(row: ContentRow): Promise<void> {
 <template>
   <section class="panel video-items" :class="{ 'video-items--cards': view === 'cards' }">
     <header class="video-items__head">
-      <h2>作品内容 <span>{{ rows.length }} 项内容 · {{ available }} 项可播放<template v-if="available < rows.length"> · {{ rows.length - available }} 项待补齐</template></span></h2>
+      <h2>{{ $t("作品内容") }}<span>{{ $t("{p0} 项内容 · {p1} 项可播放", {p0: (rows.length), p1: (available)}) }}<template v-if="available < rows.length">{{ $t("· {p0} 项待补齐", {p0: (rows.length - available)}) }}</template></span></h2>
       <div class="video-items__tools">
-        <div class="video-items__views" role="group" aria-label="内容视图">
-          <button type="button" aria-label="卡片视图" :aria-pressed="view === 'cards'" title="卡片视图" @click="changeView('cards')"><LayoutGrid :size="15" /></button>
-          <button type="button" aria-label="列表视图" :aria-pressed="view === 'list'" title="列表视图" @click="changeView('list')"><List :size="15" /></button>
+        <div class="video-items__views" role="group" :aria-label="$t('内容视图')">
+          <button type="button" :aria-label="$t('卡片视图')" :aria-pressed="view === 'cards'" :title="$t('卡片视图')" @click="changeView('cards')"><LayoutGrid :size="15" /></button>
+          <button type="button" :aria-label="$t('列表视图')" :aria-pressed="view === 'list'" :title="$t('列表视图')" @click="changeView('list')"><List :size="15" /></button>
         </div>
-        <button class="btn btn--subtle" type="button" :disabled="checking" @click="emit('check')"><Loader2 v-if="checking" :size="13" class="spin" /><RefreshCw v-else :size="13" />{{ checking ? '正在检查…' : '检查文件' }}</button>
-        <button v-if="rows.some(row => row.content)" class="btn btn--subtle" type="button" :aria-pressed="managing" :disabled="saving" @click="managing ? stopManaging() : startManaging()"><ListOrdered :size="13" />{{ managing ? '退出管理' : '管理集数' }}</button>
+        <button class="btn btn--subtle" type="button" :disabled="checking" @click="emit('check')"><Loader2 v-if="checking" :size="13" class="spin" /><RefreshCw v-else :size="13" />{{ checking ? $t('正在检查…') : $t('检查文件') }}</button>
+        <button v-if="rows.some(row => row.content)" class="btn btn--subtle" type="button" :aria-pressed="managing" :disabled="saving" @click="managing ? stopManaging() : startManaging()"><ListOrdered :size="13" />{{ managing ? $t('退出管理') : $t('管理集数') }}</button>
       </div>
     </header>
-    <div v-if="managing" class="video-items__manage" role="region" aria-label="管理集数">
-      <p>改好每一集的{{ withoutSeason ? '部和集号' : '季和集号' }}后一次提交；{{ withoutSeason ? '不分部的填 0。' : '' }}同一{{ withoutSeason ? '部' : '季' }}里集号不能重复，有冲突时整组不会改。要把某一集移出合集，点这一集资料里的「移除 / 移出合集…」。</p>
+    <div v-if="managing" class="video-items__manage" role="region" :aria-label="$t('管理集数')">
+      <p>{{ $t("改好每一集的{p0}后一次提交；{p1}同一{p2}里集号不能重复，有冲突时整组不会改。要把某一集移出合集，点这一集资料里的「移除 / 移出合集…」。", {p0: (withoutSeason ? $t('部和集号') : $t('季和集号')), p1: (withoutSeason ? $t('不分部的填 0。') : ''), p2: (withoutSeason ? $t('部') : $t('季'))}) }}</p>
       <div class="video-items__manage-actions">
-        <button class="btn btn--primary" type="button" :disabled="saving || !numberingChanges.length || !numberingValid" @click="saveNumbering"><Loader2 v-if="saving" :size="13" class="spin" />{{ saving ? '正在保存…' : `保存 ${numberingChanges.length} 处改动` }}</button>
-        <button class="btn btn--ghost" type="button" :disabled="saving" @click="stopManaging">取消</button>
+        <button class="btn btn--primary" type="button" :disabled="saving || !numberingChanges.length || !numberingValid" @click="saveNumbering"><Loader2 v-if="saving" :size="13" class="spin" />{{ saving ? $t('正在保存…') : $t('保存 {p0} 处改动', {p0: numberingChanges.length}) }}</button>
+        <button class="btn btn--ghost" type="button" :disabled="saving" @click="stopManaging">{{ $t("取消") }}</button>
       </div>
     </div>
     <p v-if="checkMessage" class="video-items__check-result" role="status">{{ checkMessage }}</p>
-    <div v-if="rows.length && view === 'list'" class="video-items__columns" aria-hidden="true"><span>看过</span><span>内容</span><span>文件 / 版本</span><span>可用性</span><span>操作</span></div>
+    <div v-if="rows.length && view === 'list'" class="video-items__columns" aria-hidden="true"><span>{{ $t("看过") }}</span><span>{{ $t("内容") }}</span><span>{{ $t("文件 / 版本") }}</span><span>{{ $t("可用性") }}</span><span>{{ $t("操作") }}</span></div>
     <template v-if="rows.length">
     <template v-for="group in seasonGroups" :key="group.season">
-    <h3 v-if="group.label" class="video-items__season">{{ group.label }}<span>{{ group.rows.length }} 集</span></h3>
-    <ul class="video-items__list" :aria-label="group.label ? group.label + '的内容' : '作品内容'">
+    <h3 v-if="group.label" class="video-items__season">{{ group.label }}<span>{{ $t("{p0} 集", {p0: (group.rows.length)}) }}</span></h3>
+    <ul class="video-items__list" :aria-label="group.label ? group.label + $t('的内容') : $t('作品内容')">
       <li v-for="row in group.rows" :key="row.id" class="video-item" :class="{ 'video-item--watched': row.watched, 'video-item--selected': row.id === selectedId, 'video-item--managing': managing && row.content }">
         <div v-if="managing && row.content && numbering[row.id]" class="video-item__numbering">
-          <label><span>{{ withoutSeason ? '部' : '季' }}</span><input type="number" min="0" max="1000" :value="numbering[row.id].season" :aria-label="`${row.title} 的${withoutSeason ? '分部' : '季'}`" :disabled="saving" @input="setNumber(row.id, 'season', ($event.target as HTMLInputElement).value)" /></label>
-          <label><span>集</span><input type="number" min="0" max="10000" :value="numbering[row.id].episode" :aria-label="`${row.title} 的集号`" :disabled="saving" @input="setNumber(row.id, 'episode', ($event.target as HTMLInputElement).value)" /></label>
+          <label><span>{{ withoutSeason ? $t('部') : $t('季') }}</span><input type="number" min="0" max="1000" :value="numbering[row.id].season" :aria-label="$t('{p0} 的{p1}', {p0: row.title, p1: withoutSeason ? $t('分部') : $t('季')})" :disabled="saving" @input="setNumber(row.id, 'season', ($event.target as HTMLInputElement).value)" /></label>
+          <label><span>{{ $t("集") }}</span><input type="number" min="0" max="10000" :value="numbering[row.id].episode" :aria-label="$t('{p0} 的集号', {p0: row.title})" :disabled="saving" @input="setNumber(row.id, 'episode', ($event.target as HTMLInputElement).value)" /></label>
         </div>
-        <button v-if="view === 'cards'" class="video-item__cover" type="button" :disabled="!row.content" :aria-label="`打开${row.label || row.title}资料`" @click="row.content && emit('select', row.content)">
+        <button v-if="view === 'cards'" class="video-item__cover" type="button" :disabled="!row.content" :aria-label="$t('打开{p0}资料', {p0: row.label || row.title})" @click="row.content && emit('select', row.content)">
           <img v-if="row.poster && failedPosters[row.id] !== row.poster" :src="row.poster" :alt="row.title" loading="lazy" @error="failedPosters[row.id] = row.poster" />
-          <span v-else class="video-item__placeholder"><Clapperboard :size="30" /><span>暂无封面</span></span>
-          <span class="video-item__cover-label">{{ row.label || '视频' }}</span>
+          <span v-else class="video-item__placeholder"><Clapperboard :size="30" /><span>{{ $t("暂无封面") }}</span></span>
+          <span class="video-item__cover-label">{{ row.label || $t('视频') }}</span>
         </button>
-        <button class="video-item__check" type="button" :disabled="marking" :aria-label="`${row.watched ? '标记未看' : '标记看过'}：${row.title}`" :aria-pressed="row.watched" @click="emit('watched', row.content, row.watched ? 'unwatched' : 'watched')"><Check v-if="row.watched" :size="13" /></button>
+        <button class="video-item__check" type="button" :disabled="marking" :aria-label="`${row.watched ? $t('标记未看') : $t('标记看过')}：${row.title}`" :aria-pressed="row.watched" @click="emit('watched', row.content, row.watched ? 'unwatched' : 'watched')"><Check v-if="row.watched" :size="13" /></button>
         <div class="video-item__title">
           <small v-if="view === 'cards' && row.content?.tags?.length" class="video-item__tags">{{ row.content.tags.slice(0, 5).join(' · ') }}</small>
           <small v-if="row.label" class="video-item__number">{{ row.label }}<template v-if="row.content?.display_label && row.content.display_label !== row.label"> · {{ row.content.display_label }}</template></small>
-          <button v-if="row.content" type="button" :title="row.content.title || row.title" :aria-label="`查看${row.label}简介`" @click="emit('select', row.content)">{{ row.title }}</button>
+          <button v-if="row.content" type="button" :title="row.content.title || row.title" :aria-label="$t('查看{p0}简介', {p0: row.label})" @click="emit('select', row.content)">{{ row.title }}</button>
           <span v-else :title="row.title">{{ row.title }}</span>
           <small v-if="row.duration > 0">{{ formatDuration(row.duration) }}</small>
         </div>
         <div class="video-item__version">
           <template v-if="row.assets.length > 1">
-            <select :value="selected(row)?.id" :disabled="!!busy" :aria-label="`${row.title} 的文件版本`" @change="selectedVersions[row.id] = ($event.target as HTMLSelectElement).value"><option v-for="asset in row.assets" :key="asset.id" :value="asset.id">{{ versionLabel(asset) }}</option></select>
-            <button v-if="row.content && selected(row)?.path !== row.path" type="button" :disabled="!!busy || selected(row)?.state !== 'present'" @click="setDefault(row)">设为默认</button><small v-else>默认版本 · {{ row.assets.length }} 个文件</small>
+            <select :value="selected(row)?.id" :disabled="!!busy" :aria-label="$t('{p0} 的文件版本', {p0: row.title})" @change="selectedVersions[row.id] = ($event.target as HTMLSelectElement).value"><option v-for="asset in row.assets" :key="asset.id" :value="asset.id">{{ versionLabel(asset) }}</option></select>
+            <button v-if="row.content && selected(row)?.path !== row.path" type="button" :disabled="!!busy || selected(row)?.state !== 'present'" @click="setDefault(row)">{{ $t("设为默认") }}</button><small v-else>{{ $t("默认版本 · {p0} 个文件", {p0: (row.assets.length)}) }}</small>
           </template>
           <span v-else-if="selected(row)" class="truncate" :title="selected(row)?.path">{{ selected(row)?.quality || basename(selected(row)!.path) }}</span>
-          <small v-else>尚无本地文件</small>
-          <button v-if="selected(row)" type="button" :aria-label="`复制文件路径：${row.title}`" @click="copyPath(row)">复制路径</button>
+          <small v-else>{{ $t("尚无本地文件") }}</small>
+          <button v-if="selected(row)" type="button" :aria-label="$t('复制文件路径：{p0}', {p0: row.title})" @click="copyPath(row)">{{ $t("复制路径") }}</button>
         </div>
-        <div class="video-item__state" :class="`video-item__state--${selected(row)?.state || 'missing'}`" :title="checkedAt(selected(row))"><span>{{ selected(row) ? stateLabels[selected(row)!.state] : '尚未下载' }}</span><small v-if="selected(row)?.checked_at">已检查</small></div>
+        <div class="video-item__state" :class="`video-item__state--${selected(row)?.state || 'missing'}`" :title="checkedAt(selected(row))"><span>{{ selected(row) ? stateLabels[selected(row)!.state] : $t('尚未下载') }}</span><small v-if="selected(row)?.checked_at">{{ $t("已检查") }}</small></div>
         <div class="video-item__actions">
-          <button type="button" :disabled="!!busy || selected(row)?.state !== 'present'" :aria-label="`播放：${row.title}`" title="播放所选文件" @click="play(row)"><Loader2 v-if="busy === row.id" :size="15" class="spin" /><Play v-else :size="15" /></button>
-          <button v-if="!item.media_kind||item.media_kind==='video'" type="button" :disabled="selected(row)?.state!=='present'" :aria-label="`内嵌试看：${row.title}`" title="内嵌试看" @click="preview.open(item.id,row.content?.id,0,selected(row)?.id)"><Eye :size="15" /></button>
-          <button type="button" :disabled="!selected(row)" :aria-label="`打开文件位置：${row.title}`" title="打开文件位置" @click="reveal(row)"><FolderOpen :size="15" /></button>
-          <button type="button" :disabled="!!busy || !selected(row)" :aria-label="`重新定位文件：${row.title}`" title="重新定位文件" @click="relocate(row)"><LocateFixed :size="15" /></button>
+          <button type="button" :disabled="!!busy || selected(row)?.state !== 'present'" :aria-label="$t('播放：{p0}', {p0: row.title})" :title="$t('播放所选文件')" @click="play(row)"><Loader2 v-if="busy === row.id" :size="15" class="spin" /><Play v-else :size="15" /></button>
+          <button v-if="!item.media_kind||item.media_kind==='video'" type="button" :disabled="selected(row)?.state!=='present'" :aria-label="$t('内嵌试看：{p0}', {p0: row.title})" :title="$t('内嵌试看')" @click="preview.open(item.id,row.content?.id,0,selected(row)?.id)"><Eye :size="15" /></button>
+          <button type="button" :disabled="!selected(row)" :aria-label="$t('打开文件位置：{p0}', {p0: row.title})" :title="$t('打开文件位置')" @click="reveal(row)"><FolderOpen :size="15" /></button>
+          <button type="button" :disabled="!!busy || !selected(row)" :aria-label="$t('重新定位文件：{p0}', {p0: row.title})" :title="$t('重新定位文件')" @click="relocate(row)"><LocateFixed :size="15" /></button>
         </div>
       </li>
     </ul>
     </template>
     </template>
-    <p v-else class="video-items__empty">尚无内容记录。可添加本地目录、导入资源包，或从来源链接补齐。</p>
+    <p v-else class="video-items__empty">{{ $t("尚无内容记录。可添加本地目录、导入资源包，或从来源链接补齐。") }}</p>
   </section>
 </template>
 

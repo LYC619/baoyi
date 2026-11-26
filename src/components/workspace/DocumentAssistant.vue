@@ -7,4 +7,4 @@ function open(){emit('opened');void assistant.show(undefined,props.context.docum
 function close(_returnFocus=true){assistant.open.value=false}
 defineExpose({close})
 </script>
-<template><button class="ws-button document-assistant-trigger" :aria-expanded="assistant.open.value" @click="open"><Sparkles :size="16"/>{{assistant.busy.value?'归档助理 · 处理中':'归档助理'}}</button></template>
+<template><button class="ws-button document-assistant-trigger" :aria-expanded="assistant.open.value" @click="open"><Sparkles :size="16"/>{{assistant.busy.value?$t('归档助理 · 处理中'):$t('归档助理')}}</button></template>

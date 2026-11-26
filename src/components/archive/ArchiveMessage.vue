@@ -3,6 +3,8 @@ let lastCopyAnnouncement = ''
 </script>
 
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -24,7 +26,7 @@ function reportCopy(ok: boolean): void {
   copyState.value = 'idle'
   btn?.removeAttribute('data-copied')
   btn?.removeAttribute('data-failed')
-  let message = ok ? '已复制' : '复制失败'
+  let message = ok ? tr('已复制') : tr('复制失败')
   if (message === lastCopyAnnouncement) message += '\u00A0'
   lastCopyAnnouncement = message
   if (tip) tip.textContent = ''
@@ -62,33 +64,33 @@ onBeforeUnmount(() => {
 })
 
 const names: Record<string, string> = {
-  archive_result: '续读归档结果',
-  archive_search: '查找归档',
-  archive_get: '读取资料信息',
-  archive_catalog: '查看分类',
-  archive_web_search: '检索公开信息',
-  archive_create_category: '建立归档分类',
-  archive_read: '阅读原文',
-  archive_search_text: '检索正文',
-  archive_project_files: '查看项目文件',
-  archive_project_search: '搜索项目内容',
-  archive_update: '保存整理结果',
-  archive_create_personal: '新增个人记录',
-  archive_check: '核验文件',
-  archive_locate: '寻找原文件',
-  archive_relocate: '修复位置',
-  archive_organize: '整理文件',
-  archive_actions: '查阅修改记录',
-  archive_undo: '撤销修改',
-  archive_link: '处理资源关联',
-  archive_skill: '处理技能记录',
-  archive_history: '查找旧对话',
-  memory: '维护记忆',
-  todo_list: '更新任务进度',
-  session_search: '找回历史',
-  skill_manage: '保存归档方法',
-  skill_view: '读取归档方法',
-  skills_list: '查找归档方法'
+  get archive_result() { return tr("续读归档结果") },
+  get archive_search() { return tr("查找归档") },
+  get archive_get() { return tr("读取资料信息") },
+  get archive_catalog() { return tr("查看分类") },
+  get archive_web_search() { return tr("检索公开信息") },
+  get archive_create_category() { return tr("建立归档分类") },
+  get archive_read() { return tr("阅读原文") },
+  get archive_search_text() { return tr("检索正文") },
+  get archive_project_files() { return tr("查看项目文件") },
+  get archive_project_search() { return tr("搜索项目内容") },
+  get archive_update() { return tr("保存整理结果") },
+  get archive_create_personal() { return tr("新增个人记录") },
+  get archive_check() { return tr("核验文件") },
+  get archive_locate() { return tr("寻找原文件") },
+  get archive_relocate() { return tr("修复位置") },
+  get archive_organize() { return tr("整理文件") },
+  get archive_actions() { return tr("查阅修改记录") },
+  get archive_undo() { return tr("撤销修改") },
+  get archive_link() { return tr("处理资源关联") },
+  get archive_skill() { return tr("处理技能记录") },
+  get archive_history() { return tr("查找旧对话") },
+  get memory() { return tr("维护记忆") },
+  get todo_list() { return tr("更新任务进度") },
+  get session_search() { return tr("找回历史") },
+  get skill_manage() { return tr("保存归档方法") },
+  get skill_view() { return tr("读取归档方法") },
+  get skills_list() { return tr("查找归档方法") }
 }
 
 const result = computed(() => {
@@ -111,14 +113,14 @@ const summary = computed(
   () =>
     failure.value ||
     result.value?.reason ||
-    (typeof result.value?.changed === 'number' ? `已保存 ${result.value.changed} 项` : '') ||
+    (typeof result.value?.changed === 'number' ? tr("已保存 {p0} 项", {p0: (result.value.changed)}) : '') ||
     (typeof result.value?.succeeded === 'number'
-      ? `完成 ${result.value.succeeded} 项${result.value.failed ? `，${result.value.failed} 项待处理` : ''}`
+      ? result.value.failed ? tr('完成 {p0} 项，{p1} 项待处理', { p0: result.value.succeeded, p1: result.value.failed }) : tr('完成 {p0} 项', { p0: result.value.succeeded })
       : '') ||
     (typeof result.value?.total === 'number'
-      ? `共 ${result.value.total} 项${result.value.next !== null && result.value.next !== undefined ? '，还有后续结果' : ''}`
+      ? result.value.next !== null && result.value.next !== undefined ? tr('共 {p0} 项，还有后续结果', { p0: result.value.total }) : tr('共 {p0} 项', { p0: result.value.total })
       : '') ||
-    (props.block.pending ? '正在处理' : '已完成')
+    (props.block.pending ? tr("正在处理") : tr("已完成"))
 )
 const html = computed(() =>
   DOMPurify.sanitize(marked.parse(props.block.text || '', { async: false }) as string, {
@@ -144,13 +146,13 @@ function follow(e: MouseEvent) {
 <template>
   <article v-if="block.role !== 'tool'" class="archive-message" :class="block.role">
     <div class="msg-head">
-      <span class="speaker">{{ block.role === 'user' ? '你' : '抱一' }}</span>
+      <span class="speaker">{{ block.role === 'user' ? $t('你') : $t('抱一') }}</span>
       <span v-if="block.role === 'assistant' && block.text" class="copy-wrap">
         <button
           ref="copyBtn"
           type="button"
           class="copy-button"
-          aria-label="复制这条回复"
+          :aria-label="$t('复制这条回复')"
           @click="copyReply"
         >
           <Check v-if="copyState === 'copied'" :size="13" aria-hidden="true" />
@@ -167,7 +169,7 @@ function follow(e: MouseEvent) {
       <LoaderCircle v-if="block.pending" class="spin" :size="13" />
       <TriangleAlert v-else-if="failure" :size="13" />
       <Check v-else :size="13" />
-      <span>{{ names[block.name || ''] || '处理归档' }}</span>
+      <span>{{ names[block.name || ''] || $t('处理归档') }}</span>
       <small>{{ summary }}</small>
       <ChevronRight class="chevron" :size="13" />
     </summary>
@@ -182,15 +184,15 @@ function follow(e: MouseEvent) {
       <button v-for="item in sources" :key="item.id" class="source-row" @click="emit('source', item.id)">
         <FileText :size="14" />
         <span>{{ item.name }}</span>
-        <small>{{ item.page ? `第 ${item.page} 页` : item.kind }}</small>
+        <small>{{ item.page ? $t('第 {p0} 页', {p0: item.page}) : item.kind }}</small>
       </button>
       <p v-if="result?.text" class="source-text">{{ result.text }}</p>
       <p v-if="failure" role="alert">{{ failure }}</p>
       <p v-if="result?.unread?.length">
-        {{ result.unread.length }} 份未能读取：{{ result.unread.map((x: any) => `${x.name}（${x.reason}）`).join('；') }}
+        {{ $t("{p0} 份未能读取：{p1}", {p0: (result.unread.length), p1: (result.unread.map((x: any) => `${x.name}（${x.reason}）`).join('；'))}) }}
       </p>
       <details class="raw">
-        <summary>查看操作明细</summary>
+        <summary>{{ $t("查看操作明细") }}</summary>
         <pre>{{ JSON.stringify(result || block.args, null, 2) }}</pre>
       </details>
     </div>

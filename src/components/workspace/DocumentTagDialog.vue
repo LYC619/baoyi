@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 import { errorMessage } from '@/utils'
 import { ref, computed, watch } from 'vue'
@@ -70,7 +72,7 @@ function removeSelected(tag: string) {
 async function applyBatch() {
   if (busy.value || !props.items.length) return
   if (!selectedTags.value.length && mode.value !== 'replace') {
-    error.value = '请至少选择或输入一个标签'
+    error.value = tr("请至少选择或输入一个标签")
     return
   }
   busy.value = true
@@ -103,7 +105,7 @@ async function applyBatch() {
         failures.push(`${item.name}：${errorMessage(e)}`)
       }
     }
-    message.value = `已更新 ${count} 份资料${failures.length ? `，${failures.length} 份失败` : ''}`
+    message.value = failures.length ? tr('已更新 {p0} 份资料，{p1} 份失败', { p0: count, p1: failures.length }) : tr('已更新 {p0} 份资料', { p0: count })
     if (count) emit('updated')
     if (failures.length) error.value = failures.join('\n')
     else emit('close')
@@ -142,7 +144,7 @@ async function renameCategoryTag(oldTag: string) {
 async function deleteCategoryTag(tag: string) {
   if (busy.value) return
   const categoryId = props.categoryId
-  if (!(await confirmDialog({ title: `移除标签「${tag}」？`, message: `将从当前${props.categoryName ? '「' + props.categoryName + '」' : ''}所有资料记录中移除该标签，本地原文件不受影响。`, confirmText: '移除标签', tone: 'danger' }))) return
+  if (!(await confirmDialog({ title: tr('移除标签「{p0}」？', {p0: tag}), message: tr("将从当前{p0}所有资料记录中移除该标签，本地原文件不受影响。", {p0: (props.categoryName ? '「' + props.categoryName + '」' : '')}), confirmText: tr('移除标签'), tone: 'danger' }))) return
   busy.value = true
   error.value = ''
   try {
@@ -164,30 +166,30 @@ async function deleteCategoryTag(tag: string) {
 <template>
   <component
     :is="embedded ? 'div' : ProjectDialog"
-    :title="isBatch ? `批量设置标签 · 已选 ${items.length} 份` : `${categoryName || '分类'}标签管理`"
+    :title="isBatch ? $t('批量设置标签 · 已选 {p0} 份', {p0: items.length}) : $t('{p0}标签管理', {p0: categoryName || $t('分类')})"
     :busy="busy"
     @close="emit('close')"
   >
     <div class="document-tag-dialog ws ws-form">
-      <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
+      <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
       <p v-if="message" role="status">{{ message }}</p>
 
       <!-- Batch Mode Options -->
       <div v-if="isBatch" class="tag-mode-switch">
         <label class="mode-option" :class="{ active: mode === 'add' }">
           <input v-model="mode" type="radio" value="add" :disabled="busy" />
-          <span>追加标签</span>
-          <small>在原标签基础上添加选中标签</small>
+          <span>{{ $t("追加标签") }}</span>
+          <small>{{ $t("在原标签基础上添加选中标签") }}</small>
         </label>
         <label class="mode-option" :class="{ active: mode === 'replace' }">
           <input v-model="mode" type="radio" value="replace" :disabled="busy" />
-          <span>替换全部</span>
-          <small>清空原标签，设置为选中标签</small>
+          <span>{{ $t("替换全部") }}</span>
+          <small>{{ $t("清空原标签，设置为选中标签") }}</small>
         </label>
         <label class="mode-option" :class="{ active: mode === 'remove' }">
           <input v-model="mode" type="radio" value="remove" :disabled="busy" />
-          <span>移除标签</span>
-          <small>从所选资料中剔除选中标签</small>
+          <span>{{ $t("移除标签") }}</span>
+          <small>{{ $t("从所选资料中剔除选中标签") }}</small>
         </label>
       </div>
 
@@ -197,20 +199,19 @@ async function deleteCategoryTag(tag: string) {
           <Tag :size="16" class="tag-input-icon" />
           <input
             v-model="newTagInput"
-            placeholder="输入新标签（按回车或点击添加）"
+            :placeholder="$t('输入新标签（按回车或点击添加）')"
             maxlength="60"
             :disabled="busy"
             @keydown.enter.prevent="addTag"
           />
         </div>
         <button class="ws-button" type="button" :disabled="busy || !newTagInput.trim()" @click="addTag">
-          <Plus :size="15" /> 添加
-        </button>
+          <Plus :size="15" />{{ $t("添加") }}</button>
       </div>
 
       <!-- Selected Tags Preview (Batch Mode) -->
       <div v-if="isBatch && selectedTags.length > 0" class="tag-section">
-        <div class="section-label">待应用的标签（已选 {{ selectedTags.length }} 个）：</div>
+        <div class="section-label">{{ $t("待应用的标签（已选 {p0} 个）：", {p0: (selectedTags.length)}) }}</div>
         <div class="tag-cloud">
           <span
             v-for="tag in selectedTags"
@@ -228,10 +229,10 @@ async function deleteCategoryTag(tag: string) {
       <!-- Available / Existing Tags -->
       <div class="tag-section">
         <div class="section-label">
-          {{ isBatch ? '点击快速选择当前分类已有标签：' : '当前分类已有标签列表：' }}
+          {{ isBatch ? $t('点击快速选择当前分类已有标签：') : $t('当前分类已有标签列表：') }}
         </div>
         <div v-if="availableTags.length === 0" class="ws-muted empty-tags-hint">
-          {{ isBatch ? '暂无已有标签，可在上方输入新建。' : '暂无已有标签，可选中资料后添加。' }}
+          {{ isBatch ? $t('暂无已有标签，可在上方输入新建。') : $t('暂无已有标签，可选中资料后添加。') }}
         </div>
         <div v-else class="tag-cloud">
           <template v-if="isBatch">
@@ -263,27 +264,23 @@ async function deleteCategoryTag(tag: string) {
                   @keydown.enter.prevent="renameCategoryTag(tag)"
                   @keydown.esc="editingTag = ''"
                 />
-                <button class="ws-button primary small" :disabled="busy" @click="renameCategoryTag(tag)">保存</button>
-                <button class="ws-button small" :disabled="busy" @click="editingTag = ''">取消</button>
+                <button class="ws-button primary small" :disabled="busy" @click="renameCategoryTag(tag)">{{ $t("保存") }}</button>
+                <button class="ws-button small" :disabled="busy" @click="editingTag = ''">{{ $t("取消") }}</button>
               </template>
               <template v-else>
                 <span class="category-tag-label">{{ tag }}</span>
                 <button
                   class="ws-button ghost small"
-                  title="重命名该标签"
+                  :title="$t('重命名该标签')"
                   :disabled="busy"
                   @click="editingTag = tag; renameInput = tag"
-                >
-                  重命名
-                </button>
+                >{{ $t("重命名") }}</button>
                 <button
                   class="ws-button danger ghost small"
-                  title="从全部分类资料中移除该标签"
+                  :title="$t('从全部分类资料中移除该标签')"
                   :disabled="busy"
                   @click="deleteCategoryTag(tag)"
-                >
-                  删除
-                </button>
+                >{{ $t("删除") }}</button>
               </template>
             </div>
           </template>
@@ -292,13 +289,13 @@ async function deleteCategoryTag(tag: string) {
     </div>
 
     <div v-if="embedded && isBatch" class="ws tag-dialog-footer">
-      <button class="ws-button" :disabled="busy" @click="emit('close')">取消选择</button>
-      <button class="ws-button primary" :disabled="busy || (!selectedTags.length && mode !== 'replace')" @click="applyBatch">应用到 {{ items.length }} 份资料</button>
+      <button class="ws-button" :disabled="busy" @click="emit('close')">{{ $t("取消选择") }}</button>
+      <button class="ws-button primary" :disabled="busy || (!selectedTags.length && mode !== 'replace')" @click="applyBatch">{{ $t("应用到 {p0} 份资料", {p0: (items.length)}) }}</button>
     </div>
     <template #footer>
       <div class="ws tag-dialog-footer">
         <button class="ws-button" type="button" :disabled="busy" @click="emit('close')">
-          {{ isBatch ? '取消' : '关闭' }}
+          {{ isBatch ? $t('取消') : $t('关闭') }}
         </button>
         <button
           v-if="isBatch"
@@ -306,9 +303,7 @@ async function deleteCategoryTag(tag: string) {
           type="button"
           :disabled="busy || (!selectedTags.length && mode !== 'replace')"
           @click="applyBatch"
-        >
-          应用到 {{ items.length }} 份资料
-        </button>
+        >{{ $t("应用到 {p0} 份资料", {p0: (items.length)}) }}</button>
       </div>
     </template>
   </component>

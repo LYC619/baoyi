@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { ref, watch } from 'vue'
 import { errorMessage } from '@/utils'
 import { workspace } from '@/utils/workspace-api'
@@ -66,7 +68,7 @@ async function analyzeImport() {
   try {
     for (const [index, path] of paths.entries()) {
       if (stopAnalysis.value) break
-      analysisStatus.value = `正在识别 ${index + 1} / ${paths.length}`
+      analysisStatus.value = tr("正在识别 {p0} / {p1}", {p0: (index + 1), p1: (paths.length)})
       try {
         const result = await workspace.documents.analyzeImport(token, path)
         if (props.preview.token !== token) return
@@ -76,7 +78,7 @@ async function analyzeImport() {
         failures.push(`${path.split(/[\\/]/).pop()}：${errorMessage(e)}`)
       }
     }
-    analysisStatus.value = `已识别 ${Object.keys(suggestions.value).length} 份，可修改建议后导入。`
+    analysisStatus.value = tr("已识别 {p0} 份，可修改建议后导入。", {p0: (Object.keys(suggestions.value).length)})
     error.value = failures.join('\n')
   } finally {
     analyzing.value = false
@@ -122,22 +124,20 @@ async function importFiles() {
 
 <template>
   <ProjectDialog
-    title="导入资料预览"
+    :title="$t('导入资料预览')"
     wide
     :busy="busy || analyzing"
     @close="emit('close')"
   >
     <div class="ws">
-      <p class="ws-muted">已找到 {{ preview.items.length }} 份资料，已登记的文件会自动跳过。</p>
-      <p v-for="warning in preview.warnings" :key="warning" class="ws-notice">{{ warning }}</p>
-      <p v-if="error" class="ws-error">{{ error }}</p>
+      <p class="ws-muted">{{ $t("已找到 {p0} 份资料，已登记的文件会自动跳过。", {p0: (preview.items.length)}) }}</p>
+      <p v-for="warning in preview.warnings" :key="warning" class="ws-notice">{{ $systemMessage(warning) }}</p>
+      <p v-if="error" class="ws-error">{{ $systemMessage(error) }}</p>
 
-      <p class="ws-notice">请确认每份资料的分类，也可选择当前模块的“其他”。</p>
+      <p class="ws-notice">{{ $t("请确认每份资料的分类，也可选择当前模块的“其他”。") }}</p>
       <div class="import-agent-options">
         <label>
-          <input v-model="agentImport" type="checkbox" :disabled="busy || analyzing" />
-          智能辅助识别分类、作者和标签
-        </label>
+          <input v-model="agentImport" type="checkbox" :disabled="busy || analyzing" />{{ $t("智能辅助识别分类、作者和标签") }}</label>
         <template v-if="agentImport">
           <button
             type="button"
@@ -145,22 +145,22 @@ async function importFiles() {
             :disabled="busy || analyzing || !selectedPaths.length"
             @click="analyzeImport"
           >
-            {{ Object.keys(suggestions).length ? '重新识别' : '识别所选' }}
+            {{ Object.keys(suggestions).length ? $t('重新识别') : $t('识别所选') }}
           </button>
           <button v-if="analyzing" type="button" class="ws-button" @click="stopAnalysis = true">
-            {{ stopAnalysis ? '当前文件结束后停止' : '停止后续识别' }}
+            {{ stopAnalysis ? $t('当前文件结束后停止') : $t('停止后续识别') }}
           </button>
-          <p class="ws-muted">使用资料模块配置的模型；识别结果可修改后登记。识别失败时仍可手动导入。</p>
+          <p class="ws-muted">{{ $t("使用资料模块配置的模型；识别结果可修改后登记。识别失败时仍可手动导入。") }}</p>
           <p v-if="analysisStatus" role="status">{{ analysisStatus }}</p>
         </template>
       </div>
 
       <div class="import-batch">
-        <select v-model="importCategoryId" aria-label="批量导入分类">
+        <select v-model="importCategoryId" :aria-label="$t('批量导入分类')">
           <optgroup
             v-for="sub in ['reading', 'archive'] as const"
             :key="sub"
-            :label="sub === 'reading' ? '阅读' : '资料'"
+            :label="sub === 'reading' ? $t('阅读') : $t('资料')"
           >
             <option
               v-for="cat in categories.filter((c) => c.submodule === sub)"
@@ -171,7 +171,7 @@ async function importFiles() {
             </option>
           </optgroup>
         </select>
-        <button type="button" class="ws-button" @click="applyImportCategory">应用到所选</button>
+        <button type="button" class="ws-button" @click="applyImportCategory">{{ $t("应用到所选") }}</button>
       </div>
 
       <div class="document-import">
@@ -181,38 +181,30 @@ async function importFiles() {
             type="checkbox"
             :value="candidate.path"
             :disabled="candidate.existing || busy || analyzing"
-            :aria-label="'导入 ' + candidate.name"
+            :aria-label="$t('导入 ') + candidate.name"
           />
           <span>
             <strong>{{ candidate.name }}</strong>
-            <small>{{ candidate.existing ? '已登记' : '' }}</small>
-            <span v-if="candidate.suggestedSubmodule" class="ws-badge suggestion-badge">
-              推测：{{ candidate.suggestedSubmodule === 'archive' ? '资料' : '阅读' }}
-              {{ candidate.suggestedReason ? `· ${candidate.suggestedReason}` : '' }}
+            <small>{{ candidate.existing ? $t('已登记') : '' }}</small>
+            <span v-if="candidate.suggestedSubmodule" class="ws-badge suggestion-badge">{{ $t("推测：{p0} {p1}", {p0: (candidate.suggestedSubmodule === 'archive' ? $t('资料') : $t('阅读')), p1: (candidate.suggestedReason ? `· ${candidate.suggestedReason}` : '')}) }}
             </span>
             <span class="ws-path">{{ candidate.path }}</span>
             <div v-if="agentImport && suggestions[candidate.path]" class="import-metadata">
-              <label>
-                标题
-                <input
+              <label>{{ $t("标题") }}<input
                   v-model="suggestions[candidate.path].name"
-                  :aria-label="'识别标题 ' + candidate.name"
+                  :aria-label="$t('识别标题 ') + candidate.name"
                   :disabled="busy || analyzing"
                 />
               </label>
-              <label>
-                作者
-                <input
+              <label>{{ $t("作者") }}<input
                   v-model="suggestions[candidate.path].author"
-                  :aria-label="'识别作者 ' + candidate.name"
+                  :aria-label="$t('识别作者 ') + candidate.name"
                   :disabled="busy || analyzing"
                 />
               </label>
-              <label>
-                标签
-                <input
+              <label>{{ $t("标签") }}<input
                   :value="suggestions[candidate.path].tags.join('，')"
-                  :aria-label="'识别标签 ' + candidate.name"
+                  :aria-label="$t('识别标签 ') + candidate.name"
                   :disabled="busy || analyzing"
                   @change="
                     suggestions[candidate.path].tags = ($event.target as HTMLInputElement).value
@@ -227,13 +219,13 @@ async function importFiles() {
           </span>
           <select
             v-model="importChoices[candidate.path]"
-            :aria-label="'归类 ' + candidate.name"
+            :aria-label="$t('归类 ') + candidate.name"
             :disabled="candidate.existing || busy"
           >
             <optgroup
               v-for="sub in ['reading', 'archive'] as const"
               :key="sub"
-              :label="sub === 'reading' ? '阅读' : '资料'"
+              :label="sub === 'reading' ? $t('阅读') : $t('资料')"
             >
               <option
                 v-for="cat in categories.filter((c) => c.submodule === sub)"
@@ -256,8 +248,7 @@ async function importFiles() {
           :disabled="busy || analyzing || !selectedPaths.length"
           @click="importFiles"
         >
-          {{ agentImport && !analysisAttempted ? '识别并预览所选' : '导入所选' }} {{ selectedPaths.length }} 份资料
-        </button>
+          {{ $t("{p0} {p1} 份资料", {p0: (agentImport && !analysisAttempted ? $t('识别并预览所选') : $t('导入所选')), p1: (selectedPaths.length)}) }}</button>
       </div>
     </template>
   </ProjectDialog>

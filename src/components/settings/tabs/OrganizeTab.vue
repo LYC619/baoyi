@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -26,7 +28,7 @@ const organizeRoot = computed(() => settings.settings.organize_root)
 async function pickVideoOrganizeRoot(): Promise<void> {
   try {
     const folder = await window.baoyi.videoOrganize.pickDirectory()
-    if (folder) { await settings.patch({ video_organize_root: folder }); success('已保存影视整理根目录') }
+    if (folder) { await settings.patch({ video_organize_root: folder }); success(tr("已保存影视整理根目录")) }
   } catch (cause) { error(errorMessage(cause)) }
 }
 
@@ -45,10 +47,10 @@ async function pickOrganizeRoot(): Promise<void> {
   if (!dir) return
   // 整理目标不该同时是扫描目录：搬进去的软件会在下一轮重扫时又被发现一遍
   if (settings.settings.software_scan_dirs.some((d) => dir.toLowerCase().startsWith(d.toLowerCase()))) {
-    toast('这个目录在扫描范围里，整理进去的软件下次扫描会被重复发现。建议换一个')
+    toast(tr("这个目录在扫描范围里，整理进去的软件下次扫描会被重复发现。建议换一个"))
   }
   await settings.patch({ organize_root: dir })
-  success('整理目标目录已保存')
+  success(tr("整理目标目录已保存"))
 }
 
 async function clearOrganizeRoot(): Promise<void> {
@@ -67,9 +69,9 @@ function planTally(p: OrganizePlan) {
 async function undoPlan(p: OrganizePlan): Promise<void> {
   const t = planTally(p)
   const ok = await confirmDialog({
-    title: '撤销这次整理？',
-    message: `移动过的 ${t.moved} 个文件夹将搬回原位置，建立的 ${t.linked} 个目录链接将被移除（真实文件不受影响）。`,
-    confirmText: '确认撤销'
+    title: tr('撤销这次整理？'),
+    message: tr("移动过的 {p0} 个文件夹将搬回原位置，建立的 {p1} 个目录链接将被移除（真实文件不受影响）。", {p0: (t.moved), p1: (t.linked)}),
+    confirmText: tr('确认撤销')
   })
   if (!ok) return
 
@@ -78,10 +80,10 @@ async function undoPlan(p: OrganizePlan): Promise<void> {
     const r = await window.baoyi.organize.undo(p.id)
     await Promise.all([loadPlans(), store.reload()])
     if (r.failed > 0) {
-      error(`撤销完成 ${r.restored} 条，${r.failed} 条失败：${r.notes.slice(0, 2).join('；')}`)
+      error(tr("撤销完成 {p0} 条，{p1} 条失败：{p2}", {p0: (r.restored), p1: (r.failed), p2: (r.notes.slice(0, 2).join('；'))}))
       return
     }
-    success(`已还原 ${r.restored} 条`)
+    success(tr("已还原 {p0} 条", {p0: (r.restored)}))
   } finally {
     undoing.value = ''
   }
@@ -92,32 +94,27 @@ onMounted(loadPlans)
 
 <template>
 <template v-if="activeModule === 'video'">
-<section class="panel"><h2>影视整理目录</h2><p class="sec-desc">创建合集时选择移动或复制，文件会放入此目录下以合集名命名的文件夹。</p><div class="row"><span class="hint mono">{{ settings.settings.video_organize_root || '尚未设置' }}</span><button class="btn btn--ghost" @click="pickVideoOrganizeRoot"><FolderOpen :size="14" />选择整理根目录</button></div></section>
+<section class="panel"><h2>{{ $t("影视整理目录") }}</h2><p class="sec-desc">{{ $t("创建合集时选择移动或复制，文件会放入此目录下以合集名命名的文件夹。") }}</p><div class="row"><span class="hint mono">{{ settings.settings.video_organize_root || $t('尚未设置') }}</span><button class="btn btn--ghost" @click="pickVideoOrganizeRoot"><FolderOpen :size="14" />{{ $t("选择整理根目录") }}</button></div></section>
 </template>
 <template v-else>
 <section class="panel">
   <div class="sec-head">
-    <h2>整理目标目录</h2>
+    <h2>{{ $t("整理目标目录") }}</h2>
     <button class="btn btn--ghost" @click="pickOrganizeRoot">
       <FolderPlus :size="14" />
-      {{ organizeRoot ? '换一个' : '选择目录' }}
+      {{ organizeRoot ? $t('换一个') : $t('选择目录') }}
     </button>
   </div>
-  <p class="sec-desc">
-    抱一会把软件按分类归置到这个目录下，比如
-    <span class="mono">E:\Toolkit\逆向分析\x64dbg\</span>。
-    它和扫描目录是<b>分开的</b> —— 扫描是「去哪里找」，这里是「归到哪里去」，
-    把整理目标也加进扫描列表只会让下一轮重扫把搬进来的软件再发现一遍。
-  </p>
+  <p class="sec-desc">{{ $t("抱一会把软件按分类归置到这个目录下，比如") }}<span class="mono">{{ $t("E:\\Toolkit\\逆向分析\\x64dbg\\") }}</span>{{ $t("。 它和扫描目录是") }}<b>{{ $t("分开的") }}</b>{{ $t("—— 扫描是「去哪里找」，这里是「归到哪里去」， 把整理目标也加进扫描列表只会让下一轮重扫把搬进来的软件再发现一遍。") }}</p>
 
   <div v-if="organizeRoot" class="datadir">
-    <span class="datadir__label">目标位置</span>
+    <span class="datadir__label">{{ $t("目标位置") }}</span>
     <span class="datadir__path mono truncate" :title="organizeRoot">{{ organizeRoot }}</span>
-    <button class="btn btn--subtle" title="清除" @click="clearOrganizeRoot">
+    <button class="btn btn--subtle" :title="$t('清除')" @click="clearOrganizeRoot">
       <Trash2 :size="14" />
     </button>
   </div>
-  <p v-else class="empty-line">还没有设置，整理功能需要先指定一个目标目录。</p>
+  <p v-else class="empty-line">{{ $t("还没有设置，整理功能需要先指定一个目标目录。") }}</p>
 
   <div class="row">
     <button
@@ -125,30 +122,19 @@ onMounted(loadPlans)
       :disabled="!organizeRoot"
       @click="router.push({ name: 'organize' })"
     >
-      <FolderTree :size="14" />
-      开始整理
-    </button>
-    <span class="hint">会先出一份方案给你逐条过目，不会直接动文件</span>
+      <FolderTree :size="14" />{{ $t("开始整理") }}</button>
+    <span class="hint">{{ $t("会先出一份方案给你逐条过目，不会直接动文件") }}</span>
   </div>
 
-  <p class="sec-desc sec-desc--foot">
-    绿色软件会被<b>剪切</b>到目标目录并把文件夹名规范成英文正式名。
-    安装版默认只在目标目录里放一个 junction 链接指向原安装位置 ——
-    装过的软件在注册表里留着固定路径，搬走就坏了。
-    识别时判定为「可安全移动」的安装版也会剪切，但执行前会再查一遍注册表引用，
-    发现问题会在方案里标出来由你决定。
-  </p>
+  <p class="sec-desc sec-desc--foot">{{ $t("绿色软件会被") }}<b>{{ $t("剪切") }}</b>{{ $t("到目标目录并把文件夹名规范成英文正式名。 安装版默认只在目标目录里放一个 junction 链接指向原安装位置 —— 装过的软件在注册表里留着固定路径，搬走就坏了。 识别时判定为「可安全移动」的安装版也会剪切，但执行前会再查一遍注册表引用， 发现问题会在方案里标出来由你决定。") }}</p>
 </section>
 
 <section class="panel">
   <div class="sec-head">
-    <h2>整理历史</h2>
-    <span class="hint">{{ plans.length }} 次</span>
+    <h2>{{ $t("整理历史") }}</h2>
+    <span class="hint">{{ $t("{p0} 次", {p0: (plans.length)}) }}</span>
   </div>
-  <p class="sec-desc">
-    每次整理都完整记下动过哪些目录，所以任何一次都能原路撤回。
-    想撤就趁记录还在 —— 它会跟着「清空识别数据」一起清掉。
-  </p>
+  <p class="sec-desc">{{ $t("每次整理都完整记下动过哪些目录，所以任何一次都能原路撤回。 想撤就趁记录还在 —— 它会跟着「清空识别数据」一起清掉。") }}</p>
 
   <ul v-if="plans.length" class="plans">
     <li v-for="p in plans" :key="p.id">
@@ -160,13 +146,10 @@ onMounted(loadPlans)
           <ChevronDown :size="13" :class="['chev', { 'chev--open': openPlan === p.id }]" />
           <span>{{ new Date(p.created_at).toLocaleString('sv') }}</span>
         </button>
-        <span class="plans__sum">
-          移动 {{ planTally(p).moved }}　链接 {{ planTally(p).linked }}
-          <span v-if="planTally(p).failed > 0" class="bad">
-            　失败 {{ planTally(p).failed }}
+        <span class="plans__sum">{{ $t("移动 {p0} 链接 {p1}", {p0: (planTally(p).moved), p1: (planTally(p).linked)}) }}<span v-if="planTally(p).failed > 0" class="bad">{{ $t("失败 {p0}", {p0: (planTally(p).failed)}) }}
           </span>
         </span>
-        <TagBadge v-if="p.undone_at > 0" label="已撤销" tone="muted" />
+        <TagBadge v-if="p.undone_at > 0" :label="$t('已撤销')" tone="muted" />
         <button
           v-else
           class="btn btn--subtle"
@@ -174,14 +157,12 @@ onMounted(loadPlans)
           @click="undoPlan(p)"
         >
           <Loader2 v-if="undoing === p.id" :size="13" class="spin" />
-          <RotateCcw v-else :size="13" />
-          撤销
-        </button>
+          <RotateCcw v-else :size="13" />{{ $t("撤销") }}</button>
       </div>
 
       <ul v-if="openPlan === p.id" class="steps">
         <li v-for="(s, i) in p.steps" :key="i" :class="{ bad: !s.ok }">
-          <span class="steps__type">{{ s.type === 'move' ? '移动' : '链接' }}</span>
+          <span class="steps__type">{{ s.type === 'move' ? $t('移动') : $t('链接') }}</span>
           <span class="steps__name truncate" :title="s.name">{{ s.name }}</span>
           <span class="steps__path mono truncate" :title="`${s.from} → ${s.to}`">
             {{ s.from }} → {{ s.to }}
@@ -191,7 +172,7 @@ onMounted(loadPlans)
       </ul>
     </li>
   </ul>
-  <p v-else class="empty-line">还没有整理过。</p>
+  <p v-else class="empty-line">{{ $t("还没有整理过。") }}</p>
 </section>
 </template>
 </template>

@@ -1,3 +1,5 @@
+
+import { tr } from '../i18n/index.ts'
 import { errorMessage } from '@/utils'
 import { ref, watch, onMounted, onBeforeUnmount, type Ref } from 'vue'
 import { workspace } from '@/utils/workspace-api'
@@ -65,7 +67,7 @@ function queue(entry: Entry, priority: number) {
 async function encode(canvas: HTMLCanvasElement) {
   const blob = await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
-      (value) => (value ? resolve(value) : reject(Error('封面编码失败'))),
+      (value) => (value ? resolve(value) : reject(Error(tr("封面编码失败")))),
       'image/png',
     ),
   )
@@ -86,7 +88,7 @@ async function render(entry: Entry, format: string, data: Uint8Array | BaoyiPdfR
       canvas.width = Math.max(1, Math.floor(viewport.width))
       canvas.height = Math.max(1, Math.floor(viewport.height))
       const context = canvas.getContext('2d')
-      if (!context) throw Error('无法生成封面画布')
+      if (!context) throw Error(tr("无法生成封面画布"))
       const rendering = page.render({
         canvas,
         canvasContext: context,
@@ -112,7 +114,7 @@ async function render(entry: Entry, format: string, data: Uint8Array | BaoyiPdfR
     canvas.width = Math.max(1, Math.floor(bitmap.width * scale))
     canvas.height = Math.max(1, Math.floor(bitmap.height * scale))
     const context = canvas.getContext('2d')
-    if (!context) throw Error('无法生成封面画布')
+    if (!context) throw Error(tr("无法生成封面画布"))
     context.fillStyle = '#ffffff'
     context.fillRect(0, 0, canvas.width, canvas.height)
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
@@ -171,7 +173,7 @@ async function drain() {
         entry.cover = {
           ...blank(),
           state: 'failed',
-          reason: '来源已变化，请刷新或重试封面',
+          reason: tr("来源已变化，请刷新或重试封面"),
         }
         return
       }
@@ -195,7 +197,7 @@ async function drain() {
       entry.cover = {
         ...entry.cover,
         state: 'failed',
-        reason: '封面暂不可用：' + errorMessage(e),
+        reason: tr("封面暂不可用：") + errorMessage(e),
       }
       if (entry.cover.key)
         entry.failure = { key: entry.cover.key, reason: entry.cover.reason }

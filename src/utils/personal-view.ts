@@ -1,3 +1,5 @@
+
+import { tr } from '../i18n/core.ts'
 import type { PersonalRecord } from '../types/workspace.ts'
 
 export function daysUntil(value: unknown, today: string): number | null {
@@ -9,7 +11,7 @@ export function daysUntil(value: unknown, today: string): number | null {
 
 export function dueText(value: unknown, today: string) {
   const days = daysUntil(value, today)
-  return days === null ? '未设置日期' : days < 0 ? `已逾期 ${-days} 天` : days === 0 ? '今天到期' : `${days} 天后到期`
+  return days === null ? tr('未设置日期') : days < 0 ? tr('已逾期 {p0} 天', {p0: -days}) : days === 0 ? tr('今天到期') : tr('{p0} 天后到期', {p0: days})
 }
 
 export function filterTodos(records: PersonalRecord[], view: string, query: string, today: string) {

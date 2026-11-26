@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr, systemMessage } from "../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -17,8 +19,8 @@ const preview = ref<RelocatePreview | null>(null), working = ref(false)
 type SoftwareKind = 'portable' | 'linked' | 'installed' | 'unknown'
 const kind = ref<'all' | SoftwareKind>('all')
 const kinds: Array<{ value: 'all' | SoftwareKind; label: string }> = [
-  { value: 'all', label: '全部' }, { value: 'portable', label: '绿色软件' },
-  { value: 'linked', label: '链接软件' }, { value: 'installed', label: '安装版' }, { value: 'unknown', label: '类型待确认' }
+  { value: 'all', get label() { return tr("全部") } }, { value: 'portable', get label() { return tr("绿色软件") } },
+  { value: 'linked', get label() { return tr("链接软件") } }, { value: 'installed', get label() { return tr("安装版") } }, { value: 'unknown', get label() { return tr("类型待确认") } }
 ]
 function kindOf(e: OrganizedEntry): SoftwareKind { return e.is_link ? 'linked' : e.is_portable === true ? 'portable' : e.is_portable === false ? 'installed' : 'unknown' }
 const counts = computed(() => Object.fromEntries(kinds.map(k => [k.value, props.entries.filter(e => k.value === 'all' || kindOf(e) === k.value).length])))
@@ -38,10 +40,10 @@ async function previewMove(e: OrganizedEntry) {
 }
 async function apply(e: OrganizedEntry, action: 'relocate' | 'materialize' | 'unlink') {
   if (working.value || props.busy) return
-  if (action === 'materialize' && !(await confirmDialog({ title: `将「${e.name}」转为实体目录？`, message: `真实文件将从 ${e.link_target} 移至 ${e.dir}。原位置不再保留文件，依赖原路径的外部快捷方式可能失效。`, confirmText: '转为实体' }))) return
-  if (action === 'unlink' && !(await confirmDialog({ title: `移除「${e.name}」的目录链接？`, message: `仅删除整理目录中的链接入口（${e.dir}），真实文件保留在原位置，库记录将指回原路径。`, confirmText: '移除链接' }))) return
+  if (action === 'materialize' && !(await confirmDialog({ title: tr('将「{p0}」转为实体目录？', {p0: e.name}), message: tr("真实文件将从 {p0} 移至 {p1}。原位置不再保留文件，依赖原路径的外部快捷方式可能失效。", {p0: (e.link_target), p1: (e.dir)}), confirmText: tr('转为实体') }))) return
+  if (action === 'unlink' && !(await confirmDialog({ title: tr('移除「{p0}」的目录链接？', {p0: e.name}), message: tr("仅删除整理目录中的链接入口（{p0}），真实文件保留在原位置，库记录将指回原路径。", {p0: (e.dir)}), confirmText: tr('移除链接') }))) return
   const p = preview.value
-  if (action === 'relocate' && (!p?.ok || !(await confirmDialog({ title: `确认重新归置「${e.name}」？`, message: `从：${p.from}\n到：${p.to}\n${p.is_link ? '仅改变链接位置，真实文件不动。' : '将移动整个软件文件夹。'}${p.warning ? '\n' + p.warning : ''}`, confirmText: '确认归置' })))) return
+  if (action === 'relocate' && (!p?.ok || !(await confirmDialog({ title: tr('确认重新归置「{p0}」？', {p0: e.name}), message: (p.is_link ? tr('从：{p0}\n到：{p1}\n仅改变链接位置，真实文件不动。', { p0: p.from, p1: p.to }) : tr('从：{p0}\n到：{p1}\n将移动整个软件文件夹。', { p0: p.from, p1: p.to })) + (p.warning ? '\n' + systemMessage(p.warning) : ''), confirmText: tr('确认归置') })))) return
   working.value = true
   try {
     const result = action === 'relocate'
@@ -62,51 +64,51 @@ function typeUpdated(item: SoftwareItem): void {
 </script>
 
 <template>
-  <section class="organized-list" aria-label="已整理的软件">
+  <section class="organized-list" :aria-label="$t('已整理的软件')">
     <div class="organized-tools">
-      <p>已整理的软件会一直保留在这里，包括归档条目。分类以所在文件夹为准。</p>
-      <input v-model="keyword" class="input" aria-label="搜索已整理软件" placeholder="搜索软件、分类或路径" />
+      <p>{{ $t("已整理的软件会一直保留在这里，包括归档条目。分类以所在文件夹为准。") }}</p>
+      <input v-model="keyword" class="input" :aria-label="$t('搜索已整理软件')" :placeholder="$t('搜索软件、分类或路径')" />
     </div>
-    <div class="kind-filters" role="group" aria-label="软件类型筛选">
+    <div class="kind-filters" role="group" :aria-label="$t('软件类型筛选')">
       <button v-for="k in kinds" :key="k.value" class="btn btn--ghost" :class="{ selected: kind === k.value }" :aria-pressed="kind === k.value" :disabled="busy || working" @click="kind = k.value">{{ k.label }} <span>{{ counts[k.value] }}</span></button>
     </div>
-    <p v-if="!entries.length" class="empty">整理目录下还没有软件记录。可先整理软件，或把软件放进“分类 / 软件文件夹”后同步。</p>
-    <p v-else-if="!visible.length" class="empty">没有匹配的软件。</p>
+    <p v-if="!entries.length" class="empty">{{ $t("整理目录下还没有软件记录。可先整理软件，或把软件放进“分类 / 软件文件夹”后同步。") }}</p>
+    <p v-else-if="!visible.length" class="empty">{{ $t("没有匹配的软件。") }}</p>
     <datalist id="organize-category-options"><option v-for="name in categories" :key="name" :value="name" /></datalist>
     <article v-for="e in visible" :key="e.software_id" class="organized-item panel" :class="{ 'organized-item--missing': !e.present || !e.target_ok || !e.exe_present }">
       <div class="item-heading">
         <Link2 v-if="e.is_link" :size="15" />
         <Leaf v-else-if="e.is_portable === true" :size="15" class="portable-icon" />
         <button class="item-title" :disabled="busy || working" @click="router.push({ name: 'detail', params: { id: e.software_id } })">{{ e.name }}</button>
-        <span class="badge">{{ e.folder_category || '未放入分类文件夹' }}</span>
+        <span class="badge">{{ e.folder_category || $t('未放入分类文件夹') }}</span>
         <span class="badge" :class="'badge--' + kindOf(e)">{{ kinds.find(k => k.value === kindOf(e))?.label }}</span>
-        <span v-if="e.is_archived" class="badge">已归档</span>
+        <span v-if="e.is_archived" class="badge">{{ $t("已归档") }}</span>
       </div>
       <p class="item-path mono">{{ e.dir }}</p>
-      <p v-if="e.is_link" class="item-path">实际位置：<span class="mono">{{ e.link_target || '无法读取' }}</span></p>
-      <p v-if="!e.present || !e.target_ok" class="warning" role="status">{{ !e.present ? '目录已不存在' : '链接目标已失效' }}。请修复路径，或进入详情移除记录。</p>
-      <p v-else-if="!e.exe_present" class="warning" role="status">主程序已不存在，可能已卸载或更换安装位置。记录仍保留；重装到原路径后同步即可恢复，路径改变时请重新导入并核对旧记录。</p>
-      <p v-if="e.category_mismatch" class="warning">库内分类为“{{ e.category }}”，同步后将跟随文件夹。</p>
+      <p v-if="e.is_link" class="item-path">{{ $t("实际位置：") }}<span class="mono">{{ e.link_target || $t('无法读取') }}</span></p>
+      <p v-if="!e.present || !e.target_ok" class="warning" role="status">{{ $t("{p0}。请修复路径，或进入详情移除记录。", {p0: (!e.present ? $t('目录已不存在') : $t('链接目标已失效'))}) }}</p>
+      <p v-else-if="!e.exe_present" class="warning" role="status">{{ $t("主程序已不存在，可能已卸载或更换安装位置。记录仍保留；重装到原路径后同步即可恢复，路径改变时请重新导入并核对旧记录。") }}</p>
+      <p v-if="e.category_mismatch" class="warning">{{ $t("库内分类为“{p0}”，同步后将跟随文件夹。", {p0: (e.category)}) }}</p>
       <div class="item-actions">
-        <button class="btn btn--ghost" :disabled="busy || working || !e.present || !e.target_ok" :title="e.is_link ? '更改分类或文件夹位置，只移动链接入口，软件本体不动；操作后仍属于已整理。' : '更改分类或文件夹位置，会移动整个软件文件夹；操作后仍属于已整理。'" @click="edit(e)">更改整理位置</button>
-        <button v-if="e.is_link" class="btn btn--ghost" :disabled="busy || working || !e.present || !e.target_ok" title="把软件本体从原位置搬到当前链接位置，操作后仍属于已整理。" @click="apply(e, 'materialize')">转为实体</button>
-        <button v-if="e.is_link" class="btn btn--ghost" :disabled="busy || working || !e.present" title="只删除链接，记录指回原位置；原位置在整理目录外时回到待整理，真实文件保留。" @click="apply(e, 'unlink')">移除链接</button>
-        <button class="btn btn--subtle" :disabled="busy || working || !e.present || !e.target_ok" @click="reveal(e.software_id)"><FolderOpen :size="14" />所在文件夹</button>
+        <button class="btn btn--ghost" :disabled="busy || working || !e.present || !e.target_ok" :title="e.is_link ? $t('更改分类或文件夹位置，只移动链接入口，软件本体不动；操作后仍属于已整理。') : $t('更改分类或文件夹位置，会移动整个软件文件夹；操作后仍属于已整理。')" @click="edit(e)">{{ $t("更改整理位置") }}</button>
+        <button v-if="e.is_link" class="btn btn--ghost" :disabled="busy || working || !e.present || !e.target_ok" :title="$t('把软件本体从原位置搬到当前链接位置，操作后仍属于已整理。')" @click="apply(e, 'materialize')">{{ $t("转为实体") }}</button>
+        <button v-if="e.is_link" class="btn btn--ghost" :disabled="busy || working || !e.present" :title="$t('只删除链接，记录指回原位置；原位置在整理目录外时回到待整理，真实文件保留。')" @click="apply(e, 'unlink')">{{ $t("移除链接") }}</button>
+        <button class="btn btn--subtle" :disabled="busy || working || !e.present || !e.target_ok" @click="reveal(e.software_id)"><FolderOpen :size="14" />{{ $t("所在文件夹") }}</button>
         <SoftwareTypeSelect :id="e.software_id" :model-value="e.is_portable" :disabled="busy || working" @busy="working = $event" @updated="typeUpdated" />
       </div>
       <form v-if="editing === e.software_id" class="relocate-form" @submit.prevent="previewMove(e)">
         <fieldset :disabled="busy || working">
-          <label>目标分类<input v-model="category" class="input" list="organize-category-options" aria-label="重新归置目标分类" required maxlength="64" /></label>
-          <label>文件夹名<input v-model="folder" class="input" aria-label="重新归置文件夹名" required maxlength="64" /></label>
-          <button class="btn btn--ghost" type="submit"><Loader2 v-if="working" :size="14" class="spin" />预览位置</button>
-          <button class="btn btn--subtle" type="button" @click="editing = ''">取消</button>
+          <label>{{ $t("目标分类") }}<input v-model="category" class="input" list="organize-category-options" :aria-label="$t('重新归置目标分类')" required maxlength="64" /></label>
+          <label>{{ $t("文件夹名") }}<input v-model="folder" class="input" :aria-label="$t('重新归置文件夹名')" required maxlength="64" /></label>
+          <button class="btn btn--ghost" type="submit"><Loader2 v-if="working" :size="14" class="spin" />{{ $t("预览位置") }}</button>
+          <button class="btn btn--subtle" type="button" @click="editing = ''">{{ $t("取消") }}</button>
         </fieldset>
         <div v-if="preview" class="move-preview" role="status">
-          <p>当前位置：<span class="mono">{{ preview.from }}</span></p>
-          <p>目标位置：<span class="mono">{{ preview.to }}</span></p>
-          <p v-if="!preview.ok" class="warning">{{ preview.message }}</p>
-          <template v-else><p>{{ preview.is_link ? '只移动链接入口，真实文件保留原位。' : '将移动整个文件夹，并更新库内路径和分类。' }}</p><p v-if="preview.warning" class="warning">{{ preview.warning }}</p>
-          <button class="btn btn--primary" type="button" :disabled="busy || working" @click="apply(e, 'relocate')">确认更改位置</button></template>
+          <p>{{ $t("当前位置：") }}<span class="mono">{{ preview.from }}</span></p>
+          <p>{{ $t("目标位置：") }}<span class="mono">{{ preview.to }}</span></p>
+          <p v-if="!preview.ok" class="warning">{{ $systemMessage(preview.message) }}</p>
+          <template v-else><p>{{ preview.is_link ? $t('只移动链接入口，真实文件保留原位。') : $t('将移动整个文件夹，并更新库内路径和分类。') }}</p><p v-if="preview.warning" class="warning">{{ $systemMessage(preview.warning) }}</p>
+          <button class="btn btn--primary" type="button" :disabled="busy || working" @click="apply(e, 'relocate')">{{ $t("确认更改位置") }}</button></template>
         </div>
       </form>
     </article>

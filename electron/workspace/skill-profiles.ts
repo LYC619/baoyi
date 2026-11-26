@@ -105,12 +105,13 @@ export class SkillProfiles {
     draft: SkillDraft,
     previous: { item: PersonalRecord; stamp: string } | null,
   ): string {
+    const activeMetrics = draft.metrics.map((m) => m.key);
     const card = new PersonalLibrary(this.db).save({
       ...(previous ? { id: previous.item.id } : {}),
       kind: "skill",
       name: draft.name,
       body: draft.summary,
-      data: previous?.item.data || {},
+      data: { ...(previous?.item.data || {}), activeMetrics },
     });
     this.db
       .prepare(
@@ -153,27 +154,12 @@ export class SkillProfiles {
           "SELECT p.*,c.parent_id FROM personal_records p LEFT JOIN skill_card c ON c.id=p.id WHERE p.kind='skill' ORDER BY p.updated_at DESC",
         )
         .all() as any[]
-    ).map((row) => ({
-      id: row.id,
-      name: row.name,
-      summary:
-        row.body ||
-        [JSON.parse(row.data).practice, JSON.parse(row.data).level]
-          .filter(Boolean)
-          .join("\n"),
-      parentId: row.parent_id || "",
-      metrics: (
-        this.db
-          .prepare("SELECT * FROM skill_metric WHERE card_id=? ORDER BY rowid")
-          .all(row.id) as any[]
-      ).map((m) => ({
-        key: m.metric_key,
-        label: m.label,
-        unit: m.unit,
-        type: m.value_type,
-        version: m.version,
-      })),
-      records: (
+    ).map((row) => {
+      const data = JSON.parse(row.data || "{}");
+      const activeSet = Array.isArray(data.activeMetrics)
+        ? new Set<string>(data.activeMetrics)
+        : null;
+      const records = (
         this.db
           .prepare(
             "SELECT r.*,m.metric_key FROM skill_record r JOIN skill_metric m ON m.id=r.metric_id WHERE r.card_id=? AND r.undone=0 ORDER BY r.occurred_on,r.created_at",
@@ -187,8 +173,40 @@ export class SkillProfiles {
         value: JSON.parse(r.value_json),
         date: r.occurred_on,
         evidence: r.evidence,
-      })),
-    }));
+      }));
+      const recordedVersions = new Set(
+        records.map((r) => `${r.metricKey}\0${r.version}`),
+      );
+      const metrics = (
+        this.db
+          .prepare("SELECT * FROM skill_metric WHERE card_id=? ORDER BY rowid")
+          .all(row.id) as any[]
+      )
+        .filter((m) => {
+          const isActive = !activeSet || activeSet.has(m.metric_key);
+          return isActive || recordedVersions.has(`${m.metric_key}\0${m.version}`);
+        })
+        .map((m) => {
+          const archived = !!activeSet && !activeSet.has(m.metric_key);
+          return {
+            key: m.metric_key,
+            label: m.label,
+            unit: m.unit,
+            type: m.value_type,
+            version: m.version,
+            ...(archived ? { archived: true } : {}),
+          };
+        });
+      return {
+        id: row.id,
+        name: row.name,
+        summary:
+          row.body || [data.practice, data.level].filter(Boolean).join("\n"),
+        parentId: row.parent_id || "",
+        metrics,
+        records,
+      };
+    });
   }
   proposals(): SkillProposal[] {
     return (
@@ -322,6 +340,11 @@ export class SkillProfiles {
         date,
         evidence,
       };
+    }
+    const cardRecord = new PersonalLibrary(this.db).get(cardId);
+    const activeMetrics = cardRecord?.data.activeMetrics;
+    if (Array.isArray(activeMetrics) && !activeMetrics.includes(key)) {
+      throw new Error("该指标已停用，请使用当前生效的指标记录");
     }
     const id = randomUUID();
     this.db

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { computed, ref, type Component } from 'vue'
 import { Box, ChevronDown, Hash } from 'lucide-vue-next'
 
@@ -15,10 +17,11 @@ const props = withDefaults(defineProps<{
   emptyCategories?: string
   tagLabel?: string
   tagExpandedAria?: boolean
-}>(), { showCategories: true, tagLabel: '标签', tagExpandedAria: false })
+}>(), { showCategories: true, tagExpandedAria: false })
 defineEmits<{ all: []; category: [name: string]; tag: [name: string] }>()
 const tagsOpen = ref(false)
 const visibleTags = computed(() => tagsOpen.value ? props.tags : props.tags.slice(0, 8))
+const visibleTagLabel = computed(() => props.tagLabel ?? tr('标签'))
 </script>
 
 <template>
@@ -30,7 +33,7 @@ const visibleTags = computed(() => tagsOpen.value ? props.tags : props.tags.slic
       </button>
       <slot name="after-all" />
       <template v-if="showCategories">
-        <p class="sidebar__title">分类</p>
+        <p class="sidebar__title">{{ $t("分类") }}</p>
         <slot name="before-categories" />
         <button v-for="c in categories" :key="c.name" class="row" :class="{ 'row--active': activeKey === `category:${c.name}` }" @click="$emit('category', c.name)">
           <component :is="categoryIcon ? categoryIcon(c.name) : Box" :size="15" />
@@ -41,7 +44,7 @@ const visibleTags = computed(() => tagsOpen.value ? props.tags : props.tags.slic
       <slot name="before-tags" />
       <template v-if="tags.length">
         <button class="sidebar__title sidebar__title--btn" :aria-expanded="tagExpandedAria ? tagsOpen : undefined" @click="tagsOpen = !tagsOpen">
-          <span>{{ tagLabel }}</span><ChevronDown :size="13" :class="['chev', { 'chev--open': tagsOpen }]" />
+          <span>{{ visibleTagLabel }}</span><ChevronDown :size="13" :class="['chev', { 'chev--open': tagsOpen }]" />
         </button>
         <button v-for="t in visibleTags" :key="t.name" class="row" :class="{ 'row--active': activeKey === `tag:${t.name}` }" @click="$emit('tag', t.name)">
           <Hash :size="15" /><span class="row__label">{{ t.name }}</span><span class="row__count">{{ t.count }}</span>

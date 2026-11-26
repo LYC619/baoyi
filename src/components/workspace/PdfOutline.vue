@@ -29,11 +29,11 @@ function toggle(node: OutlineNode) {
 }
 </script>
 <template>
-  <nav class="pdf-outline" aria-label="PDF 章节目录">
-    <p v-if="loading" class="ws-muted" role="status">正在读取章节目录…</p>
-    <p v-else-if="error" class="ws-error" role="status">{{ error }}</p>
-    <p v-else-if="!nodes.length" class="ws-muted">此 PDF 未提供章节目录</p>
-    <p v-if="truncated" class="ws-notice">部分目录未展示</p>
+  <nav class="pdf-outline" :aria-label="$t('PDF 章节目录')">
+    <p v-if="loading" class="ws-muted" role="status">{{ $t("正在读取章节目录…") }}</p>
+    <p v-else-if="error" class="ws-error" role="status">{{ $systemMessage(error) }}</p>
+    <p v-else-if="!nodes.length" class="ws-muted">{{ $t("此 PDF 未提供章节目录") }}</p>
+    <p v-if="truncated" class="ws-notice">{{ $t("部分目录未展示") }}</p>
     <div
       v-for="{ node, depth } in visible"
       :key="node.id"
@@ -44,7 +44,7 @@ function toggle(node: OutlineNode) {
         v-if="node.children.length"
         class="outline-toggle"
         :aria-label="
-          (collapsed.has(node.id) ? '展开' : '收起') + '章节 ' + node.title
+          (collapsed.has(node.id) ? $t('展开') : $t('收起')) + $t('章节 ') + node.title
         "
         :aria-expanded="!collapsed.has(node.id)"
         @click="toggle(node)"

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowUpRight, CornerDownLeft, Search as SearchIcon, X } from 'lucide-vue-next'
@@ -21,34 +23,34 @@ const loading = ref(false)
 const searchError = ref('')
 
 const KIND_OPTIONS = [
-  { key: '', label: '全部' },
-  { key: 'software', label: '软件' },
-  { key: 'game', label: '游戏' },
-  { key: 'video', label: '影视与音频' },
-  { key: 'image', label: '图片与漫画' },
-  { key: 'document', label: '文库' },
-  { key: 'project', label: '项目' },
-  { key: 'personal', label: '个人' }
+  { key: '', get label() { return tr("全部") } },
+  { key: 'software', get label() { return tr("软件") } },
+  { key: 'game', get label() { return tr("游戏") } },
+  { key: 'video', get label() { return tr("影视与音频") } },
+  { key: 'image', get label() { return tr("图片与漫画") } },
+  { key: 'document', get label() { return tr("文库") } },
+  { key: 'project', get label() { return tr("项目") } },
+  { key: 'personal', get label() { return tr("个人") } }
 ] as const
 
 const KIND_LABELS: Record<string, string> = {
-  software: '软件',
-  game: '游戏',
-  video: '影视 / 音频',
-  image: '图片 / 漫画',
-  document: '文库',
-  project: '项目',
-  personal: '个人'
+  get software() { return tr('软件') },
+  get game() { return tr('游戏') },
+  get video() { return tr('影视 / 音频') },
+  get image() { return tr('图片 / 漫画') },
+  get document() { return tr('文库') },
+  get project() { return tr('项目') },
+  get personal() { return tr('个人') }
 }
 
 const PERSONAL_SUBTYPE_LABELS: Record<string, string> = {
-  profile: '个人概览',
-  skill: '技能',
-  asset: '背包',
-  metric: '状态指标',
-  measurement: '状态记录',
-  experience: '奖项与经历',
-  todo: '待办'
+  get profile() { return tr('个人概览') },
+  get skill() { return tr('技能') },
+  get asset() { return tr('背包') },
+  get metric() { return tr('状态指标') },
+  get measurement() { return tr('状态记录') },
+  get experience() { return tr('奖项与经历') },
+  get todo() { return tr('待办') }
 }
 
 const runSearch = latestOnly((q: string, kind: string) =>
@@ -98,7 +100,7 @@ function onClose(): void {
 
 function itemBadge(item: ArchiveSource): string {
   if (item.kind === 'personal' && item.subtype) {
-    return PERSONAL_SUBTYPE_LABELS[item.subtype] || '个人'
+    return PERSONAL_SUBTYPE_LABELS[item.subtype] || tr("个人")
   }
   return KIND_LABELS[item.kind] || item.kind
 }
@@ -162,7 +164,7 @@ function scrollActiveIntoView(): void {
 }
 
 const emptyText = computed(() =>
-  query.value.trim() ? '没有找到匹配的条目，试试换个关键词或切回「全部」' : '还没有可展示的收藏记录'
+  query.value.trim() ? tr("没有找到匹配的条目，试试换个关键词或切回「全部」") : tr("还没有可展示的收藏记录")
 )
 
 onMounted(() => {
@@ -193,16 +195,16 @@ onMounted(() => {
     @close="onClose"
   >
     <div class="gs-head">
-      <h2 id="global-search-title">全局搜索跳转</h2>
-      <span class="gs-hint">上下键切换 · 回车直达 · Esc 关闭</span>
-      <button type="button" class="gs-close" aria-label="关闭全局搜索" @click="closeGlobalSearch">
+      <h2 id="global-search-title">{{ $t("全局搜索跳转") }}</h2>
+      <span class="gs-hint">{{ $t("上下键切换 · 回车直达 · Esc 关闭") }}</span>
+      <button type="button" class="gs-close" :aria-label="$t('关闭全局搜索')" @click="closeGlobalSearch">
         <X :size="16" />
       </button>
     </div>
 
     <search class="gs-search">
       <form class="gs-form" @submit.prevent="selectItem(results[activeIndex])">
-        <label for="global-search-input" class="visually-hidden">搜索全部模块内容</label>
+        <label for="global-search-input" class="visually-hidden">{{ $t("搜索全部模块内容") }}</label>
         <div class="gs-input-wrap">
           <SearchIcon :size="17" class="gs-icon" />
           <input
@@ -212,7 +214,7 @@ onMounted(() => {
             type="search"
             name="q"
             class="gs-input"
-            placeholder="输入名称、作者、标签、路径或备注，跨全部模块直达…"
+            :placeholder="$t('输入名称、作者、标签、路径或备注，跨全部模块直达…')"
             autocorrect="off"
             autocapitalize="none"
             spellcheck="false"
@@ -221,7 +223,7 @@ onMounted(() => {
             @keydown="onInputKeydown"
           />
         </div>
-        <div class="gs-filters" role="group" aria-label="按模块筛选">
+        <div class="gs-filters" role="group" :aria-label="$t('按模块筛选')">
           <button
             v-for="opt in KIND_OPTIONS"
             :key="opt.key"
@@ -238,8 +240,8 @@ onMounted(() => {
 
     <p v-if="searchError" class="gs-error" role="alert">{{ searchError }}</p>
 
-    <div class="gs-list" role="listbox" :aria-label="query.trim() ? '搜索结果' : '最近更新'">
-      <div v-if="!query.trim() && results.length" class="gs-section-label">最近更新与浏览</div>
+    <div class="gs-list" role="listbox" :aria-label="query.trim() ? $t('搜索结果') : $t('最近更新')">
+      <div v-if="!query.trim() && results.length" class="gs-section-label">{{ $t("最近更新与浏览") }}</div>
       <button
         v-for="(item, idx) in results"
         :key="item.kind + ':' + item.id"

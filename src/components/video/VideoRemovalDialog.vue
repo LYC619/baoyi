@@ -30,14 +30,14 @@ async function apply() {
 </script>
 <template>
   <dialog ref="dialog" class="video-removal" aria-labelledby="removal-title" @cancel.prevent="!busy && emit('close')">
-    <header><h2 id="removal-title">{{ episodeId ? '管理这一集' : '删除所选作品' }}</h2><button class="btn btn--ghost" :disabled="busy" @click="emit('close')">关闭</button></header>
-    <p v-if="episodeId">文件缺失时可以关闭此窗口，继续保留为待补齐。</p>
-    <label v-if="episodeId">操作<select v-model="action" class="input" :disabled="busy"><option value="remove">移除库内记录</option><option value="detach">移出合集，作为独立视频</option></select></label>
-    <label v-if="action === 'remove'" class="check"><input v-model="deleteLocal" type="checkbox" :disabled="busy" />同时将专属本地文件移入回收站</label>
-    <p>{{ action === 'detach' ? '文件位置和观看进度会保留，首页将显示独立条目。' : deleteLocal ? '同时清理归属已核实的抱一清单、备份与生成资料，并移除空目录。共享文件和用户修改过的资料会保留。' : '本地文件保留，后续普通重扫会跳过已移除的内容。' }}</p>
-    <template v-if="preview"><p>{{ preview.titles.join('、') }} · {{ preview.episodeCount }} 个内容项</p><ul><li v-for="file in preview.files" :key="file.path"><span>{{ file.path }}</span><small>{{ file.preserveReason || (file.shared ? '共享，保留' : !file.present ? '已缺失' : deleteLocal && action === 'remove' ? '移入回收站' : '保留文件') }} · {{ formatBytes(file.size) }}</small></li></ul></template>
+    <header><h2 id="removal-title">{{ episodeId ? $t('管理这一集') : $t('删除所选作品') }}</h2><button class="btn btn--ghost" :disabled="busy" @click="emit('close')">{{ $t("关闭") }}</button></header>
+    <p v-if="episodeId">{{ $t("文件缺失时可以关闭此窗口，继续保留为待补齐。") }}</p>
+    <label v-if="episodeId">{{ $t("操作") }}<select v-model="action" class="input" :disabled="busy"><option value="remove">{{ $t("移除库内记录") }}</option><option value="detach">{{ $t("移出合集，作为独立视频") }}</option></select></label>
+    <label v-if="action === 'remove'" class="check"><input v-model="deleteLocal" type="checkbox" :disabled="busy" />{{ $t("同时将专属本地文件移入回收站") }}</label>
+    <p>{{ action === 'detach' ? $t('文件位置和观看进度会保留，首页将显示独立条目。') : deleteLocal ? $t('同时清理归属已核实的抱一清单、备份与生成资料，并移除空目录。共享文件和用户修改过的资料会保留。') : $t('本地文件保留，后续普通重扫会跳过已移除的内容。') }}</p>
+    <template v-if="preview"><p>{{ $t("{p0} · {p1} 个内容项", {p0: (preview.titles.join('、')), p1: (preview.episodeCount)}) }}</p><ul><li v-for="file in preview.files" :key="file.path"><span>{{ file.path }}</span><small>{{ file.preserveReason || (file.shared ? $t('共享，保留') : !file.present ? $t('已缺失') : deleteLocal && action === 'remove' ? $t('移入回收站') : $t('保留文件')) }} · {{ formatBytes(file.size) }}</small></li></ul></template>
     <p v-if="failure" role="alert">{{ failure }}</p>
-    <footer><button v-if="!preview && !busy" class="btn btn--subtle" @click="inspect">重新检查范围</button><button class="btn btn--primary" :disabled="pending || busy || !preview" @click="apply">{{ busy ? '正在处理…' : action === 'detach' ? '确认移出合集' : deleteLocal ? '删除记录并移入回收站' : '确认移除记录' }}</button></footer>
+    <footer><button v-if="!preview && !busy" class="btn btn--subtle" @click="inspect">{{ $t("重新检查范围") }}</button><button class="btn btn--primary" :disabled="pending || busy || !preview" @click="apply">{{ busy ? $t('正在处理…') : action === 'detach' ? $t('确认移出合集') : deleteLocal ? $t('删除记录并移入回收站') : $t('确认移除记录') }}</button></footer>
   </dialog>
 </template>
 <style scoped>

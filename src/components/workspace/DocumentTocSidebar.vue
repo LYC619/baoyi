@@ -39,7 +39,7 @@ watch(
 
 <template>
   <aside ref="tocPanel" class="reader-toc">
-    <h3>目录</h3>
+    <h3>{{ $t("目录") }}</h3>
     <template v-if="pdfMode">
       <PdfOutline
         :nodes="outline"
@@ -49,12 +49,10 @@ watch(
         :active="outlineActive"
         @navigate="emit('navigate-outline', $event)"
       />
-      <p class="ws-muted">原版页面 · {{ count }} 页</p>
-      <label>
-        跳转页码
-        <input
+      <p class="ws-muted">{{ $t("原版页面 · {p0} 页", {p0: (count)}) }}</p>
+      <label>{{ $t("跳转页码") }}<input
           type="number"
-          aria-label="跳转到页码"
+          :aria-label="$t('跳转到页码')"
           :value="page"
           min="1"
           :max="count"
@@ -87,7 +85,7 @@ watch(
       >
         {{ heading.text }}
       </button>
-      <p v-if="!headings.length" class="ws-muted">此资料没有章节标题。</p>
+      <p v-if="!headings.length" class="ws-muted">{{ $t("此资料没有章节标题。") }}</p>
     </template>
   </aside>
 </template>

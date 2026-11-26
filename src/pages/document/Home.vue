@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { errorMessage } from '@/utils'
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
@@ -69,7 +71,7 @@ const annotations = ref<DocumentAnnotation[]>([])
 const backlinks = ref<Awaited<ReturnType<typeof workspace.links.backlinks>>>([])
 const insightImportMessage = ref('')
 const current = computed(() => store.items.find((i) => i.id === store.selected))
-const currentTitle = computed(() => (store.submodule === 'reading' ? '阅读' : '资料'))
+const currentTitle = computed(() => (store.submodule === 'reading' ? tr("阅读") : tr("资料")))
 
 const allSearch = computed(() => store.searchAll && !!store.search.trim())
 const moduleRows = computed(() => store.items.filter((i) => allSearch.value || i.submodule === store.submodule))
@@ -130,10 +132,10 @@ function toggleGroupView(groupId: string) {
 
 async function renameGroup(group: DocumentCustomGroup) {
   const newName = await promptDialog({
-    title: '重命名分组',
+    title: tr('重命名分组'),
     defaultValue: group.name,
-    placeholder: '请输入分组名称',
-    confirmText: '保存',
+    placeholder: tr('请输入分组名称'),
+    confirmText: tr('保存'),
   })
   if (!newName || !newName.trim() || newName.trim() === group.name) return
   await run(async () => {
@@ -150,9 +152,9 @@ async function renameGroup(group: DocumentCustomGroup) {
 
 async function dissolveGroup(group: DocumentCustomGroup) {
   const ok = await confirmDialog({
-    title: `解散分组「${group.name}」`,
-    message: `解散后，组内 ${activeGroupItems.value.length} 份资料将保留在原分类中，不会删除本地文件。`,
-    confirmText: '解散分组',
+    title: tr('解散分组「{p0}」', {p0: group.name}),
+    message: tr("解散后，组内 {p0} 份资料将保留在原分类中，不会删除本地文件。", {p0: (activeGroupItems.value.length)}),
+    confirmText: tr('解散分组'),
     tone: 'danger',
   })
   if (!ok) return
@@ -237,7 +239,7 @@ const sections = computed(() => {
   const used = new Set(recent.map((i) => i.id))
   const names = new Map(store.customGroups.map((g) => [g.id, g.name]))
   return [
-    ...(recent.length ? [{ key: 'recent', title: '最近在读', items: recent }] : []),
+    ...(recent.length ? [{ key: 'recent', title: tr('最近在读'), items: recent }] : []),
     ...documentSections(rows.value.filter((i) => !used.has(i.id)), store.groupBy, names, ''),
   ]
 })
@@ -400,7 +402,7 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
 
 <template>
   <main class="ws ws-layout document-home" v-on="dropHandlers" @click="dismissMenu" @keydown.esc="menu = ''">
-    <DropZoneOverlay :active="dropActive" :title="`松开以导入到${currentTitle}`" hint="支持拖入 PDF、EPUB、TXT、Markdown、Word 文档或整个资料文件夹" />
+    <DropZoneOverlay :active="dropActive" :title="$t('松开以导入到{p0}', {p0: currentTitle})" :hint="$t('支持拖入 PDF、EPUB、TXT、Markdown、Word 文档或整个资料文件夹')" />
     <DocumentSidebar
       :submodule="store.submodule"
       :favorite="store.favorite"
@@ -428,7 +430,7 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
       <header class="document-compact-header">
         <div class="header-left">
           <h1>
-            {{ currentTitle }} <small>{{ rows.length }} 份</small>
+            {{ currentTitle }} <small>{{ $t("{p0} 份", {p0: (rows.length)}) }}</small>
           </h1>
         </div>
 
@@ -438,30 +440,28 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
             ref="searchInput"
             v-model="store.search"
             type="search"
-            aria-label="搜索资料"
-            :placeholder="store.searchAll ? '搜索全库标题、作者或标签…' : `搜索当前${currentTitle}…`"
+            :aria-label="$t('搜索资料')"
+            :placeholder="store.searchAll ? $t('搜索全库标题、作者或标签…') : $t('搜索当前{p0}…', {p0: currentTitle})"
           />
           <button
             type="button"
             class="scope-toggle"
             :class="{ active: store.searchAll }"
-            :title="store.searchAll ? `当前：全库搜索（点击仅搜${currentTitle}）` : `当前：仅搜${currentTitle}（点击切换全库）`"
+            :title="store.searchAll ? $t('当前：全库搜索（点击仅搜{p0}）', {p0: currentTitle}) : $t('当前：仅搜{p0}（点击切换全库）', {p0: currentTitle})"
             @click="store.searchAll = !store.searchAll"
           >
-            {{ store.searchAll ? '全库' : '当前' }}
+            {{ store.searchAll ? $t('全库') : $t('当前') }}
           </button>
         </div>
 
         <p v-if="insightImportMessage" class="ws-muted" role="status">{{ insightImportMessage }}</p>
         <div class="header-controls">
           <div class="ws-tabs view-switcher">
-            <button type="button" :class="{ active: store.view === 'insights' }" aria-label="精要视图" @click="store.view = 'insights'">
-              精要
-            </button>
-            <button type="button" :class="{ active: store.view === 'list' }" aria-label="列表视图" @click="store.view = 'list'">
+            <button type="button" :class="{ active: store.view === 'insights' }" :aria-label="$t('精要视图')" @click="store.view = 'insights'">{{ $t("精要") }}</button>
+            <button type="button" :class="{ active: store.view === 'list' }" :aria-label="$t('列表视图')" @click="store.view = 'list'">
               <List :size="16" />
             </button>
-            <button type="button" :class="{ active: store.view === 'grid' }" aria-label="网格视图" @click="store.view = 'grid'">
+            <button type="button" :class="{ active: store.view === 'grid' }" :aria-label="$t('网格视图')" @click="store.view = 'grid'">
               <Grid2X2 :size="16" />
             </button>
           </div>
@@ -470,41 +470,33 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
             <button
               type="button"
               class="ws-icon"
-              aria-label="显示选项"
+              :aria-label="$t('显示选项')"
               :aria-expanded="menu === 'display'"
               @click="menu = menu === 'display' ? '' : 'display'"
             >
               <SlidersHorizontal :size="17" />
             </button>
             <div v-if="menu === 'display'" class="toolbar-popover">
-              <label>
-                来源目录
-                <select v-model="store.sourceDir" aria-label="筛选来源目录">
-                  <option value="">全部来源</option>
+              <label>{{ $t("来源目录") }}<select v-model="store.sourceDir" :aria-label="$t('筛选来源目录')">
+                  <option value="">{{ $t("全部来源") }}</option>
                   <option v-for="source in sources" :key="source" :value="source">{{ source }}</option>
                 </select>
               </label>
-              <label>
-                排序
-                <select v-model="store.sort" aria-label="资料排序">
-                  <option value="updated">最近更新</option>
-                  <option value="read">最近阅读</option>
-                  <option value="name">按名称</option>
+              <label>{{ $t("排序") }}<select v-model="store.sort" :aria-label="$t('资料排序')">
+                  <option value="updated">{{ $t("最近更新") }}</option>
+                  <option value="read">{{ $t("最近阅读") }}</option>
+                  <option value="name">{{ $t("按名称") }}</option>
                 </select>
               </label>
-              <label>
-                分组
-                <select v-model="store.groupBy" aria-label="资料分组">
-                  <option value="none">不分组</option>
-                  <option value="category">按分类</option>
-                  <option value="source">按来源目录</option>
-                  <option value="custom">按自定义分组</option>
-                  <option value="tag">按标签</option>
+              <label>{{ $t("分组") }}<select v-model="store.groupBy" :aria-label="$t('资料分组')">
+                  <option value="none">{{ $t("不分组") }}</option>
+                  <option value="category">{{ $t("按分类") }}</option>
+                  <option value="source">{{ $t("按来源目录") }}</option>
+                  <option value="custom">{{ $t("按自定义分组") }}</option>
+                  <option value="tag">{{ $t("按标签") }}</option>
                 </select>
               </label>
-              <label>
-                卡片大小
-                <input v-model.number="store.cardSize" aria-label="卡片大小" type="range" min="150" max="260" step="10" />
+              <label>{{ $t("卡片大小") }}<input v-model.number="store.cardSize" :aria-label="$t('卡片大小')" type="range" min="150" max="260" step="10" />
               </label>
             </div>
           </div>
@@ -513,21 +505,21 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
             <button
               type="button"
               class="ws-button primary"
-              aria-label="导入资料"
+              :aria-label="$t('导入资料')"
               :aria-expanded="menu === 'import'"
               :disabled="busy"
               @click="assistant?.close(false); menu = menu === 'import' ? '' : 'import'"
             >
-              <Plus :size="15" />导入<ChevronDown :size="13" />
+              <Plus :size="15" />{{ $t("导入") }}<ChevronDown :size="13" />
             </button>
             <div v-if="menu === 'import'" class="toolbar-popover import-options">
-              <button type="button" class="ws-button" @click="scan(false)"><Plus :size="15" />选择文件</button>
-              <button type="button" class="ws-button" @click="scan(true)"><FolderSearch :size="15" />扫描文件夹</button>
+              <button type="button" class="ws-button" @click="scan(false)"><Plus :size="15" />{{ $t("选择文件") }}</button>
+              <button type="button" class="ws-button" @click="scan(true)"><FolderSearch :size="15" />{{ $t("扫描文件夹") }}</button>
             </div>
           </div>
 
           <button type="button" class="ws-button" :class="{ active: bulk }" @click="bulk = !bulk; checked = []; menu = ''">
-            {{ bulk ? '退出批量' : '批量管理' }}
+            {{ bulk ? $t('退出批量') : $t('批量管理') }}
           </button>
 
           <DocumentAssistant
@@ -540,7 +532,7 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
             ref="detailTrigger"
             type="button"
             class="ws-icon"
-            :aria-label="details ? '收起资料详情' : '展开资料详情'"
+            :aria-label="details ? $t('收起资料详情') : $t('展开资料详情')"
             :aria-expanded="details"
             @click="details ? closeDetails() : showDetails()"
           >
@@ -552,10 +544,10 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
 
       <div v-if="store.type || store.favorite || store.sourceDir || store.tag" class="active-filter-strip">
         <span v-if="store.type" class="ws-badge">{{ currentCategoryName }}</span>
-        <span v-if="store.favorite" class="ws-badge">仅看收藏</span>
-        <span v-if="store.tag" class="ws-badge">标签：{{ store.tag }}</span>
-        <span v-if="store.sourceDir" class="ws-badge">目录筛选</span>
-        <button type="button" class="ws-button ghost small" @click="store.resetFilters(); activeGroupId = ''">显示全部{{ currentTitle }}</button>
+        <span v-if="store.favorite" class="ws-badge">{{ $t("仅看收藏") }}</span>
+        <span v-if="store.tag" class="ws-badge">{{ $t("标签：{p0}", {p0: (store.tag)}) }}</span>
+        <span v-if="store.sourceDir" class="ws-badge">{{ $t("目录筛选") }}</span>
+        <button type="button" class="ws-button ghost small" @click="store.resetFilters(); activeGroupId = ''">{{ $t("显示全部{p0}", {p0: (currentTitle)}) }}</button>
       </div>
       <p v-if="error || store.error" class="ws-error" role="alert">
         {{ error || store.error }}
@@ -567,35 +559,31 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
         <h2>
           {{
             store.items.length
-              ? '没有匹配的内容'
+              ? $t('没有匹配的内容')
               : store.submodule === 'reading'
-                ? '从一本好书开始'
-                : '留存一份重要资料'
+                ? $t('从一本好书开始')
+                : $t('留存一份重要资料')
           }}
         </h2>
         <p>
           {{
             store.submodule === 'reading'
-              ? '导入小说、书籍或论文。断网也能随时翻阅，书签与笔记永久留存。'
-              : '导入证书、证件或档案文件。快速检索、预览与关联项目记录。'
+              ? $t('导入小说、书籍或论文。断网也能随时翻阅，书签与笔记永久留存。')
+              : $t('导入证书、证件或档案文件。快速检索、预览与关联项目记录。')
           }}
         </p>
-        <button type="button" class="ws-button primary" :disabled="busy" @click="scan(false)">
-          选择导入文件
-        </button>
+        <button type="button" class="ws-button primary" :disabled="busy" @click="scan(false)">{{ $t("选择导入文件") }}</button>
       </div>
 
       <div v-if="bulk" class="ws-toolbar bulk-selection">
         <label>
           <input
             type="checkbox"
-            aria-label="全选当前资料"
+            :aria-label="$t('全选当前资料')"
             :checked="rows.length > 0 && rows.every((i) => checked.includes(i.id))"
             @change="checked = ($event.target as HTMLInputElement).checked ? rows.map((i) => i.id) : []"
-          />
-          全选当前结果
-        </label>
-        <span>已选 {{ checked.length }} 份</span>
+          />{{ $t("全选当前结果") }}</label>
+        <span>{{ $t("已选 {p0} 份", {p0: (checked.length)}) }}</span>
       </div>
       <DocumentBulk
         v-if="bulk && checked.length"
@@ -611,20 +599,18 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
       <section v-if="activeGroupId && activeGroup" class="document-group-view">
         <div class="group-view-header">
           <button type="button" class="ws-button ghost group-back-btn" @click="exitGroup">
-            <ChevronLeft :size="16" /> 返回{{ currentCategoryName ? ' ' + currentCategoryName : store.submodule === 'reading' ? '阅读' : '资料' }}
+            <ChevronLeft :size="16" />{{ $t("返回{p0}", {p0: (currentCategoryName ? ' ' + currentCategoryName : store.submodule === 'reading' ? $t('阅读') : $t('资料'))}) }}
           </button>
           <div class="group-view-title-block">
             <h2>{{ activeGroup.name }}</h2>
-            <span class="ws-badge count-badge">{{ activeGroupItems.length }} 份</span>
+            <span class="ws-badge count-badge">{{ $t("{p0} 份", {p0: (activeGroupItems.length)}) }}</span>
             <span v-if="activeGroupCategoryName" class="ws-badge category-badge">{{ activeGroupCategoryName }}</span>
           </div>
           <div class="group-view-actions">
             <button type="button" class="ws-button small" :disabled="busy" @click="renameGroup(activeGroup)">
-              <Pencil :size="13" /> 重命名
-            </button>
+              <Pencil :size="13" />{{ $t("重命名") }}</button>
             <button type="button" class="ws-button danger small" :disabled="busy" @click="dissolveGroup(activeGroup)">
-              <Trash2 :size="13" /> 解散分组
-            </button>
+              <Trash2 :size="13" />{{ $t("解散分组") }}</button>
           </div>
         </div>
 
@@ -706,10 +692,10 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
     <aside
       v-if="details"
       class="document-inspector"
-      aria-label="资料详情"
+      :aria-label="$t('资料详情')"
       @keydown.esc.stop="closeDetails"
     >
-      <button type="button" class="ws-icon inspector-close" aria-label="关闭资料详情" @click="closeDetails">
+      <button type="button" class="ws-icon inspector-close" :aria-label="$t('关闭资料详情')" @click="closeDetails">
         ×
       </button>
 
@@ -722,14 +708,11 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
           @open="open(current)"
           @updated="store.refresh"
         />
-        <p v-if="counts.get(current.id)" class="ws-muted">
-          被 {{ counts.get(current.id) }} 个项目引用 · 书签 {{ annotations.filter((a) => a.kind === 'bookmark').length }} 个 · 摘录
-          {{ annotations.filter((a) => a.kind === 'excerpt').length }} 条
-        </p>
+        <p v-if="counts.get(current.id)" class="ws-muted">{{ $t("被 {p0} 个项目引用 · 书签 {p1} 个 · 摘录 {p2} 条", {p0: (counts.get(current.id)), p1: (annotations.filter((a) => a.kind === 'bookmark').length), p2: (annotations.filter((a) => a.kind === 'excerpt').length)}) }}</p>
 
         <section class="ws-links">
-          <h3>用于这些事</h3>
-          <p v-if="!backlinks.length" class="ws-muted">尚未被项目或个人记录引用。</p>
+          <h3>{{ $t("用于这些事") }}</h3>
+          <p v-if="!backlinks.length" class="ws-muted">{{ $t("尚未被项目或个人记录引用。") }}</p>
           <button
             v-for="b in backlinks"
             :key="b.ownerType + b.ownerId"
@@ -739,17 +722,17 @@ function ownerPath(b: (typeof backlinks.value)[number]) {
           >
             {{ b.name }}
             <span class="ws-muted">
-              {{ b.ownerType === 'project' ? '项目' : b.ownerType === 'event' ? '项目记录' : '个人记录' }}
+              {{ b.ownerType === 'project' ? $t('项目') : b.ownerType === 'event' ? $t('项目记录') : $t('个人记录') }}
             </span>
           </button>
         </section>
 
-        <button type="button" class="ws-button danger" :disabled="busy" @click="remove">移除资料索引</button>
+        <button type="button" class="ws-button danger" :disabled="busy" @click="remove">{{ $t("移除资料索引") }}</button>
       </template>
 
       <div v-else class="ws-empty">
         <FileText :size="28" />
-        <p>选择一份资料，查看详情与关联。</p>
+        <p>{{ $t("选择一份资料，查看详情与关联。") }}</p>
       </div>
     </aside>
 

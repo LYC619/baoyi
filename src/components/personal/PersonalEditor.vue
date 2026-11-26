@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { errorMessage } from '@/utils'
 import { ref, onMounted, computed } from "vue";
 import ProjectDialog from "@/components/project/ProjectDialog.vue";
@@ -18,13 +20,13 @@ const props = defineProps<{
   }>(),
   emit = defineEmits<{ close: []; saved: [record: PersonalRecord] }>();
 const labels: Record<PersonalKind, string> = {
-  profile: "个人信息",
-  asset: "背包资产",
-  skill: "技能",
-  experience: "奖项与经历",
-  metric: "状态指标",
-  measurement: "状态记录",
-  todo: "待办",
+  get profile() { return tr('个人信息') },
+  get asset() { return tr('背包资产') },
+  get skill() { return tr('技能') },
+  get experience() { return tr('奖项与经历') },
+  get metric() { return tr('状态指标') },
+  get measurement() { return tr('状态记录') },
+  get todo() { return tr('待办') },
 };
 const defaults: Record<PersonalKind, PersonalData> = {
   profile: { motto: "" },
@@ -50,8 +52,7 @@ const defaults: Record<PersonalKind, PersonalData> = {
 const form = ref<PersonalInput>({
     ...(props.record ? { id: props.record.id } : {}),
     kind: props.kind,
-    name:
-      props.record?.name || (props.kind === "measurement" ? "状态记录" : ""),
+    name: props.record?.name || "",
     body: props.record?.body || "",
     data: plain(props.record?.data || defaults[props.kind]),
   }),
@@ -92,7 +93,8 @@ async function save() {
   busy.value = true;
   error.value = "";
   try {
-    const value = await workspace.personal.save(plain(form.value));
+    const name = form.value.name.trim() || (props.kind === 'measurement' ? tr('状态记录') : '');
+    const value = await workspace.personal.save(plain({ ...form.value, name }));
     emit("saved", value);
     emit("close");
   } catch (e) {
@@ -104,20 +106,20 @@ async function save() {
 </script>
 <template>
   <ProjectDialog
-    :title="(record ? '编辑' : '添加') + labels[kind]"
+    :title="(record ? $t('编辑') : $t('添加')) + labels[kind]"
     :busy="busy"
     @close="emit('close')"
     ><form id="personal-form" class="ws ws-form" @submit.prevent="save">
-      <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
+      <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
       <label
-        >{{ kind === "profile" ? "称呼" : "名称"
-        }}<input v-model="form.name" required maxlength="300"
+        >{{ kind === "profile" ? $t('称呼') : $t('名称')
+        }}<input v-model="form.name" :placeholder="kind === 'measurement' ? $t('状态记录') : ''" :required="kind !== 'measurement'" maxlength="300"
       /></label>
       <div v-if="kind === 'profile'" class="avatar-editor">
         <img
           v-if="form.data.avatar"
           :src="String(form.data.avatar)"
-          alt="头像预览"
+          :alt="$t('头像预览')"
           width="72"
           height="72"
           style="border-radius: 12px"
@@ -126,43 +128,40 @@ async function save() {
           class="ws-button"
           :disabled="busy"
           @click="chooseAvatar"
-        >
-          选择头像</button
+        >{{ $t("选择头像") }}</button
         ><button
           v-if="form.data.avatar"
           type="button"
           class="ws-button"
           @click="form.data.avatar = ''"
-        >
-          移除头像
-        </button>
+        >{{ $t("移除头像") }}</button>
       </div>
       <label v-if="kind === 'profile'"
-        >一句话介绍<input v-model="form.data.motto" maxlength="2000"
+        >{{ $t("一句话介绍") }}<input v-model="form.data.motto" maxlength="2000"
       /></label>
       <template v-if="kind === 'asset'"
         ><div class="ws-two">
           <label
-            >资产类别<select v-model="form.data.category" aria-label="类别">
+            >{{ $t("资产类别") }}<select v-model="form.data.category" :aria-label="$t('类别')">
               <option v-for="category in categories" :key="category">
                 {{ category }}
               </option>
             </select></label
-          ><label>提供方<input v-model="form.data.provider" /></label>
+          ><label>{{ $t("提供方") }}<input v-model="form.data.provider" /></label>
         </div>
         <div class="ws-two">
           <label
-            >费用<input
+            >{{ $t("费用") }}<input
               v-model.number="form.data.cost"
               type="number"
               min="0"
               max="1000000000"
               step="0.01" /></label
           ><label
-            >币种<input
+            >{{ $t("币种") }}<input
               v-model="form.data.currency"
               list="personal-currencies"
-              placeholder="CNY / 人民币"
+              :placeholder="$t('CNY / 人民币')"
               maxlength="20" /><datalist id="personal-currencies">
               <option value="CNY" />
               <option value="USD" />
@@ -173,54 +172,54 @@ async function save() {
         </div>
         <div class="ws-two">
           <label
-            >付费周期<select v-model="form.data.cycle" aria-label="付费周期">
-              <option value="once">一次性</option>
-              <option value="monthly">每月</option>
-              <option value="yearly">每年</option>
-              <option value="other">其他</option>
+            >{{ $t("付费周期") }}<select v-model="form.data.cycle" :aria-label="$t('付费周期')">
+              <option value="once">{{ $t("一次性") }}</option>
+              <option value="monthly">{{ $t("每月") }}</option>
+              <option value="yearly">{{ $t("每年") }}</option>
+              <option value="other">{{ $t("其他") }}</option>
             </select></label
           ><label
-            >到期日期<input v-model="form.data.expiresOn" type="date"
+            >{{ $t("到期日期") }}<input v-model="form.data.expiresOn" type="date"
           /></label>
         </div>
         <label
-          >管理入口<input
+          >{{ $t("管理入口") }}<input
             v-model="form.data.url"
             type="url"
             placeholder="https://…" /></label
       ></template>
       <template v-if="kind === 'experience'"
         ><div class="ws-two">
-          <label>日期<input v-model="form.data.date" type="date" /></label
+          <label>{{ $t("日期") }}<input v-model="form.data.date" type="date" /></label
           ><label
-            >类型<select v-model="form.data.category" aria-label="类别">
+            >{{ $t("类型") }}<select v-model="form.data.category" :aria-label="$t('类别')">
               <option v-for="category in categories" :key="category">
                 {{ category }}
               </option>
             </select></label
           >
         </div>
-        <label>机构 / 场合<input v-model="form.data.organization" /></label
+        <label>{{ $t("机构 / 场合") }}<input v-model="form.data.organization" /></label
       ></template>
       <label v-if="kind === 'metric'"
-        >单位<input v-model="form.data.unit" placeholder="小时、kg、次…"
+        >{{ $t("单位") }}<input v-model="form.data.unit" :placeholder="$t('小时、kg、次…')"
       /></label>
-      <p v-if="kind === 'metric' && record" class="ws-muted">已有记录的指标只可改名；需要更换单位时请新建指标，历史数值保留原单位。</p>
+      <p v-if="kind === 'metric' && record" class="ws-muted">{{ $t("已有记录的指标只可改名；需要更换单位时请新建指标，历史数值保留原单位。") }}</p>
       <template v-if="kind === 'measurement'"
         ><label
-          >指标<select v-model="form.data.metricId" aria-label="指标" required>
+          >{{ $t("指标") }}<select v-model="form.data.metricId" :aria-label="$t('指标')" required>
             <option
               v-for="metric in metrics"
               :key="metric.id"
               :value="metric.id"
             >
-              {{ metric.name }}（{{ metric.data.unit || "无单位" }}）
+              {{ metric.name }}（{{ metric.data.unit || $t('无单位') }}）
             </option>
           </select></label
         >
         <div class="ws-two">
           <label
-            >数值<input
+            >{{ $t("数值") }}<input
               v-model.number="form.data.value"
               required
               type="number"
@@ -228,22 +227,22 @@ async function save() {
               min="-1000000"
               max="1000000" /></label
           ><label
-            >记录日期<input v-model="form.data.date" required type="date"
+            >{{ $t("记录日期") }}<input v-model="form.data.date" required type="date"
           /></label></div
       ></template>
       <template v-if="kind === 'todo'"
-        ><label>计划日期<input v-model="form.data.dueOn" type="date" /></label
+        ><label>{{ $t("计划日期") }}<input v-model="form.data.dueOn" type="date" /></label
         ><label class="check"
-          ><input v-model="form.data.done" type="checkbox" />已完成</label
+          ><input v-model="form.data.done" type="checkbox" />{{ $t("已完成") }}</label
         ></template
       >
       <label v-if="kind !== 'profile'"
         >{{
           kind === "skill"
-            ? "事实与实践"
+            ? $t('事实与实践')
             : kind === "asset"
-              ? "用途与备注"
-              : "补充记录"
+              ? $t('用途与备注')
+              : $t('补充记录')
         }}<textarea v-model="form.body" maxlength="30000" />
       </label>
     </form>
@@ -254,9 +253,7 @@ async function save() {
           type="submit"
           form="personal-form"
           :disabled="busy"
-        >
-          保存个人记录
-        </button>
+        >{{ $t("保存个人记录") }}</button>
       </div></template
     ></ProjectDialog
   >

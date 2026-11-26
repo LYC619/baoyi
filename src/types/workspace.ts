@@ -126,7 +126,7 @@ export const PERSONAL_KINDS = ['profile', 'asset', 'skill', 'experience', 'metri
 export type PersonalKind = typeof PERSONAL_KINDS[number]
 export interface AssetRenewal { on: string; from: string; to: string; cost?: number; currency?: string }
 export interface AssetRenewalInput { to?: string; cost?: number; currency?: string }
-export type PersonalData = Record<string, string | number | boolean | string[] | AssetRenewal[]> & { renewals?: AssetRenewal[] }
+export type PersonalData = Record<string, string | number | boolean | string[] | AssetRenewal[]> & { renewals?: AssetRenewal[]; activeMetrics?: string[] }
 export interface PersonalRecord { id: string; kind: PersonalKind; name: string; body: string; data: PersonalData; createdAt: number; updatedAt: number }
 export type PersonalInput = Pick<PersonalRecord, 'kind' | 'name' | 'body' | 'data'> & { id?: string }
 export interface WorkspaceAgentContext {documentIds?:string[];selection?:{documentId:string;quote:string;location:ReadingLocation}}

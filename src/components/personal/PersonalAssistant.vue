@@ -7,7 +7,7 @@ defineExpose({ open })
 </script>
 <template>
   <button type="button" class="personal-assistant-trigger" :aria-expanded="assistant.open.value" @click="open()">
-    <Sparkles :size="15" />{{ assistant.busy.value ? '归档助理 · 处理中' : '与归档助理对话' }}
+    <Sparkles :size="15" />{{ assistant.busy.value ? $t('归档助理 · 处理中') : $t('与归档助理对话') }}
   </button>
 </template>
 <style scoped>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { errorMessage } from '@/utils'
 import { computed, ref, watch } from 'vue'
 import { ChevronDown, Loader2, ShieldCheck, Wrench } from 'lucide-vue-next'
@@ -9,7 +11,7 @@ const props = defineProps<{ resourceId: string; compact?: boolean }>(), emit = d
 const expanded = ref(false)
 const report = ref<ImageAudit | null>(null), busy = ref(false), error = ref(''), message = ref(''), pending = ref(''), limit = ref(100)
 const downloads = useImageDownloads()
-const labels: Record<ImageAuditEntry['status'], string> = { ok: '正常', missing: '缺失', damaged: '损坏', unverified: '未校验' }
+const labels: Record<ImageAuditEntry['status'], string> = { get ok() { return tr('正常') }, get missing() { return tr('缺失') }, get damaged() { return tr('损坏') }, get unverified() { return tr('未校验') } }
 const issues = computed(() => report.value?.entries.filter(e => e.status !== 'ok') || [])
 const repairable = computed(() => report.value?.entries.some(e => e.repairable))
 const job = computed(() => downloads.jobs.value.find(j => j.id === pending.value))
@@ -26,37 +28,37 @@ async function repair() {
   busy.value = true; error.value = ''; message.value = ''
   try {
     const result = await window.baoyi.image.repair(props.resourceId)
-    if (result) { pending.value = result.id; message.value = '已加入修复队列'; await downloads.refresh() }
-    else { message.value = '没有可修复的异常页'; report.value = await window.baoyi.image.audit(props.resourceId) }
+    if (result) { pending.value = result.id; message.value = tr("已加入修复队列"); await downloads.refresh() }
+    else { message.value = tr("没有可修复的异常页"); report.value = await window.baoyi.image.audit(props.resourceId) }
   } catch (cause) { error.value = errorMessage(cause) }
   finally { busy.value = false }
 }
 watch([() => job.value?.status, busy], async ([status, working]) => {
   if (working) return
-  if (!status) { if (pending.value) { pending.value = ''; message.value = '修复记录已移除' }; return }
+  if (!status) { if (pending.value) { pending.value = ''; message.value = tr("修复记录已移除") }; return }
   if (['queued', 'running', 'paused'].includes(status)) return
   const succeeded = status === 'success', failure = job.value?.error
   pending.value = ''
   await audit()
-  if (succeeded) { message.value = '修复完成'; emit('repaired') }
-  else error.value = failure || '修复未完成，请在下载记录中重试'
+  if (succeeded) { message.value = tr("修复完成"); emit('repaired') }
+  else error.value = failure || tr("修复未完成，请在下载记录中重试")
 })
 </script>
 
 <template>
-  <section class="image-integrity" :class="{ compact }" aria-label="文件检查">
-    <header><h2 v-if="!compact">文件检查</h2><button class="im-button" :disabled="busy || active" @click="audit"><Loader2 v-if="busy" :size="16" /><ShieldCheck v-else :size="16" />{{ busy ? '检查处理中' : '检查完整性' }}</button><button v-if="compact && (report || error || message)" class="im-icon" :aria-label="expanded ? '收起文件检查' : '展开文件检查结果'" :aria-expanded="expanded" :aria-controls="'audit-'+resourceId" @click="expanded=!expanded"><ChevronDown :size="16" :style="{transform:expanded?'rotate(180deg)':''}"/></button></header>
+  <section class="image-integrity" :class="{ compact }" :aria-label="$t('文件检查')">
+    <header><h2 v-if="!compact">{{ $t("文件检查") }}</h2><button class="im-button" :disabled="busy || active" @click="audit"><Loader2 v-if="busy" :size="16" /><ShieldCheck v-else :size="16" />{{ busy ? $t('检查处理中') : $t('检查完整性') }}</button><button v-if="compact && (report || error || message)" class="im-icon" :aria-label="expanded ? $t('收起文件检查') : $t('展开文件检查结果')" :aria-expanded="expanded" :aria-controls="'audit-'+resourceId" @click="expanded=!expanded"><ChevronDown :size="16" :style="{transform:expanded?'rotate(180deg)':''}"/></button></header>
     <div v-show="!compact || expanded" :id="'audit-'+resourceId" class="audit-result">
-    <div v-if="compact" class="result-heading"><h3>文件检查结果</h3></div>
-    <button v-if="repairable" class="im-button" :disabled="busy || active" @click="repair"><Wrench :size="16" />修复异常页</button>
-    <p v-if="error" class="im-error" role="alert">{{ error }}</p>
+    <div v-if="compact" class="result-heading"><h3>{{ $t("文件检查结果") }}</h3></div>
+    <button v-if="repairable" class="im-button" :disabled="busy || active" @click="repair"><Wrench :size="16" />{{ $t("修复异常页") }}</button>
+    <p v-if="error" class="im-error" role="alert">{{ $systemMessage(error) }}</p>
     <p v-if="message" role="status">{{ message }}</p>
-    <p v-if="job?.status === 'paused'">修复已暂停</p>
+    <p v-if="job?.status === 'paused'">{{ $t("修复已暂停") }}</p>
     <template v-if="report">
-      <dl aria-label="文件检查结果"><div><dt>总计</dt><dd>{{ report.total }}</dd></div><div v-for="(label, status) in labels" :key="status"><dt>{{ label }}</dt><dd>{{ report[status] }}</dd></div></dl>
-      <p v-if="!report.catalogComplete" class="audit-note">缺少完整来源目录，检查范围仅限本地索引和已保存清单。</p>
-      <p v-if="report.unverified" class="audit-note">未校验页没有来源校验值，仅确认格式与尺寸可读。</p>
-      <details v-if="issues.length"><summary>异常与未校验页面 · {{ issues.length }}</summary><ul><li v-for="entry in issues.slice(0, limit)" :key="entry.key"><strong>{{ entry.title }} · 第 {{ entry.ordinal + 1 }} 页</strong><span>{{ labels[entry.status] }}</span><small>{{ entry.reason }}</small></li></ul><button v-if="issues.length > limit" class="im-button" @click="limit += 100">显示更多</button></details>
+      <dl :aria-label="$t('文件检查结果')"><div><dt>{{ $t("总计") }}</dt><dd>{{ report.total }}</dd></div><div v-for="(label, status) in labels" :key="status"><dt>{{ label }}</dt><dd>{{ report[status] }}</dd></div></dl>
+      <p v-if="!report.catalogComplete" class="audit-note">{{ $t("缺少完整来源目录，检查范围仅限本地索引和已保存清单。") }}</p>
+      <p v-if="report.unverified" class="audit-note">{{ $t("未校验页没有来源校验值，仅确认格式与尺寸可读。") }}</p>
+      <details v-if="issues.length"><summary>{{ $t("异常与未校验页面 · {p0}", {p0: (issues.length)}) }}</summary><ul><li v-for="entry in issues.slice(0, limit)" :key="entry.key"><strong>{{ $t("{p0} · 第 {p1} 页", {p0: (entry.title), p1: (entry.ordinal + 1)}) }}</strong><span>{{ labels[entry.status] }}</span><small>{{ $systemMessage(entry.reason) }}</small></li></ul><button v-if="issues.length > limit" class="im-button" @click="limit += 100">{{ $t("显示更多") }}</button></details>
     </template>
     </div>
   </section>

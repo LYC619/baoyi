@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../../i18n/index.ts'
+
 import { ref } from 'vue'
 import { activeModule } from '@/composables/useModules'
 import { useToast } from '@/composables/useToast'
@@ -38,33 +40,26 @@ async function toggleHideHentai(): Promise<void> {
   if (sel.kind === 'category' && !video.counts.categories.some((c) => c.name === sel.value)) {
     video.select({ kind: 'group', value: 'all' })
   }
-  success(hideHentai.value ? '里番已隐藏' : '里番已恢复显示')
+  success(hideHentai.value ? tr("里番已隐藏") : tr("里番已恢复显示"))
 }
 </script>
 
 <template>
 <section v-if="activeModule === 'video'" class="panel">
   <div class="sec-head">
-    <h2>隐藏里番</h2>
+    <h2>{{ $t("隐藏里番") }}</h2>
     <label class="switch">
       <input v-model="hideHentai" type="checkbox" @change="toggleHideHentai" />
-      <span>{{ hideHentai ? '已隐藏' : '正常显示' }}</span>
+      <span>{{ hideHentai ? $t('已隐藏') : $t('正常显示') }}</span>
     </label>
   </div>
-  <p class="sec-desc">
-    打开后影视侧边栏不再出现「里番」这一格，海报墙也不铺这些条目，
-    侧栏的类型、标签、归档几处计数都不把它们算进去。
-  </p>
+  <p class="sec-desc">{{ $t("打开后影视侧边栏不再出现「里番」这一格，海报墙也不铺这些条目， 侧栏的类型、标签、归档几处计数都不把它们算进去。") }}</p>
 
   <!--
     边界要写明白，否则它很容易被当成锁用。藏起来的是「浏览时看不见」，
     不是「访问不到」—— 说清楚比让用户自己发现要好
   -->
-  <p class="sec-desc sec-desc--foot">
-    它只管显示：条目、文件和海报都原样留着，关掉开关立刻回来，
-    不改任何数据。设置页这边「影视条目」的总数仍是全库的数字，
-    已经打开过的详情页地址也照样能打开。
-  </p>
+  <p class="sec-desc sec-desc--foot">{{ $t("它只管显示：条目、文件和海报都原样留着，关掉开关立刻回来， 不改任何数据。设置页这边「影视条目」的总数仍是全库的数字， 已经打开过的详情页地址也照样能打开。") }}</p>
 </section>
 </template>
 

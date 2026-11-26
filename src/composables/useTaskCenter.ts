@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { errorMessage } from '../utils/index.ts'
 import { useToast } from './useToast.ts'
 import { computed, ref } from 'vue'
@@ -41,7 +43,7 @@ async function hydrate(): Promise<void> {
     if (Array.isArray(saved)) {
       const liveIds = new Set(tasks.value.map(task => task.id))
       const history = saved.filter(task => !liveIds.has(task.id) && !clearedIds.has(task.id))
-        .map(task => task.status === 'running' ? { ...task, status: 'interrupted' as const, message: '应用中断，可重新执行' } : task)
+        .map(task => task.status === 'running' ? { ...task, status: 'interrupted' as const, message: tr("应用中断，可重新执行") } : task)
       tasks.value = trimHistory([...tasks.value, ...history])
       const max = saved.map(task => Number(String(task.id).replace(/^task-/, ''))).filter(Number.isFinite).reduce((a, b) => Math.max(a, b), 0)
       nextId = Math.max(nextId, max + 1)
@@ -124,11 +126,11 @@ export function useTaskCenter(module?: () => ModuleKey) {
       percent: percentOf(processed, total),
       current: options.current ?? '',
       message: options.message ?? '',
-      events: [{ at: Date.now(), level: 'info', message: '任务开始' }]
+      events: [{ at: Date.now(), level: 'info', message: tr("任务开始") }]
     }
     tasks.value = trimHistory([task, ...tasks.value])
     persist(task)
-    console.info(`[task:${kind}] 任务开始：${title}`)
+    console.info(tr("[task:{p0}] 任务开始：{p1}", {p0: (kind), p1: (title)}))
     return id
   }
 
@@ -165,7 +167,7 @@ export function useTaskCenter(module?: () => ModuleKey) {
     if (index < 0 || tasks.value[index].status !== 'running') return
     replaceTask(id, (task) => {
       const level: TaskEventLevel = status === 'failed' ? 'error' : status === 'cancelled' ? 'warn' : 'success'
-      const finalMessage = message.trim() || (status === 'success' ? '任务完成' : status === 'cancelled' ? '任务已取消' : '任务失败')
+      const finalMessage = message.trim() || (status === 'success' ? tr('任务完成') : status === 'cancelled' ? tr('任务已取消') : tr('任务失败'))
       let events = appendEvent(task, level, finalMessage)
       if (error?.trim()) events = appendEvent({ ...task, events }, 'error', error)
       const next = {
@@ -189,7 +191,7 @@ export function useTaskCenter(module?: () => ModuleKey) {
     const ids = history.value.map(task => task.id)
     if (!ids.length) return
     if (typeof window !== 'undefined' && window.baoyi?.tasks) {
-      if (!window.baoyi.tasks.clear || !(await window.baoyi.tasks.clear(ids))) throw new Error('未能清除历史，请重试')
+      if (!window.baoyi.tasks.clear || !(await window.baoyi.tasks.clear(ids))) throw new Error(tr('未能清除历史，请重试'))
     }
     ids.forEach(id => clearedIds.add(id))
     // Only the records reviewed when the user clicked are removed. Newly finished

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { errorMessage } from '@/utils'
 import { ref, computed, onMounted, watch } from 'vue'
 import {
@@ -70,10 +72,10 @@ async function run(action: () => Promise<void>) {
 }
 
 const behaviorLabels: Record<string, string> = {
-  reading: '阅读资料',
-  certificate: '证书 / 凭证',
-  contract: '合同 / 协议',
-  other: '普通档案',
+  get reading() { return tr('阅读资料') },
+  get certificate() { return tr('证书 / 凭证') },
+  get contract() { return tr('合同 / 协议') },
+  get other() { return tr('普通档案') },
 }
 
 const filteredCategories = computed(() =>
@@ -210,7 +212,7 @@ async function generatePreview() {
 }
 
 async function executeOrganize() {
-  if (!organizePreview.value || previewSignature.value !== organizeSignature.value) { error.value = '整理选项已变化，请重新生成预览'; return }
+  if (!organizePreview.value || previewSignature.value !== organizeSignature.value) { error.value = tr("整理选项已变化，请重新生成预览"); return }
   organizeLoading.value = true
   error.value = ''
   try {
@@ -246,7 +248,7 @@ async function undoOrganize(id: string) {
       historyList.value = await workspace.documents.organizeHistory()
       if (organizePreview.value) await generatePreview()
     } else {
-      error.value = res.reason || '撤销未成功'
+      error.value = res.reason || tr("撤销未成功")
     }
   } catch (e) {
     error.value = errorMessage(e)
@@ -281,38 +283,33 @@ async function recoverOrganize(id: string) {
     <!-- Tab 2: Categories & Custom Groups -->
     <div v-else-if="tab === 'categories' || tab === 'groups'" class="settings-subpage">
       <!-- Submodule Toggle -->
-      <div class="submodule-switcher" role="tablist" aria-label="子模块切换">
+      <div class="submodule-switcher" role="tablist" :aria-label="$t('子模块切换')">
         <button
           type="button"
           :class="{ active: currentSubmodule === 'reading' }"
           @click="currentSubmodule = 'reading'"
-        >
-          📖 阅读（书架类）
-        </button>
+        >{{ $t("📖 阅读（书架类）") }}</button>
         <button
           type="button"
           :class="{ active: currentSubmodule === 'archive' }"
           @click="currentSubmodule = 'archive'"
-        >
-          🗂️ 资料（档案类）
-        </button>
+        >{{ $t("🗂️ 资料（档案类）") }}</button>
       </div>
 
       <!-- Categories Section -->
       <section v-if="tab === 'categories'" class="settings-card">
         <header class="card-header">
           <div>
-            <h3>{{ currentSubmodule === 'reading' ? '阅读分类' : '资料分类' }}</h3>
+            <h3>{{ currentSubmodule === 'reading' ? $t('阅读分类') : $t('资料分类') }}</h3>
             <p class="ws-muted">
               {{ currentSubmodule === 'reading'
-                ? '小说、书籍与论文等读物分类。决定阅读进度、摘录与章节索引呈现。'
-                : '证书、简历、合同等档案分类。决定有效期、相关方与用途凭据呈现。'
+                ? $t('小说、书籍与论文等读物分类。决定阅读进度、摘录与章节索引呈现。')
+                : $t('证书、简历、合同等档案分类。决定有效期、相关方与用途凭据呈现。')
               }}
             </p>
           </div>
           <button class="ws-button" :disabled="busy" @click="editCategory()">
-            <Plus :size="15" />新增分类
-          </button>
+            <Plus :size="15" />{{ $t("新增分类") }}</button>
         </header>
 
         <article
@@ -324,7 +321,7 @@ async function recoverOrganize(id: string) {
             <button
               class="ws-icon"
               :disabled="busy || index === 0"
-              :aria-label="'上移 ' + category.name"
+              :aria-label="$t('上移 ') + category.name"
               @click="moveCategory(category, -1)"
             >
               <ArrowUp :size="13" />
@@ -332,7 +329,7 @@ async function recoverOrganize(id: string) {
             <button
               class="ws-icon"
               :disabled="busy || index === filteredCategories.length - 1"
-              :aria-label="'下移 ' + category.name"
+              :aria-label="$t('下移 ') + category.name"
               @click="moveCategory(category, 1)"
             >
               <ArrowDown :size="13" />
@@ -342,23 +339,21 @@ async function recoverOrganize(id: string) {
             <div class="row-title">
               <strong>{{ category.name }}</strong>
               <span class="ws-badge">{{ behaviorLabels[category.behavior] || category.behavior }}</span>
-              <small class="ws-muted">{{ store.items.filter(d => d.type === category.id).length }} 份</small>
+              <small class="ws-muted">{{ $t("{p0} 份", {p0: (store.items.filter(d => d.type === category.id).length)}) }}</small>
             </div>
-            <p class="ws-muted">{{ category.description || '尚未填写分类说明' }}</p>
+            <p class="ws-muted">{{ category.description || $t('尚未填写分类说明') }}</p>
           </div>
           <div class="row-actions">
-            <button class="ws-icon" :aria-label="'编辑 ' + category.name" :disabled="busy" @click="editCategory(category)">
+            <button class="ws-icon" :aria-label="$t('编辑 ') + category.name" :disabled="busy" @click="editCategory(category)">
               <Pencil :size="15" />
             </button>
             <button
               v-if="category.id !== 'archive_other' && category.id !== 'reading_other' && category.id !== 'other'"
               class="ws-button"
-              :aria-label="'删除 ' + category.name"
+              :aria-label="$t('删除 ') + category.name"
               :disabled="busy"
               @click="promptRemoveCategory(category)"
-            >
-              删除
-            </button>
+            >{{ $t("删除") }}</button>
           </div>
         </article>
       </section>
@@ -367,17 +362,14 @@ async function recoverOrganize(id: string) {
       <section v-if="tab === 'groups'" class="settings-card">
         <header class="card-header">
           <div>
-            <h3>{{ currentSubmodule === 'reading' ? '阅读自定义分组' : '资料自定义分组' }}</h3>
-            <p class="ws-muted">独立于分类的主题分组（如“科幻小说”、“前端进阶”或“工作档案”），方便侧边栏快速筛选。</p>
+            <h3>{{ currentSubmodule === 'reading' ? $t('阅读自定义分组') : $t('资料自定义分组') }}</h3>
+            <p class="ws-muted">{{ $t("独立于分类的主题分组（如“科幻小说”、“前端进阶”或“工作档案”），方便侧边栏快速筛选。") }}</p>
           </div>
           <button class="ws-button" :disabled="busy" @click="editGroup()">
-            <FolderPlus :size="15" />新增分组
-          </button>
+            <FolderPlus :size="15" />{{ $t("新增分组") }}</button>
         </header>
 
-        <div v-if="!filteredCustomGroups.length" class="empty-hint ws-muted">
-          暂无自定义分组，点击上方按钮创建。
-        </div>
+        <div v-if="!filteredCustomGroups.length" class="empty-hint ws-muted">{{ $t("暂无自定义分组，点击上方按钮创建。") }}</div>
 
         <article
           v-for="(group, index) in filteredCustomGroups"
@@ -388,7 +380,7 @@ async function recoverOrganize(id: string) {
             <button
               class="ws-icon"
               :disabled="busy || index === 0"
-              :aria-label="'上移 ' + group.name"
+              :aria-label="$t('上移 ') + group.name"
               @click="moveGroup(group, -1)"
             >
               <ArrowUp :size="13" />
@@ -396,7 +388,7 @@ async function recoverOrganize(id: string) {
             <button
               class="ws-icon"
               :disabled="busy || index === filteredCustomGroups.length - 1"
-              :aria-label="'下移 ' + group.name"
+              :aria-label="$t('下移 ') + group.name"
               @click="moveGroup(group, 1)"
             >
               <ArrowDown :size="13" />
@@ -406,16 +398,14 @@ async function recoverOrganize(id: string) {
             <div class="row-title">
               <strong>{{ group.name }}</strong>
               <span v-if="group.categoryId" class="ws-badge">{{ store.categories.find(c => c.id === group.categoryId)?.name }}</span>
-              <small class="ws-muted">{{ store.items.filter(d => d.customGroupId === group.id).length }} 份资料</small>
+              <small class="ws-muted">{{ $t("{p0} 份资料", {p0: (store.items.filter(d => d.customGroupId === group.id).length)}) }}</small>
             </div>
           </div>
           <div class="row-actions">
-            <button class="ws-icon" :aria-label="'编辑 ' + group.name" :disabled="busy" @click="editGroup(group)">
+            <button class="ws-icon" :aria-label="$t('编辑 ') + group.name" :disabled="busy" @click="editGroup(group)">
               <Pencil :size="15" />
             </button>
-            <button class="ws-button" :aria-label="'删除 ' + group.name" :disabled="busy" @click="promptRemoveGroup(group)">
-              删除
-            </button>
+            <button class="ws-button" :aria-label="$t('删除 ') + group.name" :disabled="busy" @click="promptRemoveGroup(group)">{{ $t("删除") }}</button>
           </div>
         </article>
       </section>
@@ -427,62 +417,52 @@ async function recoverOrganize(id: string) {
       <section class="settings-card">
         <header class="card-header">
           <div>
-            <h3>文库归档整理</h3>
-            <p class="ws-muted">
-              依据“子模块 / 分类 / 可选分组”将散落文件规范化整理至指定目标目录。移动前提供完整变更预览与冲突检查。
-            </p>
+            <h3>{{ $t("文库归档整理") }}</h3>
+            <p class="ws-muted">{{ $t("依据“子模块 / 分类 / 可选分组”将散落文件规范化整理至指定目标目录。移动前提供完整变更预览与冲突检查。") }}</p>
           </div>
           <button class="ws-button" type="button" @click="loadHistory()">
-            <History :size="15" />整理历史与撤销
-          </button>
+            <History :size="15" />{{ $t("整理历史与撤销") }}</button>
         </header>
 
         <div class="organize-controls">
           <div class="form-row">
-            <label class="form-label">目标根目录</label>
+            <label class="form-label">{{ $t("目标根目录") }}</label>
             <div class="input-with-button">
               <input
                 v-model="organizeRoot"
                 type="text"
-                placeholder="请选择或输入整理目标文件夹绝对路径"
+                :placeholder="$t('请选择或输入整理目标文件夹绝对路径')"
                 class="ws-input"
               />
               <button class="ws-button" type="button" :disabled="organizeLoading" @click="pickOrganizeRoot">
-                <Folder :size="15" />浏览...
-              </button>
+                <Folder :size="15" />{{ $t("浏览...") }}</button>
             </div>
           </div>
 
           <div class="form-row-grid">
             <div>
-              <label class="form-label">整理方式</label>
+              <label class="form-label">{{ $t("整理方式") }}</label>
               <div class="radio-group">
                 <label class="radio-label">
-                  <input v-model="organizeMode" type="radio" value="move" @change="organizePreview && generatePreview()" />
-                  移动文件（原文件移至目标，更新索引）
-                </label>
+                  <input v-model="organizeMode" type="radio" value="move" @change="organizePreview && generatePreview()" />{{ $t("移动文件（原文件移至目标，更新索引）") }}</label>
                 <label class="radio-label">
-                  <input v-model="organizeMode" type="radio" value="copy" @change="organizePreview && generatePreview()" />
-                  复制文件（在目标处建立副本）
-                </label>
+                  <input v-model="organizeMode" type="radio" value="copy" @change="organizePreview && generatePreview()" />{{ $t("复制文件（在目标处建立副本）") }}</label>
               </div>
             </div>
 
             <div>
-              <label class="form-label">筛选子模块</label>
+              <label class="form-label">{{ $t("筛选子模块") }}</label>
               <select v-model="organizeSubmodule" class="ws-select" @change="organizePreview && generatePreview()">
-                <option value="all">全部子模块（阅读与资料）</option>
-                <option value="reading">仅阅读模块</option>
-                <option value="archive">仅资料模块</option>
+                <option value="all">{{ $t("全部子模块（阅读与资料）") }}</option>
+                <option value="reading">{{ $t("仅阅读模块") }}</option>
+                <option value="archive">{{ $t("仅资料模块") }}</option>
               </select>
             </div>
           </div>
 
           <div class="form-row checkbox-row">
             <label class="checkbox-label">
-              <input v-model="organizeUseGroups" type="checkbox" @change="organizePreview && generatePreview()" />
-              按自定义分组建立子文件夹（路径：<code>根目录/子模块/分类/主分组/文件名</code>；未勾选或未分组落入分类目录）
-            </label>
+              <input v-model="organizeUseGroups" type="checkbox" @change="organizePreview && generatePreview()" />{{ $t("按自定义分组建立子文件夹（路径：") }}<code>{{ $t("根目录/子模块/分类/主分组/文件名") }}</code>{{ $t("；未勾选或未分组落入分类目录）") }}</label>
           </div>
 
           <div class="organize-actions">
@@ -492,31 +472,25 @@ async function recoverOrganize(id: string) {
               :disabled="!organizeRoot || organizeLoading"
               @click="generatePreview"
             >
-              <RefreshCw :size="15" :class="{ 'spin-icon': organizeLoading }" />
-              生成整理预览
-            </button>
+              <RefreshCw :size="15" :class="{ 'spin-icon': organizeLoading }" />{{ $t("生成整理预览") }}</button>
           </div>
         </div>
 
         <!-- Result summary -->
         <div v-if="organizeResult" class="organize-result-summary">
           <CheckCircle :size="18" class="text-success" />
-          <span>
-            本次整理完成：成功 {{ organizeResult.succeeded }} 项，跳过 {{ organizeResult.skipped }} 项，失败 {{ organizeResult.failed }} 项。
-          </span>
+          <span>{{ $t("本次整理完成：成功 {p0} 项，跳过 {p1} 项，失败 {p2} 项。", {p0: (organizeResult.succeeded), p1: (organizeResult.skipped), p2: (organizeResult.failed)}) }}</span>
         </div>
 
         <!-- Preview Table -->
         <div v-if="organizePreview" class="organize-preview-box">
           <div class="preview-header">
-            <h4>
-              整理预览清单（共 {{ organizePreview.total }} 项）
-            </h4>
+            <h4>{{ $t("整理预览清单（共 {p0} 项）", {p0: (organizePreview.total)}) }}</h4>
             <div class="preview-stats">
-              <span class="stat-pill ready">待整理: {{ organizePreview.ready }}</span>
-              <span class="stat-pill skip">已在目标: {{ organizePreview.skip }}</span>
-              <span v-if="organizePreview.conflict" class="stat-pill conflict">冲突: {{ organizePreview.conflict }}</span>
-              <span v-if="organizePreview.missing" class="stat-pill missing">缺失: {{ organizePreview.missing }}</span>
+              <span class="stat-pill ready">{{ $t("待整理: {p0}", {p0: (organizePreview.ready)}) }}</span>
+              <span class="stat-pill skip">{{ $t("已在目标: {p0}", {p0: (organizePreview.skip)}) }}</span>
+              <span v-if="organizePreview.conflict" class="stat-pill conflict">{{ $t("冲突: {p0}", {p0: (organizePreview.conflict)}) }}</span>
+              <span v-if="organizePreview.missing" class="stat-pill missing">{{ $t("缺失: {p0}", {p0: (organizePreview.missing)}) }}</span>
             </div>
           </div>
 
@@ -524,27 +498,27 @@ async function recoverOrganize(id: string) {
             <table class="preview-table">
               <thead>
                 <tr>
-                  <th>资料名称</th>
-                  <th>所属结构</th>
-                  <th>当前位置</th>
-                  <th>目标路径</th>
-                  <th>状态</th>
+                  <th>{{ $t("资料名称") }}</th>
+                  <th>{{ $t("所属结构") }}</th>
+                  <th>{{ $t("当前位置") }}</th>
+                  <th>{{ $t("目标路径") }}</th>
+                  <th>{{ $t("状态") }}</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="item in organizePreview.items" :key="item.id" :class="'row-' + item.status">
                   <td class="cell-name" :title="item.name"><strong>{{ item.name }}</strong></td>
                   <td class="cell-struct">
-                    {{ item.submodule === 'archive' ? '资料' : '阅读' }} / {{ item.categoryName }}
+                    {{ item.submodule === 'archive' ? $t('资料') : $t('阅读') }} / {{ item.categoryName }}
                     <template v-if="item.groupName"> / {{ item.groupName }}</template>
                   </td>
                   <td class="cell-path" :title="item.source"><small>{{ item.source }}</small></td>
                   <td class="cell-path" :title="item.destination"><small>{{ item.destination }}</small></td>
                   <td class="cell-status">
                     <span class="status-badge" :class="'badge-' + item.status">
-                      {{ item.status === 'ready' ? '可整理' : item.status === 'skip' ? '已在目标' : item.status === 'conflict' ? '冲突' : '缺失' }}
+                      {{ item.status === 'ready' ? $t('可整理') : item.status === 'skip' ? $t('已在目标') : item.status === 'conflict' ? $t('冲突') : $t('缺失') }}
                     </span>
-                    <small v-if="item.reason" class="ws-muted block-hint">{{ item.reason }}</small>
+                    <small v-if="item.reason" class="ws-muted block-hint">{{ $systemMessage(item.reason) }}</small>
                   </td>
                 </tr>
               </tbody>
@@ -552,18 +526,14 @@ async function recoverOrganize(id: string) {
           </div>
 
           <footer class="preview-footer">
-            <span class="ws-muted">
-              移动操作将复制文件并严格比对校验码，确保数据一致后再清理源文件。
-            </span>
+            <span class="ws-muted">{{ $t("移动操作将复制文件并严格比对校验码，确保数据一致后再清理源文件。") }}</span>
             <button
               class="ws-button ws-button--primary"
               type="button"
               :disabled="organizePreview.ready === 0 || organizeLoading || previewSignature !== organizeSignature"
               @click="executeOrganize"
             >
-              <FolderSync :size="16" />
-              执行整理（{{ organizePreview.ready }} 项待处理）
-            </button>
+              <FolderSync :size="16" />{{ $t("执行整理（{p0} 项待处理）", {p0: (organizePreview.ready)}) }}</button>
           </footer>
         </div>
       </section>
@@ -573,47 +543,46 @@ async function recoverOrganize(id: string) {
     </div>
 
     <section v-if="tab === 'tags'" class="settings-card ws-form">
-      <h3>分类标签</h3><p class="ws-muted">标签按分类独立管理，重命名与删除只影响当前分类。</p>
-      <label>选择分类<select v-model="tagCategory" :disabled="tagsBusy"><option v-for="category in store.categories" :key="category.id" :value="category.id">{{ category.submodule === 'reading' ? '阅读' : '资料' }} · {{ category.name }}</option></select></label>
+      <h3>{{ $t("分类标签") }}</h3><p class="ws-muted">{{ $t("标签按分类独立管理，重命名与删除只影响当前分类。") }}</p>
+      <label>{{ $t("选择分类") }}<select v-model="tagCategory" :disabled="tagsBusy"><option v-for="category in store.categories" :key="category.id" :value="category.id">{{ category.submodule === 'reading' ? $t('阅读') : $t('资料') }} · {{ category.name }}</option></select></label>
       <DocumentTagDialog v-if="tagCategory" :key="tagCategory + ':' + (tagSelection.length ? 'batch' : 'manage')" embedded @busy="tagsBusy = $event" :category-id="tagCategory" :category-name="store.categories.find(row => row.id === tagCategory)?.name" :available-tags="categoryTags" :items="categoryItems.filter(item => tagSelection.includes(item.id))" @close="tagSelection = []" @updated="store.refresh()" />
-      <h3>选择资料以添加标签</h3><p class="ws-muted">未选择资料时管理已有标签；选择后可追加、替换或移除所选资料的标签。</p>
+      <h3>{{ $t("选择资料以添加标签") }}</h3><p class="ws-muted">{{ $t("未选择资料时管理已有标签；选择后可追加、替换或移除所选资料的标签。") }}</p>
       <div class="tag-documents"><label v-for="item in categoryItems" :key="item.id"><input v-model="tagSelection" :disabled="tagsBusy" type="checkbox" :value="item.id" />{{ item.name }}</label></div>
     </section>
 
     <!-- History Dialog -->
     <ProjectDialog
       v-if="showHistory"
-      title="文件整理与操作历史"
+      :title="$t('文件整理与操作历史')"
       @close="showHistory = false"
     >
       <div class="organize-history-dialog">
-        <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
-        <p v-if="!historyList.length" class="ws-muted empty-hint">暂无文件移动或复制记录。</p>
+        <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
+        <p v-if="!historyList.length" class="ws-muted empty-hint">{{ $t("暂无文件移动或复制记录。") }}</p>
         <div v-else class="history-list">
           <article v-for="op in historyList" :key="op.id" class="history-item">
             <div class="history-item-main">
               <div class="history-item-title">
-                <strong>{{ op.mode === 'move' ? '移动' : op.mode === 'copy' ? '复制' : '关联' }}</strong>
+                <strong>{{ op.mode === 'move' ? $t('移动') : op.mode === 'copy' ? $t('复制') : $t('关联') }}</strong>
                 <span class="ws-badge" :class="{ 'ws-badge--undone': op.undone }">
-                  {{ op.undoPending ? '撤销待完成' : op.undone ? '已撤销' : op.state === 'done' ? '已完成' : op.state === 'attention' ? '需处理' : '操作未完成' }}
+                  {{ op.undoPending ? $t('撤销待完成') : op.undone ? $t('已撤销') : op.state === 'done' ? $t('已完成') : op.state === 'attention' ? $t('需处理') : $t('操作未完成') }}
                 </span>
-                <small class="ws-muted">{{ new Date(op.createdAt).toLocaleString() }}</small>
+                <small class="ws-muted">{{ new Date(op.createdAt).toLocaleString($locale) }}</small>
               </div>
               <div class="history-paths">
-                <div><span class="ws-muted">源：</span><small>{{ op.source }}</small></div>
-                <div><span class="ws-muted">目标：</span><small>{{ op.destination }}</small></div>
-                <div v-if="op.error" class="ws-error"><small>{{ op.error }}</small></div>
+                <div><span class="ws-muted">{{ $t("源：") }}</span><small>{{ op.source }}</small></div>
+                <div><span class="ws-muted">{{ $t("目标：") }}</span><small>{{ op.destination }}</small></div>
+                <div v-if="op.error" class="ws-error"><small>{{ $systemMessage(op.error) }}</small></div>
               </div>
             </div>
             <div v-if="op.undoPending || (op.state !== 'done' && !op.undone)" class="history-item-actions">
               <button class="ws-button" type="button" :disabled="busy" @click="recoverOrganize(op.id)">
-                <RefreshCw :size="14" />{{ op.undoPending ? '继续完成撤销' : '核验并恢复' }}
+                <RefreshCw :size="14" />{{ op.undoPending ? $t('继续完成撤销') : $t('核验并恢复') }}
               </button>
             </div>
             <div v-if="op.mode === 'move' && op.state === 'done' && !op.undone" class="history-item-actions">
               <button class="ws-button" type="button" :disabled="busy" @click="undoOrganize(op.id)">
-                <Undo2 :size="14" />撤销移动
-              </button>
+                <Undo2 :size="14" />{{ $t("撤销移动") }}</button>
             </div>
           </article>
         </div>
@@ -623,37 +592,29 @@ async function recoverOrganize(id: string) {
     <!-- Category Dialog -->
     <ProjectDialog
       v-if="categoryForm"
-      :title="categoryForm.id ? '编辑分类' : '新增分类'"
+      :title="categoryForm.id ? $t('编辑分类') : $t('新增分类')"
       :busy="busy"
       @close="categoryForm = null"
     >
       <form id="category-form" class="ws ws-form" @submit.prevent="saveCategory">
-        <p v-if="error" class="ws-error">{{ error }}</p>
-        <label>
-          分类所属
-          <select v-model="categoryForm.submodule" :disabled="!!categoryForm.id" aria-label="分类所属子模块">
-            <option value="reading">阅读（书架类）</option>
-            <option value="archive">资料（档案类）</option>
+        <p v-if="error" class="ws-error">{{ $systemMessage(error) }}</p>
+        <label>{{ $t("分类所属") }}<select v-model="categoryForm.submodule" :disabled="!!categoryForm.id" :aria-label="$t('分类所属子模块')">
+            <option value="reading">{{ $t("阅读（书架类）") }}</option>
+            <option value="archive">{{ $t("资料（档案类）") }}</option>
           </select>
         </label>
-        <label>
-          分类名称
-          <input v-model="categoryForm.name" maxlength="100" required placeholder="如：科幻、证件凭据" />
+        <label>{{ $t("分类名称") }}<input v-model="categoryForm.name" maxlength="100" required :placeholder="$t('如：科幻、证件凭据')" />
         </label>
-        <label>
-          分类说明
-          <textarea v-model="categoryForm.description" maxlength="2000" placeholder="哪些内容适合放在这里？助手推测时会参考此说明。" />
+        <label>{{ $t("分类说明") }}<textarea v-model="categoryForm.description" maxlength="2000" :placeholder="$t('哪些内容适合放在这里？助手推测时会参考此说明。')" />
         </label>
-        <label>
-          资料用途
-          <select v-model="categoryForm.behavior" aria-label="资料用途">
+        <label>{{ $t("资料用途") }}<select v-model="categoryForm.behavior" :aria-label="$t('资料用途')">
             <option v-for="(label, value) in behaviorLabels" :key="value" :value="value">{{ label }}</option>
           </select>
         </label>
       </form>
       <template #footer>
         <div class="ws">
-          <button class="ws-button primary" form="category-form" type="submit" :disabled="busy">保存分类</button>
+          <button class="ws-button primary" form="category-form" type="submit" :disabled="busy">{{ $t("保存分类") }}</button>
         </div>
       </template>
     </ProjectDialog>
@@ -661,16 +622,14 @@ async function recoverOrganize(id: string) {
     <!-- Remove Category Dialog -->
     <ProjectDialog
       v-if="removingCategory"
-      title="删除分类"
+      :title="$t('删除分类')"
       :busy="busy"
       @close="removingCategory = null"
     >
       <div class="ws ws-form">
-        <p>删除“{{ removingCategory.name }}”分类，不会删除资料或源文件。成员将转入下方目标分类，标注与引用保持不变。</p>
-        <p v-if="error" class="ws-error">{{ error }}</p>
-        <label>
-          转移到
-          <select v-model="transferTarget" aria-label="转移到分类">
+        <p>{{ $t("删除“{p0}”分类，不会删除资料或源文件。成员将转入下方目标分类，标注与引用保持不变。", {p0: (removingCategory.name)}) }}</p>
+        <p v-if="error" class="ws-error">{{ $systemMessage(error) }}</p>
+        <label>{{ $t("转移到") }}<select v-model="transferTarget" :aria-label="$t('转移到分类')">
             <option
               v-for="cat in filteredCategories.filter(c => c.id !== removingCategory?.id)"
               :key="cat.id"
@@ -683,9 +642,7 @@ async function recoverOrganize(id: string) {
       </div>
       <template #footer>
         <div class="ws">
-          <button class="ws-button danger" :disabled="busy" @click="confirmRemoveCategory">
-            转移资料并删除分类
-          </button>
+          <button class="ws-button danger" :disabled="busy" @click="confirmRemoveCategory">{{ $t("转移资料并删除分类") }}</button>
         </div>
       </template>
     </ProjectDialog>
@@ -693,26 +650,22 @@ async function recoverOrganize(id: string) {
     <!-- Custom Group Dialog -->
     <ProjectDialog
       v-if="groupForm"
-      :title="groupForm.id ? '编辑分组' : '新增分组'"
+      :title="groupForm.id ? $t('编辑分组') : $t('新增分组')"
       :busy="busy"
       @close="groupForm = null"
     >
       <form id="group-form" class="ws ws-form" @submit.prevent="saveGroup">
-        <p v-if="error" class="ws-error">{{ error }}</p>
-        <label>
-          所属分类
-          <select v-model="groupForm.categoryId" required :disabled="busy || !!groupForm.id">
+        <p v-if="error" class="ws-error">{{ $systemMessage(error) }}</p>
+        <label>{{ $t("所属分类") }}<select v-model="groupForm.categoryId" required :disabled="busy || !!groupForm.id">
             <option v-for="cat in filteredCategories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
           </select>
         </label>
-        <label>
-          分组名称
-          <input v-model="groupForm.name" maxlength="100" required placeholder="如：科幻经典、入职材料" />
+        <label>{{ $t("分组名称") }}<input v-model="groupForm.name" maxlength="100" required :placeholder="$t('如：科幻经典、入职材料')" />
         </label>
       </form>
       <template #footer>
         <div class="ws">
-          <button class="ws-button primary" form="group-form" type="submit" :disabled="busy">保存分组</button>
+          <button class="ws-button primary" form="group-form" type="submit" :disabled="busy">{{ $t("保存分组") }}</button>
         </div>
       </template>
     </ProjectDialog>
@@ -720,19 +673,17 @@ async function recoverOrganize(id: string) {
     <!-- Remove Group Dialog -->
     <ProjectDialog
       v-if="removingGroup"
-      title="删除分组"
+      :title="$t('删除分组')"
       :busy="busy"
       @close="removingGroup = null"
     >
       <div class="ws ws-form">
-        <p>确定要删除分组“{{ removingGroup.name }}”吗？分组下的资料将保留，仅解除该分组关联。</p>
-        <p v-if="error" class="ws-error">{{ error }}</p>
+        <p>{{ $t("确定要删除分组“{p0}”吗？分组下的资料将保留，仅解除该分组关联。", {p0: (removingGroup.name)}) }}</p>
+        <p v-if="error" class="ws-error">{{ $systemMessage(error) }}</p>
       </div>
       <template #footer>
         <div class="ws">
-          <button class="ws-button danger" :disabled="busy" @click="confirmRemoveGroup">
-            删除分组
-          </button>
+          <button class="ws-button danger" :disabled="busy" @click="confirmRemoveGroup">{{ $t("删除分组") }}</button>
         </div>
       </template>
     </ProjectDialog>

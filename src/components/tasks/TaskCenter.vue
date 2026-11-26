@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { locale as appLocale, tr } from '../../i18n/index.ts'
+
 /**
  * 顶栏的「日志」面板（实测第四轮之前叫「任务」）。
  *
@@ -32,7 +34,7 @@ import { errorMessage, formatBytes } from '@/utils'
 
 type Tab = 'tasks' | 'downloads' | 'organize' | 'identify'
 const TABS: Array<{ key: Tab; label: string }> = [
-  { key: 'tasks', label: '任务' }, { key: 'downloads', label: '下载记录' }, { key: 'organize', label: '整理记录' }, { key: 'identify', label: '识别与调用' }
+  { key: 'tasks', get label() { return tr("任务") } }, { key: 'downloads', get label() { return tr("下载记录") } }, { key: 'organize', get label() { return tr("整理记录") } }, { key: 'identify', get label() { return tr("识别与调用") } }
 ]
 
 const projectLauncher=useProjectLaunch()
@@ -42,7 +44,7 @@ const activeInsights=computed(()=>insightRuns.value.filter(run=>['queued','runni
 onMounted(()=>insightQueue.initialize())
 const projectRuns=computed(()=>activeModule.value==='project'?projectLauncher.runs.value.slice(0,40):[])
 const activeProjectRuns=computed(()=>projectRuns.value.filter(run=>['starting','running','stopping'].includes(run.status)))
-const projectRunLabels={starting:'正在启动',running:'运行中',stopping:'正在停止',exited:'已结束',failed:'失败',interrupted:'上次中断'}
+const projectRunLabels={get starting() { return tr('正在启动') },get running() { return tr('运行中') },get stopping() { return tr('正在停止') },get exited() { return tr('已结束') },get failed() { return tr('失败') },get interrupted() { return tr('上次中断') }}
 function showProjectRuns(){closePanel();projectLauncher.showRuns.value=true}
 const center = useTaskCenter(() => activeModule.value)
 const { runningTasks, history } = center
@@ -73,8 +75,8 @@ const queuedCount = computed(() => downloadJobs.value.filter(job => job.status =
 const downloadAttention = computed(() => downloadJobs.value.filter(needsAttention).length + imageAttention.value)
 const failedCount = computed(() => center.attentionCount.value + downloadAttention.value)
 const attentionHint = computed(() => [
-  downloadAttention.value ? `${downloadAttention.value} 个下载待处理（失败或有剩余项，可重试或移除记录）` : '',
-  center.attentionCount.value ? `${center.attentionCount.value} 个任务失败、中断或有待确认项` : ''
+  downloadAttention.value ? tr('{p0} 个下载待处理（失败或有剩余项，可重试或移除记录）', {p0: downloadAttention.value}) : '',
+  center.attentionCount.value ? tr('{p0} 个任务失败、中断或有待确认项', {p0: center.attentionCount.value}) : ''
 ].filter(Boolean).join('；'))
 const tab = ref<Tab>('tasks')
 const availableTabs = computed(() => TABS.filter(t => activeModule.value === 'image' ? t.key === 'downloads'
@@ -84,8 +86,8 @@ const shownJobs = computed(() => downloadFilter.value === 'all' ? downloadJobs.v
 const shownImageCount = computed(() => downloadFilter.value === 'all' ? imageJobs.value.length : activeImageJobs.value.length + imageAttention.value)
 const hasDownloadHistory = computed(() => downloadJobs.value.length + imageJobs.value.length > 0)
 const jobSections = computed(() => [
-  { key: 'active', label: '下载队列', jobs: shownJobs.value.filter(activeJob).sort((a, b) => a.createdAt - b.createdAt) },
-  { key: 'finished', label: downloadFilter.value === 'all' ? '下载结果' : '待处理的下载', jobs: shownJobs.value.filter(job => !activeJob(job)) }
+  { key: 'active', label: tr('下载队列'), jobs: shownJobs.value.filter(activeJob).sort((a, b) => a.createdAt - b.createdAt) },
+  { key: 'finished', label: downloadFilter.value === 'all' ? tr("下载结果") : tr("待处理的下载"), jobs: shownJobs.value.filter(job => !activeJob(job)) }
 ])
 const journals = ref<VideoOrganizeJournal[]>([])
 const journalsLoaded = ref(false)
@@ -114,24 +116,24 @@ const closeButton = ref<HTMLButtonElement | null>(null)
 const expanded = ref(new Set<string>())
 const identifyLogs = ref(new Set<string>())
 const sections = computed(() => [
-  { key: 'running', label: '运行中', items: runningTasks.value },
-  { key: 'history', label: '最近结束', items: history.value }
+  { key: 'running', label: tr('运行中'), items: runningTasks.value },
+  { key: 'history', label: tr('最近结束'), items: history.value }
 ])
-const entryLabel = computed(() => `${identifyKindLabel.value}日志：${runningCount.value} 个运行中，${queuedCount.value} 个排队，${failedCount.value} 个失败或待处理`)
+const entryLabel = computed(() => tr('{p0}日志：{p1} 个运行中，{p2} 个排队，{p3} 个失败或待处理', {p0: identifyKindLabel.value, p1: runningCount.value, p2: queuedCount.value, p3: failedCount.value}))
 const kindLabels: Record<TaskKind, string> = {
-  'software-scan': '软件扫描', 'game-scan': '游戏扫描', 'video-scan': '影视扫描',
-  'ai-identify': 'AI 识别', organize: '目录整理', 'hanime-verify': '网络验证', 'video-download': '视频下载',
-  'video-series-download': '系列下载', 'audio-download': '音乐下载'
+  get 'software-scan'() { return tr('软件扫描') }, get 'game-scan'() { return tr('游戏扫描') }, get 'video-scan'() { return tr('影视扫描') },
+  get 'ai-identify'() { return tr('AI 识别') }, get organize() { return tr('目录整理') }, get 'hanime-verify'() { return tr('网络验证') }, get 'video-download'() { return tr('视频下载') },
+  get 'video-series-download'() { return tr('系列下载') }, get 'audio-download'() { return tr('音乐下载') }
 }
-const statusLabels: Record<TaskStatus, string> = { running: '进行中', success: '已完成', failed: '失败', cancelled: '已停止 / 未完成', interrupted: '应用中断 / 待处理' }
-const eventLabels: Record<TaskEventLevel, string> = { info: '信息', success: '完成', warn: '提醒', error: '错误' }
-const jobStatusLabels: Record<VideoDownloadJob['status'], string> = { queued: '排队中', running: '处理中', success: '已完成', partial: '部分完成', failed: '失败', cancelled: '已停止', interrupted: '中断待恢复' }
-const stageLabels: Record<VideoJobStage, string> = { pending: '待执行', running: '处理中', complete: '完成', failed: '待重试', skipped: '已跳过' }
-const retryLabels: Record<VideoJobRetry, string> = { remaining: '仅重试剩余视频', metadata: '补齐资料', registration: '仅重试入库' }
-const scanStatusLabels = { new: '新增', updated: '更新', skipped: '跳过', review: '待确认', failed: '失败' }
-const identifyKindLabel = computed(() => ({ software: '软件', game: '游戏', video: '影视', image: '图片', project:'项目', document:'资料', personal:'个人' })[activeModule.value])
-const scopeNote = computed(() => activeModule.value === 'image' ? '仅显示图片下载、修复与连载更新记录。暂停后可继续下载。'
-  : `仅显示${identifyKindLabel.value}模块的记录；切换顶部模块可查看对应日志。`)
+const statusLabels: Record<TaskStatus, string> = { get running() { return tr('进行中') }, get success() { return tr('已完成') }, get failed() { return tr('失败') }, get cancelled() { return tr('已停止 / 未完成') }, get interrupted() { return tr('应用中断 / 待处理') } }
+const eventLabels: Record<TaskEventLevel, string> = { get info() { return tr('信息') }, get success() { return tr('完成') }, get warn() { return tr('提醒') }, get error() { return tr('错误') } }
+const jobStatusLabels: Record<VideoDownloadJob['status'], string> = { get queued() { return tr('排队中') }, get running() { return tr('处理中') }, get success() { return tr('已完成') }, get partial() { return tr('部分完成') }, get failed() { return tr('失败') }, get cancelled() { return tr('已停止') }, get interrupted() { return tr('中断待恢复') } }
+const stageLabels: Record<VideoJobStage, string> = { get pending() { return tr('待执行') }, get running() { return tr('处理中') }, get complete() { return tr('完成') }, get failed() { return tr('待重试') }, get skipped() { return tr('已跳过') } }
+const retryLabels: Record<VideoJobRetry, string> = { get remaining() { return tr('仅重试剩余视频') }, get metadata() { return tr('补齐资料') }, get registration() { return tr('仅重试入库') } }
+const scanStatusLabels = { get new() { return tr('新增') }, get updated() { return tr('更新') }, get skipped() { return tr('跳过') }, get review() { return tr('待确认') }, get failed() { return tr('失败') } }
+const identifyKindLabel = computed(() => ({ get software() { return tr('软件') }, get game() { return tr('游戏') }, get video() { return tr('影视') }, get image() { return tr('图片') }, get project() { return tr('项目') }, get document() { return tr('资料') }, get personal() { return tr('个人') } })[activeModule.value])
+const scopeNote = computed(() => activeModule.value === 'image' ? tr("仅显示图片下载、修复与连载更新记录。暂停后可继续下载。")
+  : tr("仅显示{p0}模块的记录；切换顶部模块可查看对应日志。", {p0: (identifyKindLabel.value)}))
 watch(activeModule, () => {
   privacyScope.abort(); privacyScope = new AbortController()
   tab.value = activeModule.value === 'image' ? 'downloads' : 'tasks'
@@ -139,12 +141,12 @@ watch(activeModule, () => {
 }, { immediate: true })
 
 function jobStatus(job: VideoDownloadJob): string {
-  return job.status === 'success' && videoJobRetryStages(job).length ? '部分完成' : jobStatusLabels[job.status]
+  return job.status === 'success' && videoJobRetryStages(job).length ? tr("部分完成") : jobStatusLabels[job.status]
 }
 function jobSummary(job: VideoDownloadJob): string {
   const saved = job.items.filter(item => item.transfer === 'complete').length
-  return `已保存 ${saved}/${job.items.length} 项` + (job.register
-    ? ` · 已入库 ${job.items.filter(item => item.registration === 'complete').length} 项` : ' · 仅保存文件')
+  return tr('已保存 {p0}/{p1} 项', {p0: saved, p1: job.items.length}) + (job.register
+    ? tr(' · 已入库 {p0} 项', {p0: job.items.filter(item => item.registration === 'complete').length}) : tr(' · 仅保存文件'))
 }
 function openWork(id: string, edit = false): void {
   if (!id || !router) return
@@ -159,17 +161,17 @@ async function retryScan(task: TaskWithResults, entry: TaskScanEntry): Promise<v
   try {
     const item = await window.baoyi.video.get(entry.resourceId)
     if (signal.aborted) return
-    if (!item) throw new Error('作品不可用，请重新扫描来源目录')
+    if (!item) throw new Error(tr('作品不可用，请重新扫描来源目录'))
     const updated = await reidentifyVideo(item, false)
     if (updated && !signal.aborted) center.setScanResults(task.id, (task.scanEntries ?? []).map(value => value.path === entry.path
-      ? { ...value, status: 'updated', message: '重新识别完成，可打开作品核对资料' } : value))
+      ? { ...value, status: 'updated', message: tr("重新识别完成，可打开作品核对资料") } : value))
   } catch (cause) { if (!signal.aborted) actionError.value = errorMessage(cause) }
   finally { retryingEntry.value = '' }
 }
 async function retryUnit(dir: string): Promise<void> {
   try {
-    if (!(await window.baoyi.scan.retry(dir))) { toast('这个目录已经不在扫描列表里了'); return }
-    success('已退回待识别，到设置页「扫描与识别」点「开始识别」重跑')
+    if (!(await window.baoyi.scan.retry(dir))) { toast(tr("这个目录已经不在扫描列表里了")); return }
+    success(tr("已退回待识别，到设置页「扫描与识别」点「开始识别」重跑"))
   } catch (cause) { actionError.value = errorMessage(cause) }
 }
 
@@ -185,7 +187,7 @@ async function loadJournals(): Promise<void> {
     if (signal.aborted) return
     journals.value = visible
     journalsLoaded.value = true
-  } catch (cause) { if (!signal.aborted) journalError.value = privateHidden.value ? '读取整理记录失败，请重试。' : errorMessage(cause) }
+  } catch (cause) { if (!signal.aborted) journalError.value = privateHidden.value ? tr("读取整理记录失败，请重试。") : errorMessage(cause) }
   finally { journalBusy.value = false }
 }
 async function recoverJournal(id: string, action: 'retry' | 'rollback'): Promise<void> {
@@ -207,13 +209,13 @@ function showTab(next: Tab): void {
 }
 
 function time(at: number): string {
-  return new Date(at).toLocaleTimeString('zh-CN', { hour12: false })
+  return new Date(at).toLocaleTimeString(appLocale.value, { hour12: false })
 }
 function taskProgress(task: { kind: TaskKind; processed: number; total: number }): string {
-  if (task.kind === 'video-series-download') return task.total > 0 ? `${task.processed} / ${task.total} 集` : '集数待确定'
-  if (task.kind !== 'video-download' && task.kind !== 'audio-download') return task.total > 0 ? `${task.processed} / ${task.total}` : '总数待确定'
+  if (task.kind === 'video-series-download') return task.total > 0 ? tr("{p0} / {p1} 集", {p0: (task.processed), p1: (task.total)}) : tr("集数待确定")
+  if (task.kind !== 'video-download' && task.kind !== 'audio-download') return task.total > 0 ? `${task.processed} / ${task.total}` : tr("总数待确定")
   const received = task.processed > 0 ? formatBytes(task.processed) : '0 B'
-  return task.total > 0 ? `${received} / ${formatBytes(task.total)}` : `${received} / 大小未知`
+  return task.total > 0 ? `${received} / ${formatBytes(task.total)}` : tr("{p0} / 大小未知", {p0: (received)})
 }
 async function togglePanel(): Promise<void> {
   if (opened.value) { closePanel(); return }
@@ -252,7 +254,7 @@ async function clearHistory(): Promise<void> {
   try {
     await center.clearFinished()
     expanded.value = new Set([...expanded.value].filter(id => runningTasks.value.some(task => task.id === id)))
-  } catch (cause) { actionError.value = '清除历史失败：' + errorMessage(cause) }
+  } catch (cause) { actionError.value = tr("清除历史失败：") + errorMessage(cause) }
   finally { clearing.value = false }
 }
 function outside(event: Event): void {
@@ -294,7 +296,7 @@ onBeforeUnmount(() => {
     >
       <Loader2 v-if="runningCount" :size="15" class="task-spin" />
       <ScrollText v-else :size="15" />
-      <span>日志</span>
+      <span>{{ $t("日志") }}</span>
       <span v-if="runningCount" class="task-trigger__count">{{ runningCount }}</span>
       <span v-else-if="queuedCount" class="task-trigger__count">{{ queuedCount }}</span>
       <span v-if="failedCount" class="task-trigger__failed" :title="attentionHint">{{ failedCount }}</span>
@@ -313,17 +315,16 @@ onBeforeUnmount(() => {
         >
           <header class="task-panel__header">
             <div>
-              <h2 id="task-center-title">{{ identifyKindLabel }}日志</h2>
+              <h2 id="task-center-title">{{ $t("{p0}日志", {p0: (identifyKindLabel)}) }}</h2>
               <p id="task-center-note">{{ attentionHint || scopeNote }}</p>
             </div>
-            <button v-if="tab === 'tasks'" type="button" class="task-panel__clear" :disabled="clearing || history.length === 0" title="清除当前可见的扫描、识别等历史；运行中任务与下载记录继续保留" @click="clearHistory">
-              <Trash2 :size="13" />清除历史
-            </button>
-            <button ref="closeButton" type="button" class="task-panel__close" title="关闭日志面板" aria-label="关闭日志面板" @click="closePanel()">
+            <button v-if="tab === 'tasks'" type="button" class="task-panel__clear" :disabled="clearing || history.length === 0" :title="$t('清除当前可见的扫描、识别等历史；运行中任务与下载记录继续保留')" @click="clearHistory">
+              <Trash2 :size="13" />{{ $t("清除历史") }}</button>
+            <button ref="closeButton" type="button" class="task-panel__close" :title="$t('关闭日志面板')" :aria-label="$t('关闭日志面板')" @click="closePanel()">
               <X :size="16" />
             </button>
           </header>
-          <nav class="task-tabs no-select" aria-label="日志类别">
+          <nav class="task-tabs no-select" :aria-label="$t('日志类别')">
             <button v-for="item in availableTabs" :key="item.key" type="button" :aria-current="tab === item.key ? 'page' : undefined" @click="showTab(item.key)">
               {{ item.label }}<span v-if="tabCounts[item.key]" class="task-tabs__count" :class="{ 'task-tabs__count--warn': item.key === 'downloads' && downloadAttention > 0 || item.key === 'organize' }">{{ tabCounts[item.key] }}</span>
             </button>
@@ -334,11 +335,11 @@ onBeforeUnmount(() => {
             <template v-if="tab === 'tasks'">
               <div v-if="runningTasks.length === 0 && history.length === 0 && projectRuns.length === 0 && insightRuns.length===0" class="task-panel__empty">
                 <ScrollText :size="30" :stroke-width="1.3" />
-                <h3>暂无任务</h3>
-                <p>{{ identifyKindLabel }}模块的任务进度和历史会显示在这里。<template v-if="activeModule === 'video'">下载在「下载记录」页签。</template></p>
+                <h3>{{ $t("暂无任务") }}</h3>
+                <p>{{ $t("{p0}模块的任务进度和历史会显示在这里。", {p0: (identifyKindLabel)}) }}<template v-if="activeModule === 'video'">{{ $t("下载在「下载记录」页签。") }}</template></p>
               </div>
-              <section v-if="insightRuns.length" class="task-group" aria-label="资料精读任务"><h3 class="task-group__heading">资料精读<span>{{insightRuns.length}}</span></h3><article v-for="run in insightRuns" :key="run.id" class="task-card"><div class="task-card__head"><h4>{{run.name}}</h4><span class="task-card__status">{{run.phase}}</span></div><p v-if="run.error" class="task-card__error">{{run.error}}</p><div class="task-card__actions"><button v-if="['queued','running'].includes(run.status)" @click="insightQueue.cancel(run.id)">停止精读</button><button v-else @click="insightQueue.open([run.documentId]);closePanel()">重新精读</button></div></article></section>
-              <section v-if="projectRuns.length" class="task-group" aria-label="项目命令运行"><h3 class="task-group__heading">项目命令<span>{{projectRuns.length}}</span></h3><article v-for="run in projectRuns" :key="run.id" class="task-card"><div class="task-card__head"><h4>{{run.profileName}}</h4><span class="task-card__status">{{projectRunLabels[run.status]}}</span></div><p class="task-card__meta">{{new Date(run.startedAt).toLocaleString()}} · 仅保留本机运行记录</p><p v-if="run.error" class="task-card__error">{{run.error}}</p><div class="task-card__actions"><button type="button" @click="showProjectRuns">查看输出与运行详情</button></div></article></section>
+              <section v-if="insightRuns.length" class="task-group" :aria-label="$t('资料精读任务')"><h3 class="task-group__heading">{{ $t("资料精读") }}<span>{{insightRuns.length}}</span></h3><article v-for="run in insightRuns" :key="run.id" class="task-card"><div class="task-card__head"><h4>{{run.name}}</h4><span class="task-card__status">{{ $systemMessage(run.phase) }}</span></div><p v-if="run.error" class="task-card__error">{{ $systemMessage(run.error) }}</p><div class="task-card__actions"><button v-if="['queued','running'].includes(run.status)" @click="insightQueue.cancel(run.id)">{{ $t("停止精读") }}</button><button v-else @click="insightQueue.open([run.documentId]);closePanel()">{{ $t("重新精读") }}</button></div></article></section>
+              <section v-if="projectRuns.length" class="task-group" :aria-label="$t('项目命令运行')"><h3 class="task-group__heading">{{ $t("项目命令") }}<span>{{projectRuns.length}}</span></h3><article v-for="run in projectRuns" :key="run.id" class="task-card"><div class="task-card__head"><h4>{{run.profileName}}</h4><span class="task-card__status">{{projectRunLabels[run.status]}}</span></div><p class="task-card__meta">{{ $t("{p0} · 仅保留本机运行记录", {p0: (new Date(run.startedAt).toLocaleString($locale))}) }}</p><p v-if="run.error" class="task-card__error">{{ $systemMessage(run.error) }}</p><div class="task-card__actions"><button type="button" @click="showProjectRuns">{{ $t("查看输出与运行详情") }}</button></div></article></section>
               <template v-for="section in sections" :key="section.key">
                 <section v-if="section.items.length" class="task-group" :aria-label="section.label">
                   <h3 class="task-group__heading">{{ section.label }}<span>{{ section.items.length }}</span></h3>
@@ -348,14 +349,14 @@ onBeforeUnmount(() => {
                       <Check v-else-if="task.status === 'success'" :size="16" class="task-card__icon" />
                       <CircleAlert v-else-if="task.status === 'failed'" :size="16" class="task-card__icon" />
                       <Minus v-else :size="16" class="task-card__icon" />
-                      <h4>{{ task.title }}</h4>
+                      <h4>{{ $systemMessage(task.title) }}</h4>
                       <span class="task-card__status">{{ statusLabels[task.status] }}</span>
                     </div>
                     <div class="task-card__meta">
                       <span>{{ kindLabels[task.kind] }}</span>
-                      <span :title="new Date(task.startedAt).toLocaleString()">{{ time(task.startedAt) }} 开始</span>
-                      <span v-if="task.finishedAt" :title="new Date(task.finishedAt).toLocaleString()">{{ time(task.finishedAt) }} 结束</span>
-                      <span v-if="task.status === 'success' && task.events.some(e => e.level === 'warn')" class="task-card__warning">有提醒</span>
+                      <span :title="new Date(task.startedAt).toLocaleString($locale)">{{ $t("{p0} 开始", {p0: (time(task.startedAt))}) }}</span>
+                      <span v-if="task.finishedAt" :title="new Date(task.finishedAt).toLocaleString($locale)">{{ $t("{p0} 结束", {p0: (time(task.finishedAt))}) }}</span>
+                      <span v-if="task.status === 'success' && task.events.some(e => e.level === 'warn')" class="task-card__warning">{{ $t("有提醒") }}</span>
                     </div>
                     <div v-if="task.status === 'running'" class="task-progress">
                       <div
@@ -370,19 +371,19 @@ onBeforeUnmount(() => {
                       ><i :style="task.total > 0 ? { width: `${task.percent}%` } : undefined" /></div>
                       <span>{{ taskProgress(task) }}</span>
                     </div>
-                    <p v-if="task.message" class="task-card__message">{{ task.message }}</p>
+                    <p v-if="task.message" class="task-card__message">{{ $systemMessage(task.message) }}</p>
                     <p v-if="task.current" class="task-card__current" :title="task.current">{{ task.current }}</p>
-                    <p v-if="task.error" class="task-card__error">{{ task.error }}</p>
+                    <p v-if="task.error" class="task-card__error">{{ $systemMessage(task.error) }}</p>
                     <details v-if="task.scanEntries?.length" class="task-scan-results">
-                      <summary>逐项结果 · {{ task.scanEntries.length }}</summary>
+                      <summary>{{ $t("逐项结果 · {p0}", {p0: (task.scanEntries.length)}) }}</summary>
                       <ul>
                         <li v-for="(entry, index) in task.scanEntries" :key="index">
-                          <strong>{{ scanStatusLabels[entry.status] }}</strong><span class="mono">{{ entry.path }}</span><p>{{ entry.message }}</p>
+                          <strong>{{ scanStatusLabels[entry.status] }}</strong><span class="mono">{{ entry.path }}</span><p>{{ $systemMessage(entry.message) }}</p>
                           <div v-if="entry.resourceId && task.kind === 'video-scan'" class="task-card__actions">
-                            <button type="button" @click="openWork(entry.resourceId, entry.status === 'review')">{{ entry.status === 'review' ? '修正资料' : '打开作品' }}</button>
-                            <button v-if="entry.status === 'failed' || entry.status === 'review'" type="button" :disabled="!!retryingEntry || videoScan.running.value" @click="retryScan(task, entry)">重新识别此作品</button>
+                            <button type="button" @click="openWork(entry.resourceId, entry.status === 'review')">{{ entry.status === 'review' ? $t('修正资料') : $t('打开作品') }}</button>
+                            <button v-if="entry.status === 'failed' || entry.status === 'review'" type="button" :disabled="!!retryingEntry || videoScan.running.value" @click="retryScan(task, entry)">{{ $t("重新识别此作品") }}</button>
                           </div>
-                          <small v-else-if="entry.status === 'failed' || entry.status === 'review'">尚无作品记录，请检查来源目录后重新扫描。</small>
+                          <small v-else-if="entry.status === 'failed' || entry.status === 'review'">{{ $t("尚无作品记录，请检查来源目录后重新扫描。") }}</small>
                         </li>
                       </ul>
                     </details>
@@ -394,15 +395,15 @@ onBeforeUnmount(() => {
                       @click="toggleEvents(task.id)"
                     >
                       <ChevronDown :size="13" :class="{ 'task-card__chevron--open': expanded.has(task.id) }" />
-                      {{ expanded.has(task.id) ? '收起日志' : '查看日志' }} · {{ task.events.length }}
+                      {{ expanded.has(task.id) ? $t('收起日志') : $t('查看日志') }} · {{ task.events.length }}
                     </button>
                     <ol v-if="expanded.has(task.id)" :id="`${task.id}-events`" class="task-events">
                       <li v-for="(event, index) in task.events" :key="index" :class="`task-event--${event.level}`">
-                        <time>{{ time(event.at) }}</time><span class="task-events__level">{{ eventLabels[event.level] }}</span><span>{{ event.message }}</span>
+                        <time>{{ time(event.at) }}</time><span class="task-events__level">{{ eventLabels[event.level] }}</span><span>{{ $systemMessage(event.message) }}</span>
                       </li>
                     </ol>
                     <details v-if="identifyKind(task) && task.status !== 'running'" class="task-identify" @toggle="toggleIdentifyLogs(task.id, $event)">
-                      <summary>查看识别日志</summary>
+                      <summary>{{ $t("查看识别日志") }}</summary>
                       <IdentifyLog v-if="identifyLogs.has(task.id)" :resource-kind="identifyKind(task)" :since="task.startedAt" :until="task.finishedAt" />
                     </details>
                   </article>
@@ -410,18 +411,18 @@ onBeforeUnmount(() => {
               </template>
             </template>
 
-            <div v-else-if="tab === 'downloads'" class="task-panel__downloads" aria-label="下载记录">
+            <div v-else-if="tab === 'downloads'" class="task-panel__downloads" :aria-label="$t('下载记录')">
               <div class="task-filter">
-                <label>显示<select v-model="downloadFilter" class="select" aria-label="下载记录范围"><option value="attention">待处理</option><option value="all">全部</option></select></label>
-                <span>{{ downloadFilter === 'all' ? `共 ${downloadJobs.length + imageJobs.length} 条` : `${downloadAttention} 条待处理` }}</span>
+                <label>{{ $t("显示") }}<select v-model="downloadFilter" class="select" :aria-label="$t('下载记录范围')"><option value="attention">{{ $t("待处理") }}</option><option value="all">{{ $t("全部") }}</option></select></label>
+                <span>{{ downloadFilter === 'all' ? $t('共 {p0} 条', {p0: downloadJobs.length + imageJobs.length}) : $t('{p0} 条待处理', {p0: downloadAttention}) }}</span>
               </div>
               <ComicDownloadList v-if="activeModule === 'image'" :filter="downloadFilter" />
 
               <div v-if="!shownJobs.length && !shownImageCount" class="task-panel__empty">
                 <Check v-if="hasDownloadHistory" :size="30" :stroke-width="1.3" />
                 <ScrollText v-else :size="30" :stroke-width="1.3" />
-                <h3>{{ hasDownloadHistory ? '没有待处理的下载' : '暂无下载记录' }}</h3>
-                <p>{{ hasDownloadHistory ? '切到「全部」能看到已完成的记录。' : activeModule === 'image' ? '从在线漫画添加哔咔或 JM 作品后，进度和结果会显示在这里。' : '添加下载任务后，进度和结果会显示在这里。' }}</p>
+                <h3>{{ hasDownloadHistory ? $t('没有待处理的下载') : $t('暂无下载记录') }}</h3>
+                <p>{{ hasDownloadHistory ? $t('切到「全部」能看到已完成的记录。') : activeModule === 'image' ? $t('从在线漫画添加哔咔或 JM 作品后，进度和结果会显示在这里。') : $t('添加下载任务后，进度和结果会显示在这里。') }}</p>
               </div>
               <template v-for="section in jobSections" :key="section.key">
                 <section v-if="section.jobs.length" class="task-group" :aria-label="section.label">
@@ -433,31 +434,31 @@ onBeforeUnmount(() => {
                       <h4>{{ job.title }}</h4><span class="task-card__status">{{ jobStatus(job) }}</span>
                     </div>
                     <p class="task-card__message">{{ jobSummary(job) }}</p>
-                    <p v-if="job.message" class="task-card__message">{{ job.message }}</p>
+                    <p v-if="job.message" class="task-card__message">{{ $systemMessage(job.message) }}</p>
                     <p v-for="item in job.items.filter(value => value.transfer === 'running')" :key="'progress-'+item.videoCode" class="task-card__message" role="status">
-                      {{ item.title || item.videoCode }} · {{ item.transferMessage || '正在连接来源' }} · 已接收 {{ item.receivedBytes > 0 ? formatBytes(item.receivedBytes) : '0 B' }}<template v-if="item.totalBytes > 0"> / {{ formatBytes(item.totalBytes) }}（{{ Math.min(100, Math.floor(item.receivedBytes * 100 / item.totalBytes)) }}%）</template><template v-if="item.bytesPerSecond"> · {{ formatBytes(item.bytesPerSecond) }}/s</template>
+                      {{ $t("{p0} · {p1} · 已接收 {p2}", {p0: (item.title || item.videoCode), p1: (item.transferMessage || $t('正在连接来源')), p2: (item.receivedBytes > 0 ? formatBytes(item.receivedBytes) : '0 B')}) }}<template v-if="item.totalBytes > 0"> / {{ formatBytes(item.totalBytes) }}（{{ Math.min(100, Math.floor(item.receivedBytes * 100 / item.totalBytes)) }}%）</template><template v-if="item.bytesPerSecond"> · {{ formatBytes(item.bytesPerSecond) }}/s</template>
                     </p>
                     <div class="task-card__actions">
-                      <button v-if="job.resourceId" type="button" @click="openWork(job.resourceId)"><ExternalLink :size="13" />打开作品</button>
-                      <button v-if="job.directory" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.reveal(job.id)"><FolderOpen :size="13" />打开目录</button>
-                      <button v-if="activeJob(job)" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.cancel(job.id)"><Square :size="12" />{{ job.status === 'queued' ? '取消排队' : '停止下载' }}</button>
+                      <button v-if="job.resourceId" type="button" @click="openWork(job.resourceId)"><ExternalLink :size="13" />{{ $t("打开作品") }}</button>
+                      <button v-if="job.directory" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.reveal(job.id)"><FolderOpen :size="13" />{{ $t("打开目录") }}</button>
+                      <button v-if="activeJob(job)" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.cancel(job.id)"><Square :size="12" />{{ job.status === 'queued' ? $t('取消排队') : $t('停止下载') }}</button>
                       <button v-for="stage in videoJobRetryStages(job)" :key="stage" type="button" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.retry(job.id, stage)"><RefreshCw :size="13" />{{ retryLabels[stage] }}</button>
-                      <span v-if="!activeJob(job)" class="hint">缓存管理：右上角设置 → 影视 → 下载与缓存</span>
-                      <button v-if="!activeJob(job)" type="button" class="task-card__dismiss" title="只移除记录，文件和作品都保留；如需释放分片空间，请先查看下载缓存" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.dismiss(job.id)"><Trash2 :size="12" />移除记录</button>
+                      <span v-if="!activeJob(job)" class="hint">{{ $t("缓存管理：右上角设置 → 影视 → 下载与缓存") }}</span>
+                      <button v-if="!activeJob(job)" type="button" class="task-card__dismiss" :title="$t('只移除记录，文件和作品都保留；如需释放分片空间，请先查看下载缓存')" :disabled="workflow.actionIds.value.has(job.id)" @click="workflow.dismiss(job.id)"><Trash2 :size="12" />{{ $t("移除记录") }}</button>
                     </div>
                     <details class="task-download-items">
-                      <summary>查看 {{ job.items.length }} 项的下载、资料和入库结果</summary>
+                      <summary>{{ $t("查看 {p0} 项的下载、资料和入库结果", {p0: (job.items.length)}) }}</summary>
                       <ul>
                         <li v-for="item in job.items" :key="item.videoCode">
                           <strong>{{ item.title || item.videoCode }}</strong>
-                          <span>视频：{{ stageLabels[item.transfer] }} · 资料：{{ stageLabels[item.metadata] }} · 入库：{{ job.register ? stageLabels[item.registration] : '仅保存文件' }}</span>
-                          <span v-if="item.transfer === 'running'">{{ item.transferMessage || '正在下载' }} · 已接收 {{ formatBytes(item.receivedBytes) }}{{ item.totalBytes > 0 ? ' / ' + formatBytes(item.totalBytes) : ' · 大小未知' }}<template v-if="item.bytesPerSecond"> · {{ formatBytes(item.bytesPerSecond) }}/s</template></span>
-                          <span v-if="item.sourceLabel">实际清晰度：{{ item.sourceLabel }}</span>
-                          <p v-if="item.error" class="task-card__error">{{ item.error }}</p>
-                          <p v-for="warning in item.warnings" :key="warning" class="task-card__warning">{{ warning }}</p>
+                          <span>{{ $t("视频：{p0} · 资料：{p1} · 入库：{p2}", {p0: (stageLabels[item.transfer]), p1: (stageLabels[item.metadata]), p2: (job.register ? stageLabels[item.registration] : $t('仅保存文件'))}) }}</span>
+                          <span v-if="item.transfer === 'running'">{{ $t("{p0} · 已接收 {p1}{p2}", {p0: (item.transferMessage || $t('正在下载')), p1: (formatBytes(item.receivedBytes)), p2: (item.totalBytes > 0 ? ' / ' + formatBytes(item.totalBytes) : $t(' · 大小未知'))}) }}<template v-if="item.bytesPerSecond"> · {{ formatBytes(item.bytesPerSecond) }}/s</template></span>
+                          <span v-if="item.sourceLabel">{{ $t("实际清晰度：{p0}", {p0: (item.sourceLabel)}) }}</span>
+                          <p v-if="item.error" class="task-card__error">{{ $systemMessage(item.error) }}</p>
+                          <p v-for="warning in item.warnings" :key="warning" class="task-card__warning">{{ $systemMessage(warning) }}</p>
                         </li>
                       </ul>
-                      <p v-for="warning in job.warnings" :key="warning" class="task-card__warning">{{ warning }}</p>
+                      <p v-for="warning in job.warnings" :key="warning" class="task-card__warning">{{ $systemMessage(warning) }}</p>
                     </details>
                   </article>
                 </section>
@@ -466,17 +467,17 @@ onBeforeUnmount(() => {
 
             <div v-else-if="tab === 'organize'" class="task-panel__organize">
               <p v-if="journalError" class="task-card__error" role="alert">{{ journalError }}</p>
-              <p v-if="journalBusy" class="task-panel__hint" role="status"><Loader2 :size="13" class="task-spin" />正在读取整理记录…</p>
+              <p v-if="journalBusy" class="task-panel__hint" role="status"><Loader2 :size="13" class="task-spin" />{{ $t("正在读取整理记录…") }}</p>
               <OrganizeHistory :journals="journals" :loaded="journalsLoaded" :busy="journalBusy" @refresh="loadJournals" @retry="id => recoverJournal(id, 'retry')" @rollback="id => recoverJournal(id, 'rollback')" />
             </div>
 
             <div v-else class="task-panel__identify">
-              <p class="task-panel__hint">当前看的是「{{ identifyKindLabel }}」模块的识别日志；切换顶栏模块就换一份。设置页「识别日志」页签里也有同一份。</p>
+              <p class="task-panel__hint">{{ $t("当前看的是「{p0}」模块的识别日志；切换顶栏模块就换一份。设置页「识别日志」页签里也有同一份。", {p0: (identifyKindLabel)}) }}</p>
               <IdentifyLog :key="activeModule" :resource-kind="activeModule" @retry="retryUnit" />
               <SearchCallLog :key="activeModule" :resource-kind="activeModule" />
             </div>
           </div>
-          <footer class="task-panel__footer">{{ activeModule === 'image' || activeModule === 'video' ? '下载记录独立保留；移除记录只删记录，不删文件。' : '任务记录共保留最近 30 项，每项 100 条事件。清除历史只影响当前模块。' }}</footer>
+          <footer class="task-panel__footer">{{ activeModule === 'image' || activeModule === 'video' ? $t('下载记录独立保留；移除记录只删记录，不删文件。') : $t('任务记录共保留最近 30 项，每项 100 条事件。清除历史只影响当前模块。') }}</footer>
         </section>
       </Transition>
     </Teleport>

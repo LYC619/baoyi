@@ -1,3 +1,7 @@
+
+import { tr } from '../i18n/core.ts'
+
+import { currentLocale as appLocale } from '../i18n/core.ts'
 import type { PersonalRecord } from "../types/workspace.ts";
 import { daysUntil } from './personal-view.ts'
 
@@ -10,10 +14,10 @@ export const CURRENCY_SYMBOLS: Record<string, string> = {
 }
 
 export function formatAssetPrice(cost: unknown, currency: unknown): string {
-  if (typeof cost !== 'number' || !Number.isFinite(cost)) return '费用未填写'
+  if (typeof cost !== 'number' || !Number.isFinite(cost)) return tr('费用未填写')
   const code = String(currency || '').trim().toUpperCase()
   const sym = CURRENCY_SYMBOLS[code]
-  const num = cost.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  const num = cost.toLocaleString(appLocale.value, { maximumFractionDigits: 2 })
   if (sym && code) return `${sym}${num} ${code}`
   return code ? `${num} ${code}` : num
 }

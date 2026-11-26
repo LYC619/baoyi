@@ -1,3 +1,5 @@
+
+import { tr } from '../i18n/index.ts'
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
 import type {
@@ -52,7 +54,7 @@ export const useSoftwareStore = defineStore('software', () => {
   const heading = computed(() => {
     if (selection.kind === 'category') return selection.value
     if (selection.kind === 'tag') return `# ${selection.value}`
-    return { all: '全部', archived: '已归档', unused: '长期未用', pending: '待识别', portable: '绿色软件' }[
+    return { all: tr('全部'), archived: tr('已归档'), unused: tr('长期未用'), pending: tr('待识别'), portable: tr('绿色软件') }[
       selection.value as VirtualGroup
     ]
   })
@@ -80,7 +82,7 @@ export const useSoftwareStore = defineStore('software', () => {
       if (loadRounds.isCurrent(round)) { items.value = next; loadedQuery.value = JSON.stringify(query) }
     } catch (err) {
       // 失败时保留旧列表，比清成空列表再显示「还没有收录任何软件」诚实
-      if (loadRounds.isCurrent(round)) toastError(`读取列表失败：${errorMessage(err)}`)
+      if (loadRounds.isCurrent(round)) toastError(tr("读取列表失败：{p0}", {p0: (errorMessage(err))}))
     } finally {
       if (loadRounds.isCurrent(round)) loading.value = false
     }
@@ -92,7 +94,7 @@ export const useSoftwareStore = defineStore('software', () => {
       const next = await window.baoyi.software.counts(useSettingsStore().settings.unused_days)
       if (countsRounds.isCurrent(round)) counts.value = next
     } catch (err) {
-      if (countsRounds.isCurrent(round)) toastError(`读取统计失败：${errorMessage(err)}`)
+      if (countsRounds.isCurrent(round)) toastError(tr("读取统计失败：{p0}", {p0: (errorMessage(err))}))
     }
   }
 

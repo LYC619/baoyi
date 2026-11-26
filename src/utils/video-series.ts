@@ -1,3 +1,5 @@
+
+import { tr } from '../i18n/index.ts'
 const clean = (value: string) => value.normalize('NFKC').replace(/\.(mp4|mkv|avi|mov|webm|m4v)$/i, '')
   .replace(/(?:\s*[\[（(](?:中文字幕|中文(?:简体|繁体)?字幕|中字|字幕|chs|cht|subbed|\d{3,4}p)[\]）)]|[ ._-]+\d{3,4}p)+$/gi, '').trim()
 export const seriesKey = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[\s._·・-]+/g, ' ').trim()
@@ -29,9 +31,9 @@ export function collectionName(names: string[], numbers: number[] = []): string 
     let prefix = titles[0]
     for (const title of titles.slice(1)) { while (prefix && !title.startsWith(prefix)) prefix = prefix.slice(0, -1) }
     prefix = prefix.replace(/[\s._-]+$/, '')
-    base = prefix.length >= 3 ? prefix : '所选作品'
+    base = prefix.length >= 3 ? prefix : tr('所选作品')
   }
   const known = [...new Set((numbers.length ? numbers : same ? parts.filter(Boolean).map(part => part!.number) : []).filter(n => Number.isInteger(n) && n >= 0))].sort((a, b) => a - b)
   if (known.length > 1) return `${base} ${known[0]}-${known[known.length - 1]}`
-  return titles.length > 1 ? `${base}（${titles.length} 集）` : base
+  return titles.length > 1 ? tr("{p0}（{p1} 集）", {p0: (base), p1: (titles.length)}) : base
 }

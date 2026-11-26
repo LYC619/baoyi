@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 /** 从单集的封面 / 预览图里挑一张当作品封面（B1）。图是主进程按路径放行的，这里只列出来点一下 */
 import { computed, onMounted, ref } from 'vue'
 import type { VideoItem } from '@/types'
@@ -11,7 +13,7 @@ const dialog = ref<HTMLDialogElement | null>(null), busy = ref(''), failure = re
 const choices = computed(() => props.episodes.flatMap(episode => (['poster', 'thumbnail'] as const)
   .filter(role => episode[role === 'poster' ? 'poster_path' : 'thumbnail_path'])
   .map(role => ({ key: episode.id + ':' + role, episodeId: episode.id, role, path: episode[role === 'poster' ? 'poster_path' : 'thumbnail_path']!,
-    label: videoEpisodeLabel(episode, props.withoutSeason) + (role === 'poster' ? ' · 封面' : ' · 预览图'), title: episode.title || episode.original_title || '' }))))
+    label: videoEpisodeLabel(episode, props.withoutSeason) + (role === 'poster' ? tr(" · 封面") : tr(" · 预览图")), title: episode.title || episode.original_title || '' }))))
 onMounted(() => dialog.value?.showModal())
 async function choose(choice: (typeof choices.value)[number]) {
   if (busy.value) return
@@ -25,18 +27,18 @@ async function choose(choice: (typeof choices.value)[number]) {
 </script>
 <template>
   <dialog ref="dialog" class="episode-artwork-dialog" aria-labelledby="episode-artwork-title" @cancel.prevent="!busy && emit('close')">
-    <header><h2 id="episode-artwork-title">从单集选封面</h2><button class="btn btn--ghost" :disabled="!!busy" @click="emit('close')">关闭</button></header>
-    <p>点一张图就换成作品封面；换过的封面会记为你亲手选的，重扫和补封面不会再改它。</p>
-    <ul v-if="choices.length" class="choices" aria-label="单集图片">
+    <header><h2 id="episode-artwork-title">{{ $t("从单集选封面") }}</h2><button class="btn btn--ghost" :disabled="!!busy" @click="emit('close')">{{ $t("关闭") }}</button></header>
+    <p>{{ $t("点一张图就换成作品封面；换过的封面会记为你亲手选的，重扫和补封面不会再改它。") }}</p>
+    <ul v-if="choices.length" class="choices" :aria-label="$t('单集图片')">
       <li v-for="choice in choices" :key="choice.key">
-        <button type="button" class="choice" :class="'choice--' + choice.role" :disabled="!!busy" :aria-label="'用' + choice.label + '作为作品封面'" @click="choose(choice)">
+        <button type="button" class="choice" :class="'choice--' + choice.role" :disabled="!!busy" :aria-label="$t('用') + choice.label + $t('作为作品封面')" @click="choose(choice)">
           <img :src="posterUrl(choice.path)" :alt="choice.label" loading="lazy" />
           <span class="choice__label">{{ choice.label }}</span>
           <span v-if="choice.title" class="choice__title">{{ choice.title }}</span>
         </button>
       </li>
     </ul>
-    <p v-else>这部作品的单集还没有封面或预览图。</p>
+    <p v-else>{{ $t("这部作品的单集还没有封面或预览图。") }}</p>
     <p v-if="failure" class="failure" role="alert">{{ failure }}</p>
   </dialog>
 </template>

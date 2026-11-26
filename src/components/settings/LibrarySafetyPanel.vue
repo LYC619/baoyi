@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { locale as appLocale } from '../../i18n/index.ts'
+
+import { tr } from "../../i18n/index.ts"
+
 import { computed, onMounted, ref, watch } from 'vue'
 import { Database, FolderOpen, RefreshCw, ShieldCheck } from 'lucide-vue-next'
 import type { LibrarySafetyInfo } from '@/types/library-snapshot'
@@ -16,7 +20,7 @@ async function refresh() {
 }
 async function create() {
   action.value = 'create'; error.value = ''; notice.value = ''
-  try { await window.baoyi.data.createSnapshot(); notice.value = '数据库快照已创建，创建校验通过'; await refresh(); emit('storage-changed') }
+  try { await window.baoyi.data.createSnapshot(); notice.value = tr("数据库快照已创建，创建校验通过"); await refresh(); emit('storage-changed') }
   catch (cause) { error.value = errorMessage(cause) }
   finally { action.value = '' }
 }
@@ -25,36 +29,36 @@ async function archive() {
   try {
     const result = await window.baoyi.data.archiveSnapshots()
     await refresh(); emit('storage-changed')
-    notice.value = `已压缩 ${result.archived} 份旧快照，释放 ${formatBytes(result.reclaimedBytes)}；全部恢复点保留`
+    notice.value = tr("已压缩 {p0} 份旧快照，释放 {p1}；全部恢复点保留", {p0: (result.archived), p1: (formatBytes(result.reclaimedBytes))})
     error.value = result.warnings.join('；')
   } catch (cause) { error.value = errorMessage(cause) }
   finally { action.value = '' }
 }
 async function exportSnapshot(id: string) {
   action.value = 'export'; error.value = ''; notice.value = ''
-  try { const result = await window.baoyi.data.exportSnapshot(id); if (result) notice.value = '已导出并核对原始摘要：' + result.file }
+  try { const result = await window.baoyi.data.exportSnapshot(id); if (result) notice.value = tr("已导出并核对原始摘要：") + result.file }
   catch (cause) { error.value = errorMessage(cause) }
   finally { action.value = '' }
 }
 async function open() { try { await window.baoyi.data.openSnapshotDir() } catch (cause) { error.value = errorMessage(cause) } }
-const stateLabel = (state: string) => state === 'available' ? '文件存在' : state === 'missing' ? '文件缺失' : '文件已变化'
-const time = (value: number) => new Date(value).toLocaleString()
+const stateLabel = (state: string) => state === 'available' ? tr('文件存在') : state === 'missing' ? tr('文件缺失') : tr('文件已变化')
+const time = (value: number) => new Date(value).toLocaleString(appLocale.value)
 watch(() => props.refreshKey, refresh)
 onMounted(refresh)
 </script>
 <template>
-  <section class="library-safety" aria-label="资料库保护">
-    <header><h2><ShieldCheck :size="19" />资料库保护</h2><button class="btn btn--subtle" aria-label="刷新快照信息" title="刷新快照信息" :disabled="loading||busy" @click="refresh"><RefreshCw :size="16" /></button><button class="btn btn--subtle" aria-label="打开快照目录" title="打开快照目录" :disabled="busy" @click="open"><FolderOpen :size="16" /></button><button class="btn btn--ghost" :disabled="busy||loading" @click="create"><Database :size="15" />{{ action==='create'?'正在创建快照':'创建数据库快照' }}</button></header>
-    <p v-if="error" class="safety-error" role="alert">{{ error }}</p><p v-if="notice" class="safety-notice" role="status">{{ notice }}</p>
+  <section class="library-safety" :aria-label="$t('资料库保护')">
+    <header><h2><ShieldCheck :size="19" />{{ $t("资料库保护") }}</h2><button class="btn btn--subtle" :aria-label="$t('刷新快照信息')" :title="$t('刷新快照信息')" :disabled="loading||busy" @click="refresh"><RefreshCw :size="16" /></button><button class="btn btn--subtle" :aria-label="$t('打开快照目录')" :title="$t('打开快照目录')" :disabled="busy" @click="open"><FolderOpen :size="16" /></button><button class="btn btn--ghost" :disabled="busy||loading" @click="create"><Database :size="15" />{{ action==='create'?$t('正在创建快照'):$t('创建数据库快照') }}</button></header>
+    <p v-if="error" class="safety-error" role="alert">{{ $systemMessage(error) }}</p><p v-if="notice" class="safety-notice" role="status">{{ notice }}</p>
     <template v-if="info">
-      <dl class="safety-facts"><dt>程序版本</dt><dd>v{{ info.version }}</dd><dt>资料库结构</dt><dd>{{ info.schema }}</dd><dt>数据库文件</dt><dd class="mono">{{ info.database }}</dd><dt>快照目录</dt><dd class="mono">{{ info.inventory.directory }}</dd><dt>快照内容</dt><dd>数据库与本机设置 · 不含资源文件</dd><dt>历史备份</dt><dd>旧版备份 {{ info.inventory.legacyBackups }} 份 · 恢复前快照 {{ info.inventory.recoveryBackups }} 份</dd></dl>
-      <div aria-label="最近元数据备份" class="last-export"><h3>最近资料备份</h3><template v-if="info.lastExport"><span class="mono export-path">{{ info.lastExport.file }}</span><p>{{ time(info.lastExport.createdAt) }} · {{ formatBytes(info.lastExport.size) }} · {{ stateLabel(info.lastExport.state) }}</p></template><p v-else>暂无导出记录</p></div>
-      <div class="snapshot-heading"><h3>数据库快照</h3><span>{{ info.inventory.total }} 份<span v-if="info.inventory.total>info.inventory.snapshots.length"> · 显示最近 {{ info.inventory.snapshots.length }} 份</span></span><button class="btn btn--subtle" :disabled="busy||loading" @click="archive">{{ action==='archive'?'正在压缩旧快照…':'压缩旧升级快照' }}</button></div>
-      <p class="safety-notice">保留最近 3 份升级快照和手动快照的原始数据库，较早升级快照在启动后无损压缩。全部快照均可导出为原始数据库；请使用新的文件名。</p>
-      <div v-if="info.inventory.snapshots.length" class="snapshot-table"><table><thead><tr><th>创建时间</th><th>来源</th><th>版本 / 结构</th><th>实际占用</th><th>创建校验</th><th>当前文件</th><th>导出</th></tr></thead><tbody><tr v-for="snapshot in info.inventory.snapshots" :key="snapshot.id" :title="snapshot.file"><td>{{ time(snapshot.createdAt) }}</td><td>{{ snapshot.reason==='upgrade'?'升级前':'手动' }}</td><td>{{ snapshot.fromVersion||'未记录' }} → {{ snapshot.targetVersion }}<br /><span>结构 {{ snapshot.fromSchema }} → {{ snapshot.targetSchema }}</span></td><td>{{ formatBytes(snapshot.storedSize ?? snapshot.size) }}<br v-if="snapshot.compression" /><span v-if="snapshot.compression">已压缩 · 原始 {{ formatBytes(snapshot.size) }}</span></td><td :title="`SHA-256: ${snapshot.sha256}`">通过</td><td :class="{unavailable:snapshot.state!=='available'}">{{ stateLabel(snapshot.state) }}</td><td><button class="btn btn--subtle" :disabled="busy||loading||snapshot.state!=='available'" @click="exportSnapshot(snapshot.id)">导出数据库</button></td></tr></tbody></table></div>
-      <p v-else class="safety-empty">暂无数据库快照</p>
-      <p v-for="warning in info.inventory.warnings" :key="warning" class="safety-error">{{ warning }}</p>
-    </template><p v-else-if="loading" class="safety-empty">正在读取资料库信息</p>
+      <dl class="safety-facts"><dt>{{ $t("程序版本") }}</dt><dd>v{{ info.version }}</dd><dt>{{ $t("资料库结构") }}</dt><dd>{{ info.schema }}</dd><dt>{{ $t("数据库文件") }}</dt><dd class="mono">{{ info.database }}</dd><dt>{{ $t("快照目录") }}</dt><dd class="mono">{{ info.inventory.directory }}</dd><dt>{{ $t("快照内容") }}</dt><dd>{{ $t("数据库与本机设置 · 不含资源文件") }}</dd><dt>{{ $t("历史备份") }}</dt><dd>{{ $t("旧版备份 {p0} 份 · 恢复前快照 {p1} 份", {p0: (info.inventory.legacyBackups), p1: (info.inventory.recoveryBackups)}) }}</dd></dl>
+      <div :aria-label="$t('最近元数据备份')" class="last-export"><h3>{{ $t("最近资料备份") }}</h3><template v-if="info.lastExport"><span class="mono export-path">{{ info.lastExport.file }}</span><p>{{ time(info.lastExport.createdAt) }} · {{ formatBytes(info.lastExport.size) }} · {{ stateLabel(info.lastExport.state) }}</p></template><p v-else>{{ $t("暂无导出记录") }}</p></div>
+      <div class="snapshot-heading"><h3>{{ $t("数据库快照") }}</h3><span>{{ $t("{p0} 份", {p0: (info.inventory.total)}) }}<span v-if="info.inventory.total>info.inventory.snapshots.length">{{ $t("· 显示最近 {p0} 份", {p0: (info.inventory.snapshots.length)}) }}</span></span><button class="btn btn--subtle" :disabled="busy||loading" @click="archive">{{ action==='archive'?$t('正在压缩旧快照…'):$t('压缩旧升级快照') }}</button></div>
+      <p class="safety-notice">{{ $t("保留最近 3 份升级快照和手动快照的原始数据库，较早升级快照在启动后无损压缩。全部快照均可导出为原始数据库；请使用新的文件名。") }}</p>
+      <div v-if="info.inventory.snapshots.length" class="snapshot-table"><table><thead><tr><th>{{ $t("创建时间") }}</th><th>{{ $t("来源") }}</th><th>{{ $t("版本 / 结构") }}</th><th>{{ $t("实际占用") }}</th><th>{{ $t("创建校验") }}</th><th>{{ $t("当前文件") }}</th><th>{{ $t("导出") }}</th></tr></thead><tbody><tr v-for="snapshot in info.inventory.snapshots" :key="snapshot.id" :title="snapshot.file"><td>{{ time(snapshot.createdAt) }}</td><td>{{ snapshot.reason==='upgrade'?$t('升级前'):$t('手动') }}</td><td>{{ snapshot.fromVersion||$t('未记录') }} → {{ snapshot.targetVersion }}<br /><span>{{ $t("结构 {p0} → {p1}", {p0: (snapshot.fromSchema), p1: (snapshot.targetSchema)}) }}</span></td><td>{{ formatBytes(snapshot.storedSize ?? snapshot.size) }}<br v-if="snapshot.compression" /><span v-if="snapshot.compression">{{ $t("已压缩 · 原始 {p0}", {p0: (formatBytes(snapshot.size))}) }}</span></td><td :title="`SHA-256: ${snapshot.sha256}`">{{ $t("通过") }}</td><td :class="{unavailable:snapshot.state!=='available'}">{{ stateLabel(snapshot.state) }}</td><td><button class="btn btn--subtle" :disabled="busy||loading||snapshot.state!=='available'" @click="exportSnapshot(snapshot.id)">{{ $t("导出数据库") }}</button></td></tr></tbody></table></div>
+      <p v-else class="safety-empty">{{ $t("暂无数据库快照") }}</p>
+      <p v-for="warning in info.inventory.warnings" :key="warning" class="safety-error">{{ $systemMessage(warning) }}</p>
+    </template><p v-else-if="loading" class="safety-empty">{{ $t("正在读取资料库信息") }}</p>
   </section>
 </template>
 <style scoped>

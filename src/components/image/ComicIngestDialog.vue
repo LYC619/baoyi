@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/utils'
 import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue'
@@ -22,7 +24,7 @@ async function resolve(){
 }
 async function close(){if(saving.value)return;generation++;if(props.embedded)emit('close');else ingest.open.value=false;await window.baoyi.comic.cancelPreview().catch(() => { /* best-effort */ })}
 async function start(){
-  if(!preview.value||saving.value||busy.value)return;if(!root.value){error.value='请先选择漫画存放根目录';return;}saving.value=true;error.value=''
+  if(!preview.value||saving.value||busy.value)return;if(!root.value){error.value=tr("请先选择漫画存放根目录");return;}saving.value=true;error.value=''
   const stamp=generation
   try{
     const connection=proxy()
@@ -34,10 +36,10 @@ async function start(){
       preview.value=refreshed
       resolvedProxy=JSON.stringify(connection)
       const valid=new Set(available.value.map(c=>c.id))
-      if(selected.value.some(id=>!valid.has(id))){selected.value=selected.value.filter(id=>valid.has(id));throw new Error('作品目录已变化，请核对所选章节后再下载')}
+      if(selected.value.some(id=>!valid.has(id))){selected.value=selected.value.filter(id=>valid.has(id));throw new Error(tr('作品目录已变化，请核对所选章节后再下载'))}
     }
     const id=recovery?await window.baoyi.comic.revalidate(recovery.id,preview.value.token,root.value):await window.baoyi.comic.start(preview.value.token,[...selected.value],directory.value,group.value||null,root.value)
-    if(id){await ingest.refresh();if(stamp!==generation)return;message.value='已加入下载队列，完成后自动出现在漫画书架。';preview.value=null;selected.value=[];if(props.embedded&&props.active)emit('tasks');else if(!props.embedded){ingest.open.value=false;await nextTick();ingest.showRecords.value=true}}
+    if(id){await ingest.refresh();if(stamp!==generation)return;message.value=tr("已加入下载队列，完成后自动出现在漫画书架。");preview.value=null;selected.value=[];if(props.embedded&&props.active)emit('tasks');else if(!props.embedded){ingest.open.value=false;await nextTick();ingest.showRecords.value=true}}
   }catch(e){if(stamp===generation)error.value=errorMessage(e)}finally{saving.value=false}
 }
 function keys(event:KeyboardEvent){
@@ -53,20 +55,20 @@ onMounted(async()=>{field.value?.focus();const stamp=generation;try{const defaul
 onUnmounted(()=>{generation++;void window.baoyi.comic.cancelPreview().catch(() => { /* best-effort */ });previous?.focus()})
 </script>
 <template><Teleport to="body" :disabled="embedded"><div :class="embedded?'comic-embedded':'comic-shade'" @click.self="close"><section ref="dialog" :role="embedded?undefined:'dialog'" :aria-modal="embedded?undefined:true" aria-labelledby="comic-title" class="comic-dialog" @keydown="keys">
-  <header><div><p>在线下载</p><h2 id="comic-title">{{recovery?'核验并继续原任务':'从 JM 添加作品'}}</h2></div><button class="im-button" :aria-label="embedded?'返回 JM 列表':'关闭在线下载'" :disabled="saving" @click="close"><X :size="20"/></button></header>
-  <div class="comic-body"><form @submit.prevent="resolve"><label class="im-field">作品编号或链接<input ref="field" v-model="input" :disabled="busy||saving" placeholder="数字 ID、JM 编号或作品链接"/></label>
-    <div class="comic-proxy"><label class="im-field">连接方式<select v-model="mode" :disabled="busy||saving"><option value="system">跟随系统代理</option><option value="custom">指定代理</option><option value="builtin">使用当前内置代理</option></select></label><label v-if="mode==='custom'" class="im-field">代理地址<input v-model="custom" :disabled="busy||saving" placeholder="127.0.0.1:7890"/></label></div>
-    <p class="comic-hint">{{mode==='builtin'?'沿用设置中的代理；设置为空时直连。':'仅用于在线漫画下载，会自动记住最近成功的连接方式。支持 HTTP 与 SOCKS5。'}}</p>
-    <p v-if="recovery" class="comic-hint">重新读取来源后，选择原存放根目录。已保存的页面通过核验后继续使用。</p>
-    <button class="im-button im-primary" :disabled="!input.trim()||busy||saving"><Loader2 v-if="busy" class="spin" :size="17"/>{{busy?'正在读取作品与章节…':'解析作品'}}</button>
-  </form><p v-if="error" class="im-error" role="alert">{{error}}</p>
-  <p v-if="message" role="status">{{message}}</p><section v-if="preview" class="comic-preview"><div class="comic-target"><label>存放根目录<output>{{root||'请先选择存放位置'}}</output></label><button class="im-button" :disabled="saving||targetLocked" @click="chooseRoot">更改</button><small v-if="targetLocked">补章沿用原位置</small></div><img v-if="preview.catalog.cover" class="comic-cover" :src="preview.catalog.cover" alt="作品封面"/><h3>{{preview.catalog.name}}</h3><p class="comic-hint">{{preview.catalog.authors.join('、')||'未知作者'}} · {{preview.catalog.chapters.length}} 章</p><p v-if="preview.catalog.description" class="comic-description">{{preview.catalog.description}}</p>
-    <button v-if="preview.existingId" class="im-button" @click="ingest.open.value=false;router.push({name:'image-detail',params:{id:preview.existingId}})"><BookOpen :size="16"/>打开已有作品</button>
-    <div class="comic-selection"><strong>{{recovery?'原任务所选章节':preview.existingId?'补齐缺失章节':'选择保存章节'}}</strong><button v-if="!recovery" class="im-button" :disabled="saving" @click="selected=selected.length===available.length?[]:available.map(c=>c.id)">{{selected.length===available.length?'取消全选':'全选'}}</button></div>
-    <p v-if="!available.length" class="comic-hint">当前章节均已保存，可以直接开始阅读。</p><div v-else class="comic-chapters"><label v-for="chapter in available" :key="chapter.id"><input v-model="selected" :value="chapter.id" type="checkbox" :disabled="saving||!!recovery"/><span>{{chapter.title||'第 '+chapter.order+' 章'}}</span><small>{{chapter.pageIds.length}} 页</small></label></div>
-    <label class="im-field">存放目录名<input v-model="directory" :disabled="saving||!!preview.existingId||!!recovery" maxlength="150"/></label><label v-if="!preview.existingId&&!recovery" class="im-field">归入分类<select v-model="group" :disabled="saving"><option value="">未分类</option><option v-for="item in store.groups.filter(g=>g.type==='comic'&&!g.hidden)" :key="item.id" :value="item.id">{{item.name}}</option></select></label>
+  <header><div><p>{{ $t("在线下载") }}</p><h2 id="comic-title">{{recovery?$t('核验并继续原任务'):$t('从 JM 添加作品')}}</h2></div><button class="im-button" :aria-label="embedded?$t('返回 JM 列表'):$t('关闭在线下载')" :disabled="saving" @click="close"><X :size="20"/></button></header>
+  <div class="comic-body"><form @submit.prevent="resolve"><label class="im-field">{{ $t("作品编号或链接") }}<input ref="field" v-model="input" :disabled="busy||saving" :placeholder="$t('数字 ID、JM 编号或作品链接')"/></label>
+    <div class="comic-proxy"><label class="im-field">{{ $t("连接方式") }}<select v-model="mode" :disabled="busy||saving"><option value="system">{{ $t("跟随系统代理") }}</option><option value="custom">{{ $t("指定代理") }}</option><option value="builtin">{{ $t("使用当前内置代理") }}</option></select></label><label v-if="mode==='custom'" class="im-field">{{ $t("代理地址") }}<input v-model="custom" :disabled="busy||saving" placeholder="127.0.0.1:7890"/></label></div>
+    <p class="comic-hint">{{mode==='builtin'?$t('沿用设置中的代理；设置为空时直连。'):$t('仅用于在线漫画下载，会自动记住最近成功的连接方式。支持 HTTP 与 SOCKS5。')}}</p>
+    <p v-if="recovery" class="comic-hint">{{ $t("重新读取来源后，选择原存放根目录。已保存的页面通过核验后继续使用。") }}</p>
+    <button class="im-button im-primary" :disabled="!input.trim()||busy||saving"><Loader2 v-if="busy" class="spin" :size="17"/>{{busy?$t('正在读取作品与章节…'):$t('解析作品')}}</button>
+  </form><p v-if="error" class="im-error" role="alert">{{$systemMessage(error)}}</p>
+  <p v-if="message" role="status">{{message}}</p><section v-if="preview" class="comic-preview"><div class="comic-target"><label>{{ $t("存放根目录") }}<output>{{root||$t('请先选择存放位置')}}</output></label><button class="im-button" :disabled="saving||targetLocked" @click="chooseRoot">{{ $t("更改") }}</button><small v-if="targetLocked">{{ $t("补章沿用原位置") }}</small></div><img v-if="preview.catalog.cover" class="comic-cover" :src="preview.catalog.cover" :alt="$t('作品封面')"/><h3>{{preview.catalog.name}}</h3><p class="comic-hint">{{ $t("{p0} · {p1} 章", {p0: (preview.catalog.authors.join('、')||$t('未知作者')), p1: (preview.catalog.chapters.length)}) }}</p><p v-if="preview.catalog.description" class="comic-description">{{preview.catalog.description}}</p>
+    <button v-if="preview.existingId" class="im-button" @click="ingest.open.value=false;router.push({name:'image-detail',params:{id:preview.existingId}})"><BookOpen :size="16"/>{{ $t("打开已有作品") }}</button>
+    <div class="comic-selection"><strong>{{recovery?$t('原任务所选章节'):preview.existingId?$t('补齐缺失章节'):$t('选择保存章节')}}</strong><button v-if="!recovery" class="im-button" :disabled="saving" @click="selected=selected.length===available.length?[]:available.map(c=>c.id)">{{selected.length===available.length?$t('取消全选'):$t('全选')}}</button></div>
+    <p v-if="!available.length" class="comic-hint">{{ $t("当前章节均已保存，可以直接开始阅读。") }}</p><div v-else class="comic-chapters"><label v-for="chapter in available" :key="chapter.id"><input v-model="selected" :value="chapter.id" type="checkbox" :disabled="saving||!!recovery"/><span>{{chapter.title||$t('第 {p0} 章', { p0: chapter.order })}}</span><small>{{ $t("{p0} 页", {p0: (chapter.pageIds.length)}) }}</small></label></div>
+    <label class="im-field">{{ $t("存放目录名") }}<input v-model="directory" :disabled="saving||!!preview.existingId||!!recovery" maxlength="150"/></label><label v-if="!preview.existingId&&!recovery" class="im-field">{{ $t("归入分类") }}<select v-model="group" :disabled="saving"><option value="">{{ $t("未分类") }}</option><option v-for="item in store.groups.filter(g=>g.type==='comic'&&!g.hidden)" :key="item.id" :value="item.id">{{item.name}}</option></select></label>
   </section></div>
-  <footer><p>{{selected.length}} 章 · {{pages}} 页<span>完成后自动出现在漫画书架</span></p><button class="im-button im-primary" :disabled="!preview||!selected.length||!root||saving||busy" @click="start"><FolderOpen v-if="!saving" :size="17"/><Download v-else :size="17"/>{{saving?'正在核验并加入任务…':recovery?'核验并继续':'加入下载'}}</button></footer>
+  <footer><p>{{ $t("{p0} 章 · {p1} 页", {p0: (selected.length), p1: (pages)}) }}<span>{{ $t("完成后自动出现在漫画书架") }}</span></p><button class="im-button im-primary" :disabled="!preview||!selected.length||!root||saving||busy" @click="start"><FolderOpen v-if="!saving" :size="17"/><Download v-else :size="17"/>{{saving?$t('正在核验并加入任务…'):recovery?$t('核验并继续'):$t('加入下载')}}</button></footer>
 </section></div></Teleport></template>
 <style scoped>
 .comic-embedded .comic-dialog{width:100%;height:auto;box-shadow:none;background:transparent}.comic-embedded .comic-dialog header{padding:0 0 16px}.comic-embedded .comic-body{padding:18px 0;overflow:visible}.comic-embedded .comic-dialog footer{position:sticky;bottom:0;background:var(--bg-main);padding:14px 0}.comic-target{display:flex;gap:12px;align-items:center;clear:both;border:1px solid var(--divider);border-radius:8px;padding:12px;margin-bottom:18px}.comic-target label{flex:1;min-width:0;font-size:12px;color:var(--text-sub)}.comic-target output{display:block;margin-top:5px;color:var(--text-main);overflow-wrap:anywhere}.comic-embedded .comic-chapters{max-height:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;border:0}.comic-embedded .comic-chapters label{border:1px solid var(--divider);border-radius:7px;padding:10px}.comic-embedded .comic-chapters span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:900px){.comic-embedded .comic-chapters{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.comic-embedded .comic-chapters{grid-template-columns:repeat(2,minmax(0,1fr))}}

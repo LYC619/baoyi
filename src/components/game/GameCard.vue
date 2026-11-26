@@ -60,7 +60,7 @@ function onContextMenu(event: MouseEvent) {
         class="card__open"
         :disabled="locked"
         :title="item.summary || title"
-        :aria-label="`查看游戏 ${title}`"
+        :aria-label="$t('查看游戏 {p0}', {p0: title})"
         :aria-pressed="selectable ? !!selected : undefined"
         @click="selectable ? emit('select', item.id) : emit('open', item.id)"
       >
@@ -72,7 +72,7 @@ function onContextMenu(event: MouseEvent) {
         type="checkbox"
         :checked="selected"
         :disabled="locked"
-        :aria-label="`选择 ${title}`"
+        :aria-label="$t('选择 {p0}', {p0: title})"
         @change="emit('select', item.id)"
       />
       <span v-else-if="item.play_status !== 'unplayed'" class="card__status">
@@ -82,7 +82,7 @@ function onContextMenu(event: MouseEvent) {
       <span
         v-if="unavailable || stale.length"
         class="card__stale"
-        :title="unavailable ? '程序路径不可用' : `存档路径找不到了：${stale.join('、')}`"
+        :title="unavailable ? $t('程序路径不可用') : $t('存档路径找不到了：{p0}', {p0: stale.join('、')})"
       >
         <Unlink :size="12" />
       </span>
@@ -90,7 +90,7 @@ function onContextMenu(event: MouseEvent) {
         v-if="!selectable && !unavailable && isWindowsGameEntry(item.path)"
         class="card__launch"
         :disabled="locked || launching"
-        :aria-label="`启动 ${title}`"
+        :aria-label="$t('启动 {p0}', {p0: title})"
         @click="launch"
       >
         <Play :size="18" />
@@ -105,24 +105,23 @@ function onContextMenu(event: MouseEvent) {
       {{ title }}
     </button>
     <div v-if="unavailable" class="card__missing">
-      <Unlink :size="12" />路径失效 ·
-      <button :disabled="locked" @click="emit('open', item.id, 'files')">修复</button>
+      <Unlink :size="12" />{{ $t("路径失效 ·") }}<button :disabled="locked" @click="emit('open', item.id, 'files')">{{ $t("修复") }}</button>
     </div>
     <div v-else class="card__meta">
       <span>
         <Clock :size="11" />{{
           isAndroid
-            ? '安卓包'
+            ? $t('安卓包')
             : item.total_playtime_sec
               ? formatPlaytime(item.total_playtime_sec)
-              : formatRelative(item.last_played_at) === '从未使用'
-                ? '未玩过'
+              : !item.last_played_at
+                ? $t('未玩过')
                 : formatRelative(item.last_played_at)
         }}
       </span>
       <span class="card__resources">
-        <span v-if="tools" :title="`${tools} 个修改器`"><Wrench :size="11" />{{ tools }}</span>
-        <span v-if="guides" :title="`${guides} 份攻略`"><BookOpen :size="11" />{{ guides }}</span>
+        <span v-if="tools" :title="$t('{p0} 个修改器', {p0: tools})"><Wrench :size="11" />{{ tools }}</span>
+        <span v-if="guides" :title="$t('{p0} 份攻略', {p0: guides})"><BookOpen :size="11" />{{ guides }}</span>
       </span>
     </div>
   </article>

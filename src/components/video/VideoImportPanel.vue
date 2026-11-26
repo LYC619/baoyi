@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { FolderPlus, Loader2, RefreshCw, X } from 'lucide-vue-next'
 import { useVideoImport } from '@/composables/useVideoImport'
@@ -14,7 +16,7 @@ const canSelect = (entry: VideoImportEntry) => entry.status === 'ready' || entry
 const rows = computed(() => batch.value?.entries.filter(entry => filter.value === 'all' || entry.status === filter.value) || [])
 const selected = computed(() => batch.value?.entries.filter(entry => entry.selected && canSelect(entry)) || [])
 const active = computed(() => batch.value?.entries.find(entry => entry.id === activeId.value) || null)
-const labels = { ready: '待确认', review: '资料待补齐', skipped: '已跳过', failed: '识别失败', confirmed: '已入库' }
+const labels = { get ready() { return tr('待确认') }, get review() { return tr('资料待补齐') }, get skipped() { return tr('已跳过') }, get failed() { return tr('识别失败') }, get confirmed() { return tr('已入库') } }
 const working = computed(() => !!busy.value || !!batch.value && ['scanning', 'reviewing', 'committing'].includes(batch.value.status))
 function resetForm() {
   const entry = active.value
@@ -56,32 +58,32 @@ onBeforeUnmount(() => dialog.value?.close())
 <template>
   <Teleport to="body">
     <dialog ref="dialog" class="import-panel" aria-labelledby="video-import-title" @cancel.prevent="close">
-      <header><div><h2 id="video-import-title">视频导入确认</h2><p>先识别、再勾选入库。关闭后可从影视墙的「导入待确认」或设置页继续。</p></div><button type="button" aria-label="关闭导入确认" @click="close"><X :size="19" /></button></header>
+      <header><div><h2 id="video-import-title">{{ $t("视频导入确认") }}</h2><p>{{ $t("先识别、再勾选入库。关闭后可从影视墙的「导入待确认」或设置页继续。") }}</p></div><button type="button" :aria-label="$t('关闭导入确认')" @click="close"><X :size="19" /></button></header>
       <div class="import-tools">
-        <select :value="batch?.id || ''" :disabled="working" aria-label="导入批次" @change="switchBatch(($event.target as HTMLSelectElement).value)"><option value="" disabled>选择一批导入</option><option v-for="row in batches" :key="row.id" :value="row.id">{{ new Date(row.createdAt).toLocaleString('zh-CN', { hour12: false }) }} · {{ row.total }} 项 / {{ row.pending }} 项待确认</option></select>
-        <label class="agent-toggle"><input type="checkbox" :checked="useAgent" :disabled="working" @change="session.setAgent(($event.target as HTMLInputElement).checked)" />新批次启用智能复查</label>
-        <button class="btn btn--ghost" :disabled="working || dirty" @click="session.begin()"><FolderPlus :size="14" />选择目录</button>
+        <select :value="batch?.id || ''" :disabled="working" :aria-label="$t('导入批次')" @change="switchBatch(($event.target as HTMLSelectElement).value)"><option value="" disabled>{{ $t("选择一批导入") }}</option><option v-for="row in batches" :key="row.id" :value="row.id">{{ $t("{p0} · {p1} 项 / {p2} 项待确认", {p0: (new Date(row.createdAt).toLocaleString($locale, { hour12: false })), p1: (row.total), p2: (row.pending)}) }}</option></select>
+        <label class="agent-toggle"><input type="checkbox" :checked="useAgent" :disabled="working" @change="session.setAgent(($event.target as HTMLInputElement).checked)" />{{ $t("新批次启用智能复查") }}</label>
+        <button class="btn btn--ghost" :disabled="working || dirty" @click="session.begin()"><FolderPlus :size="14" />{{ $t("选择目录") }}</button>
       </div>
-      <p class="import-note">{{ useAgent ? '先读取本地资料，再联网智能复查，核对无误后入库。' : '仅按本地文件、info 与 NFO 识别；也可单独选中条目做智能复查。' }}</p>
+      <p class="import-note">{{ useAgent ? $t('先读取本地资料，再联网智能复查，核对无误后入库。') : $t('仅按本地文件、info 与 NFO 识别；也可单独选中条目做智能复查。') }}</p>
       <p v-if="error || batch?.error" class="import-error" role="alert">{{ error || batch?.error }}</p>
-      <div v-if="working" class="import-progress" role="status"><Loader2 class="spin" :size="15" /><span>{{ busy === 'confirm' ? '正在确认入库、补充封面…' : batch?.progress?.log || '正在处理…' }} <template v-if="batch?.progress?.total">{{ batch.progress.processed }}/{{ batch.progress.total }}</template></span><button v-if="busy === 'scan' || busy === 'review'" @click="session.cancel">停止识别</button></div>
+      <div v-if="working" class="import-progress" role="status"><Loader2 class="spin" :size="15" /><span>{{ busy === 'confirm' ? $t('正在确认入库、补充封面…') : batch?.progress?.log || $t('正在处理…') }} <template v-if="batch?.progress?.total">{{ batch.progress.processed }}/{{ batch.progress.total }}</template></span><button v-if="busy === 'scan' || busy === 'review'" @click="session.cancel">{{ $t("停止识别") }}</button></div>
       <div class="import-body">
-        <section class="import-list" aria-label="本批识别结果">
-          <div class="import-list__tools"><button :disabled="working" @click="selectAll">全选 / 取消当前列表</button><select v-model="filter" aria-label="导入结果筛选"><option value="all">全部 {{ batch?.entries.length || 0 }} 项</option><option value="ready">待确认</option><option value="review">资料待补齐</option><option value="failed">识别失败</option><option value="confirmed">已入库</option></select></div>
-          <p class="import-note">按住 Shift 点击复选框，可连续选择。</p>
-          <ul><li v-for="entry in rows" :key="entry.id" :class="{ active: activeId === entry.id }"><input type="checkbox" :checked="entry.selected" :disabled="working || !canSelect(entry)" :aria-label="'选择导入：' + entry.title" @click.prevent="toggle(entry, $event)" /><button :disabled="working" @click="choose(entry)"><span>{{ entry.title }}</span><small :class="'state-' + entry.status">{{ labels[entry.status] }} · {{ entry.action === 'update' ? '更新已有作品' : entry.episodeCount > 1 ? entry.episodeCount + ' 集合集' : '新增作品' }}</small><small class="entry-path" :title="entry.path">{{ entry.path }}</small></button></li></ul>
-          <p v-if="!rows.length" class="import-empty">{{ working ? '正在读取目录…' : '选择视频目录后，识别结果会保存在这里。' }}</p>
+        <section class="import-list" :aria-label="$t('本批识别结果')">
+          <div class="import-list__tools"><button :disabled="working" @click="selectAll">{{ $t("全选 / 取消当前列表") }}</button><select v-model="filter" :aria-label="$t('导入结果筛选')"><option value="all">{{ $t("全部 {p0} 项", {p0: (batch?.entries.length || 0)}) }}</option><option value="ready">{{ $t("待确认") }}</option><option value="review">{{ $t("资料待补齐") }}</option><option value="failed">{{ $t("识别失败") }}</option><option value="confirmed">{{ $t("已入库") }}</option></select></div>
+          <p class="import-note">{{ $t("按住 Shift 点击复选框，可连续选择。") }}</p>
+          <ul><li v-for="entry in rows" :key="entry.id" :class="{ active: activeId === entry.id }"><input type="checkbox" :checked="entry.selected" :disabled="working || !canSelect(entry)" :aria-label="$t('选择导入：') + entry.title" @click.prevent="toggle(entry, $event)" /><button :disabled="working" @click="choose(entry)"><span>{{ entry.title }}</span><small :class="'state-' + entry.status">{{ labels[entry.status] }} · {{ entry.action === 'update' ? $t('更新已有作品') : entry.episodeCount > 1 ? entry.episodeCount + $t(' 集合集') : $t('新增作品') }}</small><small class="entry-path" :title="entry.path">{{ entry.path }}</small></button></li></ul>
+          <p v-if="!rows.length" class="import-empty">{{ working ? $t('正在读取目录…') : $t('选择视频目录后，识别结果会保存在这里。') }}</p>
         </section>
-        <section class="import-detail" aria-label="条目资料">
+        <section class="import-detail" :aria-label="$t('条目资料')">
           <template v-if="active">
-            <div class="import-detail__heading"><h3>{{ labels[active.status] }}</h3><span>{{ active.fileCount }} 个视频 · {{ active.episodeCount }} 项内容</span></div>
-            <p v-if="active.publishedStart" class="import-note">发布时间：{{ videoDateLabel(active.publishedStart) }}<template v-if="active.publishedEnd !== active.publishedStart"> ～ {{ videoDateLabel(active.publishedEnd) }}</template></p>
-            <form @submit.prevent="save"><fieldset :disabled="working || !canSelect(active)"><label>名称<input v-model="form.title" maxlength="240" /></label><label>原名<input v-model="form.originalTitle" maxlength="240" /></label><label>分类<select v-model="form.category"><option v-for="category in ['电影', '剧集', '动画', '纪录片', '综艺', '里番', '其他']" :key="category">{{ category }}</option><option v-if="form.category && !['电影', '剧集', '动画', '纪录片', '综艺', '里番', '其他'].includes(form.category)">{{ form.category }}</option></select></label><label>简介<textarea v-model="form.description" rows="5" maxlength="20000" /></label><label>标签<input v-model="form.tags" placeholder="用顿号分隔" /></label></fieldset><div class="import-detail__actions"><button type="submit" class="btn btn--ghost" :disabled="working || !dirty || !canSelect(active)">保存修改</button><button type="button" class="btn btn--ghost" :disabled="working || !canSelect(active)" @click="review([active.id])">智能复查此项</button></div></form>
-            <p class="import-note">{{ active.message }}</p><details class="import-log"><summary>此项识别日志<span v-if="active.tokens"> · {{ active.tokens.toLocaleString() }} tokens</span></summary><pre>{{ active.log || '尚无日志' }}</pre></details>
-          </template><p v-else class="import-empty">选择左侧条目核对资料。</p>
+            <div class="import-detail__heading"><h3>{{ labels[active.status] }}</h3><span>{{ $t("{p0} 个视频 · {p1} 项内容", {p0: (active.fileCount), p1: (active.episodeCount)}) }}</span></div>
+            <p v-if="active.publishedStart" class="import-note">{{ $t("发布时间：{p0}", {p0: (videoDateLabel(active.publishedStart))}) }}<template v-if="active.publishedEnd !== active.publishedStart"> ～ {{ videoDateLabel(active.publishedEnd) }}</template></p>
+            <form @submit.prevent="save"><fieldset :disabled="working || !canSelect(active)"><label>{{ $t("名称") }}<input v-model="form.title" maxlength="240" /></label><label>{{ $t("原名") }}<input v-model="form.originalTitle" maxlength="240" /></label><label>{{ $t("分类") }}<select v-model="form.category"><option v-for="category in ['电影', '剧集', '动画', '纪录片', '综艺', '里番', '其他']" :key="category" :value="category">{{ $t(category) }}</option><option v-if="form.category && !['电影', '剧集', '动画', '纪录片', '综艺', '里番', '其他'].includes(form.category)">{{ form.category }}</option></select></label><label>{{ $t("简介") }}<textarea v-model="form.description" rows="5" maxlength="20000" /></label><label>{{ $t("标签") }}<input v-model="form.tags" :placeholder="$t('用顿号分隔')" /></label></fieldset><div class="import-detail__actions"><button type="submit" class="btn btn--ghost" :disabled="working || !dirty || !canSelect(active)">{{ $t("保存修改") }}</button><button type="button" class="btn btn--ghost" :disabled="working || !canSelect(active)" @click="review([active.id])">{{ $t("智能复查此项") }}</button></div></form>
+            <p class="import-note">{{ $systemMessage(active.message) }}</p><details class="import-log"><summary>{{ $t("此项识别日志") }}<span v-if="active.tokens"> · {{ active.tokens.toLocaleString($locale) }} tokens</span></summary><pre>{{ active.log || $t('尚无日志') }}</pre></details>
+          </template><p v-else class="import-empty">{{ $t("选择左侧条目核对资料。") }}</p>
         </section>
       </div>
-      <footer><div><strong>已选 {{ selected.length }} 项</strong><button v-if="batch" :disabled="working || dirty" @click="session.refresh"><RefreshCw :size="13" />重新检查目录</button><button v-if="batch" :disabled="working" @click="session.discard">丢弃本批预览</button></div><button class="btn btn--ghost" :disabled="working || !selected.length" @click="review(selected.map(row => row.id))">智能复查所选</button><button class="btn btn--primary" :disabled="working || !selected.length" @click="confirm">确认录入 {{ selected.length }} 项</button></footer>
+      <footer><div><strong>{{ $t("已选 {p0} 项", {p0: (selected.length)}) }}</strong><button v-if="batch" :disabled="working || dirty" @click="session.refresh"><RefreshCw :size="13" />{{ $t("重新检查目录") }}</button><button v-if="batch" :disabled="working" @click="session.discard">{{ $t("丢弃本批预览") }}</button></div><button class="btn btn--ghost" :disabled="working || !selected.length" @click="review(selected.map(row => row.id))">{{ $t("智能复查所选") }}</button><button class="btn btn--primary" :disabled="working || !selected.length" @click="confirm">{{ $t("确认录入 {p0} 项", {p0: (selected.length)}) }}</button></footer>
     </dialog>
   </Teleport>
 </template>

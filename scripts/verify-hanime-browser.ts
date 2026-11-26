@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { EventEmitter } from 'node:events'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
 import { isHanimeHost } from '../electron/services/hanime/hanime-network-rules.ts'
@@ -22,7 +23,7 @@ function harness() {
   const load=createRendererLoader({electron:{BrowserWindow:FakeWindow,Menu:{buildFromTemplate:(items:unknown[])=>({items})},clipboard:{writeText:()=>{}}}}, {URL,Buffer,setTimeout,clearTimeout})
   const module=load('electron/services/hanime/hanime-browser.ts') as typeof import('../electron/services/hanime/hanime-browser.ts')
   const browser=module.createHanimeBrowser({getSession:()=>session as any,getMainWindow:()=>main as any,isHidden:()=>hidden})
-  return {browser,main,session,windows,sent,hide:()=>{hidden=true}}
+  return {browser,main,session,windows,sent,load,hide:()=>{hidden=true}}
 }
 async function test(name:string,run:(h:ReturnType<typeof harness>)=>void|Promise<void>){
   let h:ReturnType<typeof harness>|undefined
@@ -59,5 +60,16 @@ await test('privacy and parent window closure end the browser session window',h=
 await test('closing the main window closes the site window and releases session listeners',h=>{
   h.browser.open();const win=h.windows.at(-1)!;h.main.close();assert.equal(win.destroyed,true)
   assert.equal(h.session.listenerCount('will-download'),0)
+})
+await test('English native menus use the exact download wording shown in discovery guidance', h => {
+  const i18n = h.load('src/i18n/index.ts')
+  i18n.applyLanguage('en')
+  h.browser.open()
+  const win = h.windows.at(-1)!
+  assert.equal(win.options.title, 'Hanime · BaoYi')
+  assert.deepEqual(Array.from(win.menu.items, (item: any) => item.label), ['Home', 'Back', 'Forward', 'Refresh', 'Download current video', 'Copy page link'])
+  const key = '沿用现有浏览窗口。选好后，使用窗口菜单“下载当前视频”保存。'
+  assert.ok(fs.readFileSync('src/pages/video/Discover.vue', 'utf8').includes(key))
+  assert.ok(i18n.tr(key).includes(i18n.tr('下载当前视频')))
 })
 console.log(`Hanime browser: ${passed} passed / ${failed} failed`);process.exitCode=failed?1:0

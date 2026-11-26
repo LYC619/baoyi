@@ -6,9 +6,9 @@
 
 | 维度 | 当前值 |
 |---|---|
-| 应用版本 | `0.20.5` |
+| 应用版本 | `0.20.8` |
 | SQLite Schema 版本 | `v33`（共 66 张数据表） |
-| 主进程服务域 | 7 个子目录 / 50 个模块文件 |
+| 主进程服务域 | 7 个子目录 / 51 个模块文件 |
 | IPC 通道 | 502 条主进程通道（24 个模块）；Preload 暴露 25 个命名空间（495 invoke / 7 send / 29 event） |
 | 前端路由 | 19 条（Hash 路由；详情页按 `meta.remountOnId` 防迟到响应） |
 | 归档助理工具 | 22 项（均含 JSON Schema 与离线 Eval 覆盖） |
@@ -23,7 +23,7 @@
 | `media/` | 4 | `artwork-migration.ts`、`iconExtractor.ts`、`poster-protocol.ts`、`poster-storage.ts` |
 | `network/` | 10 | `chromium-download-fetch.ts`、`discovery-browser.ts`、`online-network-rules.ts`、`online-network.ts`、`proxy-rules.ts`、`proxy.ts`、`searchService.ts`、`web-browser-sources.ts`、`web-browser-url.ts`、`web-browser.ts` |
 | `storage/` | 16 | `activity.ts`、`database.ts`、`identify-records.ts`、`library-backup.ts`、`library-snapshots.ts`、`organize-plans.ts`、`portable-rules.ts`、`portable.ts`、`reset-files.ts`、`scan-units.ts`、`schema.ts`、`setting-keys.ts`、`settings-store.ts`、`snapshot-archive.ts`、`storage-usage.ts`、`task-records.ts` |
-| `system/` | 6 | `fstree.ts`、`json.ts`、`lifecycle.ts`、`text-file.ts`、`timing.ts`、`window-focus.ts` |
+| `system/` | 7 | `fstree.ts`、`json.ts`、`language.ts`、`lifecycle.ts`、`text-file.ts`、`timing.ts`、`window-focus.ts` |
 | `taxonomy/` | 3 | `resource-taxonomy.ts`、`taxonomy-store.ts`、`taxonomy.ts` |
 
 ## 2. 数据表结构 (`SCHEMA_VERSION = 33`)

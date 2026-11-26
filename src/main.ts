@@ -1,4 +1,6 @@
+
 import { showBootError } from "./boot-error"
+import { applyLanguage, installI18n, tr } from './i18n'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
@@ -26,8 +28,10 @@ function reportError(err: unknown): void {
 }
 
 async function boot(): Promise<void> {
+  applyLanguage('system')
   try {
     const app = createApp(App)
+    installI18n(app)
     app.config.errorHandler = reportError
     window.addEventListener('unhandledrejection', event => reportError(event.reason))
     app.use(createPinia())
@@ -57,7 +61,7 @@ async function boot(): Promise<void> {
         useVideoStore().select({ kind:'type',value:'hentai' })
         await router.push({ name:'video-home' })
         await workflow.prepare()
-      })().catch(cause => useToast().error('打开下载预览失败：' + errorMessage(cause)))
+      })().catch(cause => useToast().error(tr("打开下载预览失败：") + errorMessage(cause)))
     })
   } catch (err) {
     showBootError(err)

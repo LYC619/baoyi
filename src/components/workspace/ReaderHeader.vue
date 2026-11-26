@@ -88,12 +88,12 @@ function onEncodingChange(e: Event) {
 
 <template>
   <header class="reader-header">
-    <button type="button" class="ws-icon" aria-label="返回来源" @click="emit('back')">
+    <button type="button" class="ws-icon" :aria-label="$t('返回来源')" @click="emit('back')">
       <ArrowLeft :size="18" />
     </button>
 
     <div class="header-book-info">
-      <h1 class="header-book-title" :title="item?.name">{{ item?.name || '资料' }}</h1>
+      <h1 class="header-book-title" :title="item?.name">{{ item?.name || $t('资料') }}</h1>
       <span
         v-if="novelIndex?.chapters.length"
         class="ws-muted current-chapter-label"
@@ -103,7 +103,7 @@ function onEncodingChange(e: Event) {
       </span>
       <span v-else class="ws-muted">
         {{ item?.format.toUpperCase() }}
-        <template v-if="unsaved"> · 正在保存位置</template>
+        <template v-if="unsaved">{{ $t("· 正在保存位置") }}</template>
       </span>
     </div>
 
@@ -117,16 +117,16 @@ function onEncodingChange(e: Event) {
           ref="searchInputRef"
           v-model="searchQuery"
           type="search"
-          aria-label="搜索正文"
-          placeholder="搜索正文…"
+          :aria-label="$t('搜索正文')"
+          :placeholder="$t('搜索正文…')"
           @keydown.enter.shift.prevent="emit('find', searchQuery, -1)"
         />
         <button
           v-if="searchQuery.trim()"
           type="button"
           class="ws-icon"
-          aria-label="查找上一处"
-          title="查找上一处（Shift+Enter）"
+          :aria-label="$t('查找上一处')"
+          :title="$t('查找上一处（Shift+Enter）')"
           :disabled="searching"
           @click="emit('find', searchQuery, -1)"
         >
@@ -135,8 +135,8 @@ function onEncodingChange(e: Event) {
         <button
           type="submit"
           class="ws-icon"
-          aria-label="查找下一处"
-          title="查找下一处（Enter）"
+          :aria-label="$t('查找下一处')"
+          :title="$t('查找下一处（Enter）')"
           :disabled="!searchQuery.trim() || searching"
         >
           <Search :size="16" />
@@ -144,21 +144,21 @@ function onEncodingChange(e: Event) {
       </form>
 
       <div v-if="supported && hasContent && (isPdf || isImage)" class="pdf-zoom-tools">
-        <button type="button" class="ws-icon" aria-label="缩小页面" title="缩小页面" @click="emit('change-zoom', -0.1)">
+        <button type="button" class="ws-icon" :aria-label="$t('缩小页面')" :title="$t('缩小页面')" @click="emit('change-zoom', -0.1)">
           <Minus :size="16" />
         </button>
         <span>{{ Math.round(zoom * 100) }}%</span>
-        <button type="button" class="ws-icon" aria-label="放大页面" title="放大页面" @click="emit('change-zoom', 0.1)">
+        <button type="button" class="ws-icon" :aria-label="$t('放大页面')" :title="$t('放大页面')" @click="emit('change-zoom', 0.1)">
           <Plus :size="16" />
         </button>
         <button
           v-if="isPdf"
           type="button"
           class="ws-button small pdf-fit-btn"
-          :title="readerSettings.pdfFit === 'page' ? '切换为适合页宽' : '切换为适合整页'"
+          :title="readerSettings.pdfFit === 'page' ? $t('切换为适合页宽') : $t('切换为适合整页')"
           @click="emit('fit-pdf', readerSettings.pdfFit === 'page' ? 'width' : 'page')"
         >
-          {{ readerSettings.pdfFit === 'page' ? '适宽' : '整页' }}
+          {{ readerSettings.pdfFit === 'page' ? $t('适宽') : $t('整页') }}
         </button>
       </div>
 
@@ -167,8 +167,8 @@ function onEncodingChange(e: Event) {
           type="button"
           class="ws-icon"
           :disabled="currentChapterIndex <= 0"
-          aria-label="上一章"
-          title="上一章"
+          :aria-label="$t('上一章')"
+          :title="$t('上一章')"
           @click="emit('prev-chapter')"
         >
           <ChevronLeft :size="18" />
@@ -180,8 +180,8 @@ function onEncodingChange(e: Event) {
           type="button"
           class="ws-icon"
           :disabled="currentChapterIndex >= novelIndex.chapters.length - 1"
-          aria-label="下一章"
-          title="下一章"
+          :aria-label="$t('下一章')"
+          :title="$t('下一章')"
           @click="emit('next-chapter')"
         >
           <ChevronRight :size="18" />
@@ -194,8 +194,8 @@ function onEncodingChange(e: Event) {
         class="ws-icon"
         :class="{ active: pageBookmarked }"
         :aria-pressed="!!pageBookmarked"
-        aria-label="添加当前页书签"
-        :title="pageBookmarked ? '移除当前位置书签' : '添加当前位置书签'"
+        :aria-label="$t('添加当前页书签')"
+        :title="pageBookmarked ? $t('移除当前位置书签') : $t('添加当前位置书签')"
         :disabled="busy"
         @click="emit('bookmark-page')"
       >
@@ -207,8 +207,8 @@ function onEncodingChange(e: Event) {
         type="button"
         class="ws-icon"
         :class="{ active: toc }"
-        aria-label="切换阅读目录"
-        title="切换阅读目录"
+        :aria-label="$t('切换阅读目录')"
+        :title="$t('切换阅读目录')"
         @click="emit('toggle-toc')"
       >
         <PanelLeft :size="18" />
@@ -219,8 +219,8 @@ function onEncodingChange(e: Event) {
           type="button"
           class="ws-icon"
           :class="{ active: settingsOpen }"
-          aria-label="阅读偏好与设置"
-          title="阅读偏好（字号、配色、编码）"
+          :aria-label="$t('阅读偏好与设置')"
+          :title="$t('阅读偏好（字号、配色、编码）')"
           @click="emit('update:settingsOpen', !settingsOpen)"
         >
           <SlidersHorizontal :size="16" />
@@ -228,7 +228,7 @@ function onEncodingChange(e: Event) {
 
         <div v-if="settingsOpen" class="reader-settings-panel">
           <div v-if="isText" class="setting-row">
-            <span>字号</span>
+            <span>{{ $t("字号") }}</span>
             <div class="setting-controls">
               <button
                 type="button"
@@ -251,7 +251,7 @@ function onEncodingChange(e: Event) {
           </div>
 
           <div v-if="isText" class="setting-row">
-            <span>行距</span>
+            <span>{{ $t("行距") }}</span>
             <div class="setting-controls">
               <button
                 type="button"
@@ -274,51 +274,43 @@ function onEncodingChange(e: Event) {
           </div>
 
           <div class="setting-row">
-            <span>配色</span>
+            <span>{{ $t("配色") }}</span>
             <div class="theme-chips">
               <button
                 type="button"
                 class="theme-chip light"
                 :class="{ active: readerSettings.theme === 'light' }"
-                title="白昼"
+                :title="$t('白昼')"
                 @click="patchSetting('theme', 'light')"
-              >
-                白
-              </button>
+              >{{ $t("白") }}</button>
               <button
                 type="button"
                 class="theme-chip sepia"
                 :class="{ active: readerSettings.theme === 'sepia' }"
-                title="暖纸"
+                :title="$t('暖纸')"
                 @click="patchSetting('theme', 'sepia')"
-              >
-                暖
-              </button>
+              >{{ $t("暖") }}</button>
               <button
                 type="button"
                 class="theme-chip eye"
                 :class="{ active: readerSettings.theme === 'eye' }"
-                title="护眼柔绿"
+                :title="$t('护眼柔绿')"
                 @click="patchSetting('theme', 'eye')"
-              >
-                绿
-              </button>
+              >{{ $t("绿") }}</button>
               <button
                 type="button"
                 class="theme-chip dark"
                 :class="{ active: readerSettings.theme === 'dark' }"
-                title="深色夜读"
+                :title="$t('深色夜读')"
                 @click="patchSetting('theme', 'dark')"
-              >
-                夜
-              </button>
+              >{{ $t("夜") }}</button>
             </div>
           </div>
 
           <div v-if="item && ['txt', 'md', 'markdown'].includes(item.format)" class="setting-row">
-            <span>编码</span>
+            <span>{{ $t("编码") }}</span>
             <select :value="readerSettings.encoding" class="encoding-select" @change="onEncodingChange">
-              <option value="auto">自动识别</option>
+              <option value="auto">{{ $t("自动识别") }}</option>
               <option value="utf-8">UTF-8</option>
               <option value="gb18030">GBK / GB18030</option>
               <option value="utf-16le">UTF-16 LE</option>
@@ -331,10 +323,10 @@ function onEncodingChange(e: Event) {
         ref="sideTrigger"
         type="button"
         class="ws-icon"
-        aria-label="切换标注栏"
+        :aria-label="$t('切换标注栏')"
         :aria-expanded="side"
         :class="{ active: side }"
-        title="切换书签与笔记"
+        :title="$t('切换书签与笔记')"
         @click="emit('toggle-side')"
       >
         <PanelRight :size="18" />
@@ -343,8 +335,8 @@ function onEncodingChange(e: Event) {
       <button
         type="button"
         class="ws-icon"
-        aria-label="全屏阅读"
-        title="专注阅读（隐藏顶栏）"
+        :aria-label="$t('全屏阅读')"
+        :title="$t('专注阅读（隐藏顶栏）')"
         @click="patchSetting('immersive', true)"
       >
         <Maximize2 :size="16" />
@@ -354,11 +346,10 @@ function onEncodingChange(e: Event) {
         type="button"
         class="ws-button"
         :disabled="busy || !item?.available"
-        title="在系统默认应用中打开"
+        :title="$t('在系统默认应用中打开')"
         @click="emit('open-external')"
       >
-        <ExternalLink :size="15" />外部打开
-      </button>
+        <ExternalLink :size="15" />{{ $t("外部打开") }}</button>
     </div>
   </header>
 </template>

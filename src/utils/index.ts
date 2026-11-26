@@ -1,3 +1,5 @@
+
+import { locale as appLocale, tr, systemMessage } from '../i18n/index.ts'
 import type {
   AgentEvent,
   IdentifyLog,
@@ -29,8 +31,13 @@ export function plain<T>(value: T): T {
  * IPC 报错的原文。参数侧有 plain() 挡着，返回侧的失败散落在各个 catch 里 ——
  * 拼这句话的格式统一放这里，别每处各写各的。
  */
+export function rawErrorMessage(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).replace(/^(?:Error:\s*)?Error invoking remote method ['"][^'"]+['"]:\s*(?:Error:\s*)?/i, '').replace(/^Error:\s*/i, '').trim()
+}
+
 export function errorMessage(err: unknown): string {
-  return (err instanceof Error ? err.message : String(err)).replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/i, '').replace(/^Error:\s*/i, '').trim() || '操作未能完成，请稍后重试'
+  const message = rawErrorMessage(err)
+  return message ? systemMessage(message) : tr('操作未能完成，请稍后重试')
 }
 
 /**
@@ -62,11 +69,11 @@ export function coverUrl(coverPath: string, version = 0): string {
 
 /** 关联文件类型显示成什么词。label 为空时才用得上，是最后的退路 */
 export const LINK_TYPE_LABEL: Record<LinkedFile['type'], string> = {
-  guide: '攻略',
-  trainer: '修改器',
+  get guide() { return tr('攻略') },
+  get trainer() { return tr('修改器') },
   mod: 'MOD',
-  emulator: '模拟器',
-  other: '其他'
+  get emulator() { return tr('模拟器') },
+  get other() { return tr('其他') }
 }
 
 /**
@@ -126,15 +133,19 @@ export function formatDateTime(ts: number): string {
 
 /** 相对时间。0 表示从未启动过 */
 export function formatRelative(ts: number): string {
-  if (!ts) return '从未使用'
+  if (!ts) return tr('从未使用')
   const diff = Date.now() - ts
-  if (diff < 0) return '刚刚'
+  if (diff < 0) return tr('刚刚')
   const days = Math.floor(diff / DAY)
-  if (days === 0) return '今天'
-  if (days === 1) return '昨天'
-  if (days < 30) return `${days} 天前`
-  if (days < 365) return `${Math.floor(days / 30)} 个月前`
-  return `${Math.floor(days / 365)} 年前`
+  if (days === 0) return tr('今天')
+  if (days === 1) return tr('昨天')
+  if (appLocale.value === 'en') {
+    const relative = new Intl.RelativeTimeFormat('en', { numeric: 'always' })
+    return days < 30 ? relative.format(-days, 'day') : days < 365 ? relative.format(-Math.floor(days / 30), 'month') : relative.format(-Math.floor(days / 365), 'year')
+  }
+  if (days < 30) return tr('{p0} 天前', {p0: days})
+  if (days < 365) return tr('{p0} 个月前', {p0: Math.floor(days / 30)})
+  return tr('{p0} 年前', {p0: Math.floor(days / 365)})
 }
 
 export function daysSince(ts: number): number {
@@ -150,10 +161,10 @@ export function daysSince(ts: number): number {
  * 那种情况下卡片退回显示 last_played_at，说的是「今天玩过，但时长没跟到」。
  */
 export function formatPlaytime(sec: number): string {
-  if (!sec) return '未记录'
-  if (sec < 3600) return `${Math.max(1, Math.round(sec / 60))} 分钟`
+  if (!sec) return tr('未记录')
+  if (sec < 3600) return tr('{p0} 分钟', {p0: Math.max(1, Math.round(sec / 60))})
   const hours = sec / 3600
-  return hours < 10 ? `${hours.toFixed(1)} 小时` : `${Math.round(hours)} 小时`
+  return hours < 10 ? tr('{p0} 小时', {p0: hours.toFixed(1)}) : tr('{p0} 小时', {p0: Math.round(hours)})
 }
 
 /**
@@ -168,24 +179,24 @@ export function formatPlaytime(sec: number): string {
  * 验不到「名单和文案对不对得上」，而那正是最容易漏的一处。
  */
 export const PROTECTED_FIELD_LABEL: Record<string, string> = {
-  poster_path: '海报',
-  collection_name: '分组',
-  name_zh: '片名',
-  name_en: '原名',
-  summary: '简介',
-  description: '详细说明',
-  category: '分类',
-  tags: '标签',
-  official_url: '官网',
-  video_type: '类型',
-  media_kind: '媒体类型',
-  year: '年份',
-  end_year: '完结年份',
-  rating: 'TMDB 评分',
+  get poster_path() { return tr('海报') },
+  get collection_name() { return tr('分组') },
+  get name_zh() { return tr('片名') },
+  get name_en() { return tr('原名') },
+  get summary() { return tr('简介') },
+  get description() { return tr("详细说明") },
+  get category() { return tr('分类') },
+  get tags() { return tr('标签') },
+  get official_url() { return tr('官网') },
+  get video_type() { return tr('类型') },
+  get media_kind() { return tr('媒体类型') },
+  get year() { return tr('年份') },
+  get end_year() { return tr('完结年份') },
+  get rating() { return tr('TMDB 评分') },
   tmdb_id: 'TMDB id',
   imdb_id: 'IMDb id',
-  douban_id: '豆瓣 id',
-  douban_rating: '豆瓣评分',
+  get douban_id() { return tr('豆瓣 id') },
+  get douban_rating() { return tr('豆瓣评分') },
   hanime_id: 'hanime id'
 }
 
@@ -255,10 +266,10 @@ export function isLocalPosterPath(value: string): boolean {
 export function formatDuration(sec: number): string {
   if (!sec || sec < 0) return '—'
   const mins = Math.round(sec / 60)
-  if (mins < 90) return `${mins} 分钟`
+  if (mins < 90) return tr('{p0} 分钟', {p0: mins})
   const h = Math.floor(mins / 60)
   const m = mins % 60
-  return m === 0 ? `${h} 小时` : `${h} 小时 ${m} 分`
+  return m === 0 ? tr('{p0} 小时', {p0: h}) : tr('{p0} 小时 {p1} 分', {p0: h, p1: m})
 }
 
 /**
@@ -310,7 +321,7 @@ export function activityOf(item: SoftwareItem): Activity {
       at: item.last_used_at,
       source: 'baoyi',
       label: formatRelative(item.last_used_at),
-      hint: `由抱一启动 · ${formatDate(item.last_used_at)}`
+      hint: tr('由抱一启动 · {p0}', {p0: formatDate(item.last_used_at)})
     }
   }
   if (item.external_active_at > 0) {
@@ -318,22 +329,22 @@ export function activityOf(item: SoftwareItem): Activity {
       at: item.external_active_at,
       source: 'external',
       label: formatRelative(item.external_active_at),
-      hint: `外部活跃 · ${formatDate(item.external_active_at)}（依据软件目录里配置文件的最后修改时间，未经抱一启动）`
+      hint: tr('外部活跃 · {p0}（依据软件目录里配置文件的最后修改时间，未经抱一启动）', {p0: formatDate(item.external_active_at)})
     }
   }
   return {
     at: 0,
     source: 'none',
-    label: '从未使用',
-    hint: '抱一没记到过启动，目录里也读不出活跃痕迹'
+    label: tr('从未使用'),
+    hint: tr('抱一没记到过启动，目录里也读不出活跃痕迹')
   }
 }
 
 export const MASTERY_META: Record<MasteryLevel, { label: string; dots: number }> = {
-  proficient: { label: '熟练', dots: 3 },
-  familiar: { label: '会用', dots: 2 },
-  learning: { label: '在学', dots: 1 },
-  new: { label: '未上手', dots: 0 }
+  proficient: { get label() { return tr("熟练") }, dots: 3 },
+  familiar: { get label() { return tr("会用") }, dots: 2 },
+  learning: { get label() { return tr("在学") }, dots: 1 },
+  new: { get label() { return tr("未上手") }, dots: 0 }
 }
 
 export const MASTERY_ORDER: MasteryLevel[] = ['proficient', 'familiar', 'learning', 'new']
@@ -447,9 +458,9 @@ export function versionOf(item: { source_dir: string; exe_path: string; version:
 /* ------------------------------ 日志导出 ------------------------------ */
 
 const LOG_STATUS_TEXT: Record<IdentifyLogStatus, string> = {
-  success: '识别完成',
-  skipped: '未注册任何条目',
-  failed: '识别失败'
+  get success() { return tr('识别完成') },
+  get skipped() { return tr('未注册任何条目') },
+  get failed() { return tr('识别失败') }
 }
 
 /**
@@ -461,21 +472,21 @@ const LOG_STATUS_TEXT: Record<IdentifyLogStatus, string> = {
 export function logToText(log: IdentifyLog): string {
   const seconds = (log.duration_ms / 1000).toFixed(1)
   const out = [
-    `目录：${log.dir}`,
-    `状态：${LOG_STATUS_TEXT[log.status]}${log.summary ? ` —— ${log.summary}` : ''}`,
-    `轮次：${log.rounds} | 耗时：${seconds}s | Tokens：${log.tokens.toLocaleString()}`,
+    tr('目录：{p0}', {p0: log.dir}),
+    tr('状态：{p0}{p1}', {p0: LOG_STATUS_TEXT[log.status], p1: log.summary ? ` —— ${log.summary}` : ''}),
+    tr('轮次：{p0} | 耗时：{p1}s | Tokens：{p2}', {p0: log.rounds, p1: seconds, p2: log.tokens.toLocaleString(appLocale.value)}),
     ''
   ]
-  if (log.stop_reason === 'max_turns') out.push('（达到轮数上限被强制结束，当时还没下结论）', '')
+  if (log.stop_reason === 'max_turns') out.push(tr('（达到轮数上限被强制结束，当时还没下结论）'), '')
 
   for (const round of groupRounds(log.events)) {
     for (const { event } of round.events) {
       if (event.type === 'tool_call') {
-        out.push(`[轮次 ${round.index}] → ${event.name} ${JSON.stringify(event.args)}`)
+        out.push(tr('[轮次 {p0}] → {p1} {p2}', {p0: round.index, p1: event.name, p2: JSON.stringify(event.args)}))
       } else if (event.type === 'tool_result') {
-        out.push(`返回${event.isError ? '（错误）' : ''}：${event.text}`)
+        out.push(tr('返回{p0}：{p1}', {p0: event.isError ? tr("（错误）") : '', p1: event.text}))
       } else if (event.type === 'text') {
-        out.push(`[轮次 ${round.index}] 模型推理：${event.text}`)
+        out.push(tr('[轮次 {p0}] 模型推理：{p1}', {p0: round.index, p1: event.text}))
       }
     }
   }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { computed, ref } from 'vue'
 import { marked, Renderer } from 'marked'
 import DOMPurify from 'dompurify'
@@ -38,7 +40,7 @@ const html = computed(() => {
     }
     el.disabled = !props.editableTasks
     el.setAttribute('data-task', String(i))
-    el.setAttribute('aria-label', `切换待办 ${i + 1}`)
+    el.setAttribute('aria-label', tr("切换待办 {p0}", {p0: (i + 1)}))
   })
   parsed.querySelectorAll('span[data-local-img]').forEach((el) => {
     let key = ''

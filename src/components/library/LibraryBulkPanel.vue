@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
@@ -38,22 +40,22 @@ const lastLabel = ref('')
 const { toast } = useToast()
 
 const actions = computed(() => [
-  { value: 'category', label: '修改分类' },
-  { value: 'tags', label: '添加标签' },
-  { value: 'remove-tags', label: '移除标签' },
-  ...(props.kind === 'game' ? [{ value: 'play_status', label: '修改游玩状态' }] : []),
+  { value: 'category', label: tr('修改分类') },
+  { value: 'tags', label: tr('添加标签') },
+  { value: 'remove-tags', label: tr('移除标签') },
+  ...(props.kind === 'game' ? [{ value: 'play_status', label: tr('修改游玩状态') }] : []),
   ...(props.kind === 'project'
     ? [
-        { value: 'group', label: '修改分组' },
-        { value: 'state', label: '修改状态' },
-        { value: 'pin', label: '置顶' },
-        { value: 'unpin', label: '取消置顶' },
+        { value: 'group', label: tr('修改分组') },
+        { value: 'state', label: tr('修改状态') },
+        { value: 'pin', label: tr('置顶') },
+        { value: 'unpin', label: tr('取消置顶') },
       ]
     : [
-        { value: 'archive', label: '归档' },
-        { value: 'restore', label: '恢复到库' },
+        { value: 'archive', label: tr('归档') },
+        { value: 'restore', label: tr('恢复到库') },
       ]),
-  { value: 'remove', label: '移出资料库' },
+  { value: 'remove', label: tr('移出资料库') },
 ])
 
 const label = computed(() => actions.value.find((item) => item.value === action.value)?.label || '')
@@ -79,7 +81,7 @@ watch(
 watch(busy, (v) => emit('busy', v), { flush: 'sync' })
 onBeforeRouteLeave(() => {
   if (busy.value) {
-    toast('正在保存所选项目，请稍后再离开')
+    toast(tr("正在保存所选项目，请稍后再离开"))
     return false
   }
   return true
@@ -107,9 +109,9 @@ async function apply() {
       if (
         moves.length &&
         !(await confirmDialog({
-          title: '确认同步调整整理目录？',
+          title: tr('确认同步调整整理目录？'),
           message: categoryMoveConfirmation(moves),
-          confirmText: '确认调整',
+          confirmText: tr('确认调整'),
         }))
       ) {
         return
@@ -130,7 +132,7 @@ async function apply() {
       return
     }
     const current = await api.get(item.id)
-    if (!current) throw new Error('条目已不存在，请刷新资料库')
+    if (!current) throw new Error(tr('条目已不存在，请刷新资料库'))
     const move = moves.find((m) => m.id === item.id)
     if (move) {
       const p = move.preview
@@ -166,7 +168,7 @@ async function apply() {
     if (mode === 'state') patch.state = text
     if (mode === 'pin' || mode === 'unpin') patch.pinned = mode === 'pin'
     const updated = await api.update(item.id, patch)
-    if (!updated) throw new Error('条目未保存，请刷新后重试')
+    if (!updated) throw new Error(tr('条目未保存，请刷新后重试'))
   })
   emit(
     'completed',
@@ -176,64 +178,44 @@ async function apply() {
 </script>
 
 <template>
-  <section class="library-bulk" aria-label="批量管理" :aria-busy="busy">
+  <section class="library-bulk" :aria-label="$t('批量管理')" :aria-busy="busy">
     <header>
-      <strong aria-live="polite" title="仅包含当前搜索与筛选结果；勾选卡片开始，Esc 可退出">
-        已选 {{ ids.length }} / {{ items.length }} 项
-      </strong>
-      <button class="btn btn--subtle" :disabled="busy || pending || !items.length" @click="emit('all')">
-        全选当前结果
-      </button>
-      <button v-if="ids.length" class="btn btn--subtle" :disabled="busy || !ids.length" @click="emit('clear')">
-        清空选择
-      </button>
-      <button class="btn btn--subtle bulk-close" :disabled="busy" @click="emit('close')">退出批量管理</button>
+      <strong aria-live="polite" :title="$t('仅包含当前搜索与筛选结果；勾选卡片开始，Esc 可退出')">{{ $t("已选 {p0} / {p1} 项", {p0: (ids.length), p1: (items.length)}) }}</strong>
+      <button class="btn btn--subtle" :disabled="busy || pending || !items.length" @click="emit('all')">{{ $t("全选当前结果") }}</button>
+      <button v-if="ids.length" class="btn btn--subtle" :disabled="busy || !ids.length" @click="emit('clear')">{{ $t("清空选择") }}</button>
+      <button class="btn btn--subtle bulk-close" :disabled="busy" @click="emit('close')">{{ $t("退出批量管理") }}</button>
     </header>
     <form v-if="ids.length || busy" @submit.prevent="apply">
       <fieldset :disabled="busy || pending">
-        <label>
-          操作
-          <select v-model="action" aria-label="批量操作">
+        <label>{{ $t("操作") }}<select v-model="action" :aria-label="$t('批量操作')">
             <option v-for="option in actions" :key="option.value" :value="option.value">{{ option.label }}</option>
           </select>
         </label>
-        <label v-if="action === 'category'">
-          目标分类
-          <select v-model="value" aria-label="批量分类">
-            <option value="" disabled>选择分类</option>
+        <label v-if="action === 'category'">{{ $t("目标分类") }}<select v-model="value" :aria-label="$t('批量分类')">
+            <option value="" disabled>{{ $t("选择分类") }}</option>
             <option v-for="category in categories" :key="category" :value="category">{{ category }}</option>
           </select>
         </label>
-        <label v-if="action === 'tags'" class="bulk-value">
-          新增标签
-          <input v-model="value" aria-label="批量标签" placeholder="多个标签用逗号分隔" maxlength="500" />
+        <label v-if="action === 'tags'" class="bulk-value">{{ $t("新增标签") }}<input v-model="value" :aria-label="$t('批量标签')" :placeholder="$t('多个标签用逗号分隔')" maxlength="500" />
         </label>
-        <label v-if="action === 'remove-tags'" class="bulk-value">
-          移除标签
-          <input v-model="value" aria-label="批量移除标签" placeholder="多个标签用逗号分隔" maxlength="500" />
+        <label v-if="action === 'remove-tags'" class="bulk-value">{{ $t("移除标签") }}<input v-model="value" :aria-label="$t('批量移除标签')" :placeholder="$t('多个标签用逗号分隔')" maxlength="500" />
         </label>
-        <label v-if="action === 'play_status'">
-          游玩状态
-          <select v-model="value" aria-label="批量游玩状态">
-            <option value="" disabled>选择状态</option>
-            <option value="playing">在玩</option>
-            <option value="unplayed">想玩</option>
-            <option value="completed">通关</option>
-            <option value="shelved">搁置</option>
+        <label v-if="action === 'play_status'">{{ $t("游玩状态") }}<select v-model="value" :aria-label="$t('批量游玩状态')">
+            <option value="" disabled>{{ $t("选择状态") }}</option>
+            <option value="playing">{{ $t("在玩") }}</option>
+            <option value="unplayed">{{ $t("想玩") }}</option>
+            <option value="completed">{{ $t("通关") }}</option>
+            <option value="shelved">{{ $t("搁置") }}</option>
           </select>
         </label>
-        <label v-if="action === 'group'" class="bulk-value">
-          分组名称
-          <input v-model="value" aria-label="批量分组" placeholder="留空可取消分组" maxlength="100" />
+        <label v-if="action === 'group'" class="bulk-value">{{ $t("分组名称") }}<input v-model="value" :aria-label="$t('批量分组')" :placeholder="$t('留空可取消分组')" maxlength="100" />
         </label>
-        <label v-if="action === 'state'">
-          目标状态
-          <select v-model="value" aria-label="批量状态">
-            <option value="" disabled>选择状态</option>
-            <option value="active">使用中</option>
-            <option value="maintaining">维护中</option>
-            <option value="paused">已暂停</option>
-            <option value="archived">已归档</option>
+        <label v-if="action === 'state'">{{ $t("目标状态") }}<select v-model="value" :aria-label="$t('批量状态')">
+            <option value="" disabled>{{ $t("选择状态") }}</option>
+            <option value="active">{{ $t("使用中") }}</option>
+            <option value="maintaining">{{ $t("维护中") }}</option>
+            <option value="paused">{{ $t("已暂停") }}</option>
+            <option value="archived">{{ $t("已归档") }}</option>
           </select>
         </label>
         <button
@@ -243,38 +225,30 @@ async function apply() {
           type="submit"
           :disabled="!canRun"
         >
-          {{ busy ? `处理中 ${processed} / ${total}` : `${label}所选 ${ids.length} 项` }}
+          {{ busy ? $t('处理中 {p0} / {p1}', {p0: processed, p1: total}) : $t('{p0}所选 {p1} 项', {p0: label, p1: ids.length}) }}
         </button>
       </fieldset>
       <div v-if="confirming" class="bulk-confirm" role="alert">
-        <span>
-          将 {{ ids.length }} 项移出资料库。原文件保留，库内资料需要重新导入。{{
-            kind === 'software' ? '整理目录里属于它们的链接会一并删除。' : ''
-          }}确认继续？
-        </span>
-        <button class="btn bulk-danger" type="submit" :disabled="busy || pending">确认移出 {{ ids.length }} 项</button>
-        <button class="btn btn--subtle" type="button" @click="confirming = false">取消</button>
+        <span>{{ $t("将 {p0} 项移出资料库。原文件保留，库内资料需要重新导入。{p1}确认继续？", {p0: (ids.length), p1: (kind === 'software' ? $t('整理目录里属于它们的链接会一并删除。') : '')}) }}</span>
+        <button class="btn bulk-danger" type="submit" :disabled="busy || pending">{{ $t("确认移出 {p0} 项", {p0: (ids.length)}) }}</button>
+        <button class="btn btn--subtle" type="button" @click="confirming = false">{{ $t("取消") }}</button>
       </div>
     </form>
-    <p v-if="pending" role="status">
-      当前筛选结果尚未就绪，更新后可继续操作。
-      <button class="btn btn--subtle" :disabled="busy" @click="emit('refresh')">刷新结果</button>
+    <p v-if="pending" role="status">{{ $t("当前筛选结果尚未就绪，更新后可继续操作。") }}<button class="btn btn--subtle" :disabled="busy" @click="emit('refresh')">{{ $t("刷新结果") }}</button>
     </p>
 
     <p v-if="total" role="status">
       {{
         busy
-          ? `正在${lastLabel}：${processed} / ${total}`
-          : `${lastLabel}结束：成功 ${succeeded} 项${
-              failures.length ? `，失败 ${failures.length} 项；失败项已保留选择，可重试` : ''
-            }`
+          ? $t('正在{p0}：{p1} / {p2}', {p0: lastLabel, p1: processed, p2: total})
+          : $t('{p0}结束：成功 {p1} 项{p2}', {p0: lastLabel, p1: succeeded, p2: failures.length ? $t('，失败 {p0} 项；失败项已保留选择，可重试', {p0: failures.length}) : ''})
       }}
     </p>
     <details v-if="failures.length" open class="bulk-errors">
-      <summary>未完成的项目</summary>
+      <summary>{{ $t("未完成的项目") }}</summary>
       <ul>
         <li v-for="item in failures" :key="item.id">
-          <strong>{{ item.name }}</strong>：{{ item.message }}
+          <strong>{{ item.name }}</strong>：{{ $systemMessage(item.message) }}
         </li>
       </ul>
     </details>

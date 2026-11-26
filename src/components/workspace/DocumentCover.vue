@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { ref, toRef, computed } from 'vue'
 import { useDocumentCovers } from '@/composables/useDocumentCovers'
 import type { DocumentItem } from '@/types/workspace'
@@ -17,10 +19,10 @@ const media = computed(() =>
 )
 const status = computed(() =>
   !props.item.available
-    ? '原文件暂不可用'
+    ? tr("原文件暂不可用")
     : cover.value.state === 'loading'
-      ? '正在生成封面'
-      : cover.value.reason || '首页预览待载入',
+      ? tr("正在生成封面")
+      : cover.value.reason || tr("首页预览待载入"),
 )
 </script>
 <template>
@@ -31,22 +33,20 @@ const status = computed(() =>
     :data-cover-state="cover.state"
     :data-cover-key="cover.key"
   >
-    <img v-if="cover.url" :src="cover.url" :alt="item.name + '的首页封面'" />
+    <img v-if="cover.url" :src="cover.url" :alt="item.name + $t('的首页封面')" />
     <div v-else class="cover-fallback" :title="cover.reason || item.name">
       <span class="cover-type">{{ item.typeName }}</span>
       <strong>{{ item.name }}</strong>
       <span class="cover-line" />
-      <small>{{ media ? status : item.author || '文字资料' }}</small>
+      <small>{{ media ? status : item.author || $t('文字资料') }}</small>
     </div>
     <span class="cover-format">{{ item.format.toUpperCase() }}</span>
     <button
       v-if="cover.state === 'failed'"
       class="cover-retry"
-      :aria-label="'重试封面 ' + item.name"
+      :aria-label="$t('重试封面 ') + item.name"
       @click.stop="retry"
-    >
-      重试
-    </button>
+    >{{ $t("重试") }}</button>
     <span
       v-if="media && ['failed', 'unavailable'].includes(cover.state)"
       class="cover-status"

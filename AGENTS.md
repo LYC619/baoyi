@@ -1,7 +1,3 @@
-# Contributor guidance
+# BaoYi contributor guidance
 
-Use Node.js 22.12 or newer. Install with npm ci. Run npm run build and checks appropriate to the change.
-
-Use isolated profiles and synthetic data for tests. Preserve user files and prior builds. Never commit account credentials, databases, downloaded media, personal notes, or test profiles.
-
-Prepare the pinned Hermes and comic runtimes before packaging; see README.md. Keep package.json and both root version entries in package-lock.json aligned.
+Read README.en.md and CONTRIBUTING.md. Keep user data out of source control. Use isolated profiles for tests. Run npm run typecheck, npm run build, npm run i18n:check and relevant module tests. Run npm run docs:generate when IPC or routes change. Interface copy is bilingual; preserve user text and stored domain values.

@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import {app,dialog,type BrowserWindow,type IpcMain} from 'electron'
 import path from 'node:path'
 import { getDb } from '../services/storage/database.ts'
@@ -21,6 +22,6 @@ export function registerMusicIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<IpcMa
   handle('search',(source,query,page)=>service!.search(reqEnum(source,['netease','tencent','kuwo','joox','bilibili'] as const,'source'),reqString(query,'query',{max:512}),optNumber(page,'page',{min:1,max:1000,integer:true})))
   handle('preview',key=>service!.preview(reqString(key,'key',{max:512})));handle('download',key=>service!.download(reqString(key,'key',{max:512})))
   handle('jobs',()=>service!.list());handle('cancel',id=>service!.cancel(reqId(id)));handle('retry',id=>service!.retry(reqId(id)))
-  handle('directory',root);handle('pick-directory',async()=>{const result=await dialog.showOpenDialog(getWindow()!,{title:'选择音乐保存目录',defaultPath:root(),properties:['openDirectory','createDirectory']});if(result.canceled||!result.filePaths[0])return null;patchSettings(getDb(), {music_download_root:result.filePaths[0]});return result.filePaths[0]})
+  handle('directory',root);handle('pick-directory',async()=>{const result=await dialog.showOpenDialog(getWindow()!,{title:tr("选择音乐保存目录"),defaultPath:root(),properties:['openDirectory','createDirectory']});if(result.canceled||!result.filePaths[0])return null;patchSettings(getDb(), {music_download_root:result.filePaths[0]});return result.filePaths[0]})
   return service.stop
 }

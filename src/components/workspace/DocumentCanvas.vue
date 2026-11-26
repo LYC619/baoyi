@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { latestOnly, STALE } from '@/composables/latestOnly'
 import { errorMessage } from '@/utils'
 import {
@@ -165,7 +167,7 @@ async function readOutline(instance: PDFDocumentProxy) {
       outlineTruncated.value = result.truncated
     }
   } catch {
-    if (!disposed && pdf.value === instance) outlineError.value = '章节目录读取失败，仍可按页阅读'
+    if (!disposed && pdf.value === instance) outlineError.value = tr("章节目录读取失败，仍可按页阅读")
   } finally {
     if (!disposed && pdf.value === instance) outlineLoading.value = false
   }
@@ -179,7 +181,7 @@ async function navigateOutline(node: OutlineNode) {
   const target = await outlinePages.get(node.id)
   if (disposed || pdf.value !== instance || request !== outlineNavigation) return
   if (target == null) {
-    outlineError.value = '此章节无法定位'
+    outlineError.value = tr("此章节无法定位")
     return
   }
   outlineError.value = ''
@@ -441,7 +443,7 @@ function select() {
   const range = selection.getRangeAt(0)
   const quote = selection.toString().trim()
   if (quote.length > 30000) {
-    error.value = '单条标注最多 30000 字，请分段保存'
+    error.value = tr("单条标注最多 30000 字，请分段保存")
     return
   }
   const rects = boxesFromRange(range)
@@ -559,7 +561,7 @@ async function find(query: string, direction: 1 | -1 = 1) {
   if (!query || searching.value) return
   searching.value = true
   search.value = query
-  searchMessage.value = '正在查找…'
+  searchMessage.value = tr("正在查找…")
   ;(CSS as any).highlights?.delete('document-search')
   try {
     const term = query.toLowerCase()
@@ -575,13 +577,13 @@ async function find(query: string, direction: 1 | -1 = 1) {
         )
         if (disposed) return
         if (!match) {
-          searchMessage.value = '未找到匹配内容'
+          searchMessage.value = tr("未找到匹配内容")
           return
         }
         await loadChapter(match.page - 1)
         highlightQueryInElement(prose.value, viewport.value, query, match.occurrence)
         lastMatch = { query: term, page: match.page, start: match.start, occurrence: match.occurrence }
-        searchMessage.value = '已找到 · 第 ' + match.page + ' 章'
+        searchMessage.value = tr("已找到 · 第 ") + match.page + tr(" 章")
       } else {
         const chapters = props.novelIndex.chapters
         const total = chapters.length
@@ -605,10 +607,10 @@ async function find(query: string, direction: 1 | -1 = 1) {
           await loadChapter(chIdx)
           highlightQueryInElement(prose.value, viewport.value, query, occurrence)
           lastMatch = { query: term, page: chIdx + 1, start: found, occurrence }
-          searchMessage.value = '已找到 · 第 ' + (chIdx + 1) + ' 章'
+          searchMessage.value = tr("已找到 · 第 ") + (chIdx + 1) + tr(" 章")
           return
         }
-        searchMessage.value = '未找到匹配内容'
+        searchMessage.value = tr("未找到匹配内容")
       }
     } else if (pdfMode.value && pdf.value) {
       const instance = pdf.value
@@ -636,14 +638,14 @@ async function find(query: string, direction: 1 | -1 = 1) {
         const occurrence = countOccurrenceBefore(lower, term, start)
         highlightQueryInElement(pdfLayer(n), viewport.value, query, occurrence)
         lastMatch = { query: term, page: n, start, occurrence }
-        searchMessage.value = '已找到 · 第 ' + n + ' 页'
+        searchMessage.value = tr("已找到 · 第 ") + n + tr(" 页")
         return
       }
-      searchMessage.value = '未找到匹配内容（扫描页需文字层）'
+      searchMessage.value = tr("未找到匹配内容（扫描页需文字层）")
     } else {
       const len = chunks.value.length
       if (!len) {
-        searchMessage.value = '未找到匹配内容'
+        searchMessage.value = tr("未找到匹配内容")
         return
       }
       const first = previous?.page || page.value
@@ -668,13 +670,13 @@ async function find(query: string, direction: 1 | -1 = 1) {
           occurrence
         )
         lastMatch = { query: term, page: n + 1, start, occurrence }
-        searchMessage.value = '已找到 · 第 ' + (n + 1) + ' 段'
+        searchMessage.value = tr("已找到 · 第 ") + (n + 1) + tr(" 段")
         return
       }
-      searchMessage.value = '未找到匹配内容'
+      searchMessage.value = tr("未找到匹配内容")
     }
   } catch (e) {
-    if (!disposed) searchMessage.value = '搜索失败：' + errorMessage(e)
+    if (!disposed) searchMessage.value = tr("搜索失败：") + errorMessage(e)
   } finally {
     searching.value = false
   }
@@ -823,7 +825,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="ws-icon"
-            aria-label="上一页"
+            :aria-label="$t('上一页')"
             :disabled="page <= 1 || loading"
             @click="jump({ page: page - 1, offset: 0 })"
           >
@@ -833,7 +835,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="ws-icon"
-            aria-label="下一页"
+            :aria-label="$t('下一页')"
             :disabled="page >= count || loading"
             @click="jump({ page: page + 1, offset: 0 })"
           >
@@ -845,19 +847,18 @@ onBeforeUnmount(() => {
               type="number"
               min="1"
               :max="count"
-              aria-label="跳转页码"
-              title="输入页码后按回车跳转"
+              :aria-label="$t('跳转页码')"
+              :title="$t('输入页码后按回车跳转')"
               @blur="submitPageJump"
             />
           </form>
         </template>
-        <span v-else-if="!imageMode" class="ws-muted">
-          第 {{ page }} / {{ count }} {{ streamedMode ? '章' : '段' }}
+        <span v-else-if="!imageMode" class="ws-muted">{{ $t("第 {p0} / {p1} {p2}", {p0: (page), p1: (count), p2: (streamedMode ? $t('章') : $t('段'))}) }}
         </span>
         <span v-if="searchMessage" class="reader-search-message" role="status">{{ searchMessage }}</span>
       </div>
 
-      <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
+      <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
 
       <div
         ref="viewport"
@@ -869,7 +870,7 @@ onBeforeUnmount(() => {
         @keyup="select"
         @click="hitAnnotation"
       >
-        <div v-if="loading" class="reader-loading" role="status">正在载入页面…</div>
+        <div v-if="loading" class="reader-loading" role="status">{{ $t("正在载入页面…") }}</div>
 
         <div
           v-if="pdfMode"
@@ -903,7 +904,7 @@ onBeforeUnmount(() => {
         <img
           v-else-if="imageMode"
           :src="imageUrl"
-          alt="资料原图"
+          :alt="$t('资料原图')"
           class="document-image"
           :style="{ width: zoom * 90 + '%' }"
         />
@@ -919,7 +920,7 @@ onBeforeUnmount(() => {
               lineHeight: props.readerSettings?.lineHeight || 1.8,
             }"
           >
-            <div v-if="chapterLoading" class="novel-chapter-loading">正在读取章节内容…</div>
+            <div v-if="chapterLoading" class="novel-chapter-loading">{{ $t("正在读取章节内容…") }}</div>
             <header v-if="novelMode" class="novel-chapter-header">
               <h2>{{ props.novelIndex?.chapters[activeChapter]?.title }}</h2>
             </header>
@@ -935,18 +936,14 @@ onBeforeUnmount(() => {
               </p>
             </template>
             <div class="chapter-nav-bottom">
-              <button type="button" class="ws-button" :disabled="activeChapter <= 0 || chapterLoading" @click="prevChapter">
-                上一章
-              </button>
-              <span class="ws-muted">第 {{ activeChapter + 1 }} / {{ props.novelIndex?.chapters.length }} 章</span>
+              <button type="button" class="ws-button" :disabled="activeChapter <= 0 || chapterLoading" @click="prevChapter">{{ $t("上一章") }}</button>
+              <span class="ws-muted">{{ $t("第 {p0} / {p1} 章", {p0: (activeChapter + 1), p1: (props.novelIndex?.chapters.length)}) }}</span>
               <button
                 type="button"
                 class="ws-button primary"
                 :disabled="activeChapter >= (props.novelIndex?.chapters.length || 1) - 1 || chapterLoading"
                 @click="nextChapter"
-              >
-                下一章
-              </button>
+              >{{ $t("下一章") }}</button>
             </div>
           </article>
 

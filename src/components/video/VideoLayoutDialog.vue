@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowRight, Loader2, X } from 'lucide-vue-next'
 import type { VideoLayoutPreview, VideoLayoutResult } from '@/types/video-organize'
@@ -11,7 +13,7 @@ const preview = ref<VideoLayoutPreview | null>(null)
 const result = ref<VideoLayoutResult | null>(null)
 const busy = ref(false), loading = ref(true), failure = ref('')
 watch(busy, value => emit('busy', value), { flush: 'sync' })
-const actionLabel = { 'move-directory': '移动整个目录', 'move-files': '搬文件进新目录', 'in-place': '已就位', skip: '这次不动' } as const
+const actionLabel = { get 'move-directory'() { return tr('移动整个目录') }, get 'move-files'() { return tr('搬文件进新目录') }, get 'in-place'() { return tr('已就位') }, get skip() { return tr('这次不动') } } as const
 const summary = computed(() => {
   const entries = preview.value?.entries ?? []
   return { move: preview.value?.movable ?? 0, inPlace: entries.filter(e => e.action === 'in-place').length, skip: entries.filter(e => e.action === 'skip').length }
@@ -37,30 +39,30 @@ onBeforeUnmount(() => dialog.value?.close())
   <Teleport to="body">
     <dialog ref="dialog" class="layout" aria-labelledby="layout-title" @cancel.prevent="!busy && emit('close')" @click="($event.target === dialog && !busy) && emit('close')">
       <header>
-        <div><h2 id="layout-title">统一移动</h2><p>把已入库的视频挪成「整理根目录 / 收藏分组 / 作品文件夹」；没有分组的直接放在根目录下。移动的是文件本身，观看记录和资料跟着走。</p></div>
-        <button type="button" :disabled="busy" aria-label="关闭统一移动" @click="emit('close')"><X :size="18" /></button>
+        <div><h2 id="layout-title">{{ $t("统一移动") }}</h2><p>{{ $t("把已入库的视频挪成「整理根目录 / 收藏分组 / 作品文件夹」；没有分组的直接放在根目录下。移动的是文件本身，观看记录和资料跟着走。") }}</p></div>
+        <button type="button" :disabled="busy" :aria-label="$t('关闭统一移动')" @click="emit('close')"><X :size="18" /></button>
       </header>
-      <p v-if="loading" class="layout__hint">正在核对每部作品的位置…</p>
+      <p v-if="loading" class="layout__hint">{{ $t("正在核对每部作品的位置…") }}</p>
       <p v-if="failure" class="layout__error" role="alert">{{ failure }}</p>
       <template v-if="preview && !result">
-        <p class="layout__hint">整理根目录：<span class="mono">{{ preview.root }}</span>。要移动 {{ summary.move }} 部，已就位 {{ summary.inPlace }} 部，这次不动 {{ summary.skip }} 部。</p>
-        <ul class="layout__list" aria-label="移动计划">
+        <p class="layout__hint">{{ $t("整理根目录：") }}<span class="mono">{{ preview.root }}</span>{{ $t("。要移动 {p0} 部，已就位 {p1} 部，这次不动 {p2} 部。", {p0: (summary.move), p1: (summary.inPlace), p2: (summary.skip)}) }}</p>
+        <ul class="layout__list" :aria-label="$t('移动计划')">
           <li v-for="entry in preview.entries" :key="entry.resourceId" :class="'layout__row--' + entry.action">
-            <div class="layout__head"><strong>{{ entry.title }}</strong><span class="layout__tag">{{ actionLabel[entry.action] }}</span><span v-if="entry.group" class="layout__group">分组：{{ entry.group }}</span></div>
+            <div class="layout__head"><strong>{{ entry.title }}</strong><span class="layout__tag">{{ actionLabel[entry.action] }}</span><span v-if="entry.group" class="layout__group">{{ $t("分组：{p0}", {p0: (entry.group)}) }}</span></div>
             <p v-if="entry.action === 'move-directory' || entry.action === 'move-files'" class="layout__path mono"><span>{{ entry.from }}</span><ArrowRight :size="13" /><span>{{ entry.to }}</span></p>
-            <p v-if="entry.reason" class="layout__reason">{{ entry.reason }}</p>
+            <p v-if="entry.reason" class="layout__reason">{{ $systemMessage(entry.reason) }}</p>
           </li>
         </ul>
       </template>
       <template v-if="result">
-        <p class="layout__hint">完成 {{ result.outcomes.filter(o => o.ok).length }} 部，{{ result.outcomes.filter(o => !o.ok).length }} 部未处理。移动记录：<span class="mono">{{ result.record }}</span></p>
-        <ul class="layout__list" aria-label="移动结果">
-          <li v-for="outcome in result.outcomes" :key="outcome.resourceId" :class="outcome.ok ? 'layout__row--ok' : 'layout__row--skip'"><div class="layout__head"><strong>{{ outcome.title }}</strong></div><p class="layout__reason">{{ outcome.message }}</p></li>
+        <p class="layout__hint">{{ $t("完成 {p0} 部，{p1} 部未处理。移动记录：", {p0: (result.outcomes.filter(o => o.ok).length), p1: (result.outcomes.filter(o => !o.ok).length)}) }}<span class="mono">{{ result.record }}</span></p>
+        <ul class="layout__list" :aria-label="$t('移动结果')">
+          <li v-for="outcome in result.outcomes" :key="outcome.resourceId" :class="outcome.ok ? 'layout__row--ok' : 'layout__row--skip'"><div class="layout__head"><strong>{{ outcome.title }}</strong></div><p class="layout__reason">{{ $systemMessage(outcome.message) }}</p></li>
         </ul>
       </template>
       <footer>
-        <button type="button" class="btn btn--ghost" :disabled="busy" @click="emit('close')">{{ result ? '关闭' : '取消' }}</button>
-        <button v-if="!result" type="button" class="btn btn--primary" :disabled="pending || busy || loading || !preview?.movable" @click="apply"><Loader2 v-if="busy" class="spin" :size="14" />{{ busy ? '正在移动…' : `开始移动 ${summary.move} 部` }}</button>
+        <button type="button" class="btn btn--ghost" :disabled="busy" @click="emit('close')">{{ result ? $t('关闭') : $t('取消') }}</button>
+        <button v-if="!result" type="button" class="btn btn--primary" :disabled="pending || busy || loading || !preview?.movable" @click="apply"><Loader2 v-if="busy" class="spin" :size="14" />{{ busy ? $t('正在移动…') : $t('开始移动 {p0} 部', {p0: summary.move}) }}</button>
       </footer>
     </dialog>
   </Teleport>

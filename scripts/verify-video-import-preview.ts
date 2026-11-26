@@ -216,5 +216,36 @@ await test('Agent enrichment uses an available version when another recorded ver
     assert.equal(episodes.length, 1); assert.equal(episodes[0].description, 'Reviewed description')
   } finally { scratch.close() }
 })
+await test('single video file, single audio file, and mixed file+folder drops flow through import manager', async f => {
+  const singleMp4 = f.file('Drops/SoloFilm.mp4')
+  f.file('Drops/SoloFilm.nfo', '<movie><title>Solo Film</title><plot>Single file movie</plot></movie>')
+  const singleMp3 = f.file('Drops/SoloSong.mp3', 'synthetic audio')
+  const ignoredTxt = f.file('Drops/readme.txt', 'ignore me')
+  const manager = f.make()
+
+  // Single MP4 drop
+  const videoBatch = await manager.prepare([singleMp4])
+  assert.equal(videoBatch.entries.length, 1)
+  assert.equal(videoBatch.entries[0].title, 'Solo Film')
+  const videoConfirmed = manager.confirm(videoBatch.id, [videoBatch.entries[0].id])
+  assert.equal(videoConfirmed.entries[0].status, 'confirmed')
+
+  // Single MP3 drop
+  const audioBatch = await manager.prepare([singleMp3])
+  assert.equal(audioBatch.entries.length, 1)
+  const audioConfirmed = manager.confirm(audioBatch.id, [audioBatch.entries[0].id])
+  const audioItem = videoDb.getVideo(f.db, audioConfirmed.entries[0].resourceId)
+  assert.equal(audioItem?.media_kind, 'audio')
+
+  // Mixed folder + single file + unsupported sidecar drop
+  const extraMp4 = f.file('Drops/ExtraFilm.mp4')
+  const mixedBatch = await manager.prepare([path.join(f.root, 'Alpha'), extraMp4, ignoredTxt])
+  assert.equal(mixedBatch.entries.length, 2)
+  assert.ok(mixedBatch.entries.some(e => e.title === 'Alpha'))
+  assert.ok(mixedBatch.entries.some(e => e.path.toLowerCase() === extraMp4.toLowerCase()))
+
+  // Unsupported-only drop must still fail cleanly
+  await assert.rejects(() => manager.prepare([ignoredTxt]), /视频|音频|文件夹/)
+})
 console.log(`Video import preview: ${passed} passed / ${failed} failed`)
 process.exitCode = failed ? 1 : 0

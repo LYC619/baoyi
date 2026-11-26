@@ -12,7 +12,7 @@ const meta = computed(() => MASTERY_META[props.level] ?? MASTERY_META.new)
 </script>
 
 <template>
-  <div class="mastery" :title="`掌握度：${meta.label}`">
+  <div class="mastery" :title="$t('掌握度：{p0}', {p0: meta.label})">
     <span class="mastery__dots" :style="{ '--dot': `${size}px` }">
       <i v-for="n in 3" :key="n" :class="{ on: n <= meta.dots }" />
     </span>

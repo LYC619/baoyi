@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { errorMessage } from '@/utils'
 import { computed, ref, watch, onUnmounted } from 'vue'
 import type { ImageApi,ImageItem,ImageGroup } from '@/types/image'
@@ -30,7 +32,7 @@ const blocks=computed(()=>{
     const group=props.groups.find(g=>g.id===item.groupId)
     const folder=p.folder==='.'?'':p.folder
     const key=props.view.grouping==='directory'?item.id+'/'+folder:props.view.grouping==='category'?group?.id||'uncategorized':'all'
-    const name=props.view.grouping==='directory'?item.name+(folder?' / '+folder:''):props.view.grouping==='category'?group?.name||'未分类':''
+    const name=props.view.grouping==='directory'?item.name+(folder?' / '+folder:''):props.view.grouping==='category'?group?.name||tr("未分类"):''
     if(!blocks.has(key))blocks.set(key,{key,name,path:props.view.grouping==='directory'?item.path:'',pages:[]})
     blocks.get(key)!.pages.push(p)
   }
@@ -45,18 +47,18 @@ async function turn(value:number){page.value=value;await load();root.value?.scro
 </script>
 <template>
   <section ref="root" class="photo-gallery" :aria-busy="busy">
-    <header class="gallery-summary"><span>{{total}} 张图片<span v-if="items.size>1"> · {{items.size}} 个文件夹</span></span><button class="im-button" @click="emit('manage')">管理组合</button><button class="im-button" @click="emit('bulk')">批量整理</button><nav v-if="pageCount>1" aria-label="图片分页"><button class="im-button" :disabled="busy||page===1" @click="turn(page-1)">上一页</button><span>{{page}} / {{pageCount}}</span><button class="im-button" :disabled="busy||page===pageCount" @click="turn(page+1)">下一页</button></nav></header>
-    <p v-if="error" class="im-error" role="alert">{{error}} <button class="im-button" @click="load">重试</button></p><p v-if="busy" role="status">正在载入图片…</p>
-    <p v-if="!busy&&!error&&!total" class="im-empty">文件夹中暂无图片，放入新图片后会自动显示。</p>
+    <header class="gallery-summary"><span>{{ $t("{p0} 张图片", {p0: (total)}) }}<span v-if="items.size>1">{{ $t("· {p0} 个文件夹", {p0: (items.size)}) }}</span></span><button class="im-button" @click="emit('manage')">{{ $t("管理组合") }}</button><button class="im-button" @click="emit('bulk')">{{ $t("批量整理") }}</button><nav v-if="pageCount>1" :aria-label="$t('图片分页')"><button class="im-button" :disabled="busy||page===1" @click="turn(page-1)">{{ $t("上一页") }}</button><span>{{page}} / {{pageCount}}</span><button class="im-button" :disabled="busy||page===pageCount" @click="turn(page+1)">{{ $t("下一页") }}</button></nav></header>
+    <p v-if="error" class="im-error" role="alert">{{$systemMessage(error)}} <button class="im-button" @click="load">{{ $t("重试") }}</button></p><p v-if="busy" role="status">{{ $t("正在载入图片…") }}</p>
+    <p v-if="!busy&&!error&&!total" class="im-empty">{{ $t("文件夹中暂无图片，放入新图片后会自动显示。") }}</p>
     <section v-for="block in blocks" :key="block.key" class="photo-folder">
-      <header v-if="block.name"><h2>{{block.name}}</h2><small>{{block.pages.length}} 张<span v-if="pageCount>1"> · 本页</span></small><p v-if="block.path" :title="block.path">{{block.path}}</p></header>
+      <header v-if="block.name"><h2>{{block.name}}</h2><small>{{ $t("{p0} 张", {p0: (block.pages.length)}) }}<span v-if="pageCount>1">{{ $t("· 本页") }}</span></small><p v-if="block.path" :title="block.path">{{block.path}}</p></header>
       <div class="photo-tiles" :class="'photo-tiles--'+view.layout" :style="{'--photo-size':view.cardSize+'px'}">
-        <button v-for="p in block.pages" :key="p.id" v-masonry="view.layout==='adaptive'" class="photo-tile" :disabled="opening" :aria-label="`浏览 ${p.name} · ${items.get(p.resourceId)?.name}`" @click="open(p)">
+        <button v-for="p in block.pages" :key="p.id" v-masonry="view.layout==='adaptive'" class="photo-tile" :disabled="opening" :aria-label="$t('浏览 {p0} · {p1}', {p0: p.name, p1: items.get(p.resourceId)?.name})" @click="open(p)">
           <ImageCover :page-id="p.id" :revision="items.get(p.resourceId)?.updatedAt" :name="p.name" photo :shape="view.layout"/><span>{{p.name}}<small>{{items.get(p.resourceId)?.name}}</small></span>
         </button>
       </div>
     </section>
-    <nav v-if="pageCount>1" class="gallery-summary gallery-bottom" aria-label="底部图片分页"><button class="im-button" :disabled="busy||page===1" @click="turn(page-1)">上一页</button><span>{{page}} / {{pageCount}}</span><button class="im-button" :disabled="busy||page===pageCount" @click="turn(page+1)">下一页</button></nav>
+    <nav v-if="pageCount>1" class="gallery-summary gallery-bottom" :aria-label="$t('底部图片分页')"><button class="im-button" :disabled="busy||page===1" @click="turn(page-1)">{{ $t("上一页") }}</button><span>{{page}} / {{pageCount}}</span><button class="im-button" :disabled="busy||page===pageCount" @click="turn(page+1)">{{ $t("下一页") }}</button></nav>
   </section>
 </template>
 <style scoped>

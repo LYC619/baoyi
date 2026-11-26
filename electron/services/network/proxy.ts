@@ -1,3 +1,4 @@
+import { tr } from '../system/language.ts'
 /**
  * 出站代理：把设置里的那串规则铺到 Hanime 专用 Chromium session 上，并把
  * hanime 的取页切到该 session 的 `fetch`（才吃得到这份代理配置）。
@@ -212,7 +213,7 @@ async function openHanimeChallenge(url: string): Promise<string | null> {
     const win = new BrowserWindow({
       width: 900,
       height: 760,
-      title: 'Hanime Cloudflare 验证',
+      title: tr('Hanime Cloudflare 验证'),
       autoHideMenuBar: true,
       webPreferences: { session: getHanimeSession(), contextIsolation: true, nodeIntegration: false }
     })

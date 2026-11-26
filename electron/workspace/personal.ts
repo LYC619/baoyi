@@ -24,7 +24,7 @@ const allowed: Record<PersonalKind, string[]> = {
     "snoozedUntil",
     "renewals",
   ],
-  skill: ["stages", "practice", "level"],
+  skill: ["stages", "practice", "level", "activeMetrics"],
   experience: ["date", "organization", "category"],
   metric: ["unit"],
   measurement: ["metricId", "value", "date"],
@@ -83,6 +83,8 @@ export function validatePersonal(input: PersonalInput): PersonalInput {
         )
       )
         throw new Error("经历节点无效");
+    } else if (key === "activeMetrics") {
+      data[key] = [...new Set(v.strings(value, 12))];
     } else data[key] = v.text(value, key, key === "practice" ? 10000 : 2000);
   }
   if (data.url) {

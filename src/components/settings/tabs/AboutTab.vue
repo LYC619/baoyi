@@ -3,6 +3,9 @@ import { onMounted, ref, version as vueVersion } from 'vue'
 import { Github } from 'lucide-vue-next'
 import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
 import type { AppInfo } from '@/types'
+import { locale } from '@/i18n'
+import { useToast } from '@/composables/useToast'
+import { errorMessage } from '@/utils'
 
 /* -------------------------------- 关于 -------------------------------- */
 
@@ -11,35 +14,34 @@ const info = ref<AppInfo | null>(null)
 onMounted(async () => {
   info.value = await window.baoyi.app.info()
 })
+async function openPage(page: 'repository' | 'guide'): Promise<void> {
+  const url = page === 'repository' ? 'https://github.com/LYC619/baoyi' : `https://github.com/LYC619/baoyi/blob/main/docs/site/${locale.value}/guide.md`
+  try { await window.baoyi.app.openUrl(url) }
+  catch (error) { useToast().error(errorMessage(error)) }
+}
 </script>
 
 <template>
 <section class="panel about">
   <BaoyiLogo :size="52" />
   <div>
-    <p class="about__name">
-      抱一 <span class="about__ver mono">v{{ info?.version ?? '—' }}</span>
+    <p class="about__name">{{ $t("抱一") }}<span class="about__ver mono">v{{ info?.version ?? '—' }}</span>
     </p>
-    <p class="about__slogan">知止而后得。</p>
-    <p class="about__quote">是以圣人抱一为天下式。——《道德经》第二十二章</p>
+    <p class="about__slogan">{{ $t("知止而后得。") }}</p>
+    <p class="about__quote">{{ $t("是以圣人抱一为天下式。——《道德经》第二十二章") }}</p>
   </div>
 </section>
 
 <section class="panel">
-  <h2 class="sec-head">这是什么</h2>
-  <p class="sec-desc sec-desc--loose">
-    抱一把散落在各个盘符里的绿色软件收拢成一面卡片墙，交给 AI 认清每一个是什么、
-    能替你解决什么问题，再由你决定留下哪些。
-  </p>
-  <p class="sec-desc sec-desc--loose">
-    不联网同步、不上传任何数据，所有记录都在本机。
-  </p>
+  <h2 class="sec-head">{{ $t("这是什么") }}</h2>
+  <p class="sec-desc sec-desc--loose">{{ $t('抱一把文件、项目与个人记录放在同一个本地工作区，保留资料之间的关联。') }}</p>
+  <p class="sec-desc sec-desc--loose">{{ $t('资料库保存在本机。使用 AI、联网搜索或在线来源时，相关请求会发送到你选择的服务。') }}</p>
 </section>
 
 <section class="panel">
-  <h2 class="sec-head">构建信息</h2>
+  <h2 class="sec-head">{{ $t("构建信息") }}</h2>
   <dl class="kv">
-    <dt>抱一</dt>
+    <dt>{{ $t("抱一") }}</dt>
     <dd class="mono">v{{ info?.version ?? '—' }}</dd>
     <dt>Electron</dt>
     <dd class="mono">{{ info?.electron ?? '—' }}</dd>
@@ -49,24 +51,20 @@ onMounted(async () => {
     <dd class="mono">{{ info?.node ?? '—' }}</dd>
     <dt>Vue</dt>
     <dd class="mono">{{ vueVersion }}</dd>
-    <dt>分发方式</dt>
-    <dd>{{ info?.portable ? '绿色版（数据在程序旁边）' : '装机版（数据在 AppData）' }}</dd>
+    <dt>{{ $t("分发方式") }}</dt>
+    <dd>{{ info?.portable ? $t('绿色版（数据在程序旁边）') : $t('装机版（数据在 AppData）') }}</dd>
   </dl>
-  <p v-if="info?.portable" class="hint">
-    整个文件夹可以直接拷走，库和封面海报都跟着 <code>data\</code> 走。
-    删掉 <code>绿色版.txt</code> 会让抱一改用 AppData，届时 <code>data\</code>
-    里的数据不会自动搬过去。
-  </p>
+  <p v-if="info?.portable" class="hint">{{ $t('绿色版可连同整个目录复制。移除 绿色版.txt 会改用 AppData；原 data\\ 中的数据不会自动搬迁。') }}</p>
 </section>
 
 <section class="panel">
-  <h2 class="sec-head">项目主页</h2>
+  <h2 class="sec-head">{{ $t("项目主页") }}</h2>
   <div class="row">
-    <button class="btn btn--ghost" disabled title="仓库还没公开">
+    <button class="btn btn--ghost" @click="openPage('repository')">
       <Github :size="14" />
       GitHub
     </button>
-    <span class="hint">仓库地址确定后会填在这里。</span>
+    <button class="btn btn--ghost" @click="openPage('guide')">{{ $t('使用指南') }}</button>
   </div>
 </section>
 </template>

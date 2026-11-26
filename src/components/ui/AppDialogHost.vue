@@ -92,10 +92,10 @@ function cancelDialog() {
   >
     <form v-if="activeDialog" method="dialog" class="app-dialog__form" @submit.prevent="submitForm">
       <h2 :id="`app-dialog-title-${activeDialog.id}`" class="app-dialog__title">
-        {{ activeDialog.title }}
+        {{ $systemMessage(activeDialog.title) }}
       </h2>
       <p v-if="activeDialog.message" class="app-dialog__message">
-        {{ activeDialog.message }}
+        {{ $systemMessage(activeDialog.message) }}
       </p>
       <input
         v-if="activeDialog.kind === 'prompt'"
@@ -104,8 +104,8 @@ function cancelDialog() {
         type="text"
         class="input app-dialog__input"
         :autofocus="true"
-        :placeholder="activeDialog.placeholder"
-        :aria-label="activeDialog.title"
+        :placeholder="$systemMessage(activeDialog.placeholder)"
+        :aria-label="$systemMessage(activeDialog.title)"
       />
       <div class="app-dialog__actions">
         <button
@@ -116,7 +116,7 @@ function cancelDialog() {
           :autofocus="activeDialog.kind === 'confirm' && activeDialog.tone === 'danger' ? true : undefined"
           @click="cancelDialog"
         >
-          {{ activeDialog.cancelText }}
+          {{ $systemMessage(activeDialog.cancelText) }}
         </button>
         <button
           ref="confirmBtnEl"
@@ -126,7 +126,7 @@ function cancelDialog() {
           :class="activeDialog.tone === 'danger' ? 'btn--danger' : 'btn--primary'"
           :autofocus="activeDialog.kind === 'confirm' && activeDialog.tone !== 'danger' ? true : undefined"
         >
-          {{ activeDialog.confirmText }}
+          {{ $systemMessage(activeDialog.confirmText) }}
         </button>
       </div>
     </form>

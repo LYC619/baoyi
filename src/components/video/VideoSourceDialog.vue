@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { onMounted, ref } from 'vue'
 import type { VideoItem } from '@/types'
 import type { VideoWorkContent } from '@/types/video-workflow'
@@ -17,25 +19,25 @@ async function search() {
   catch (e) { failure.value = errorMessage(e) } finally { busy.value = false }
 }
 async function bind(code: string) {
-  if (props.episodes.length > 1 && !episode.value) { failure.value = '先选择这一来源对应的本地单集'; return }
+  if (props.episodes.length > 1 && !episode.value) { failure.value = tr("先选择这一来源对应的本地单集"); return }
   busy.value = true; failure.value = ''
   try {
     const result = await window.baoyi.video.scrapeEpisode(props.item.id, episode.value, code)
     emit('changed')
-    if (result.warnings.length) failure.value = '来源与资料已保存；' + result.warnings.join('；')
+    if (result.warnings.length) failure.value = tr("来源与资料已保存；") + result.warnings.join('；')
     else emit('close')
   } catch (e) { failure.value = errorMessage(e) } finally { busy.value = false }
 }
 </script>
 <template>
   <dialog ref="dialog" class="video-source" aria-labelledby="video-source-title" @cancel.prevent="!busy && emit('close')">
-    <header><h2 id="video-source-title">匹配单集来源</h2><button class="btn btn--ghost" :disabled="busy" @click="emit('close')">关闭</button></header>
-    <p>选择对应的视频后，会保存这一集的简介、标签与图片，供后续下载和补集使用。</p>
-    <label v-if="episodes.length > 1">本地单集<select v-model="episode" class="input" :disabled="busy"><option value="">请选择对应的一集</option><option v-for="e in episodes" :key="e.id" :value="e.id">{{ e.title || e.original_title }}</option></select></label>
-    <form @submit.prevent="search"><label>作品名<input v-model="query" class="input" maxlength="240" :disabled="busy" /></label><button class="btn btn--primary" :disabled="busy || !query.trim()">{{ busy ? '正在读取…' : '搜索来源' }}</button></form>
-    <ul v-if="hits.length"><li v-for="hit in hits" :key="hit.videoCode"><span>{{ hit.title }}<small>Hanime · {{ hit.videoCode }}</small></span><button class="btn btn--subtle" :disabled="busy" @click="bind(hit.videoCode)">选用并刮削</button></li></ul>
-    <p v-else-if="searched && !busy">没有找到匹配结果，可修改片名或直接填写链接。</p>
-    <form @submit.prevent="bind(source)"><label>视频链接或来源编号<input v-model="source" class="input" placeholder="https://hanime1.me/watch?v=…" :disabled="busy" /></label><button class="btn btn--subtle" :disabled="busy || !source.trim()">绑定并刮削</button></form>
+    <header><h2 id="video-source-title">{{ $t("匹配单集来源") }}</h2><button class="btn btn--ghost" :disabled="busy" @click="emit('close')">{{ $t("关闭") }}</button></header>
+    <p>{{ $t("选择对应的视频后，会保存这一集的简介、标签与图片，供后续下载和补集使用。") }}</p>
+    <label v-if="episodes.length > 1">{{ $t("本地单集") }}<select v-model="episode" class="input" :disabled="busy"><option value="">{{ $t("请选择对应的一集") }}</option><option v-for="e in episodes" :key="e.id" :value="e.id">{{ e.title || e.original_title }}</option></select></label>
+    <form @submit.prevent="search"><label>{{ $t("作品名") }}<input v-model="query" class="input" maxlength="240" :disabled="busy" /></label><button class="btn btn--primary" :disabled="busy || !query.trim()">{{ busy ? $t('正在读取…') : $t('搜索来源') }}</button></form>
+    <ul v-if="hits.length"><li v-for="hit in hits" :key="hit.videoCode"><span>{{ hit.title }}<small>Hanime · {{ hit.videoCode }}</small></span><button class="btn btn--subtle" :disabled="busy" @click="bind(hit.videoCode)">{{ $t("选用并刮削") }}</button></li></ul>
+    <p v-else-if="searched && !busy">{{ $t("没有找到匹配结果，可修改片名或直接填写链接。") }}</p>
+    <form @submit.prevent="bind(source)"><label>{{ $t("视频链接或来源编号") }}<input v-model="source" class="input" placeholder="https://hanime1.me/watch?v=…" :disabled="busy" /></label><button class="btn btn--subtle" :disabled="busy || !source.trim()">{{ $t("绑定并刮削") }}</button></form>
     <p v-if="failure" class="failure" role="alert">{{ failure }}</p>
   </dialog>
 </template>

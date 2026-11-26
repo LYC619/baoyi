@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 /**
  * 识别结果确认面板。
@@ -107,14 +109,14 @@ const groups = computed(() => {
   const grouped = new Set<string>()
 
   for (const g of versionGroups.value) {
-    out.push({ key: `dupe:${g.key}`, title: `${g.name} —— ${g.list.length} 个版本`, dupe: true, list: g.list })
+    out.push({ key: `dupe:${g.key}`, title: tr('{p0} —— {p1} 个版本', {p0: g.name, p1: g.list.length}), dupe: true, list: g.list })
     for (const it of g.list) grouped.add(it.id)
   }
 
   const byDir = new Map<string, PendingItem[]>()
   for (const it of items.value) {
     if (grouped.has(it.id)) continue
-    const key = it.source_dir || '（未知目录）'
+    const key = it.source_dir || tr("（未知目录）")
     if (!byDir.has(key)) byDir.set(key, [])
     byDir.get(key)!.push(it)
   }
@@ -126,7 +128,7 @@ const groups = computed(() => {
 /** 版本号显示用。认不出来就用 PE 的 version 字段顶上 */
 function versionLabel(item: PendingItem): string {
   const v = versionOf(item)
-  return v.length > 0 ? v.join('.') : item.version || '版本未知'
+  return v.length > 0 ? v.join('.') : item.version || tr('版本未知')
 }
 
 const allSelected = computed(
@@ -157,7 +159,7 @@ async function patch(item: PendingItem, p: Partial<PendingItem>): Promise<void> 
     if (i >= 0) items.value[i] = updated
   } catch (err) {
     // 失焦即存的调用点太多，逐个包 try/catch 不现实，错误统一在这里接住
-    error(`改动没有存上：${errorMessage(err)}`)
+    error(tr("改动没有存上：{p0}", {p0: (errorMessage(err))}))
   }
 }
 
@@ -201,7 +203,7 @@ function planOf(item: PendingItem): 'move' | 'link' {
 
 async function confirm(ids: string[]): Promise<void> {
   if (ids.length === 0) {
-    toast('先勾选要确认的条目')
+    toast(tr("先勾选要确认的条目"))
     return
   }
   busy.value = true
@@ -209,13 +211,13 @@ async function confirm(ids: string[]): Promise<void> {
     const r = await window.baoyi.pending.confirm(plain(ids))
     await Promise.all([load(), categories.load(), store.reload()])
     const extra = [
-      r.categories.length ? `新建分类「${r.categories.join('、')}」` : '',
-      r.tags.length ? `${r.tags.length} 个标签入池` : ''
+      r.categories.length ? tr("新建分类「{p0}」", {p0: (r.categories.join('、'))}) : '',
+      r.tags.length ? tr("{p0} 个标签入池", {p0: (r.tags.length)}) : ''
     ].filter(Boolean)
-    success(`已收录 ${r.registered} 个软件${extra.length ? `，${extra.join('，')}` : ''}`)
+    success(tr("已收录 {p0} 个软件{p1}", {p0: (r.registered), p1: (extra.length ? `，${extra.join('，')}` : '')}))
     if (items.value.length === 0) void router.push({ name: 'home' })
   } catch (err) {
-    error(`写入失败：${errorMessage(err)}`)
+    error(tr("写入失败：{p0}", {p0: (errorMessage(err))}))
   } finally {
     busy.value = false
   }
@@ -226,9 +228,9 @@ async function skip(ids: string[], ask: boolean): Promise<void> {
   if (
     ask &&
     !(await confirmDialog({
-      title: `忽略选中的 ${ids.length} 个程序？`,
-      message: '它们会加入忽略名单，后续扫描不再提示；可在「设置 → 扫描与识别」中清空忽略名单。本地程序文件不受影响。',
-      confirmText: '加入忽略名单'
+      title: tr('忽略选中的 {p0} 个程序？', {p0: ids.length}),
+      message: tr("它们会加入忽略名单，后续扫描不再提示；可在「设置 → 扫描与识别」中清空忽略名单。本地程序文件不受影响。"),
+      confirmText: tr('加入忽略名单')
     }))
   ) {
     return
@@ -237,17 +239,17 @@ async function skip(ids: string[], ask: boolean): Promise<void> {
   try {
     const n = await window.baoyi.pending.skip(plain(ids))
     await Promise.all([load(), store.refreshCounts()])
-    toast(`已标记 ${n} 个为不注册`)
+    toast(tr("已标记 {p0} 个为不注册", {p0: (n)}))
     if (items.value.length === 0) void router.push({ name: 'home' })
   } catch (err) {
-    error(`标记失败：${errorMessage(err)}`)
+    error(tr("标记失败：{p0}", {p0: (errorMessage(err))}))
   } finally {
     busy.value = false
   }
 }
 
 async function confirmAll(): Promise<void> {
-  if (!(await confirmDialog({ title: `收录全部 ${items.value.length} 个待确认条目？`, message: '将按当前识别结果直接加入软件库，收录后仍可随时修改分类与名称。', confirmText: '全部收录' }))) return
+  if (!(await confirmDialog({ title: tr('收录全部 {p0} 个待确认条目？', {p0: items.value.length}), message: tr("将按当前识别结果直接加入软件库，收录后仍可随时修改分类与名称。"), confirmText: tr('全部收录') }))) return
   await confirm(items.value.map((i) => i.id))
 }
 </script>
@@ -256,29 +258,22 @@ async function confirmAll(): Promise<void> {
   <div class="confirm">
     <header class="head">
       <button class="btn btn--subtle" @click="router.push({ name: 'home' })">
-        <ArrowLeft :size="16" />
-        稍后再说
-      </button>
-      <h1>确认识别结果</h1>
+        <ArrowLeft :size="16" />{{ $t("稍后再说") }}</button>
+      <h1>{{ $t("确认识别结果") }}</h1>
       <span class="head__count">{{ items.length }}</span>
     </header>
 
     <div class="body">
-      <p v-if="loading" class="state">载入中…</p>
+      <p v-if="loading" class="state">{{ $t("载入中…") }}</p>
 
       <div v-else-if="items.length === 0" class="state">
-        <h2>没有待确认的条目</h2>
-        <p>识别完的软件会先停在这里，等你过目之后才进入卡片墙。</p>
-        <button class="btn btn--ghost" @click="router.push({ name: 'home' })">返回卡片墙</button>
+        <h2>{{ $t("没有待确认的条目") }}</h2>
+        <p>{{ $t("识别完的软件会先停在这里，等你过目之后才进入卡片墙。") }}</p>
+        <button class="btn btn--ghost" @click="router.push({ name: 'home' })">{{ $t("返回卡片墙") }}</button>
       </div>
 
       <template v-else>
-        <p class="intro">
-          下面是 AI 识别出来但还没入库的条目。名字、说明、分类、标签都可以直接改 ——
-          改完失焦就存，不用先点保存。带
-          <TagBadge label="新分类" tone="warning" /> 或
-          <TagBadge label="新标签" tone="warning" /> 的是 AI 自己造的词，确认后才会进入体系。
-        </p>
+        <p class="intro">{{ $t("下面是 AI 识别出来但还没入库的条目。名字、说明、分类、标签都可以直接改 —— 改完失焦就存，不用先点保存。带") }}<TagBadge :label="$t('新分类')" tone="warning" />{{ $t("或") }}<TagBadge :label="$t('新标签')" tone="warning" />{{ $t("的是 AI 自己造的词，确认后才会进入体系。") }}</p>
 
         <!--
           多版本提示。默认已经替用户勾好了最新那个，这条只是说明「为什么有两条同名的」，
@@ -286,10 +281,7 @@ async function confirmAll(): Promise<void> {
         -->
         <div v-if="versionGroups.length > 0" class="warn">
           <Layers :size="15" />
-          <span>
-            有 {{ versionGroups.length }} 个软件存在多个版本目录，建议只保留最新版。
-            已默认只勾选版本号最大的那一条，旧版留着没勾 —— 想全留就点左下角「全选」。
-          </span>
+          <span>{{ $t("有 {p0} 个软件存在多个版本目录，建议只保留最新版。 已默认只勾选版本号最大的那一条，旧版留着没勾 —— 想全留就点左下角「全选」。", {p0: (versionGroups.length)}) }}</span>
         </div>
 
         <section v-for="g in groups" :key="g.key" class="group" :class="{ 'group--dupe': g.dupe }">
@@ -315,7 +307,7 @@ async function confirmAll(): Promise<void> {
                 <input
                   class="input input--name"
                   :value="it.name_zh"
-                  placeholder="中文名称"
+                  :placeholder="$t('中文名称')"
                   spellcheck="false"
                   @blur="editText(it, 'name_zh', $event)"
                   @keydown.enter="($event.target as HTMLInputElement).blur()"
@@ -323,7 +315,7 @@ async function confirmAll(): Promise<void> {
                 <input
                   class="input input--en"
                   :value="it.name_en"
-                  placeholder="英文原名"
+                  :placeholder="$t('英文原名')"
                   spellcheck="false"
                   @blur="editText(it, 'name_en', $event)"
                   @keydown.enter="($event.target as HTMLInputElement).blur()"
@@ -332,7 +324,7 @@ async function confirmAll(): Promise<void> {
 
               <div v-if="g.dupe" class="row__ver">
                 <TagBadge
-                  :label="idx === 0 ? `最新 ${versionLabel(it)}` : `旧版 ${versionLabel(it)}`"
+                  :label="idx === 0 ? $t('最新 {p0}', {p0: versionLabel(it)}) : $t('旧版 {p0}', {p0: versionLabel(it)})"
                   :tone="idx === 0 ? 'success' : 'warning'"
                 />
                 <span class="hint">{{ it.source_dir }}</span>
@@ -341,7 +333,7 @@ async function confirmAll(): Promise<void> {
               <input
                 class="input"
                 :value="it.summary"
-                placeholder="一句话说明"
+                :placeholder="$t('一句话说明')"
                 spellcheck="false"
                 @blur="editText(it, 'summary', $event)"
                 @keydown.enter="($event.target as HTMLInputElement).blur()"
@@ -355,12 +347,12 @@ async function confirmAll(): Promise<void> {
                 >
                   <option v-for="c in categoryOptions(it)" :key="c" :value="c">{{ c }}</option>
                 </select>
-                <TagBadge v-if="it.new_category" label="新分类" tone="warning" />
+                <TagBadge v-if="it.new_category" :label="$t('新分类')" tone="warning" />
 
                 <input
                   class="input input--tags"
                   :value="it.tags.join('、')"
-                  placeholder="标签，用顿号分隔"
+                  :placeholder="$t('标签，用顿号分隔')"
                   spellcheck="false"
                   @blur="editTags(it, $event)"
                   @keydown.enter="($event.target as HTMLInputElement).blur()"
@@ -368,7 +360,7 @@ async function confirmAll(): Promise<void> {
                 <TagBadge
                   v-for="t in it.new_tags"
                   :key="t"
-                  :label="`新：${t}`"
+                  :label="$t('新：{p0}', {p0: t})"
                   tone="warning"
                 />
               </div>
@@ -380,52 +372,48 @@ async function confirmAll(): Promise<void> {
                 所以放在确认面板里让用户复核，而不是直接信 AI。
               -->
               <div class="row__move">
-                <label class="pick" title="绿色软件可以整体移动到整理目录下">
-                  <span class="pick__label">绿色软件</span>
+                <label class="pick" :title="$t('绿色软件可以整体移动到整理目录下')">
+                  <span class="pick__label">{{ $t("绿色软件") }}</span>
                   <select
                     class="select select--sm"
                     :value="portableValue(it)"
                     @change="setPortable(it, ($event.target as HTMLSelectElement).value)"
                   >
-                    <option value="unknown">未判断</option>
-                    <option value="yes">是</option>
-                    <option value="no">否</option>
+                    <option value="unknown">{{ $t("未判断") }}</option>
+                    <option value="yes">{{ $t("是") }}</option>
+                    <option value="no">{{ $t("否") }}</option>
                   </select>
                 </label>
 
-                <label class="pick" title="安装版挪走可能会坏，抱一会据此决定是剪切还是只做链接">
-                  <span class="pick__label">移动风险</span>
+                <label class="pick" :title="$t('安装版挪走可能会坏，抱一会据此决定是剪切还是只做链接')">
+                  <span class="pick__label">{{ $t("移动风险") }}</span>
                   <select
                     class="select select--sm"
                     :value="it.move_risk"
                     @change="patch(it, { move_risk: ($event.target as HTMLSelectElement).value as MoveRisk })"
                   >
-                    <option value="unknown">未知（只做链接）</option>
-                    <option value="safe">可安全移动</option>
-                    <option value="risky">有风险（只做链接）</option>
+                    <option value="unknown">{{ $t("未知（只做链接）") }}</option>
+                    <option value="safe">{{ $t("可安全移动") }}</option>
+                    <option value="risky">{{ $t("有风险（只做链接）") }}</option>
                   </select>
                 </label>
 
                 <span class="row__plan" :class="{ 'row__plan--link': planOf(it) === 'link' }">
-                  {{ planOf(it) === 'move' ? '整理时：剪切移动' : '整理时：创建链接' }}
+                  {{ planOf(it) === 'move' ? $t('整理时：剪切移动') : $t('整理时：创建链接') }}
                 </span>
               </div>
             </div>
 
             <div class="row__ops">
-              <button class="btn btn--ghost" :disabled="busy" title="收录这一条" @click="confirm([it.id])">
-                <Check :size="14" />
-                确认
-              </button>
+              <button class="btn btn--ghost" :disabled="busy" :title="$t('收录这一条')" @click="confirm([it.id])">
+                <Check :size="14" />{{ $t("确认") }}</button>
               <button
                 class="btn btn--subtle"
                 :disabled="busy"
-                title="不收录，并记入忽略名单"
+                :title="$t('不收录，并记入忽略名单')"
                 @click="skip([it.id], false)"
               >
-                <X :size="14" />
-                不注册
-              </button>
+                <X :size="14" />{{ $t("不注册") }}</button>
             </div>
           </article>
         </section>
@@ -434,36 +422,28 @@ async function confirmAll(): Promise<void> {
 
     <footer v-if="!loading && items.length > 0" class="bar">
       <label class="bar__all">
-        <input type="checkbox" :checked="allSelected" @change="toggleAll" />
-        全选
-      </label>
-      <span class="bar__count">已选 {{ selected.length }} / {{ items.length }}</span>
+        <input type="checkbox" :checked="allSelected" @change="toggleAll" />{{ $t("全选") }}</label>
+      <span class="bar__count">{{ $t("已选 {p0} / {p1}", {p0: (selected.length), p1: (items.length)}) }}</span>
 
       <div class="bar__ops">
         <button
           class="btn btn--subtle"
           :disabled="busy || selected.length === 0"
           @click="skip(selected, true)"
-        >
-          不注册已选
-        </button>
+        >{{ $t("不注册已选") }}</button>
         <button
           v-if="unselectedStaleIds.length > 0 && selected.length > 0"
           class="btn btn--ghost"
           :disabled="busy"
           @click="confirmAndSkipOld"
-        >
-          确认已选并忽略旧版（{{ unselectedStaleIds.length }}）
-        </button>
-        <button class="btn btn--ghost" :disabled="busy" @click="confirmAll">全部确认</button>
+        >{{ $t("确认已选并忽略旧版（{p0}）", {p0: (unselectedStaleIds.length)}) }}</button>
+        <button class="btn btn--ghost" :disabled="busy" @click="confirmAll">{{ $t("全部确认") }}</button>
         <button
           class="btn btn--primary"
           :disabled="busy || selected.length === 0"
           @click="confirm(selected)"
         >
-          <Loader2 v-if="busy" :size="14" class="spin" />
-          确认已选（{{ selected.length }}）
-        </button>
+          <Loader2 v-if="busy" :size="14" class="spin" />{{ $t("确认已选（{p0}）", {p0: (selected.length)}) }}</button>
       </div>
     </footer>
   </div>

@@ -1,3 +1,5 @@
+
+import { tr } from '../i18n/index.ts'
 import { useToast } from '@/composables/useToast'
 import { computed, ref } from 'vue'
 import type { VideoImportBatch, VideoImportEdits, VideoImportSummary } from '@/types/video-import'
@@ -15,7 +17,7 @@ function merge(value: VideoImportBatch) {
   const summary: VideoImportSummary = { id: value.id, roots: value.roots, createdAt: value.createdAt, updatedAt: value.updatedAt, status: value.status,
     total: value.entries.length, pending: value.entries.filter(eligible).length, confirmed: value.entries.filter(entry => entry.status === 'confirmed').length }
   batches.value = [summary, ...batches.value.filter(row => row.id !== value.id)].sort((a, b) => b.createdAt - a.createdAt)
-  if (taskId && value.progress) tasks.update(taskId, { current: value.progress.current, processed: value.progress.processed, total: value.progress.total, message: value.progress.log || '正在识别预览' })
+  if (taskId && value.progress) tasks.update(taskId, { current: value.progress.current, processed: value.progress.processed, total: value.progress.total, message: value.progress.log || tr("正在识别预览") })
 }
 async function refreshList() { batches.value = await window.baoyi.videoImport.list() }
 async function perform<T>(name: string, action: () => Promise<T>): Promise<T | null> {
@@ -32,15 +34,15 @@ export function useVideoImport() {
   async function review(ids: string[]) {
     if (!batch.value || !ids.length) return
     await perform('review', async () => {
-      taskId = tasks.start('video-scan', '视频导入 · 智能复查')
+      taskId = tasks.start('video-scan', tr("视频导入 · 智能复查"))
       try {
         const value = await window.baoyi.videoImport.review(batch.value!.id, plain(ids)); merge(value)
         const failures = value.entries.filter(entry => ids.includes(entry.id) && entry.reviewError)
         tasks.finish(taskId, value.status === 'interrupted' ? 'cancelled' : failures.length ? 'failed' : 'success',
-          failures.length ? `${failures.length} 项复查未完成，原识别结果已保留` : '复查结束，结果保留在导入确认窗口',
+          failures.length ? tr("{p0} 项复查未完成，原识别结果已保留", {p0: (failures.length)}) : tr("复查结束，结果保留在导入确认窗口"),
           failures.map(entry => `${entry.title}：${entry.reviewError}`).join('\n'))
       }
-      catch (cause) { tasks.finish(taskId, 'failed', '复查未完成', errorMessage(cause)); throw cause }
+      catch (cause) { tasks.finish(taskId, 'failed', tr("复查未完成"), errorMessage(cause)); throw cause }
       finally { taskId = '' }
     })
   }
@@ -49,13 +51,13 @@ export function useVideoImport() {
     const autoAgent = useAgent.value
     open.value = true; acceptingNew = true
     const value = await perform('scan', async () => {
-      taskId = tasks.start('video-scan', '视频导入 · 识别预览')
+      taskId = tasks.start('video-scan', tr("视频导入 · 识别预览"))
       try {
         const value = await window.baoyi.videoImport.prepare(roots && plain(roots))
-        if (value) { merge(value); tasks.finish(taskId, value.status === 'interrupted' ? 'cancelled' : 'success', `${value.entries.length} 项识别结果，等待确认入库`) }
-        else tasks.finish(taskId, 'cancelled', '未选择目录，已取消导入')
+        if (value) { merge(value); tasks.finish(taskId, value.status === 'interrupted' ? 'cancelled' : 'success', tr("{p0} 项识别结果，等待确认入库", {p0: (value.entries.length)})) }
+        else tasks.finish(taskId, 'cancelled', tr("未选择目录，已取消导入"))
         return value
-      } catch (cause) { tasks.finish(taskId, 'failed', '识别预览失败', errorMessage(cause)); throw cause }
+      } catch (cause) { tasks.finish(taskId, 'failed', tr("识别预览失败"), errorMessage(cause)); throw cause }
       finally { taskId = ''; acceptingNew = false }
     })
     if (value && autoAgent) await review(value.entries.filter(eligible).map(entry => entry.id))

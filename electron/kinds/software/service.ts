@@ -13,6 +13,7 @@ import { getSoftware, listSoftware, updateSoftware } from './db.ts'
 import { iconsDir } from '../../services/storage/database'
 import { extractIcon } from '../../services/media/iconExtractor'
 import { ICON_EXTS, iconFileName, iconSiblings, isIconExt, isManualIcon } from './icons.ts'
+import { samePath } from '../../services/system/fstree.ts'
 
 /** 清掉这个条目的所有手动图标文件（含换过扩展名留下的孤儿） */
 function dropManualIcons(id: string): void {
@@ -150,27 +151,47 @@ export function relocateSoftware(
   if (conflict) throw new Error('所选文件已登记在另一条记录下，请先处理重复条目')
 
   const oldRoot = path.resolve(item.source_dir || path.dirname(item.exe_path))
-  let newRoot = directory ? path.resolve(directory) : path.dirname(file)
   const oldRel = path.relative(oldRoot, item.exe_path)
-  if (
-    !directory &&
+  let newRoot: string
+  if (directory) {
+    newRoot = path.resolve(directory)
+  } else if (withinDir(oldRoot, file)) {
+    // 仅在原软件目录内更换主入口时，保持软件根目录不变，不破坏同目录附属启动项
+    newRoot = oldRoot
+  } else if (
     withinDir(oldRoot, item.exe_path) &&
     file.toLowerCase().endsWith((path.sep + oldRel).toLowerCase())
   ) {
     newRoot = file.slice(0, -(oldRel.length + 1))
+  } else {
+    newRoot = path.dirname(file)
   }
   if (!fs.statSync(newRoot).isDirectory() || !withinDir(newRoot, file)) {
     throw new Error('主程序必须位于所选软件目录内')
   }
-  const rebasePath = (p: string): string =>
-    p && withinDir(oldRoot, path.resolve(p)) ? path.join(newRoot, path.relative(oldRoot, p)) : p
+  const rootMoved = !samePath(oldRoot, newRoot)
+  const rebasePath = (p: string): string => {
+    if (!p || !rootMoved) return p
+    const resolved = path.resolve(p)
+    if (!withinDir(oldRoot, resolved)) return p
+    const candidate = path.join(newRoot, path.relative(oldRoot, resolved))
+    return fs.existsSync(candidate) || !fs.existsSync(resolved) ? candidate : p
+  }
 
-  const launchers = item.launchers.map((l) => {
-    if (l.path.toLowerCase() === item.exe_path.toLowerCase()) {
-      return { ...l, path: file }
-    }
-    return { ...l, path: rebasePath(l.path) }
-  })
+  const seenLaunchers = new Set<string>()
+  const launchers = item.launchers
+    .map((l) => {
+      if (samePath(l.path, item.exe_path)) {
+        return { ...l, path: file }
+      }
+      return { ...l, path: rebasePath(l.path) }
+    })
+    .filter((l) => {
+      const k = path.resolve(l.path).toLowerCase()
+      if (seenLaunchers.has(k)) return false
+      seenLaunchers.add(k)
+      return true
+    })
 
   const updated = updateSoftware(db, id, {
     exe_path: file,

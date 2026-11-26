@@ -15,7 +15,7 @@ function fixture() {
   const session = load('src/composables/useVideoAgentOrganize.ts').useVideoAgentOrganize()
   const tasks = load('src/composables/useTaskCenter.ts').useTaskCenter()
   session.show(samplePlan().works)
-  return { session, tasks, progress: (value: VideoAgentProgress) => callback(value), setPrepare: (next: typeof prepare) => { prepare = next } }
+  return { session, tasks, load, progress: (value: VideoAgentProgress) => callback(value), setPrepare: (next: typeof prepare) => { prepare = next } }
 }
 async function test(name: string, run: () => Promise<void>) {
   try { await run(); passed++; console.log('PASS ' + name) }
@@ -24,7 +24,9 @@ async function test(name: string, run: () => Promise<void>) {
 async function panel(session: any) {
   const load = createRendererLoader({ '@/composables/useVideoAgentOrganize': { useVideoAgentOrganize: () => session }, './OrganizePreview.vue': { default: { render: () => null } } }, {}, true)
   const context: { teleports?: Record<string, string> } = {}
-  await renderToString(createSSRApp(load('src/components/video/AgentOrganizePanel.vue').default), context)
+  const app = createSSRApp(load('src/components/video/AgentOrganizePanel.vue').default)
+  load('src/i18n/index.ts').installI18n(app)
+  await renderToString(app, context)
   return context.teleports?.body || ''
 }
 
@@ -75,6 +77,24 @@ await test('a cancelled analysis is recorded as cancelled and a new attempt clea
   await f.session.prepare()
   assert.doesNotMatch(f.session.analysisLog.value, /上一轮分析/)
   const html = await panel(f.session); assert.match(html, /片名和集数/); assert.doesNotMatch(html, /分组分析未完成/)
+})
+
+await test('English cancellation uses raw IPC errors and English grouping summaries contain no Chinese fragments', async () => {
+  for (const raw of ['已停止', '已取消']) {
+    const f = fixture()
+    f.load('src/i18n/index.ts').applyLanguage('en')
+    f.setPrepare(async () => { throw new Error(`Error invoking remote method 'video-agent:prepare': Error: ${raw}`) })
+    await f.session.prepare()
+    assert.equal(f.session.error.value, raw === '已停止' ? 'Stopped' : 'Canceled')
+    assert.equal(f.tasks.history.value[0].status, 'cancelled')
+    assert.doesNotMatch(f.tasks.history.value[0].message, /\p{Script=Han}/u)
+    for (const warnings of [[], ['Please review']]) {
+      f.setPrepare(async () => samplePlan({ warnings }))
+      await f.session.prepare()
+      assert.equal(f.tasks.history.value[0].status, 'success')
+      assert.doesNotMatch(f.tasks.history.value[0].message, /\p{Script=Han}/u)
+    }
+  }
 })
 
 console.log(`Video Agent grouping renderer: ${passed} passed / ${failed} failed`)

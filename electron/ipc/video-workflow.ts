@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { app, dialog, nativeImage, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -53,7 +54,7 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   })
   ipcMain.handle('settings:ffmpeg-pick', async event => {
     assertMain(event)
-    const result = await dialog.showOpenDialog(getWindow()!, { title: '选择 ffmpeg.exe', properties: ['openFile'], filters: [{ name: 'FFmpeg', extensions: ['exe'] }] })
+    const result = await dialog.showOpenDialog(getWindow()!, { title: tr("选择 ffmpeg.exe"), properties: ['openFile'], filters: [{ name: 'FFmpeg', extensions: ['exe'] }] })
     if (result.canceled || !result.filePaths[0]) return null
     const file = result.filePaths[0]
     if (!validateFfmpeg(file)) throw new Error('该程序不是可运行的 FFmpeg，请选择 ffmpeg.exe')
@@ -118,7 +119,7 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   ipcMain.handle('video-workflow:prepare', (event, input) => { assertMain(event); const safe = optRecord(input, 'input') as any; return safe?.discovery ? discovery.prepare(safe.discovery) : workflow.prepare(safe || {}) })
   ipcMain.handle('video-workflow:pick-root', async (event, id: string) => {
     assertMain(event); id = reqId(id)
-    const result = await dialog.showOpenDialog(getWindow()!, { title: '选择影视库根目录', properties: ['openDirectory', 'createDirectory'] })
+    const result = await dialog.showOpenDialog(getWindow()!, { title: tr("选择影视库根目录"), properties: ['openDirectory', 'createDirectory'] })
     return result.canceled || !result.filePaths[0] ? null : workerFor(id).setRoot(id, result.filePaths[0])
   })
   ipcMain.handle('video-workflow:enqueue', (event, request: VideoEnqueueRequest) => { assertMain(event); const safe = reqRecord(request, 'request') as unknown as VideoEnqueueRequest; return workerFor(reqId(safe.draftId, 'request.draftId')).enqueue(safe) })
@@ -134,10 +135,10 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     if (!job) throw new Error('下载任务不存在或当前不可见')
     const before = inspectDownloadCaches(allJobs()).find(cache => cache.jobId === id)
     if (!before?.canClear) throw new Error(before?.reason || '没有可清理的缓存')
-    const choice = await dialog.showMessageBox(getWindow()!, { type: 'warning', title: '清理下载缓存',
-      message: `清理「${job.title}」的 ${(before.bytes / 1048576).toFixed(1)} MB 下载缓存？`,
-      detail: '完整视频和资料库条目会保留。清理后，未完成的内容需要重新下载。\n\n' + before.directories.join('\n'),
-      buttons: ['保留缓存', '清理缓存'], defaultId: 0, cancelId: 0, noLink: true })
+    const choice = await dialog.showMessageBox(getWindow()!, { type: 'warning', title: tr("清理下载缓存"),
+      message: tr("清理「{p0}」的 {p1} MB 下载缓存？", {p0: (job.title), p1: ((before.bytes / 1048576).toFixed(1))}),
+      detail: tr("完整视频和资料库条目会保留。清理后，未完成的内容需要重新下载。\n\n") + before.directories.join('\n'),
+      buttons: [tr("保留缓存"), tr("清理缓存")], defaultId: 0, cancelId: 0, noLink: true })
     if (choice.response !== 1) return { cleared: false, bytes: 0 }
     assertMain(event)
     const jobs = allJobs(), current = jobs.find(job => job.id === id && visible(job))
@@ -179,7 +180,7 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
     assertMain(event)
     const asset = getDb().prepare('SELECT resource_id FROM video_assets WHERE id = ?').get(reqId(assetId, 'assetId')) as { resource_id: string } | undefined
     if (!asset) return false
-    const result = await dialog.showOpenDialog(getWindow()!, { title: '重新定位视频文件', properties: ['openFile'], filters: [{ name: '视频', extensions: ['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'mpg', 'mpeg'] }] })
+    const result = await dialog.showOpenDialog(getWindow()!, { title: tr("重新定位视频文件"), properties: ['openFile'], filters: [{ name: tr("视频"), extensions: ['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'mpg', 'mpeg'] }] })
     if (result.canceled || !result.filePaths[0]) return false
     const changed = relocateVideoAsset(getDb(), assetId, result.filePaths[0]); send('video:library-changed', asset.resource_id); return changed
   })

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { FolderOpen, Loader2, X } from 'lucide-vue-next'
 import type { VideoItem } from '@/types'
@@ -30,10 +32,10 @@ const resultHeading = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
 let unlisten: (() => void) | undefined
 const isAudio = computed(() => works.value.length > 0 && works.value.every(work => work.media_kind === 'audio'))
-const title = computed(() => props.mode === 'history' ? '整理记录' : props.mode === 'relocate' ? (isAudio.value ? '音频目录管理' : '作品目录管理') : (isAudio.value ? '合并为专辑' : '组建合集'))
+const title = computed(() => props.mode === 'history' ? tr('整理记录') : props.mode === 'relocate' ? (isAudio.value ? tr('音频目录管理') : tr('作品目录管理')) : (isAudio.value ? tr('合并为专辑') : tr('组建合集')))
 const mutation = computed(() => busy.value === 'apply' || busy.value === 'retry' || busy.value === 'rollback')
 const inputLocked = computed(() => mutation.value || busy.value === 'pick' || busy.value === 'history')
-const applyLabel = computed(() => (isAudio.value ? (collectionAction.value === 'join' ? '并入专辑' : '合并为专辑') : (collectionAction.value === 'join' ? '加入合集' : '创建合集')) + (copyFiles.value ? transfer.value === 'move' ? '并移动文件' : '并复制文件' : ''))
+const applyLabel = computed(() => (isAudio.value ? (collectionAction.value === 'join' ? tr('并入专辑') : tr('合并为专辑')) : (collectionAction.value === 'join' ? tr('加入合集') : tr('创建合集'))) + (copyFiles.value ? transfer.value === 'move' ? tr('并移动文件') : tr('并复制文件') : ''))
 const fileAction = computed({
   get: () => copyFiles.value ? transfer.value : 'none',
   set: (value: string) => { transfer.value = value === 'move' ? 'move' : 'copy'; copyFiles.value = value !== 'none' }
@@ -108,57 +110,57 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <div class="organize-overlay" @click.self="$emit('close')">
       <section ref="panel" class="organize-panel" role="dialog" aria-modal="true" aria-labelledby="organize-title" tabindex="-1">
-        <header class="organize-panel__head"><div><h2 id="organize-title">{{ title }}</h2><p>{{ mode === 'organize' ? (isAudio ? '填写专辑名称并调整曲序，把多首曲目归到同一张专辑。' : '选好名称和集数，让同一部作品集中显示。') : '核对目录与文件，保留原有资料和观看记录。' }}</p></div><button class="btn btn--subtle" type="button" aria-label="关闭整理面板" @click="$emit('close')"><X :size="18" /></button></header>
-        <nav class="organize-tabs no-select" aria-label="整理步骤">
-          <button v-if="mode !== 'history'" type="button" :aria-current="tab === 'preview' ? 'step' : undefined" @click="showSelection">{{ mode === 'organize' ? (isAudio ? '专辑曲目' : '合集内容') : '目录与预览' }}</button>
-          <button type="button" :aria-current="tab === 'history' ? 'step' : undefined" :disabled="!!busy" @click="showHistory">整理记录</button>
+        <header class="organize-panel__head"><div><h2 id="organize-title">{{ title }}</h2><p>{{ mode === 'organize' ? (isAudio ? $t('填写专辑名称并调整曲序，把多首曲目归到同一张专辑。') : $t('选好名称和集数，让同一部作品集中显示。')) : $t('核对目录与文件，保留原有资料和观看记录。') }}</p></div><button class="btn btn--subtle" type="button" :aria-label="$t('关闭整理面板')" @click="$emit('close')"><X :size="18" /></button></header>
+        <nav class="organize-tabs no-select" :aria-label="$t('整理步骤')">
+          <button v-if="mode !== 'history'" type="button" :aria-current="tab === 'preview' ? 'step' : undefined" @click="showSelection">{{ mode === 'organize' ? (isAudio ? $t('专辑曲目') : $t('合集内容')) : $t('目录与预览') }}</button>
+          <button type="button" :aria-current="tab === 'history' ? 'step' : undefined" :disabled="!!busy" @click="showHistory">{{ $t("整理记录") }}</button>
         </nav>
         <div ref="body" class="organize-panel__body" :aria-busy="!!busy">
-          <p v-if="error" class="organize-error" role="alert">{{ error }}</p>
+          <p v-if="error" class="organize-error" role="alert">{{ $systemMessage(error) }}</p>
           <p v-if="notice" class="organize-notice" role="status">{{ notice }}</p>
-          <p v-if="busy" class="organize-hint" role="status"><Loader2 :size="13" class="spin" />{{ mutation ? '正在处理，可关闭面板；稍后在整理记录查看结果。' : busy === 'history' ? '正在读取可见记录…' : busy === 'pick' ? '正在选择目录…' : '正在核对资料与文件…' }}</p>
+          <p v-if="busy" class="organize-hint" role="status"><Loader2 :size="13" class="spin" />{{ mutation ? $t('正在处理，可关闭面板；稍后在整理记录查看结果。') : busy === 'history' ? $t('正在读取可见记录…') : busy === 'pick' ? $t('正在选择目录…') : $t('正在核对资料与文件…') }}</p>
           <template v-if="tab === 'preview'">
             <form class="organize-form" @submit.prevent="generatePreview">
               <template v-if="mode === 'organize'">
-                <fieldset class="collection-mode" :disabled="inputLocked"><legend class="sr-only">合集方式</legend><label :class="{ active: collectionAction === 'create' }"><input v-model="collectionAction" type="radio" value="create" />{{ isAudio ? '新建专辑' : '创建新合集' }}</label><label :class="{ active: collectionAction === 'join' }"><input v-model="collectionAction" type="radio" value="join" />{{ isAudio ? '并入已有专辑' : '加入已有合集' }}</label></fieldset>
-                <label v-if="collectionAction === 'create'" class="organize-field collection-name"><span>{{ isAudio ? '专辑名称' : '合集名称' }}</span><input v-model="collectionTitle" maxlength="240" :disabled="inputLocked" :placeholder="isAudio ? '例如：专辑、播客或合集名称' : '例如：某部作品的系列名称'" /></label>
+                <fieldset class="collection-mode" :disabled="inputLocked"><legend class="sr-only">{{ $t("合集方式") }}</legend><label :class="{ active: collectionAction === 'create' }"><input v-model="collectionAction" type="radio" value="create" />{{ isAudio ? $t('新建专辑') : $t('创建新合集') }}</label><label :class="{ active: collectionAction === 'join' }"><input v-model="collectionAction" type="radio" value="join" />{{ isAudio ? $t('并入已有专辑') : $t('加入已有合集') }}</label></fieldset>
+                <label v-if="collectionAction === 'create'" class="organize-field collection-name"><span>{{ isAudio ? $t('专辑名称') : $t('合集名称') }}</span><input v-model="collectionTitle" maxlength="240" :disabled="inputLocked" :placeholder="isAudio ? $t('例如：专辑、播客或合集名称') : $t('例如：某部作品的系列名称')" /></label>
                 <template v-else>
-                  <label class="organize-field"><span>{{ isAudio ? '并入哪张专辑' : '加入哪个合集' }}</span><select v-model="survivorId" :disabled="inputLocked"><option disabled value="">{{ isAudio ? '请选择已选音频中的目标专辑' : '请选择已选作品中的合集' }}</option><option v-for="work in works" :key="work.id" :value="work.id">{{ videoTitle(work) }}{{ work.episode_total > 1 ? `（已有 ${work.episode_total} ${isAudio ? '首' : '集'}）` : '' }}</option></select></label>
-                  <p class="organize-hint">{{ isAudio ? '目标专辑也需要一并勾选。它的名称、封面和整体简介继续保留。' : '现有合集也需要一并选中。它的名称、封面和整体简介继续保留。' }}</p>
+                  <label class="organize-field"><span>{{ isAudio ? $t('并入哪张专辑') : $t('加入哪个合集') }}</span><select v-model="survivorId" :disabled="inputLocked"><option disabled value="">{{ isAudio ? $t('请选择已选音频中的目标专辑') : $t('请选择已选作品中的合集') }}</option><option v-for="work in works" :key="work.id" :value="work.id">{{ videoTitle(work) }}{{ work.episode_total > 1 ? $t('（已有 {p0} {p1}）', {p0: work.episode_total, p1: isAudio ? $t('首') : $t('集')}) : '' }}</option></select></label>
+                  <p class="organize-hint">{{ isAudio ? $t('目标专辑也需要一并勾选。它的名称、封面和整体简介继续保留。') : $t('现有合集也需要一并选中。它的名称、封面和整体简介继续保留。') }}</p>
                 </template>
-                <p class="organize-selection-count">已选 {{ works.length }} {{ isAudio ? '项音频' : '部作品' }}<span>更改后自动核对</span></p>
+                <p class="organize-selection-count">{{ $t("已选 {p0} {p1}", {p0: (works.length), p1: (isAudio ? $t('项音频') : $t('部作品'))}) }}<span>{{ $t("更改后自动核对") }}</span></p>
                 <div class="organize-file-options">
-                  <fieldset class="organize-file-actions" :disabled="inputLocked"><legend>文件整理</legend><label><input v-model="fileAction" type="radio" value="none" />保留位置</label><label><input v-model="fileAction" type="radio" value="move" />移动</label><label><input v-model="fileAction" type="radio" value="copy" />复制</label></fieldset>
+                  <fieldset class="organize-file-actions" :disabled="inputLocked"><legend>{{ $t("文件整理") }}</legend><label><input v-model="fileAction" type="radio" value="none" />{{ $t("保留位置") }}</label><label><input v-model="fileAction" type="radio" value="move" />{{ $t("移动") }}</label><label><input v-model="fileAction" type="radio" value="copy" />{{ $t("复制") }}</label></fieldset>
                   <template v-if="copyFiles">
-                    <div class="organize-field"><span>整理根目录</span><p class="organize-path">{{ targetDirectory || '请先在设置中保存影视整理根目录' }}</p><p class="organize-hint">将在根目录下新建以合集名命名的文件夹。</p><p class="organize-hint">修改位置：右上角设置 → 影视 → 目录整理。</p></div>
-                    <p class="organize-hint">{{ transfer === 'move' ? '全部复制并校验成功后移除原文件，共享文件保留原件。' : '复制后保留原件。' }}下方列出各文件去向，目标重名时不会覆盖。</p>
+                    <div class="organize-field"><span>{{ $t("整理根目录") }}</span><p class="organize-path">{{ targetDirectory || $t('请先在设置中保存影视整理根目录') }}</p><p class="organize-hint">{{ $t("将在根目录下新建以合集名命名的文件夹。") }}</p><p class="organize-hint">{{ $t("修改位置：右上角设置 → 影视 → 目录整理。") }}</p></div>
+                    <p class="organize-hint">{{ $t("{p0}下方列出各文件去向，目标重名时不会覆盖。", {p0: (transfer === 'move' ? $t('全部复制并校验成功后移除原文件，共享文件保留原件。') : $t('复制后保留原件。'))}) }}</p>
                   </template>
                 </div>
               </template>
               <template v-else>
                 <p v-if="works[0]" class="organize-work-title">{{ videoTitle(works[0]) }}</p>
-                <p class="organize-path">当前作品目录：{{ directory?.path || '尚未绑定受管理目录' }}</p>
-                <p v-if="!directory" class="organize-hint">此作品尚无受管理目录。可在首页创建合集时选择“文件整理 · 复制”，复制到统一目录。</p>
-                <fieldset class="organize-mode" :disabled="!!busy || !canRelocate"><legend>目录处理方式</legend><label><input v-model="relocateMode" type="radio" value="rebind" />重新绑定已移动的目录</label><label><input v-model="relocateMode" type="radio" value="copy" />复制整目录（保留原件）</label></fieldset>
-                <label class="organize-field"><span>新作品目录</span><div class="organize-location"><input v-model="targetDirectory" :disabled="!!busy || !canRelocate" spellcheck="false" placeholder="填写完整的新作品目录路径" /><button class="btn btn--ghost" type="button" :disabled="!!busy || !canRelocate" aria-label="选择整理目标目录" @click="session.pickDirectory"><FolderOpen :size="14" />选择</button></div></label>
-                <p class="organize-hint">{{ relocateMode === 'copy' ? '目标应是不存在或为空的作品目录；复制成功后仍保留原目录。' : '选择你已移动或复制好的作品目录，预览会核对文件和作品身份。' }}</p>
-                <details class="organize-root"><summary>指定所属影视库根目录（可选）</summary><label class="organize-field"><span>所属影视库根目录</span><input v-model="root" :disabled="!!busy" placeholder="留空使用作品绑定或目标的上级目录" spellcheck="false" /></label></details>
+                <p class="organize-path">{{ $t("当前作品目录：{p0}", {p0: (directory?.path || $t('尚未绑定受管理目录'))}) }}</p>
+                <p v-if="!directory" class="organize-hint">{{ $t("此作品尚无受管理目录。可在首页创建合集时选择“文件整理 · 复制”，复制到统一目录。") }}</p>
+                <fieldset class="organize-mode" :disabled="!!busy || !canRelocate"><legend>{{ $t("目录处理方式") }}</legend><label><input v-model="relocateMode" type="radio" value="rebind" />{{ $t("重新绑定已移动的目录") }}</label><label><input v-model="relocateMode" type="radio" value="copy" />{{ $t("复制整目录（保留原件）") }}</label></fieldset>
+                <label class="organize-field"><span>{{ $t("新作品目录") }}</span><div class="organize-location"><input v-model="targetDirectory" :disabled="!!busy || !canRelocate" spellcheck="false" :placeholder="$t('填写完整的新作品目录路径')" /><button class="btn btn--ghost" type="button" :disabled="!!busy || !canRelocate" :aria-label="$t('选择整理目标目录')" @click="session.pickDirectory"><FolderOpen :size="14" />{{ $t("选择") }}</button></div></label>
+                <p class="organize-hint">{{ relocateMode === 'copy' ? $t('目标应是不存在或为空的作品目录；复制成功后仍保留原目录。') : $t('选择你已移动或复制好的作品目录，预览会核对文件和作品身份。') }}</p>
+                <details class="organize-root"><summary>{{ $t("指定所属影视库根目录（可选）") }}</summary><label class="organize-field"><span>{{ $t("所属影视库根目录") }}</span><input v-model="root" :disabled="!!busy" :placeholder="$t('留空使用作品绑定或目标的上级目录')" spellcheck="false" /></label></details>
               </template>
-              <div v-if="mode !== 'organize' || error" class="organize-preview-action"><span v-if="!works.length" class="organize-hint">当前没有可见的已选作品。</span><button class="btn btn--ghost" type="submit" :disabled="previewDisabled">{{ mode === 'organize' || preview ? '重新预览' : '生成预览' }}</button></div>
+              <div v-if="mode !== 'organize' || error" class="organize-preview-action"><span v-if="!works.length" class="organize-hint">{{ $t("当前没有可见的已选作品。") }}</span><button class="btn btn--ghost" type="submit" :disabled="previewDisabled">{{ mode === 'organize' || preview ? $t('重新预览') : $t('生成预览') }}</button></div>
             </form>
-            <p v-if="preview && stale && mode !== 'organize'" class="organize-notice" role="status">预览已失效，重新预览后才能执行。</p>
+            <p v-if="preview && stale && mode !== 'organize'" class="organize-notice" role="status">{{ $t("预览已失效，重新预览后才能执行。") }}</p>
             <div v-if="preview" ref="review" :data-preview-stale="stale" tabindex="-1"><OrganizePreview :preview="preview" :file-names="fileNames" :episode-numbers="episodeNumbers" :audio="isAudio" :without-season="isAudio || works.every(work => work.category === '里番')" :copy-files="mode === 'relocate' || copyFiles" :disabled="inputLocked" @number="(id, season, episode) => episodeNumbers = { ...episodeNumbers, [id]: { season, episode } }" @rename="(id, name) => fileNames = { ...fileNames, [id]: name }" /></div>
-            <p v-else class="organize-empty">{{ mode === 'organize' ? canPreview ? '正在整理集数与原作品资料…' : '填写合集名称并选择作品后，将自动显示内容。' : '预览会列出各文件的当前位置与目标位置。' }}</p>
+            <p v-else class="organize-empty">{{ mode === 'organize' ? canPreview ? $t('正在整理集数与原作品资料…') : $t('填写合集名称并选择作品后，将自动显示内容。') : $t('预览会列出各文件的当前位置与目标位置。') }}</p>
           </template>
           <template v-else>
-            <h3 ref="resultHeading" class="organize-result-title" tabindex="-1">本次结果与历史</h3>
+            <h3 ref="resultHeading" class="organize-result-title" tabindex="-1">{{ $t("本次结果与历史") }}</h3>
             <OrganizeHistory :journals="journals" :loaded="historyLoaded" :busy="!!busy" @refresh="session.refreshHistory" @retry="id => recover(id, 'retry')" @rollback="id => recover(id, 'rollback')" />
           </template>
         </div>
         <footer v-if="tab === 'preview' && mode !== 'history'" class="organize-panel__footer">
-          <p>{{ mode === 'organize' ? copyFiles ? transfer === 'move' ? '创建合集并移动文件，校验完成后移除原件。' : '创建合集并复制文件，原文件继续保留。' : '在影视库中合为一个作品，视频保留在原位置。' : '核对完整预览后才更新目录绑定。' }}</p>
+          <p>{{ mode === 'organize' ? copyFiles ? transfer === 'move' ? $t('创建合集并移动文件，校验完成后移除原件。') : $t('创建合集并复制文件，原文件继续保留。') : $t('在影视库中合为一个作品，视频保留在原位置。') : $t('核对完整预览后才更新目录绑定。') }}</p>
           <button v-if="mode === 'organize'" type="button" class="btn btn--primary" :disabled="applyDisabled" @click="applied(copyFiles ? 'physical' : 'logical')">{{ applyLabel }}</button>
-          <button v-else type="button" class="btn btn--primary" :disabled="!!busy || stale || preview?.kind !== 'relocate' || !preview.canApply" @click="applied()">{{ relocateMode === 'rebind' ? '确认重新绑定' : '确认复制整目录' }}</button>
+          <button v-else type="button" class="btn btn--primary" :disabled="!!busy || stale || preview?.kind !== 'relocate' || !preview.canApply" @click="applied()">{{ relocateMode === 'rebind' ? $t('确认重新绑定') : $t('确认复制整目录') }}</button>
         </footer>
       </section>
     </div>

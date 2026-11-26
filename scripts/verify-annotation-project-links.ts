@@ -19,3 +19,63 @@ test('annotation project picker handles search, archived projects and failed wri
     assert.deepEqual(writes,[['project','p','d','a'],['project','p','d','a']])
   }finally{unmount.forEach(f=>f());scope.stop()}
 })
+
+test('ResourceLinks discards stale empty annotations when switching candidates or closing dialog',async()=>{
+  const deferred=()=>{let resolve!:(v:any)=>void;const promise=new Promise<any>(r=>{resolve=r});return {promise,resolve}}
+  const notesA=deferred(),notesB=deferred(),linksAdded:any[]=[],unmount:Function[]=[],scope=Vue.effectScope()
+  const docA={id:'doc-a',name:'文档 A',kind:'document',path:'a.md'}
+  const docB={id:'doc-b',name:'文档 B',kind:'document',path:'b.md'}
+  const annB={id:'ann-b',documentId:'doc-b',kind:'excerpt',quote:'摘录 B',note:'',location:{page:1,offset:0},createdAt:1,updatedAt:1}
+  const api={
+    workspace:{
+      links:{
+        list:async()=>[],
+        resources:async()=>[docA,docB],
+        add:async(...args:any[])=>{linksAdded.push(args)}
+      },
+      documents:{
+        annotations:(id:string)=>id==='doc-a'?notesA.promise:notesB.promise
+      },
+      onChanged:()=>()=>{}
+    }
+  }
+  const load=createRendererLoader({
+    vue:{...Vue,onBeforeUnmount:(f:Function)=>unmount.push(f)},
+    'vue-router':{useRoute:()=>({path:'/project/p',query:{}}),useRouter:()=>({resolve:()=>({fullPath:'/project/p'}),push:async()=>{}})},
+    'lucide-vue-next':{},
+    '@/components/project/ProjectDialog.vue':{},
+    './ProjectFiles.vue':{}
+  },{window:{baoyi:api}})
+  const state=scope.run(()=>load('src/components/workspace/ResourceLinks.vue').default.setup({owner:'project',id:'p'},{expose(){},emit(){}}))
+  try{
+    const { locale } = load('src/i18n/index.ts')
+    assert.equal(state.displayTitle.value, '相关实践与资源')
+    locale.value = 'en'
+    assert.equal(state.displayTitle.value, 'Related practice and resources')
+    locale.value = 'zh-CN'
+    await state.start()
+    const clickA=state.clickCandidate(docA)
+    const clickB=state.clickCandidate(docB)
+    notesB.resolve([annB])
+    await clickB
+    assert.equal(state.selected.value,'doc-b')
+    assert.equal(state.annotations.value.length,1)
+    assert.equal(state.show.value,true)
+    notesA.resolve([])
+    await clickA
+    assert.equal(state.selected.value,'doc-b')
+    assert.equal(state.annotations.value.length,1)
+    assert.equal(state.show.value,true)
+    assert.deepEqual(linksAdded,[])
+
+    // Closing dialog before an annotation fetch resolves must also block auto-link
+    const notesLate=deferred()
+    api.workspace.documents.annotations=()=>notesLate.promise
+    const clickLate=state.clickCandidate(docA)
+    state.closeDialog()
+    notesLate.resolve([])
+    await clickLate
+    assert.equal(state.show.value,false)
+    assert.deepEqual(linksAdded,[])
+  }finally{unmount.forEach(f=>f());scope.stop()}
+})

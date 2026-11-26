@@ -40,9 +40,7 @@ const emit = defineEmits<{
   >
     <section class="panel">
       <h2 class="sec-title">
-        <span>
-          启动端
-          <span v-if="item.launchers.length > 1" class="sec-title__count">
+        <span>{{ $t("启动端") }}<span v-if="item.launchers.length > 1" class="sec-title__count">
             {{ item.launchers.length }}
           </span>
         </span>
@@ -52,13 +50,9 @@ const emit = defineEmits<{
           class="sec-title__act"
           @click="emit('add-launcher')"
         >
-          <Plus :size="13" />
-          添加启动项
-        </button>
+          <Plus :size="13" />{{ $t("添加启动项") }}</button>
       </h2>
-      <p class="sec-note">
-        同一个软件的 32/64 位和附属程序都归在这里。点击左侧按钮直接启动，点击「设为默认」可更换主启动目标。
-      </p>
+      <p class="sec-note">{{ $t("同一个软件的 32/64 位和附属程序都归在这里。点击左侧按钮直接启动，点击「设为默认」可更换主启动目标。") }}</p>
       <ul class="launchers">
         <li
           v-for="l in item.launchers"
@@ -68,7 +62,7 @@ const emit = defineEmits<{
           <button
             type="button"
             class="launchers__go"
-            :title="`${isMobilePackage(l.path) ? '定位安装包' : '启动'} ${l.path}`"
+            :title="`${isMobilePackage(l.path) ? $t('定位安装包') : $t('启动')} ${l.path}`"
             @click="emit('launch-with', l.path)"
           >
             <FolderOpen v-if="isMobilePackage(l.path)" :size="13" />
@@ -81,12 +75,12 @@ const emit = defineEmits<{
                 class="launchers__labelInput"
                 :value="l.label"
                 maxlength="20"
-                placeholder="备注名（如 64 位）"
-                aria-label="启动项名称"
+                :placeholder="$t('备注名（如 64 位）')"
+                :aria-label="$t('启动项名称')"
                 @change="emit('rename-launcher', l, ($event.target as HTMLInputElement).value.trim())"
               />
-              <TagBadge v-if="l.is_default" label="默认" tone="success" />
-              <TagBadge v-else-if="l.kind === 'extra'" label="附属" tone="muted" />
+              <TagBadge v-if="l.is_default" :label="$t('默认')" tone="success" />
+              <TagBadge v-else-if="l.kind === 'extra'" :label="$t('附属')" tone="muted" />
             </div>
             <button type="button" class="launchers__path mono" :title="l.path" @click="emit('copy-path', l.path)">
               {{ l.path }}
@@ -98,14 +92,12 @@ const emit = defineEmits<{
               type="button"
               class="launchers__set"
               @click="emit('set-default', l.path)"
-            >
-              设为默认
-            </button>
+            >{{ $t("设为默认") }}</button>
             <button
               v-if="!l.is_default"
               type="button"
               class="launchers__del"
-              title="从启动列表中移除（不删除本地文件）"
+              :title="$t('从启动列表中移除（不删除本地文件）')"
               @click="emit('remove-launcher', l.path)"
             >
               <Trash2 :size="13" />
@@ -116,31 +108,29 @@ const emit = defineEmits<{
     </section>
 
     <section class="panel">
-      <h2 class="sec-title">位置信息</h2>
+      <h2 class="sec-title">{{ $t("位置信息") }}</h2>
       <div class="row row--relocate">
-        <button type="button" class="btn btn--ghost" :disabled="relocating" @click="emit('relocate', 'directory')">
-          重新定位目录
-        </button>
+        <button type="button" class="btn btn--ghost" :disabled="relocating" @click="emit('relocate', 'directory')">{{ $t("重新定位目录") }}</button>
         <button type="button" class="btn btn--subtle" :disabled="relocating" @click="emit('relocate', 'file')">
-          {{ isMobilePackage(item.exe_path) ? '更换安装包文件' : '更换主程序' }}
+          {{ isMobilePackage(item.exe_path) ? $t('更换安装包文件') : $t('更换主程序') }}
         </button>
       </div>
       <dl class="kv">
-        <dt>当前位置</dt>
+        <dt>{{ $t("当前位置") }}</dt>
         <dd>
           <button type="button" class="link-btn mono" :title="locationDir" @click="emit('copy-path', locationDir)">
             {{ locationDir }}
           </button>
         </dd>
-        <dt>位置类型</dt>
+        <dt>{{ $t("位置类型") }}</dt>
         <dd>
           <TagBadge
-            :label="item.link_target ? '目录链接' : '实体目录'"
+            :label="item.link_target ? $t('目录链接') : $t('实体目录')"
             :tone="item.link_target ? 'alt' : 'muted'"
           />
         </dd>
         <template v-if="item.link_target">
-          <dt>实际指向</dt>
+          <dt>{{ $t("实际指向") }}</dt>
           <dd>
             <button
               type="button"
@@ -152,7 +142,7 @@ const emit = defineEmits<{
             </button>
           </dd>
         </template>
-        <dt>安装类型</dt>
+        <dt>{{ $t("安装类型") }}</dt>
         <dd>
           <SoftwareTypeSelect
             :id="item.id"
@@ -162,42 +152,36 @@ const emit = defineEmits<{
             @updated="emit('type-updated', $event)"
           />
         </dd>
-        <dt>移动风险</dt>
+        <dt>{{ $t("移动风险") }}</dt>
         <dd>
           <TagBadge
-            :label="{ safe: '可安全移动', risky: '有风险', unknown: '待确认' }[item.move_risk]"
+            :label="{ safe: $t('可安全移动'), risky: $t('有风险'), unknown: $t('待确认') }[item.move_risk]"
             :tone="item.move_risk === 'safe' ? 'success' : item.move_risk === 'risky' ? 'warning' : 'muted'"
           />
         </dd>
       </dl>
 
-      <p v-if="item.link_target" class="sec-note sec-note--foot">
-        整理目录里存放的是目录链接，软件本体仍留在原安装位置。「转为实体」会把真实文件搬到此处；「移除链接」只删链接并将路径退回原位置，两者都不会删除你的软件。
-      </p>
+      <p v-if="item.link_target" class="sec-note sec-note--foot">{{ $t("整理目录里存放的是目录链接，软件本体仍留在原安装位置。「转为实体」会把真实文件搬到此处；「移除链接」只删链接并将路径退回原位置，两者都不会删除你的软件。") }}</p>
 
       <div v-if="item.link_target" class="row row--foot">
         <button type="button" class="btn btn--ghost" :disabled="linkBusy" @click="emit('to-entity')">
           <Loader2 v-if="linkBusy" :size="14" class="spin" />
-          <FolderInput v-else :size="14" />
-          转为实体
-        </button>
+          <FolderInput v-else :size="14" />{{ $t("转为实体") }}</button>
         <button type="button" class="btn btn--subtle" :disabled="linkBusy" @click="emit('drop-link')">
-          <Unlink :size="14" />
-          移除链接
-        </button>
+          <Unlink :size="14" />{{ $t("移除链接") }}</button>
       </div>
     </section>
 
     <section class="panel">
-      <h2 class="sec-title">文件信息</h2>
+      <h2 class="sec-title">{{ $t("文件信息") }}</h2>
       <dl class="kv">
-        <dt>文件名</dt>
+        <dt>{{ $t("文件名") }}</dt>
         <dd class="mono">{{ item.file_name }}</dd>
-        <dt>开发商</dt>
+        <dt>{{ $t("开发商") }}</dt>
         <dd>{{ item.company || '—' }}</dd>
-        <dt>版本</dt>
+        <dt>{{ $t("版本") }}</dt>
         <dd class="mono">{{ item.version || '—' }}</dd>
-        <dt>大小</dt>
+        <dt>{{ $t("大小") }}</dt>
         <dd>{{ formatBytes(item.file_size) }}</dd>
       </dl>
     </section>

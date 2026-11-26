@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { computed } from 'vue'
 import { useImageDownloads } from './useImageDownloads'
 import { useComicIngest } from './useComicIngest'
@@ -7,16 +9,16 @@ import type { ImageDownloadProgress } from '@/types/image'
 export type ComicTaskAction = 'pause' | 'cancel' | 'retry' | 'dismiss' | 'open' | 'logs' | 'resume' | 'up' | 'down' | 'proxy' | 'revalidate' | 'clean'
 export interface ComicTaskRow {
   provider: 'pica' | 'jm'; id: string; title: string; status: string
-  phaseLabel: string; processed: number; total: number; chapterDone: number; chapterTotal: number; error: string
+  phase: string; phaseLabel: string; processed: number; total: number; chapterDone: number; chapterTotal: number; error: string
   retryNotBefore?: number; resourceId: string; createdAt: number; queuePosition?: number; actions: ComicTaskAction[]
   current: string; totalKnown: boolean; requiresRevalidation?: boolean
   progress?: ImageDownloadProgress; chapterTitle?: string; queueTotal?: number
 }
-export const comicStatusLabels: Record<string, string> = { queued: '排队中', running: '正在下载', paused: '已暂停', success: '已入库', failed: '需要处理', cancelled: '已停止', interrupted: '上次中断' }
+export const comicStatusLabels: Record<string, string> = { get queued() { return tr('排队中') }, get running() { return tr('正在下载') }, get paused() { return tr('已暂停') }, get success() { return tr('已入库') }, get failed() { return tr('需要处理') }, get cancelled() { return tr('已停止') }, get interrupted() { return tr('上次中断') } }
 export const comicPhaseLabels: Record<string, string> = {
-  queued: '排队中', catalog: '读取章节目录', checking: '校验已有页面', connecting: '连接图源', receiving: '接收图片',
-  retrying: '等待重试', 'rate-limited': '等待限流', saving: '保存图片', importing: '整理入库', idle: '',
-  resolving: '读取目录', downloading: '下载页面', verifying: '核验图片', prepared: '准备保存', placed: '已落盘，待登记', indexing: '登记入库', done: '已入库',
+  get queued() { return tr('排队中') }, get catalog() { return tr('读取章节目录') }, get checking() { return tr('校验已有页面') }, get connecting() { return tr('连接图源') }, get receiving() { return tr('接收图片') },
+  get retrying() { return tr('等待重试') }, get 'rate-limited'() { return tr('等待限流') }, get saving() { return tr('保存图片') }, get importing() { return tr('整理入库') }, idle: '',
+  get resolving() { return tr('读取目录') }, get downloading() { return tr('下载页面') }, get verifying() { return tr('核验图片') }, get prepared() { return tr('准备保存') }, get placed() { return tr('已落盘，待登记') }, get indexing() { return tr('登记入库') }, get done() { return tr('已入库') },
 }
 export function useComicDownloads() {
   const pica = useImageDownloads(), jm = useComicIngest(), fallbackDates = new Map<string, number>()
@@ -39,7 +41,7 @@ export function useComicDownloads() {
       }
       actions.push('logs')
       return { provider: 'pica' as const, id: job.id, title: job.work.title, status: job.status,
-        phaseLabel: comicPhaseLabels[job.progress?.phase || 'idle'], processed: job.processed, total: job.total,
+        phase: job.progress?.phase || 'idle', phaseLabel: comicPhaseLabels[job.progress?.phase || 'idle'], processed: job.processed, total: job.total,
         chapterDone: job.completedChapters, chapterTotal: job.chapters.length, error: job.error,
         retryNotBefore: Math.max(job.retryNotBefore || 0, job.progress?.retryAt || 0), resourceId: job.resourceId,
         createdAt: date('pica', job), queuePosition: job.queuePosition, actions, current: job.current,
@@ -57,7 +59,7 @@ export function useComicDownloads() {
       else actions.push('dismiss')
       if (job.status !== 'success' && !job.requiresRevalidation) actions.push('clean')
       actions.push('logs')
-      return { provider: 'jm' as const, id: job.id, title: job.name, status: job.status, phaseLabel: comicPhaseLabels[job.phase],
+      return { provider: 'jm' as const, id: job.id, title: job.name, status: job.status, phase: job.phase, phaseLabel: comicPhaseLabels[job.phase],
         processed: job.processed, total: job.total, chapterDone: job.completedChapters, chapterTotal: job.selectedChapters.length,
         error: job.error, retryNotBefore: job.retryNotBefore, resourceId: job.resourceId, createdAt: date('jm', job), actions,
         current: job.current, totalKnown: true, requiresRevalidation: job.requiresRevalidation }

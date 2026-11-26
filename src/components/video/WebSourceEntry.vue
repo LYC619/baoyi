@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { errorMessage } from '@/utils'
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { ArrowUpRight, Globe, Pencil, Plus, Trash2, X } from 'lucide-vue-next'
@@ -20,7 +22,7 @@ async function connect() { await run(async () => { emit('connected', await windo
 async function save() {
   await run(async () => {
     const saved = await api.save({ ...(editingId.value ? { id: editingId.value } : {}), name: name.value, url: address.value })
-    address.value = saved.url; sources.value = await api.list(); editingId.value = ''; name.value = ''; notice.value = '网页来源已保存'
+    address.value = saved.url; sources.value = await api.list(); editingId.value = ''; name.value = ''; notice.value = tr("网页来源已保存")
   })
 }
 function edit(source: WebBrowserSource) {
@@ -28,7 +30,7 @@ function edit(source: WebBrowserSource) {
 }
 function cancelEdit() { editingId.value = ''; name.value = ''; notice.value = '' }
 function remove(source: WebBrowserSource) {
-  void run(async () => { await api.remove(source.id); sources.value = await api.list(); if (editingId.value === source.id) cancelEdit(); notice.value = '网页来源已移除' })
+  void run(async () => { await api.remove(source.id); sources.value = await api.list(); if (editingId.value === source.id) cancelEdit(); notice.value = tr("网页来源已移除") })
 }
 function host(url: string) { try { return new URL(url).host } catch { return url /* 无效地址使用原文字显示。 */ } }
 async function takePending(value: string | null) {
@@ -40,24 +42,24 @@ watch(pendingWebAddress, takePending)
 onMounted(() => { void run(async () => { sources.value = await api.list() }); void takePending(pendingWebAddress.value) })
 </script>
 <template>
-  <section class="web-entry" aria-label="在线网页入口">
-    <div class="web-intro"><div class="web-symbol"><Globe :size="28" :stroke-width="1.2" /></div><h2>从一个网址开始</h2><p>将支持的网页接入海报墙，在这里浏览、收藏和观看。<br />JAVDB 的列表 / 搜索 / 排行页可直接接入；喜欢的作品可下载保存，并选择登记到本地影视库。</p></div>
+  <section class="web-entry" :aria-label="$t('在线网页入口')">
+    <div class="web-intro"><div class="web-symbol"><Globe :size="28" :stroke-width="1.2" /></div><h2>{{ $t("从一个网址开始") }}</h2><p>{{ $t("将支持的网页接入海报墙，在这里浏览、收藏和观看。") }}<br />{{ $t("JAVDB 的列表 / 搜索 / 排行页可直接接入；喜欢的作品可下载保存，并选择登记到本地影视库。") }}</p></div>
     <form class="web-address-form" @submit.prevent="connect()">
-      <label for="web-address">网页地址</label>
-      <div class="web-address-row"><input id="web-address" ref="input" v-model="address" class="input" type="text" inputmode="url" autocomplete="url" maxlength="4000" placeholder="https://javdb.com/search?q=..." :disabled="busy" /><button class="btn btn--primary" type="submit" :disabled="busy || !address.trim()">{{ busy ? '正在处理…' : '接入海报墙' }}<Globe :size="16" /></button></div>
-      <p class="web-footnote">支持 JAVDB 地址（列表 / 搜索 / 排行页），以及含公开 VideoObject 资料的网页；能否内播和下载取决于来源是否提供直接视频文件。</p>
-      <button class="btn btn--ghost" type="button" :disabled="busy || !address.trim()" @click="open()">打开网页<ArrowUpRight :size="16" /></button>
-      <div class="web-save-row"><input v-model="name" class="input" aria-label="来源名称（可选）" placeholder="来源名称（可选）" maxlength="100" :disabled="busy" /><button class="btn btn--subtle" type="button" :disabled="busy || !address.trim()" @click="save"><Plus v-if="!editingId" :size="15" />{{ editingId ? '保存修改' : '保存为来源' }}</button><button v-if="editingId" class="btn btn--ghost" type="button" :disabled="busy" @click="cancelEdit"><X :size="14" />取消编辑</button></div>
+      <label for="web-address">{{ $t("网页地址") }}</label>
+      <div class="web-address-row"><input id="web-address" ref="input" v-model="address" class="input" type="text" inputmode="url" autocomplete="url" maxlength="4000" placeholder="https://javdb.com/search?q=..." :disabled="busy" /><button class="btn btn--primary" type="submit" :disabled="busy || !address.trim()">{{ busy ? $t('正在处理…') : $t('接入海报墙') }}<Globe :size="16" /></button></div>
+      <p class="web-footnote">{{ $t("支持 JAVDB 地址（列表 / 搜索 / 排行页），以及含公开 VideoObject 资料的网页；能否内播和下载取决于来源是否提供直接视频文件。") }}</p>
+      <button class="btn btn--ghost" type="button" :disabled="busy || !address.trim()" @click="open()">{{ $t("打开网页") }}<ArrowUpRight :size="16" /></button>
+      <div class="web-save-row"><input v-model="name" class="input" :aria-label="$t('来源名称（可选）')" :placeholder="$t('来源名称（可选）')" maxlength="100" :disabled="busy" /><button class="btn btn--subtle" type="button" :disabled="busy || !address.trim()" @click="save"><Plus v-if="!editingId" :size="15" />{{ editingId ? $t('保存修改') : $t('保存为来源') }}</button><button v-if="editingId" class="btn btn--ghost" type="button" :disabled="busy" @click="cancelEdit"><X :size="14" />{{ $t("取消编辑") }}</button></div>
     </form>
-    <p v-if="error" class="web-error" role="alert">{{ error }}</p><p v-else-if="notice" class="web-notice" role="status">{{ notice }}</p>
-    <section class="saved-websites" aria-label="已保存的网页来源"><div class="web-section-head"><h3>网页来源</h3><span>{{ sources.length }} 个</span></div>
+    <p v-if="error" class="web-error" role="alert">{{ $systemMessage(error) }}</p><p v-else-if="notice" class="web-notice" role="status">{{ notice }}</p>
+    <section class="saved-websites" :aria-label="$t('已保存的网页来源')"><div class="web-section-head"><h3>{{ $t("网页来源") }}</h3><span>{{ $t("{p0} 个", {p0: (sources.length)}) }}</span></div>
       <div v-if="sources.length" class="web-source-grid"><article v-for="source in sources" :key="source.id" class="web-source-card">
-        <button class="web-source-open" :aria-label="'打开 ' + source.name" :disabled="busy" @click="open(source.url)"><Globe :size="20" :stroke-width="1.3" /><span><strong>{{ source.name }}</strong><small>{{ host(source.url) }}</small></span><ArrowUpRight :size="15" /></button>
-        <div class="web-source-tools"><button class="btn btn--ghost" :aria-label="'编辑 ' + source.name" :disabled="busy" @click="edit(source)"><Pencil :size="13" /></button><button class="btn btn--ghost" :aria-label="'移除 ' + source.name" :disabled="busy" @click="remove(source)"><Trash2 :size="13" /></button></div>
+        <button class="web-source-open" :aria-label="$t('打开 ') + source.name" :disabled="busy" @click="open(source.url)"><Globe :size="20" :stroke-width="1.3" /><span><strong>{{ source.name }}</strong><small>{{ host(source.url) }}</small></span><ArrowUpRight :size="15" /></button>
+        <div class="web-source-tools"><button class="btn btn--ghost" :aria-label="$t('编辑 ') + source.name" :disabled="busy" @click="edit(source)"><Pencil :size="13" /></button><button class="btn btn--ghost" :aria-label="$t('移除 ') + source.name" :disabled="busy" @click="remove(source)"><Trash2 :size="13" /></button></div>
       </article></div>
-      <p v-else class="web-source-empty">保存常用网址后，它们会显示在这里。</p>
+      <p v-else class="web-source-empty">{{ $t("保存常用网址后，它们会显示在这里。") }}</p>
     </section>
-    <p class="web-footnote">未适配的网页可用“打开网页”浏览。保存网址后，也可通过编辑地址再次接入海报墙。</p>
+    <p class="web-footnote">{{ $t("未适配的网页可用“打开网页”浏览。保存网址后，也可通过编辑地址再次接入海报墙。") }}</p>
   </section>
 </template>
 <style scoped>

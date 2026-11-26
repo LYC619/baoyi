@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import path from 'node:path'
 import { dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { getDb } from '../services/storage/database.ts'
@@ -42,7 +43,7 @@ export function registerVideoImportIpc(getWindow: () => BrowserWindow | null, ip
   ipcMain.handle('video-import:prepare', async (event, roots?: string[]) => {
     assertMain(event)
     if (!roots) {
-      const picked = await dialog.showOpenDialog(getWindow()!, { title: '选择视频目录，识别后统一确认入库', properties: ['openDirectory', 'multiSelections'] })
+      const picked = await dialog.showOpenDialog(getWindow()!, { title: tr("选择视频目录，识别后统一确认入库"), properties: ['openDirectory', 'multiSelections'] })
       if (picked.canceled || !picked.filePaths.length) return null
       roots = picked.filePaths
     } else {

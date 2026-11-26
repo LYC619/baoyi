@@ -73,80 +73,58 @@ async function save() {
 </script>
 
 <template>
-  <ProjectDialog title="编辑资料" :busy="busy" @close="emit('close')">
+  <ProjectDialog :title="$t('编辑资料')" :busy="busy" @close="emit('close')">
     <form id="document-edit" class="ws ws-form" @submit.prevent="save">
-      <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
-      <label>
-        所属子模块
-        <select v-model="currentSubmodule" aria-label="所属子模块">
-          <option value="">待归类（稍后选择）</option>
-          <option value="reading">阅读（书架类：小说、书籍、论文）</option>
-          <option value="archive">资料（档案类：证书、证件、合同）</option>
+      <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
+      <label>{{ $t("所属子模块") }}<select v-model="currentSubmodule" :aria-label="$t('所属子模块')">
+          <option value="">{{ $t("待归类（稍后选择）") }}</option>
+          <option value="reading">{{ $t("阅读（书架类：小说、书籍、论文）") }}</option>
+          <option value="archive">{{ $t("资料（档案类：证书、证件、合同）") }}</option>
         </select>
       </label>
-      <label>
-        资料名称
-        <input v-model="form.name" required maxlength="300" />
+      <label>{{ $t("资料名称") }}<input v-model="form.name" required maxlength="300" />
       </label>
       <div v-if="currentSubmodule" class="ws-two">
-        <label>
-          资料分类
-          <select v-model="form.type" aria-label="资料分类">
+        <label>{{ $t("资料分类") }}<select v-model="form.type" :aria-label="$t('资料分类')">
             <option v-for="category in availableCategories" :key="category.id" :value="category.id">
               {{ category.name }}
             </option>
           </select>
         </label>
-        <label>
-          自定义分组
-          <select v-model="form.customGroupId" aria-label="自定义分组">
-            <option value="">不指定分组</option>
+        <label>{{ $t("自定义分组") }}<select v-model="form.customGroupId" :aria-label="$t('自定义分组')">
+            <option value="">{{ $t("不指定分组") }}</option>
             <option v-for="group in availableCustomGroups" :key="group.id" :value="group.id">
               {{ group.name }}
             </option>
           </select>
         </label>
       </div>
-      <label v-if="currentSubmodule === 'reading'">
-        作者
-        <input v-model="form.author" maxlength="300" />
+      <label v-if="currentSubmodule === 'reading'">{{ $t("作者") }}<input v-model="form.author" maxlength="300" />
       </label>
       <label v-else>
-        {{ behavior === 'certificate' ? '颁发机构' : '相关方' }}
+        {{ behavior === 'certificate' ? $t('颁发机构') : $t('相关方') }}
         <input v-model="form.counterpart" maxlength="300" />
       </label>
       <div class="ws-two">
-        <label>
-          取得 / 发布日期
-          <input v-model="form.issuedOn" type="date" />
+        <label>{{ $t("取得 / 发布日期") }}<input v-model="form.issuedOn" type="date" />
         </label>
-        <label>
-          有效期至
-          <input v-model="form.expiresOn" type="date" />
+        <label>{{ $t("有效期至") }}<input v-model="form.expiresOn" type="date" />
         </label>
       </div>
-      <label v-if="currentSubmodule === 'reading'">
-        阅读状态
-        <select v-model="form.readState" aria-label="阅读状态">
-          <option value="unread">未读</option>
-          <option value="reading">在读</option>
-          <option value="read">已读</option>
+      <label v-if="currentSubmodule === 'reading'">{{ $t("阅读状态") }}<select v-model="form.readState" :aria-label="$t('阅读状态')">
+          <option value="unread">{{ $t("未读") }}</option>
+          <option value="reading">{{ $t("在读") }}</option>
+          <option value="read">{{ $t("已读") }}</option>
         </select>
       </label>
-      <label>
-        标签
-        <input v-model="tags" placeholder="用逗号分隔" />
+      <label>{{ $t("标签") }}<input v-model="tags" :placeholder="$t('用逗号分隔')" />
       </label>
-      <label>
-        备注
-        <textarea v-model="form.notes" maxlength="20000" />
+      <label>{{ $t("备注") }}<textarea v-model="form.notes" maxlength="20000" />
       </label>
     </form>
     <template #footer>
       <div class="ws">
-        <button class="ws-button primary" type="submit" form="document-edit" :disabled="busy">
-          保存资料
-        </button>
+        <button class="ws-button primary" type="submit" form="document-edit" :disabled="busy">{{ $t("保存资料") }}</button>
       </div>
     </template>
   </ProjectDialog>

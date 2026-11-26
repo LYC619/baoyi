@@ -13,7 +13,7 @@ const output = path.resolve('output/unified-settings')
 await fs.mkdir(output, { recursive: true })
 const profile = await fs.mkdtemp(path.join(output, 'profile-'))
 const db = new DatabaseSync(path.join(profile, 'baoyi.db')); initSchema(db, KINDS); db.exec(VIDEO_JOBS_SQL)
-for (const [key, value] of Object.entries({ onboarded: true, theme: 'light', hanime_builtin_hosts: false, ai: { enabled: false, api_url: '', api_key: '', model: '' } })) db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, JSON.stringify(value))
+for (const [key, value] of Object.entries({ onboarded: true, language: 'zh-CN', theme: 'light', hanime_builtin_hosts: false, ai: { enabled: false, api_url: '', api_key: '', model: '' } })) db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, JSON.stringify(value))
 const secrets = { ai:'synthetic-old-ai', profile:'synthetic-old-profile', search:'synthetic-old-search', tmdb:'synthetic-old-tmdb' }
 for (const [key, value] of Object.entries({ai:{enabled:false,api_key:secrets.ai}, ai_profiles:[{id:'test',name:'测试',enabled:false,api_key:secrets.profile}],search:{enabled:false,api_key:secrets.search},tmdb:{enabled:false,api_key:secrets.tmdb}})) db.prepare('INSERT OR REPLACE INTO settings VALUES(?,?)').run(key,JSON.stringify(value))
 db.prepare("UPDATE settings SET value='31' WHERE key='_schema'").run()
@@ -171,6 +171,68 @@ try {
   })
   await page.keyboard.press('Escape')
   checks.push('merged-settings-proxy-exact-return-global-search-and-side-split')
+  await navigate('/settings?module=software&scope=global&tab=appearance')
+  await page.getByLabel('Language / 界面语言', { exact: true }).selectOption('en')
+  await page.waitForFunction(() => document.documentElement.lang === 'en')
+  await page.getByRole('heading', { name: 'Theme', exact: true }).waitFor()
+  assert.deepEqual((await page.locator('.titlebar .tabs .tab > span:first-child').allTextContents()).map(x => x.trim()), ['Personal', 'Projects', 'Software', 'Games', 'Video', 'Images', 'Documents'])
+  const englishSettings = await page.evaluate(() => window.baoyi.settings.getAll())
+  assert.equal(englishSettings.language, 'en')
+  assert.equal(englishSettings.title_lang, current.title_lang, 'interface language must not change resource title preference')
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+  await page.screenshot({ path: path.join(output, 'settings-english.png') })
+  const englishDocument = await page.evaluate(id => window.baoyi.workspace.documents.get(id), fixtureDoc.id)
+  assert.equal(englishDocument?.name, fixtureDoc.name)
+  assert.ok(englishDocument?.tags.includes('设置页标签'), 'user labels remain unchanged')
+  await app.evaluate(({ dialog }) => {
+    const state = globalThis as any
+    state.i18nOriginalOpenDialog = dialog.showOpenDialog
+    dialog.showOpenDialog = (async (...args: any[]) => {
+      state.i18nDialogTitle = args.at(-1).title
+      return { canceled: true, filePaths: [] }
+    }) as typeof dialog.showOpenDialog
+  })
+  try {
+    await page.evaluate(() => window.baoyi.data.pickSaveBackupRoot())
+    assert.equal(await app.evaluate(() => (globalThis as any).i18nDialogTitle), 'Choose save backup folder')
+  } finally {
+    await app.evaluate(({ dialog }) => {
+      dialog.showOpenDialog = (globalThis as any).i18nOriginalOpenDialog
+      delete (globalThis as any).i18nOriginalOpenDialog
+      delete (globalThis as any).i18nDialogTitle
+    })
+  }
+  await page.reload()
+  await page.getByRole('heading', { name: 'Theme', exact: true }).waitFor()
+  assert.equal(await page.locator('html').getAttribute('lang'), 'en')
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(960, 850))
+  for (const [module, route, marker] of [
+    ['software', '/', 'input[aria-label="Search software"]'],
+    ['game', '/game', 'input[aria-label="Search games"]'],
+    ['video', '/video', 'input[aria-label="Search works, content titles or filenames"]'],
+    ['image', '/image', '.image-home'],
+    ['document', '/document', '.document-home'],
+    ['project', '/project', '.pj-home'],
+    ['personal', '/personal', '.personal-home'],
+  ]) {
+    await navigate(route)
+    await page.locator(marker).waitFor({ state: 'visible' })
+    await page.waitForFunction(() => !document.querySelector('.page-enter-active,.page-leave-active'))
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'English page fits: ' + module)
+    const allLabel = { software: 'All', game: 'All games', video: 'All video' }[module]
+    if (allLabel) assert.equal(await page.locator('.sidebar .row__label').first().textContent(), allLabel)
+    if (module === 'document') {
+      assert.equal(await page.locator('.document-sidebar').evaluate(element => element.scrollWidth > element.clientWidth), false, 'English document navigation fits its sidebar')
+    }
+    await page.screenshot({ path: path.join(output, 'english-' + module + '.png') })
+  }
+  checks.push('seven-english-module-pages-fit-960px-after-route-content-ready')
+  await navigate('/settings?module=software&scope=global&tab=appearance')
+  await page.getByRole('heading', { name: 'Theme', exact: true }).waitFor()
+  await page.getByLabel('Language / 界面语言', { exact: true }).selectOption('zh-CN')
+  await page.getByRole('heading', { name: '主题', exact: true }).waitFor()
+  assert.equal(await page.locator('.titlebar .tabs .tab > span:first-child').first().textContent(), '个人')
+  checks.push('live-language-switch-persistence-user-content-and-title-preference-preserved')
   assert.deepEqual(errors, [])
   await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify({ status: 'passed', executable, profile, checks, errors }, null, 2))
   console.log('PASS ' + checks.join(', '))

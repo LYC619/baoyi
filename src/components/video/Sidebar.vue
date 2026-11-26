@@ -61,15 +61,15 @@ const isActive = (kind: string, value: string) => !props.pendingActive && store.
 <template>
   <LibrarySidebar
     class="video-sidebar"
-    aria-label="影视分类与待处理"
-    all-label="全部影视"
+    :aria-label="$t('影视分类与待处理')"
+    :all-label="$t('全部影视')"
     :all-icon="Clapperboard"
     :all-count="store.counts.all"
     :active-key="pendingActive ? '' : store.activeKey"
     :categories="categories"
     :show-categories="categories.length > 0"
     :tags="tagCounts"
-    :tag-label="inHentaiScope ? '里番标签' : inAudioScope ? '音频标签' : '标签'"
+    :tag-label="inHentaiScope ? $t('里番标签') : inAudioScope ? $t('音频标签') : $t('标签')"
     tag-expanded-aria
     @all="store.select({ kind: 'group', value: 'all' })"
     @category="store.select({ kind: 'category', value: $event })"
@@ -81,12 +81,12 @@ const isActive = (kind: string, value: string) => !props.pendingActive && store.
         class="row"
         :class="{ 'row--active': pendingActive }"
         :aria-pressed="pendingActive"
-        title="查看当前范围的待处理项"
+        :title="$t('查看当前范围的待处理项')"
         @click="$emit('pending')"
       >
-        <CircleAlert :size="15" /><span class="row__label">待处理</span><span class="row__count">{{ pendingCount }}</span>
+        <CircleAlert :size="15" /><span class="row__label">{{ $t("待处理") }}</span><span class="row__count">{{ pendingCount }}</span>
       </button>
-      <p class="sidebar__title">类型</p>
+      <p class="sidebar__title">{{ $t("类型") }}</p>
       <button
         v-for="t in TYPES"
         :key="t"
@@ -108,13 +108,13 @@ const isActive = (kind: string, value: string) => !props.pendingActive && store.
         @click="store.select({ kind: 'type', value: 'hentai' })"
       >
         <Flame :size="15" />
-        <span class="row__label">里番</span>
+        <span class="row__label">{{ $t("里番") }}</span>
         <span class="row__count">{{ store.counts.hentai ?? 0 }}</span>
       </button>
     </template>
     <template #before-tags>
       <template v-if="collections.length">
-        <p class="sidebar__title">{{ inAudioScope ? '歌单分组' : '收藏分组' }}</p>
+        <p class="sidebar__title">{{ inAudioScope ? $t('歌单分组') : $t('收藏分组') }}</p>
         <button
           v-for="collection in collections"
           :key="collection.name"
@@ -124,7 +124,7 @@ const isActive = (kind: string, value: string) => !props.pendingActive && store.
         >
           <ListMusic v-if="inAudioScope" :size="15" />
           <Folder v-else :size="15" />
-          <span class="row__label" :title="collection.name || '未设置'">{{ collection.name || '未设置' }}</span>
+          <span class="row__label" :title="collection.name || $t('未设置')">{{ collection.name || $t('未设置') }}</span>
           <span class="row__count">{{ collection.count }}</span>
         </button>
       </template>
@@ -138,7 +138,7 @@ const isActive = (kind: string, value: string) => !props.pendingActive && store.
           @click="store.select({ kind: 'group', value: 'archived', ...(scopeType ? { type: scopeType } : {}) })"
         >
           <Archive :size="15" />
-          <span class="row__label">{{ inAudioScope ? '已归档音频' : '已归档' }}</span>
+          <span class="row__label">{{ inAudioScope ? $t('已归档音频') : $t('已归档') }}</span>
           <span class="row__count">{{ archivedCount }}</span>
         </button>
       </template>

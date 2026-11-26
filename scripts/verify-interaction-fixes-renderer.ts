@@ -7,9 +7,9 @@ import {createRendererLoader} from './helpers/renderer-harness.ts'
 const tick=async()=>{await new Promise(setImmediate);await Vue.nextTick()}
 function setup(file:string,api:any,mocks:Record<string,unknown>={},globals:Record<string,unknown>={},props:any={}){
   const mounted:Array<()=>unknown>=[],scope=Vue.effectScope()
-  const load=createRendererLoader({vue:{...Vue,onMounted:(fn:()=>unknown)=>mounted.push(fn),onBeforeUnmount:()=>{},onUnmounted:()=>{}},'lucide-vue-next':{},'vue-router':{useRouter:()=>({push:()=>{}})},...mocks},{window:{baoyi:api},document:{activeElement:null},...globals})
+  const load=createRendererLoader({vue:{...Vue,onMounted:(fn:()=>unknown)=>mounted.push(fn),onBeforeUnmount:()=>{},onUnmounted:()=>{}},'lucide-vue-next':{},'vue-router':{useRouter:()=>({push:()=>{}})},...mocks},{window:{baoyi:api},document:{activeElement:null,documentElement:{lang:''},title:''},...globals})
   const state=scope.run(()=>load(file).default.setup(props,{expose:()=>{},emit:()=>{}}))
-  return {state,mount:async()=>{for(const fn of mounted)await fn()},dispose:()=>scope.stop()}
+  return {state,load,mount:async()=>{for(const fn of mounted)await fn()},dispose:()=>scope.stop()}
 }
 const comicPreview=(token='comic-1')=>({token,catalog:{workId:'123',name:'合成漫画',authors:[],chapters:[{id:'a',pageIds:['1']},{id:'b',pageIds:['2']}]},directory:'目录',existingId:'',existingChapters:[]})
 function comicFixture(){
@@ -130,10 +130,91 @@ test('公共侧栏默认显示八个标签，展开后保留全部计数', async
   const tags = Array.from({ length: 10 }, (_, i) => ({ name: '标签' + i, count: i + 1 }))
   const fixture = setup('src/components/library/LibrarySidebar.vue', {}, {}, {}, { tags })
   try {
+    const { locale } = fixture.load('src/i18n/index.ts')
+    assert.equal(fixture.state.visibleTagLabel.value, '标签')
+    locale.value = 'en'
+    assert.equal(fixture.state.visibleTagLabel.value, 'Tags')
+    locale.value = 'zh-CN'
+    assert.equal(fixture.state.visibleTagLabel.value, '标签')
     assert.equal(fixture.state.visibleTags.value.length, 8)
     fixture.state.tagsOpen.value = true
     assert.deepEqual([...fixture.state.visibleTags.value], tags)
     fixture.state.tagsOpen.value = false
     assert.equal(fixture.state.visibleTags.value.length, 8)
   } finally { fixture.dispose() }
+})
+
+test('English AI profile validation uses input and hostname, not the translated placeholder', async () => {
+  const saved: any[] = [], errors: string[] = []
+  const store = { settings: { ai: { api_url: '', api_key: '', model: '', enabled: false }, ai_profiles: [], ai_profile_id: '' }, patch: async (value: any) => { saved.push(value) } }
+  const f = setup('src/components/settings/tabs/AiTab.vue', {}, {
+    '@/stores/settings': { useSettingsStore: () => store },
+    '@/composables/useToast': { useToast: () => ({ error: (message: string) => errors.push(message), success() {}, toast() {} }) }
+  }, { URL })
+  try {
+    f.load('src/i18n/index.ts').applyLanguage('en')
+    for (const url of ['', 'not a URL', 'file:///folder']) {
+      f.state.apiUrl.value = url; await f.state.addProfile()
+      assert.equal(saved.length, 0)
+      assert.equal(errors.at(-1), f.load('src/i18n/index.ts').tr('先给这套配置起个名字'))
+    }
+    f.state.apiUrl.value = 'https://api.example.com/v1'; await f.state.addProfile()
+    assert.equal(saved[0].ai_profiles[0].name, 'example.com')
+    f.state.apiUrl.value = ''; f.state.profileName.value = '配置名'; await f.state.addProfile()
+    assert.equal(saved[1].ai_profiles[0].name, '配置名', 'a user-provided name is never mistaken for a placeholder')
+  } finally { f.dispose() }
+})
+
+test('English comic retry uses the raw phase and composable rows retain it', () => {
+  const row = Vue.reactive({ provider: 'jm', phase: 'placed', phaseLabel: 'Saved, awaiting registration', status: 'failed' })
+  const f = setup('src/components/image/ComicTaskRow.vue', {}, {}, {}, { row })
+  try {
+    f.load('src/i18n/index.ts').applyLanguage('en')
+    for (const phase of ['placed', 'indexing']) { row.phase = phase; assert.equal(f.state.label('retry'), f.load('src/i18n/index.ts').tr('重试登记')) }
+    row.phase = 'downloading'; assert.equal(f.state.label('retry'), f.load('src/i18n/index.ts').tr('重试剩余页'))
+    row.status = 'paused'; assert.equal(f.state.label('retry'), f.load('src/i18n/index.ts').tr('继续下载'))
+  } finally { f.dispose() }
+  const load = createRendererLoader({
+    './useImageDownloads': { useImageDownloads: () => ({ jobs: Vue.ref([{ id: 'p', status: 'failed', updatedAt: 1, work: { title: 'Sample' }, chapters: [], progress: { phase: 'importing' } }]) }) },
+    './useComicIngest': { useComicIngest: () => ({ jobs: Vue.ref([{ id: 'j', status: 'failed', updatedAt: 2, name: 'Sample', phase: 'placed', selectedChapters: [] }]) }) }
+  })
+  const downloads = load('src/composables/useComicDownloads.ts').useComicDownloads()
+  load('src/i18n/index.ts').applyLanguage('en')
+  assert.deepEqual(Array.from(downloads.rows.value, (r: any) => [r.id, r.phase]), [['j', 'placed'], ['p', 'importing']])
+  assert.doesNotMatch(downloads.rows.value[0].phaseLabel, /\p{Script=Han}/u)
+})
+
+test('motto, copy notification and new measurement name follow language changes without losing user text', async () => {
+  const sidebar = setup('src/components/software/Sidebar.vue', {}, {
+    '@/stores/software': { useSoftwareStore: () => ({}) }, '@/stores/categories': { useCategoriesStore: () => ({}) }
+  })
+  try {
+    const chinese = sidebar.state.motto.value.text
+    sidebar.load('src/i18n/index.ts').applyLanguage('en')
+    assert.doesNotMatch(sidebar.state.motto.value.text, /\p{Script=Han}/u)
+    sidebar.load('src/i18n/index.ts').applyLanguage('zh-CN')
+    assert.equal(sidebar.state.motto.value.text, chinese)
+  } finally { sidebar.dispose() }
+  const savedRecords: any[] = []
+  const editor = setup('src/components/personal/PersonalEditor.vue', {
+    workspace: { preferences: { get: async () => ({ assetCategories: [], experienceCategories: [] }) }, personal: { save: async (v: any) => { savedRecords.push(v); return v } } }
+  }, {}, { structuredClone }, { kind: 'measurement', metrics: [] })
+  try {
+    editor.load('src/i18n/index.ts').applyLanguage('en')
+    assert.equal(editor.state.form.value.name, '', 'input starts empty so user can clear/type freely without fallback snapping back')
+    await editor.state.save()
+    assert.equal(savedRecords[0].name, editor.load('src/i18n/index.ts').tr('状态记录'))
+    editor.state.form.value.name = '我的记录'
+    editor.load('src/i18n/index.ts').applyLanguage('zh-CN')
+    editor.load('src/i18n/index.ts').applyLanguage('en')
+    await editor.state.save()
+    assert.equal(savedRecords[1].name, '我的记录')
+  } finally { editor.dispose() }
+  const messages: string[] = []
+  const load = createRendererLoader({ '@/composables/useToast': { useToast: () => ({ success: (text: string) => messages.push(text) }) } }, { window: { baoyi: { app: { copyText: async () => {} } } } })
+  const i18n = load('src/i18n/index.ts')
+  const paths = load('src/composables/useResourceDetail.ts').useResourcePaths({ reveal: async () => true, copied: () => i18n.tr('文件路径已复制'), copyTone: 'success' })
+  i18n.applyLanguage('en'); await paths.copyPath('C:/用户/路径')
+  assert.equal(messages[0], i18n.tr('文件路径已复制'))
+  assert.doesNotMatch(messages[0], /\p{Script=Han}/u)
 })

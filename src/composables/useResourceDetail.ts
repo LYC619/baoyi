@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import type { Ref } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/utils'
@@ -5,7 +7,7 @@ import { errorMessage } from '@/utils'
 /** Native file actions shared by detail pages and individual video assets. */
 export function useResourcePaths<A extends unknown[]>(options: {
   reveal: (...args: A) => Promise<void | boolean>
-  copied?: string
+  copied?: string | (() => string)
   copyTone?: 'toast' | 'success'
   copyErrorPrefix?: string
 }) {
@@ -13,14 +15,14 @@ export function useResourcePaths<A extends unknown[]>(options: {
   async function copyPath(path: string): Promise<void> {
     try {
       await window.baoyi.app.copyText(path)
-      toast[options.copyTone ?? 'toast'](options.copied ?? '路径已复制')
+      toast[options.copyTone ?? 'toast'](typeof options.copied === 'function' ? options.copied() : options.copied ?? tr("路径已复制"))
     } catch (cause) {
-      toast.error((options.copyErrorPrefix ?? '复制失败：') + errorMessage(cause))
+      toast.error((options.copyErrorPrefix ?? tr("复制失败：")) + errorMessage(cause))
     }
   }
   async function reveal(...args: A): Promise<void> {
     try {
-      if (await options.reveal(...args) === false) toast.error('文件位置不可用，请检查磁盘是否在线')
+      if (await options.reveal(...args) === false) toast.error(tr('文件位置不可用，请检查磁盘是否在线'))
     } catch (cause) {
       toast.error(errorMessage(cause))
     }
@@ -46,7 +48,7 @@ export function useResourceDetail<T extends Resource>(options: {
       if (updated) item.value = updated
       return updated
     } catch (cause) {
-      error(`保存失败：${errorMessage(cause)}`)
+      error(tr("保存失败：{p0}", {p0: (errorMessage(cause))}))
       return null
     }
   }

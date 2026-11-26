@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
+import { locale as appLocale } from '../../i18n/index.ts'
+
 import { computed } from "vue";
 import { Backpack } from "lucide-vue-next";
 import type { PersonalRecord } from "@/types/workspace";
@@ -18,7 +22,7 @@ const view = usePersonalView("assets", { query: "", category: "", sort: "expiry"
 const categories = computed(() => [
   ...new Set([
     ...props.categories,
-    ...props.records.map((r) => String(r.data.category || "其他")),
+    ...props.records.map((r) => String(r.data.category || tr("其他"))),
   ]),
 ]);
 
@@ -31,74 +35,70 @@ const filtered = computed(() =>
 const snoozedCount = computed(() => props.records.filter((r) => isSnoozed(r, props.today)).length);
 const annual = computed(() => assetAnnualCosts(props.records));
 const days = (r: PersonalRecord) => daysUntil(r.data.expiresOn, props.today);
-const expiry = (r: PersonalRecord) => days(r) === null ? '未设置到期日' : dueText(r.data.expiresOn, props.today);
+const expiry = (r: PersonalRecord) => days(r) === null ? tr("未设置到期日") : dueText(r.data.expiresOn, props.today);
 const snoozedDate = (r: PersonalRecord) => {
   const [, month, day] = String(r.data.snoozedUntil).split('-');
-  return `${Number(month)} 月 ${Number(day)} 日`;
+  return tr("{p0} 月 {p1} 日", {p0: (Number(month)), p1: (Number(day))});
 };
 
 function monthlyEquivalent(r: PersonalRecord): string {
   if (r.data.cycle !== 'yearly' || typeof r.data.cost !== 'number' || !Number.isFinite(r.data.cost) || r.data.cost <= 0) return '';
   const code = String(r.data.currency || '').toUpperCase();
   const sym = CURRENCY_SYMBOLS[code] || '';
-  const monthly = (r.data.cost / 12).toLocaleString(undefined, { maximumFractionDigits: 1 });
-  return `约 ${sym}${monthly}${!sym && code ? ' ' + code : ''}/月`;
+  const monthly = (r.data.cost / 12).toLocaleString(appLocale.value, { maximumFractionDigits: 1 });
+  return tr("约 {p0}{p1}{p2}/月", {p0: (sym), p1: (monthly), p2: (!sym && code ? ' ' + code : '')});
 }
 
 function reset() { view.query = ''; view.category = ''; view.status = 'all'; view.sort = 'expiry' }
 
 const cycles: Record<string, string> = {
-  once: "一次性",
-  monthly: "每月",
-  yearly: "每年",
-  other: "其他周期",
+  get once() { return tr("一次性") },
+  get monthly() { return tr("每月") },
+  get yearly() { return tr("每年") },
+  get other() { return tr("其他周期") },
 };
 </script>
 <template>
   <section class="asset-browser">
     <div class="asset-summary">
-      <span><strong>{{ records.length }}</strong> 项资产</span>
-      <span><strong>{{ records.filter((r) => isReminding(r, remindDays, today)).length }}</strong> 项已到期 / {{ remindDays }} 天内到期</span>
-      <span v-for="(cost, currency) in annual.totals" :key="currency">
-        按当前周期折算年费
-        <strong>{{ CURRENCY_SYMBOLS[String(currency)] || '' }}{{ cost.toLocaleString(undefined, { maximumFractionDigits: 2 }) }} {{ currency }}</strong>
-        <em class="asset-summary-monthly">（约 {{ CURRENCY_SYMBOLS[String(currency)] || '' }}{{ (cost / 12).toLocaleString(undefined, { maximumFractionDigits: 1 }) }}/月）</em>
+      <span><strong>{{ records.length }}</strong>{{ $t("项资产") }}</span>
+      <span><strong>{{ records.filter((r) => isReminding(r, remindDays, today)).length }}</strong>{{ $t("项已到期 / {p0} 天内到期", {p0: (remindDays)}) }}</span>
+      <span v-for="(cost, currency) in annual.totals" :key="currency">{{ $t("按当前周期折算年费") }}<strong>{{ CURRENCY_SYMBOLS[String(currency)] || '' }}{{ cost.toLocaleString($locale, { maximumFractionDigits: 2 }) }} {{ currency }}</strong>
+        <em class="asset-summary-monthly">{{ $t("（约 {p0}{p1}/月）", {p0: (CURRENCY_SYMBOLS[String(currency)] || ''), p1: ((cost / 12).toLocaleString($locale, { maximumFractionDigits: 1 }))}) }}</em>
       </span>
       <button v-if="snoozedCount" type="button" class="ws-button asset-snooze-btn" @click="view.status = view.status === 'snoozed' ? 'all' : 'snoozed'">
-        {{ view.status === 'snoozed' ? '返回全部资产' : `查看 ${snoozedCount} 项已暂缓提醒` }}
+        {{ view.status === 'snoozed' ? $t('返回全部资产') : $t('查看 {p0} 项已暂缓提醒', {p0: snoozedCount}) }}
       </button>
-      <small v-if="annual.omitted">{{ annual.omitted }} 项费用或周期未明确，未计入年费</small>
+      <small v-if="annual.omitted">{{ $t("{p0} 项费用或周期未明确，未计入年费", {p0: (annual.omitted)}) }}</small>
     </div>
     <div class="ws-toolbar">
       <input
         v-model="view.query"
-        aria-label="搜索背包"
-        placeholder="搜索名称、用途或提供方"
+        :aria-label="$t('搜索背包')"
+        :placeholder="$t('搜索名称、用途或提供方')"
       />
-      <select v-model="view.category" aria-label="筛选背包类别">
-        <option value="">全部类别</option>
+      <select v-model="view.category" :aria-label="$t('筛选背包类别')">
+        <option value="">{{ $t("全部类别") }}</option>
         <option v-for="item in categories" :key="item">{{ item }}</option>
       </select>
-      <select v-model="view.status" aria-label="背包到期筛选">
-        <option value="all">全部到期状态</option>
-        <option value="reminding">待处理到期（已到期 + {{ remindDays }} 天内）</option>
-        <option value="overdue">已到期</option>
-        <option value="soon">{{ remindDays }} 天内到期</option>
-        <option value="snoozed">已暂缓提醒</option>
-        <option value="undated">未设到期日</option>
+      <select v-model="view.status" :aria-label="$t('背包到期筛选')">
+        <option value="all">{{ $t("全部到期状态") }}</option>
+        <option value="reminding">{{ $t("待处理到期（已到期 + {p0} 天内）", {p0: (remindDays)}) }}</option>
+        <option value="overdue">{{ $t("已到期") }}</option>
+        <option value="soon">{{ $t("{p0} 天内到期", {p0: (remindDays)}) }}</option>
+        <option value="snoozed">{{ $t("已暂缓提醒") }}</option>
+        <option value="undated">{{ $t("未设到期日") }}</option>
       </select>
-      <select v-model="view.sort" aria-label="背包排序">
-        <option value="expiry">到期时间</option>
-        <option value="name">名称</option>
-        <option value="cost">折算年费（按币种分组）</option>
+      <select v-model="view.sort" :aria-label="$t('背包排序')">
+        <option value="expiry">{{ $t("到期时间") }}</option>
+        <option value="name">{{ $t("名称") }}</option>
+        <option value="cost">{{ $t("折算年费（按币种分组）") }}</option>
       </select>
     </div>
     <div class="ws-toolbar">
-      <small class="ws-muted" role="status">
-        显示 {{ filtered.length }} / {{ records.length }} 项 · 汇总为全部资产，买断和未知周期不折算年费
-        <template v-if="snoozedCount && ['reminding', 'overdue', 'soon'].includes(view.status)"> · 另有 {{ snoozedCount }} 项已暂缓提醒（可切到「已暂缓提醒」查看）</template>
+      <small class="ws-muted" role="status">{{ $t("显示 {p0} / {p1} 项 · 汇总为全部资产，买断和未知周期不折算年费", {p0: (filtered.length), p1: (records.length)}) }}<template v-if="snoozedCount && ['reminding', 'overdue', 'soon'].includes(view.status)">{{ $t("· 另有 {p0} 项已暂缓提醒（可切到「已暂缓提醒」查看）", {p0: (snoozedCount)}) }}</template>
       </small>
-      <button v-if="view.query || view.category || view.status !== 'all'" class="ws-button" @click="reset">清除筛选</button>
+      <button v-if="view.query || view.category || view.status !== 'all'" class="ws-button" @click="reset">{{ $t("清除筛选") }}</button>
     </div>
     <div class="asset-grid">
       <button
@@ -107,9 +107,9 @@ const cycles: Record<string, string> = {
         class="asset-card"
         @click="emit('select', record)"
       >
-        <span class="asset-category"><Backpack :size="18" />{{ record.data.category || "其他" }}</span>
+        <span class="asset-category"><Backpack :size="18" />{{ record.data.category || $t('其他') }}</span>
         <h3>{{ record.name }}</h3>
-        <p>{{ record.data.provider || record.body || "尚未补充用途" }}</p>
+        <p>{{ record.data.provider || record.body || $t('尚未补充用途') }}</p>
         <strong>
           {{ formatAssetPrice(record.data.cost, record.data.currency) }}
           <small v-if="record.data.cycle">/ {{ cycles[String(record.data.cycle)] }}</small>
@@ -125,14 +125,14 @@ const cycles: Record<string, string> = {
               days(record)! <= remindDays,
           }"
         >{{ expiry(record) }}</span>
-        <span v-if="isSnoozed(record, today)" class="asset-snoozed">已暂缓至 {{ snoozedDate(record) }}</span>
+        <span v-if="isSnoozed(record, today)" class="asset-snoozed">{{ $t("已暂缓至 {p0}", {p0: (snoozedDate(record))}) }}</span>
       </button>
     </div>
     <p v-if="!filtered.length" class="ws-empty">
       {{
         records.length
-          ? "没有符合条件的资产，试试其他分类或关键词。"
-          : "用个人助手记下一项资产，也可以手动添加。"
+          ? $t('没有符合条件的资产，试试其他分类或关键词。')
+          : $t('用个人助手记下一项资产，也可以手动添加。')
       }}
     </p>
   </section>

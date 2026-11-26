@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import fs from 'node:fs/promises'
 import { app, dialog, shell, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'node:crypto'
@@ -61,7 +62,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
     chooseTarget=optBool(chooseTarget,'chooseTarget')??false
     let root=''
     if(chooseTarget || !byCategory || ids.some(id=>!rememberedImageDirectory(getDb(),library().get(id)?.groupId||null))){
-      const selected=await dialog.showOpenDialog(getWindow()!,{title:'选择整理目标目录',properties:['openDirectory','createDirectory']})
+      const selected=await dialog.showOpenDialog(getWindow()!,{title:tr("选择整理目标目录"),properties:['openDirectory','createDirectory']})
       focusBack()
       if(selected.canceled||!selected.filePaths[0])return null
       root=selected.filePaths[0]
@@ -69,7 +70,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
     return imageOperation(async()=>{
       const plan=await planImageMove(getDb(),ids,root,byCategory,protectedPaths())
       if(!plan.length)return {moved:0,paths:[],warnings:[]}
-      const confirmed=await dialog.showMessageBox(getWindow()!,{type:'question',title:'确认整理和移动',message:`移动 ${plan.length} 个作品目录${byCategory?'，按分类存放':''}`,detail:plan.slice(0,30).map(row=>row.source+'\n→ '+row.destination).join('\n\n')+(plan.length>30?`\n另有 ${plan.length-30} 项`:'')+'\n\n保留全部内容、分类、合集及阅读进度；同名目录不会覆盖。',buttons:['取消','确认移动'],defaultId:0,cancelId:0})
+      const confirmed=await dialog.showMessageBox(getWindow()!,{type:'question',title:tr("确认整理和移动"),message:byCategory ? tr('移动 {p0} 个作品目录，按分类存放', { p0: plan.length }) : tr('移动 {p0} 个作品目录', { p0: plan.length }),detail:plan.slice(0,30).map(row=>row.source+'\n→ '+row.destination).join('\n\n')+(plan.length>30?tr("\n另有 {p0} 项", {p0: (plan.length-30)}):'')+tr("\n\n保留全部内容、分类、合集及阅读进度；同名目录不会覆盖。"),buttons:[tr("取消"),tr("确认移动")],defaultId:0,cancelId:0})
       focusBack()
       if(confirmed.response!==1)return null
       const result=await moveImageItems(getDb(),plan,file=>shell.trashItem(file),protectedPaths());changed();return result
@@ -80,7 +81,7 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
     assertImageFilesIdle(id)
     if(deleteFiles){
       const target=await imageFileTarget(getDb(),id,protectedPaths())
-      const confirmed=await dialog.showMessageBox(getWindow()!,{type:'warning',title:'删除原文件及全部内容',message:'将此作品的原文件夹及全部内容送入回收站？',detail:target+'\n\n包含图片、附带文件和子文件夹；同时移除库中记录。',buttons:['取消','删除原文件'],defaultId:0,cancelId:0})
+      const confirmed=await dialog.showMessageBox(getWindow()!,{type:'warning',title:tr("删除原文件及全部内容"),message:tr("将此作品的原文件夹及全部内容送入回收站？"),detail:target+tr("\n\n包含图片、附带文件和子文件夹；同时移除库中记录。"),buttons:[tr("取消"),tr("删除原文件")],defaultId:0,cancelId:0})
       focusBack()
       if(confirmed.response!==1)return false
       await imageOperation(()=>removeImageFiles(getDb(),id,file=>shell.trashItem(file),protectedPaths()))
@@ -111,8 +112,8 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
       }
       targets = provided
     } else {
-      const result = await dialog.showOpenDialog(getWindow()!, { title: archive ? '选择 ZIP／CBZ' : multiple ? '选择包含多个相册／作品的父目录' : '选择一个相册／漫画目录',
-        properties: archive ? ['openFile'] : ['openDirectory'], ...(archive ? { filters: [{ name: '漫画归档', extensions: ['zip','cbz'] }] } : {}) })
+      const result = await dialog.showOpenDialog(getWindow()!, { title: archive ? tr("选择 ZIP／CBZ") : multiple ? tr("选择包含多个相册／作品的父目录") : tr("选择一个相册／漫画目录"),
+        properties: archive ? ['openFile'] : ['openDirectory'], ...(archive ? { filters: [{ name: tr("漫画归档"), extensions: ['zip','cbz'] }] } : {}) })
       focusBack()
       if (result.canceled || !result.filePaths[0]) return null
       targets = [result.filePaths[0]]
@@ -167,8 +168,8 @@ export function registerImageIpc(getWindow: () => BrowserWindow | null, ipc: Pic
     assertImageFilesIdle(id)
     const item = library().get(id)
     if (!item) throw new Error('资源不可用')
-    const result = await dialog.showOpenDialog(getWindow()!, { title: '重新定位相册／漫画', properties: isArchive(item.path) ? ['openFile'] : ['openDirectory'],
-      ...(isArchive(item.path) ? { filters: [{ name: '漫画归档', extensions: ['zip','cbz'] }] } : {}) })
+    const result = await dialog.showOpenDialog(getWindow()!, { title: tr("重新定位相册／漫画"), properties: isArchive(item.path) ? ['openFile'] : ['openDirectory'],
+      ...(isArchive(item.path) ? { filters: [{ name: tr("漫画归档"), extensions: ['zip','cbz'] }] } : {}) })
     focusBack()
     if (result.canceled || !result.filePaths[0]) return null
     return imageOperation(async () => {

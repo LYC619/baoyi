@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { app, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -45,7 +46,7 @@ export function registerLibraryBackupIpc(getWindow: () => BrowserWindow | null, 
   ipcMain.handle('data:export-json', async event => {
     assertMain(event)
     const result = await dialog.showSaveDialog(getWindow()!, {
-      title: '备份全部资料', defaultPath: 'baoyi-library-backup.json', filters: [{ name: '资料库备份', extensions: ['json'] }]
+      title: tr("备份全部资料"), defaultPath: 'baoyi-library-backup.json', filters: [{ name: tr("资料库备份"), extensions: ['json'] }]
     })
     if (result.canceled || !result.filePath) return null
     assertLibraryIdle()
@@ -64,7 +65,7 @@ export function registerLibraryBackupIpc(getWindow: () => BrowserWindow | null, 
     try {
       assertLibraryIdle()
       const result = await dialog.showOpenDialog(getWindow()!, {
-        title: '选择资料库备份', properties: ['openFile'], filters: [{ name: '资料库备份', extensions: ['json'] }]
+        title: tr("选择资料库备份"), properties: ['openFile'], filters: [{ name: tr("资料库备份"), extensions: ['json'] }]
       })
       const file = result.filePaths[0]
       if (result.canceled || !file) return null
@@ -73,13 +74,13 @@ export function registerLibraryBackupIpc(getWindow: () => BrowserWindow | null, 
       const summary = previewLibraryBackup(getDb(), input)
       const recoveryDirectory = path.join(app.getPath('userData'), 'recovery')
       const confirmation = await dialog.showMessageBox(getWindow()!, {
-        type: 'warning', title: '确认恢复资料库', message: '使用这份备份替换当前资料库并重启？',
-        detail: `备份：${path.basename(file)}\n导出时间：${new Date(summary.exported_at).toLocaleString()}\n` +
-          `软件 ${summary.resources.software} 个，游戏 ${summary.resources.game} 个，影视 ${summary.resources.video} 个，图片 ${summary.resources.image} 项，资料 ${summary.resources.document} 份，项目 ${summary.resources.project} 个，个人记录 ${summary.table_counts.personal_records} 条；共 ${summary.total_rows} 条资料记录。\n\n` +
-          '当前资料及历史记录将被替换。保留本机设置，不移动或删除图片、视频、软件、游戏和存档文件。备份中的未完成任务会标记为中断，供你手动重试。\n' +
-          ((input as any).assistant?'归档助理的对话、记忆和方法将随备份恢复。':'此旧备份不含归档助理记录，恢复后助理从空白开始；当前助手记录会另存到恢复目录。')+'\n\n' +
-          `恢复前会把当前完整数据库另存到：${recoveryDirectory}\n恢复完成后应用立即重启。`,
-        buttons: ['取消', '恢复并重启'], defaultId: 0, cancelId: 0, noLink: true
+        type: 'warning', title: tr("确认恢复资料库"), message: tr("使用这份备份替换当前资料库并重启？"),
+        detail: tr("备份：{p0}\n导出时间：{p1}\n", {p0: (path.basename(file)), p1: (new Date(summary.exported_at).toLocaleString())}) +
+          tr("软件 {p0} 个，游戏 {p1} 个，影视 {p2} 个，图片 {p3} 项，资料 {p4} 份，项目 {p5} 个，个人记录 {p6} 条；共 {p7} 条资料记录。\n\n", {p0: (summary.resources.software), p1: (summary.resources.game), p2: (summary.resources.video), p3: (summary.resources.image), p4: (summary.resources.document), p5: (summary.resources.project), p6: (summary.table_counts.personal_records), p7: (summary.total_rows)}) +
+          tr("当前资料及历史记录将被替换。保留本机设置，不移动或删除图片、视频、软件、游戏和存档文件。备份中的未完成任务会标记为中断，供你手动重试。\n") +
+          ((input as any).assistant?tr("归档助理的对话、记忆和方法将随备份恢复。"):tr("此旧备份不含归档助理记录，恢复后助理从空白开始；当前助手记录会另存到恢复目录。"))+'\n\n' +
+          tr("恢复前会把当前完整数据库另存到：{p0}\n恢复完成后应用立即重启。", {p0: (recoveryDirectory)}),
+        buttons: [tr("取消"), tr("恢复并重启")], defaultId: 0, cancelId: 0, noLink: true
       })
       if (confirmation.response !== 1) return null
       assertLibraryIdle()

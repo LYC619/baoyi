@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { useToast } from '@/composables/useToast'
@@ -22,20 +24,20 @@ function toggleSelecting() {
   notice.value = ''
   if (!selecting.value) selectionTrigger.value?.focus()
 }
-onBeforeRouteLeave(() => { if (busy.value) { toast('正在处理所选内容，请稍后再离开'); return false } return true })
+onBeforeRouteLeave(() => { if (busy.value) { toast(tr("正在处理所选内容，请稍后再离开")); return false } return true })
 function keys(event: KeyboardEvent) {
   const target = event.target as HTMLElement
   if (!selecting.value || busy.value || event.defaultPrevented || target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '')) return
   if (event.key === 'Escape') { event.preventDefault(); toggleSelecting() }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') { event.preventDefault(); if (props.pending) return; if (props.items.length <= 5000) selected.value = new Set(props.items.map(item => item.id)); else notice.value = '一次最多选择 5000 项' }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') { event.preventDefault(); if (props.pending) return; if (props.items.length <= 5000) selected.value = new Set(props.items.map(item => item.id)); else notice.value = tr("一次最多选择 5000 项") }
 }
 const entries=computed(()=>imageShelfEntries(props.items))
 const pageCount = computed(() => Math.max(1, Math.ceil(entries.value.length / 60)))
 const current = computed(() => Math.min(pageCount.value, Math.max(1, props.page)))
 const shownEntries=computed(()=>entries.value.slice((current.value-1)*60,current.value*60))
 const shown = computed(() => shownEntries.value.flatMap(entry=>entry.members))
-const blocks=computed(()=>libraryBlocks(shownEntries.value,props.grouping||'none',entry=>props.groups.find(g=>g.id===entry.item.groupId)?.name||'未分类',entry=>entry.item.path,props.roots||[]))
-function toggleEntry(entry:ImageShelfEntry){if(props.pending||busy.value)return;const next=new Set(selected.value),all=entry.members.every(item=>next.has(item.id));for(const item of entry.members){if(all)next.delete(item.id);else next.add(item.id)}if(next.size>5000){notice.value='一次最多选择 5000 项';return}selected.value=next}
+const blocks=computed(()=>libraryBlocks(shownEntries.value,props.grouping||'none',entry=>props.groups.find(g=>g.id===entry.item.groupId)?.name||tr("未分类"),entry=>entry.item.path,props.roots||[]))
+function toggleEntry(entry:ImageShelfEntry){if(props.pending||busy.value)return;const next=new Set(selected.value),all=entry.members.every(item=>next.has(item.id));for(const item of entry.members){if(all)next.delete(item.id);else next.add(item.id)}if(next.size>5000){notice.value=tr("一次最多选择 5000 项");return}selected.value=next}
 function openEntry(entry:ImageShelfEntry){if(selecting.value)toggleEntry(entry);else if(entry.item.collectionId)emit('collection',entry.item.collectionId);else emit('open',entry.item)}
 const allPage = computed(() => shown.value.length > 0 && shown.value.every(item => selected.value.has(item.id)))
 const partialPage = computed(() => !allPage.value && shown.value.some(item => selected.value.has(item.id)))
@@ -44,32 +46,32 @@ watch(() => props.items, items => { const available = new Set(items.map(i => i.i
 function selectPage() {
   if (busy.value) return
   const next = new Set(selected.value)
-  if (!allPage.value && next.size + shown.value.filter(item => !next.has(item.id)).length > 5000) { notice.value = '一次最多选择 5000 项'; return }
+  if (!allPage.value && next.size + shown.value.filter(item => !next.has(item.id)).length > 5000) { notice.value = tr("一次最多选择 5000 项"); return }
   for (const item of shown.value) { if (allPage.value) next.delete(item.id); else next.add(item.id) }
   selected.value = next; notice.value = ''
 }
 function changePage(value: number) { emit('update:page', value); shelf.value?.scrollIntoView({ block: 'start' }) }
-function finish(count: number) { selected.value = new Set(); notice.value = `已更新 ${count} 项` }
+function finish(count: number) { selected.value = new Set(); notice.value = tr("已更新 {p0} 项", {p0: (count)}) }
 </script>
 <template>
   <div ref="shelf" class="image-shelf-view" @keydown="keys">
     <div class="shelf-controls">
-      <h2 v-if="heading">{{heading}}</h2><span v-if="!selecting" class="shelf-count">{{items.length}} {{type==='comic'?'部作品':'个相册'}}</span>
-      <button ref="selectionTrigger" class="im-button" aria-label="批量整理" :title="selecting?'退出批量整理':'批量整理'" :aria-pressed="selecting" :disabled="busy" @click="toggleSelecting"><X v-if="selecting" :size="18" /><ListChecks v-else :size="18" />{{selecting?'退出批量整理':'批量整理'}}</button>
-      <template v-if="selecting"><label><input type="checkbox" aria-label="选择当前页" :checked="allPage" :indeterminate="partialPage" :disabled="pending||busy||!shown.length" @change="selectPage" />当前页</label><button class="im-button" aria-label="全选筛选结果" :disabled="pending||busy||!items.length||items.length>5000" @click="selected=new Set(items.map(i=>i.id));notice=''">全选结果</button><button v-if="selected.size" class="im-button" :disabled="busy" @click="selected=new Set()">清空选择</button><output aria-label="所选数量">已选 {{ selected.size }} / {{ items.length }}</output></template>
+      <h2 v-if="heading">{{heading}}</h2><span v-if="!selecting" class="shelf-count">{{items.length}} {{type==='comic'?$t('部作品'):$t('个相册')}}</span>
+      <button ref="selectionTrigger" class="im-button" :aria-label="$t('批量整理')" :title="selecting?$t('退出批量整理'):$t('批量整理')" :aria-pressed="selecting" :disabled="busy" @click="toggleSelecting"><X v-if="selecting" :size="18" /><ListChecks v-else :size="18" />{{selecting?$t('退出批量整理'):$t('批量整理')}}</button>
+      <template v-if="selecting"><label><input type="checkbox" :aria-label="$t('选择当前页')" :checked="allPage" :indeterminate="partialPage" :disabled="pending||busy||!shown.length" @change="selectPage" />{{ $t("当前页") }}</label><button class="im-button" :aria-label="$t('全选筛选结果')" :disabled="pending||busy||!items.length||items.length>5000" @click="selected=new Set(items.map(i=>i.id));notice=''">{{ $t("全选结果") }}</button><button v-if="selected.size" class="im-button" :disabled="busy" @click="selected=new Set()">{{ $t("清空选择") }}</button><output :aria-label="$t('所选数量')">{{ $t("已选 {p0} / {p1}", {p0: (selected.size), p1: (items.length)}) }}</output></template>
       <p v-if="notice" role="status">{{ notice }}</p>
-      <nav v-if="pageCount>1" aria-label="书架分页"><button class="im-icon" aria-label="上一页书架" title="上一页" :disabled="current===1||busy" @click="changePage(current-1)"><ArrowLeft :size="18" /></button><output aria-label="书架页码">{{ current }} / {{ pageCount }}</output><button class="im-icon" aria-label="下一页书架" title="下一页" :disabled="current===pageCount||busy" @click="changePage(current+1)"><ArrowRight :size="18" /></button></nav>
+      <nav v-if="pageCount>1" :aria-label="$t('书架分页')"><button class="im-icon" :aria-label="$t('上一页书架')" :title="$t('上一页')" :disabled="current===1||busy" @click="changePage(current-1)"><ArrowLeft :size="18" /></button><output :aria-label="$t('书架页码')">{{ current }} / {{ pageCount }}</output><button class="im-icon" :aria-label="$t('下一页书架')" :title="$t('下一页')" :disabled="current===pageCount||busy" @click="changePage(current+1)"><ArrowRight :size="18" /></button></nav>
     </div>
-    <p v-if="selecting && pending" role="status" class="shelf-pending">当前结果尚未就绪，刷新后可继续操作。</p>
+    <p v-if="selecting && pending" role="status" class="shelf-pending">{{ $t("当前结果尚未就绪，刷新后可继续操作。") }}</p>
     <ImageBulkPanel v-if="selecting" :pending="pending" :ids="[...selected]" :groups="groups" :type="type" @applied="finish" @busy="busy=$event" />
     <section v-for="block in blocks" :key="block.key" class="shelf-group"><h3 v-if="block.name">{{block.name}} <small>{{block.items.length}}</small></h3>
     <div class="image-shelf" :class="{'image-shelf--list':layout==='list','image-shelf--photo':type!=='comic'}" :style="{'--photo-size':(cardSize||220)+'px',...(cardSize&&layout!=='list'&&layout!=='adaptive'?{gridTemplateColumns:`repeat(auto-fill,minmax(min(100%,${cardSize}px),1fr))`}:{})}" :data-layout="layout">
       <article v-for="entry in block.items" :key="entry.id" v-masonry="layout==='adaptive'" class="image-card" :class="{selected:entry.members.every(item=>selected.has(item.id))}">
-        <label v-if="selecting" class="shelf-select"><input type="checkbox" :aria-label="`选择 ${entry.name}`" :checked="entry.members.every(item=>selected.has(item.id))" :disabled="pending||busy" @change="toggleEntry(entry)" /></label>
-        <button class="image-card__open" :disabled="busy||(selecting&&pending)" @click="openEntry(entry)"><ImageCover :page-id="entry.item.coverPageId" :revision="entry.item.type!=='comic'?entry.item.updatedAt:undefined" :name="entry.name" :photo="entry.item.type!=='comic'" :shape="type!=='comic'?layout:undefined"/><div class="image-card__info"><strong>{{entry.name}}</strong><p v-if="entry.item.authors?.length" class="image-card__authors">{{entry.item.authors.join("、")}}</p><p><template v-if="entry.item.collectionId">合集 · {{entry.members.length}} 册 · </template><template v-else-if="entry.item.type==='comic'">{{entry.item.chapterCount}} 章 · </template>{{entry.members.reduce((n,i)=>n+i.pageCount,0)}} {{type==='comic'?'页':'张'}}<Heart v-if="entry.item.favorite" :size="13"/></p><span v-if="type==='comic' && entry.members.every(item=>item.read)" class="shelf-read"><Check :size="12"/>已读</span></div></button>
+        <label v-if="selecting" class="shelf-select"><input type="checkbox" :aria-label="$t('选择 {p0}', {p0: entry.name})" :checked="entry.members.every(item=>selected.has(item.id))" :disabled="pending||busy" @change="toggleEntry(entry)" /></label>
+        <button class="image-card__open" :disabled="busy||(selecting&&pending)" @click="openEntry(entry)"><ImageCover :page-id="entry.item.coverPageId" :revision="entry.item.type!=='comic'?entry.item.updatedAt:undefined" :name="entry.name" :photo="entry.item.type!=='comic'" :shape="type!=='comic'?layout:undefined"/><div class="image-card__info"><strong>{{entry.name}}</strong><p v-if="entry.item.authors?.length" class="image-card__authors">{{entry.item.authors.join("、")}}</p><p><template v-if="entry.item.collectionId">{{ $t("合集 · {p0} 册 ·", {p0: (entry.members.length)}) }}</template><template v-else-if="entry.item.type==='comic'">{{ $t("{p0} 章 ·", {p0: (entry.item.chapterCount)}) }}</template>{{entry.members.reduce((n,i)=>n+i.pageCount,0)}} {{type==='comic'?$t('页'):$t('张')}}<Heart v-if="entry.item.favorite" :size="13"/></p><span v-if="type==='comic' && entry.members.every(item=>item.read)" class="shelf-read"><Check :size="12"/>{{ $t("已读") }}</span></div></button>
       </article>
     </div></section>
-    <nav v-if="pageCount>1" class="shelf-bottom" aria-label="底部书架分页"><button class="im-icon" aria-label="上一页书架底部" title="上一页" :disabled="current===1||busy" @click="changePage(current-1)"><ArrowLeft :size="18" /></button><output>{{ current }} / {{ pageCount }}</output><button class="im-icon" aria-label="下一页书架底部" title="下一页" :disabled="current===pageCount||busy" @click="changePage(current+1)"><ArrowRight :size="18" /></button></nav>
+    <nav v-if="pageCount>1" class="shelf-bottom" :aria-label="$t('底部书架分页')"><button class="im-icon" :aria-label="$t('上一页书架底部')" :title="$t('上一页')" :disabled="current===1||busy" @click="changePage(current-1)"><ArrowLeft :size="18" /></button><output>{{ current }} / {{ pageCount }}</output><button class="im-icon" :aria-label="$t('下一页书架底部')" :title="$t('下一页')" :disabled="current===pageCount||busy" @click="changePage(current+1)"><ArrowRight :size="18" /></button></nav>
   </div>
 </template>
 <style scoped>

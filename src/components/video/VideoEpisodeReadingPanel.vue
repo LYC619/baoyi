@@ -52,8 +52,8 @@ const hasVideo = (content: VideoWorkContent) =>
   >
     <header class="episode-reading__head">
       <div>
-        <h2>{{ selectedEpisode ? videoEpisodeLabel(selectedEpisode, item.category === '里番') : '作品简介' }}</h2>
-        <p>{{ selectedEpisode ? '单集故事与资料' : '整部作品的介绍' }}</p>
+        <h2>{{ selectedEpisode ? videoEpisodeLabel(selectedEpisode, item.category === '里番') : $t('作品简介') }}</h2>
+        <p>{{ selectedEpisode ? $t('单集故事与资料') : $t('整部作品的介绍') }}</p>
       </div>
       <VideoScopeSwitch
         v-if="library?.contents.length"
@@ -73,20 +73,18 @@ const hasVideo = (content: VideoWorkContent) =>
           :title="playHint"
           @click="emit('play')"
         >
-          <Play :size="13" />{{ playing ? '正在打开…' : '播放这一集' }}
+          <Play :size="13" />{{ playing ? $t('正在打开…') : $t('播放这一集') }}
         </button>
         <button type="button" class="btn btn--subtle" @click="episodeEditing = !episodeEditing">
-          {{ episodeEditing ? '完成单集编辑' : '编辑这一集' }}
+          {{ episodeEditing ? $t('完成单集编辑') : $t('编辑这一集') }}
         </button>
         <button type="button" class="btn btn--subtle" :disabled="!!busyEpisode" @click="emit('scrape-selected')">
-          {{ busyEpisode ? '正在获取资料…' : '获取单集资料' }}
+          {{ busyEpisode ? $t('正在获取资料…') : $t('获取单集资料') }}
         </button>
-        <button type="button" class="btn btn--ghost" @click="emit('open-source')">更改来源</button>
-        <button type="button" class="btn btn--ghost" @click="emit('pick-episode-image', 'poster')">选择封面</button>
-        <button type="button" class="btn btn--ghost" @click="emit('pick-episode-image', 'thumbnail')">选择预览图</button>
-        <button type="button" class="btn btn--ghost" @click="emit('remove-episode', selectedEpisode.id)">
-          移除 / 移出合集…
-        </button>
+        <button type="button" class="btn btn--ghost" @click="emit('open-source')">{{ $t("更改来源") }}</button>
+        <button type="button" class="btn btn--ghost" @click="emit('pick-episode-image', 'poster')">{{ $t("选择封面") }}</button>
+        <button type="button" class="btn btn--ghost" @click="emit('pick-episode-image', 'thumbnail')">{{ $t("选择预览图") }}</button>
+        <button type="button" class="btn btn--ghost" @click="emit('remove-episode', selectedEpisode.id)">{{ $t("移除 / 移出合集…") }}</button>
       </div>
 
       <div
@@ -95,9 +93,7 @@ const hasVideo = (content: VideoWorkContent) =>
       >
         <VideoArtwork :poster="selectedEpisode.poster_path" :thumbnail="selectedEpisode.thumbnail_path" />
         <div class="episode-copy">
-          <label v-if="episodeEditing">
-            单集标题
-            <input
+          <label v-if="episodeEditing">{{ $t("单集标题") }}<input
               class="input"
               :value="selectedEpisode.title"
               @change="emit('save-episode', { title: ($event.target as HTMLInputElement).value.trim() })"
@@ -117,31 +113,29 @@ const hasVideo = (content: VideoWorkContent) =>
               selectedEpisode.duration_sec
             "
             class="episode-facts"
-            aria-label="单集基本资料"
+            :aria-label="$t('单集基本资料')"
           >
             <div v-if="selectedEpisode.air_date">
-              <dt>发行日期</dt>
+              <dt>{{ $t("发行日期") }}</dt>
               <dd>{{ videoDateLabel(selectedEpisode.air_date) }}</dd>
             </div>
             <div v-if="selectedEpisode.published_at">
-              <dt>发布日期</dt>
+              <dt>{{ $t("发布日期") }}</dt>
               <dd>{{ videoDateLabel(selectedEpisode.published_at) }}</dd>
             </div>
             <div v-if="selectedEpisode.studio">
-              <dt>厂牌 / 作者</dt>
+              <dt>{{ $t("厂牌 / 作者") }}</dt>
               <dd>{{ selectedEpisode.studio }}</dd>
             </div>
             <div v-if="selectedEpisode.duration_sec">
-              <dt>片长</dt>
+              <dt>{{ $t("片长") }}</dt>
               <dd>{{ formatDuration(selectedEpisode.duration_sec) }}</dd>
             </div>
           </dl>
-          <label v-if="editing || episodeEditing" class="episode-reading__original">
-            原名
-            <input
+          <label v-if="editing || episodeEditing" class="episode-reading__original">{{ $t("原名") }}<input
               class="input"
               :value="selectedEpisode.original_title || ''"
-              aria-label="单集原名"
+              :aria-label="$t('单集原名')"
               @change="emit('save-episode', { original_title: ($event.target as HTMLInputElement).value.trim() })"
             />
           </label>
@@ -150,15 +144,15 @@ const hasVideo = (content: VideoWorkContent) =>
             :key="'description-' + selectedEpisode.id"
             :model-value="selectedEpisode.description || ''"
             multiline
-            placeholder="补充单集剧情简介"
+            :placeholder="$t('补充单集剧情简介')"
             @commit="emit('save-episode', { description: $event })"
           />
-          <p v-else class="read-text">{{ selectedEpisode.description || '本集暂无简介，可在编辑资料中补充。' }}</p>
+          <p v-else class="read-text">{{ selectedEpisode.description || $t('本集暂无简介，可在编辑资料中补充。') }}</p>
           <details
             v-if="selectedEpisode.original_description && selectedEpisode.original_description !== selectedEpisode.description"
             class="original-description"
           >
-            <summary>查看原文介绍</summary>
+            <summary>{{ $t("查看原文介绍") }}</summary>
             <p>{{ selectedEpisode.original_description }}</p>
           </details>
           <button
@@ -167,8 +161,7 @@ const hasVideo = (content: VideoWorkContent) =>
             type="button"
             @click="emit('open-url', selectedEpisode.source_url)"
           >
-            <ExternalLink :size="13" />查看单集来源
-          </button>
+            <ExternalLink :size="13" />{{ $t("查看单集来源") }}</button>
         </div>
       </div>
 
@@ -185,7 +178,7 @@ const hasVideo = (content: VideoWorkContent) =>
         v-if="episodeEditing"
         :key="'tags-' + selectedEpisode.id"
         :model-value="(selectedEpisode.tags || []).join('、')"
-        placeholder="单集标签，用顿号分隔"
+        :placeholder="$t('单集标签，用顿号分隔')"
         @commit="
           emit('save-episode', {
             tags: $event
@@ -212,19 +205,19 @@ const hasVideo = (content: VideoWorkContent) =>
             v-if="editing"
             :model-value="item.description"
             multiline
-            placeholder="整部作品讲的是什么"
+            :placeholder="$t('整部作品讲的是什么')"
             @commit="emit('save-work', { description: $event })"
           />
           <p v-else class="read-text">
             {{
               item.description ||
               (library?.contents.length
-                ? '暂无整部作品简介。可切换上方集数查看各集独立介绍。'
-                : '尚无简介，可在编辑资料中补充。')
+                ? $t('暂无整部作品简介。可切换上方集数查看各集独立介绍。')
+                : $t('尚无简介，可在编辑资料中补充。'))
             }}
           </p>
           <details v-if="item.original_description" class="original-description">
-            <summary>查看原文介绍</summary>
+            <summary>{{ $t("查看原文介绍") }}</summary>
             <p>{{ item.original_description }}</p>
           </details>
         </div>
@@ -242,8 +235,8 @@ const hasVideo = (content: VideoWorkContent) =>
   >
     <header class="episode-reading__head">
       <div>
-        <h2>{{ selectedEpisode ? videoEpisodeLabel(selectedEpisode, item.category === '里番') + ' · 笔记' : '作品笔记' }}</h2>
-        <p>{{ selectedEpisode ? selectedEpisode.original_title || selectedEpisode.title : '记录观影感受、版本偏好或随手备忘' }}</p>
+        <h2>{{ selectedEpisode ? videoEpisodeLabel(selectedEpisode, item.category === '里番') + $t(' · 笔记') : $t('作品笔记') }}</h2>
+        <p>{{ selectedEpisode ? selectedEpisode.original_title || selectedEpisode.title : $t('记录观影感受、版本偏好或随手备忘') }}</p>
       </div>
       <VideoScopeSwitch
         v-if="library?.contents.length"
@@ -259,10 +252,10 @@ const hasVideo = (content: VideoWorkContent) =>
       :key="'notes-' + selectedEpisodeId"
       :model-value="selectedEpisode ? selectedEpisode.notes || '' : item.notes"
       multiline
-      placeholder="看到哪里、哪个版本、想记下的话…"
+      :placeholder="$t('看到哪里、哪个版本、想记下的话…')"
       @commit="selectedEpisode ? emit('save-episode', { notes: $event }) : emit('save-work', { notes: $event })"
     />
-    <p v-else class="read-text">{{ (selectedEpisode ? selectedEpisode.notes : item.notes) || '暂无笔记' }}</p>
+    <p v-else class="read-text">{{ (selectedEpisode ? selectedEpisode.notes : item.notes) || $t('暂无笔记') }}</p>
   </section>
 </template>
 

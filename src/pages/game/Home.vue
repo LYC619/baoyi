@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { locale, tr } from "../../i18n/index.ts"
+
 import {isWindowsGameEntry} from '@/utils/game-entry'
 import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
 /**
@@ -50,11 +52,11 @@ const { grouping, cardSize,coverShape } = useLibraryView('game')
 const blocks = computed(() => {
   const raw = libraryBlocks(store.items, grouping.value, item => ['其他','未分类'].includes(item.category) ? '' : item.category, item => item.source_dir, settings.settings.game_scan_dirs)
   if (grouping.value !== 'category' || !savedCategories.value.length) return raw
-  const order = new Map(savedCategories.value.map((name, idx) => [name, idx]))
+  const order = new Map(savedCategories.value.map((name, idx) => ['category:' + name, idx]))
   return [...raw].sort((a, b) => {
-    const oa = order.get(a.name) ?? (a.name === '未分类' ? 999999 : 99999)
-    const ob = order.get(b.name) ?? (b.name === '未分类' ? 999999 : 99999)
-    return oa !== ob ? oa - ob : a.name.localeCompare(b.name, 'zh-CN', { numeric: true })
+    const oa = order.get(a.key) ?? (a.key === 'unclassified' ? 999999 : 99999)
+    const ob = order.get(b.key) ?? (b.key === 'unclassified' ? 999999 : 99999)
+    return oa !== ob ? oa - ob : a.name.localeCompare(b.name, locale.value, { numeric: true })
   })
 })
 const unavailable = computed(() => store.items.filter(item=>item.path_state && item.path_state !== 'present'))
@@ -72,7 +74,7 @@ async function previewProjects() {
   catch(cause){error(errorMessage(cause))}finally{previewingProjects.value=false}
 }
 async function projectsImported(message:string){projectPreview.value=null;success(message);await store.checkProjects()}
-async function restoreProjectArtwork(){try{const count=await window.baoyi.game.restoreProjectArtwork();if(count){success(`已恢复 ${count} 款游戏的图片`);await store.checkProjects()}else{toast('当前没有可恢复的项目图片')}}catch(cause){error(errorMessage(cause))}}
+async function restoreProjectArtwork(){try{const count=await window.baoyi.game.restoreProjectArtwork();if(count){success(tr("已恢复 {p0} 款游戏的图片", {p0: (count)}));await store.checkProjects()}else{toast(tr("当前没有可恢复的项目图片"))}}catch(cause){error(errorMessage(cause))}}
 const bulkBusy = ref(false), savedCategories = ref<string[]>([])
 const selection = useLibrarySelection(() => store.items, () => bulkBusy.value || coversBusy.value)
 const { selecting, selectedIds } = selection
@@ -91,7 +93,7 @@ const ctxMenuItems = computed<ContextMenuItem[]>(() => {
   return [
     {
       id: 'launch',
-      label: isWindowsGameEntry(g.path) ? '启动游戏' : '打开安装包目录',
+      label: isWindowsGameEntry(g.path) ? tr("启动游戏") : tr("打开安装包目录"),
       disabled: !isWindowsGameEntry(g.path) ? g.path_state !== undefined && g.path_state !== 'present' : !canLaunch,
       onSelect: async () => {
         if (!isWindowsGameEntry(g.path)) {
@@ -106,19 +108,19 @@ const ctxMenuItems = computed<ContextMenuItem[]>(() => {
     },
     {
       id: 'reveal',
-      label: '打开所在文件夹',
+      label: tr('打开所在文件夹'),
       onSelect: async () => {
         try { await window.baoyi.game.revealInFolder(g.id) } catch (e) { error(errorMessage(e)) }
       }
     },
     {
       id: 'detail',
-      label: '查看详情',
+      label: tr('查看详情'),
       onSelect: () => open(g.id)
     },
     ...catChoices.map((cat, idx) => ({
       id: `cat:${cat}`,
-      label: `分类：${cat}`,
+      label: tr('分类：{p0}', {p0: cat}),
       checked: (g.category || '其他') === cat,
       separatorBefore: idx === 0,
       onSelect: async () => {
@@ -126,37 +128,37 @@ const ctxMenuItems = computed<ContextMenuItem[]>(() => {
         try {
           await store.update(g.id, { category: cat })
           await store.reload()
-          success(`已归入「${cat}」`)
+          success(tr("已归入「{p0}」", {p0: (cat)}))
         } catch (e) { error(errorMessage(e)) }
       }
     })),
     {
       id: 'archive',
-      label: g.is_archived ? '取消归档' : '归档',
+      label: g.is_archived ? tr("取消归档") : tr("归档"),
       separatorBefore: true,
       onSelect: async () => {
         try {
           await store.update(g.id, { is_archived: !g.is_archived })
           await store.reload()
-          toast(g.is_archived ? '已取消归档' : '已归档')
+          toast(g.is_archived ? tr("已取消归档") : tr("已归档"))
         } catch (e) { error(errorMessage(e)) }
       }
     },
     {
       id: 'remove',
-      label: '从库里移除',
+      label: tr('从库里移除'),
       danger: true,
       onSelect: async () => {
         const ok = await confirmDialog({
-          title: `从游戏库移除「${gTitle}」？`,
-          message: '仅移除抱一中的库记录，本地游戏文件与已有存档备份均会保留。',
-          confirmText: '移除记录',
+          title: tr('从游戏库移除「{p0}」？', {p0: gTitle}),
+          message: tr("仅移除抱一中的库记录，本地游戏文件与已有存档备份均会保留。"),
+          confirmText: tr('移除记录'),
           tone: 'danger'
         })
         if (!ok) return
         try {
           await store.remove(g.id)
-          success('已从游戏库移除')
+          success(tr("已从游戏库移除"))
         } catch (e) { error(errorMessage(e)) }
       }
     }
@@ -172,16 +174,16 @@ const filtered = computed(() => !!store.keyword.trim() || store.selection.kind !
 function clearFilters() { store.keyword = ''; store.select({ kind: 'group', value: 'all' }) }
 async function bulkCompleted(failedIds: string[]) { selectedIds.value = new Set(failedIds); await store.reload() }
 const coverScope = computed(() => store.items.filter(game => !selecting.value || selectedIds.value.has(game.id)).map(game => game.id))
-const coversBusy = computed(() => fillingCovers.value || tasks.runningTasks.value.some(task => task.kind === 'game-scan' && task.title === '批量补齐游戏封面'))
+const coversBusy = computed(() => fillingCovers.value || tasks.runningTasks.value.some(task => task.kind === 'game-scan'))
 const scanning = computed(() => preparing.value || operation.running.value)
 const progress = operation.progress
 let pageDisposed = false
 
 const SORTS: Array<{ value: NonNullable<GameQuery['sort']>; label: string }> = [
-  { value: 'played', label: '最近游玩' },
-  { value: 'added', label: '最近加入' },
-  { value: 'playtime', label: '游玩时长' },
-  { value: 'name', label: '按名称' }
+  { value: 'played', get label() { return tr("最近游玩") } },
+  { value: 'added', get label() { return tr("最近加入") } },
+  { value: 'playtime', get label() { return tr("游玩时长") } },
+  { value: 'name', get label() { return tr("按名称") } }
 ]
 
 let offSession: (() => void) | null = null
@@ -210,11 +212,11 @@ onBeforeUnmount(() => {
 
 const busyText = computed(() => {
   const p = progress.value
-  if (operation.stopping.value && operation.running.value) return '正在停止，等待当前识别步骤收尾…'
-  if (!p) return '准备中'
-  if (p.phase === 'done') return '正在刷新资源库…'
-  if (p.phase === 'scanning') return `正在扫描 ${shortenPath(p.current, 40)}`
-  return `识别 ${Math.min(p.processed + 1, p.total)}/${p.total}　${p.log || shortenPath(p.current, 32)}`
+  if (operation.stopping.value && operation.running.value) return tr("正在停止，等待当前识别步骤收尾…")
+  if (!p) return tr("准备中")
+  if (p.phase === 'done') return tr("正在刷新资源库…")
+  if (p.phase === 'scanning') return tr("正在扫描 {p0}", {p0: (shortenPath(p.current, 40))})
+  return tr("识别 {p0}/{p1}　{p2}", {p0: (Math.min(p.processed + 1, p.total)), p1: (p.total), p2: (p.log || shortenPath(p.current, 32))})
 })
 
 const busyPercent = computed(() => {
@@ -237,7 +239,7 @@ function open(id: string,tab?:string): void {
 
 function cancelScan(): void {
   try { operation.cancel() }
-  catch (err) { error('停止扫描失败：' + errorMessage(err)) }
+  catch (err) { error(tr("停止扫描失败：") + errorMessage(err)) }
 }
 
 function toggleSelected(id: string): void {
@@ -261,7 +263,7 @@ async function addManualGame(): Promise<void> {
       if (result.item) open(result.item.id)
     }
   } catch (err) {
-    if (!pageDisposed) error('登记游戏失败：' + errorMessage(err))
+    if (!pageDisposed) error(tr("登记游戏失败：") + errorMessage(err))
   } finally { registering.value = false }
 }
 
@@ -269,8 +271,8 @@ async function fillMissingCovers(): Promise<void> {
   if (coversBusy.value || coverScope.value.length === 0) return
   const ids = [...coverScope.value]
   fillingCovers.value = true
-  coverSummary.value = `正在检查 ${ids.length} 个游戏的封面`
-  const taskId = tasks.start('game-scan', '批量补齐游戏封面', { total: ids.length })
+  coverSummary.value = tr("正在检查 {p0} 个游戏的封面", {p0: (ids.length)})
+  const taskId = tasks.start('game-scan', tr("批量补齐游戏封面"), { total: ids.length })
   let off: (() => void) | undefined
   try {
     off = window.baoyi.game.onCoverProgress((p) => {
@@ -280,16 +282,16 @@ async function fillMissingCovers(): Promise<void> {
     })
     const result = await window.baoyi.game.rebuildCovers(ids)
     const skipped = Math.max(0, result.processed - result.updated - result.failed)
-    const message = result.processed === 0 ? '当前范围的封面已齐全'
-      : `${result.failed && result.updated ? '部分完成' : '处理结束'}：已处理 ${result.processed} 个，补齐 ${result.updated} 个${result.failed ? `，失败 ${result.failed} 个` : ''}${skipped ? `，跳过 ${skipped} 个（保留较新的选择）` : ''}`
+    const message = result.processed === 0 ? tr('当前范围的封面已齐全')
+      : tr('{p0}：已处理 {p1} 个，补齐 {p2} 个{p3}{p4}', {p0: result.failed && result.updated ? tr('部分完成') : tr('处理结束'), p1: result.processed, p2: result.updated, p3: result.failed ? tr('，失败 {p0} 个', {p0: result.failed}) : '', p4: skipped ? tr('，跳过 {p0} 个（保留较新的选择）', {p0: skipped}) : ''})
     coverSummary.value = message
     tasks.update(taskId, { processed: result.processed, total: result.processed, percent: 100, current: '', message })
     tasks.finish(taskId, result.failed ? 'failed' : 'success', message)
     await store.reload()
     if (!pageDisposed) toast(message)
   } catch (err) {
-    coverSummary.value = `封面补齐失败：${errorMessage(err)}`
-    tasks.finish(taskId, 'failed', '封面补齐失败', errorMessage(err))
+    coverSummary.value = tr("封面补齐失败：{p0}", {p0: (errorMessage(err))})
+    tasks.finish(taskId, 'failed', tr("封面补齐失败"), errorMessage(err))
   } finally {
     off?.()
     fillingCovers.value = false
@@ -307,12 +309,12 @@ async function scanGameDirectories(dirs: string[]): Promise<void> {
   preparing.value = true
   let started = false
   const recordAttempt = (status: 'failed' | 'cancelled', message: string): void => {
-    const id = tasks.start('game-scan', '游戏扫描预检')
+    const id = tasks.start('game-scan', tr("游戏扫描预检"))
     tasks.finish(id, status, message, status === 'failed' ? message : undefined)
   }
   try {
     if (!settings.settings.ai.enabled || !settings.settings.ai.api_key.trim()) {
-      const message = '扫描游戏文件夹需要先在设置中配置 AI 模型；也可直接拖入 .exe 启动文件手动登记'
+      const message = tr('扫描游戏文件夹需要先在设置中配置 AI 模型；也可直接拖入 .exe 启动文件手动登记')
       recordAttempt('failed', message)
       toast(message)
       void router.push({ name: 'settings', query: { tab: 'ai' } })
@@ -323,21 +325,21 @@ async function scanGameDirectories(dirs: string[]): Promise<void> {
     const stopped = operation.stopping.value
     await store.reload()
     if (stopped) {
-      toast('扫描已停止：已收录 ' + r.registered + ' 个，已完成的结果已保留')
+      toast(tr("扫描已停止：已收录 ") + r.registered + tr(" 个，已完成的结果已保留"))
     } else if (r.candidates === 0) {
-      toast('未在这些文件夹中发现可识别的游戏程序')
+      toast(tr("未在这些文件夹中发现可识别的游戏程序"))
     } else if (r.registered > 0) {
-      const message = '识别出 ' + r.registered + ' 个游戏' + (r.skipped > 0 ? '，跳过 ' + r.skipped + ' 个' : '') + (r.failed > 0 ? '，' + r.failed + ' 个失败' : '')
+      const message = tr('识别出 ') + r.registered + tr(' 个游戏') + (r.skipped > 0 ? tr('，跳过 ') + r.skipped + tr(' 个') : '') + (r.failed > 0 ? '，' + r.failed + tr(' 个失败') : '')
       if (r.failed > 0) toast(message)
       else success(message)
     } else if (r.failed > 0) {
-      error('扫描到 ' + r.candidates + ' 个候选，但未能完成收录，请查看识别日志')
+      error(tr("扫描到 ") + r.candidates + tr(" 个候选，但未能完成收录，请查看识别日志"))
     } else {
-      toast('扫描到 ' + r.candidates + ' 个候选，均已存在或已跳过')
+      toast(tr("扫描到 ") + r.candidates + tr(" 个候选，均已存在或已跳过"))
     }
   } catch (err) {
     if (!started) recordAttempt('failed', errorMessage(err))
-    error('扫描未能完成：' + errorMessage(err))
+    error(tr("扫描未能完成：") + errorMessage(err))
   } finally {
     preparing.value = false
   }
@@ -360,7 +362,7 @@ const { dragging: dropActive, dropHandlers } = useFileDrop(async (paths) => {
       }
     }
     if (unsupported.length > 0 && entries.length === 0 && folders.length === 0) {
-      toast('游戏库支持直接拖入 .exe / .lnk / .bat / .cmd 启动文件，或拖入解压后的游戏文件夹')
+      toast(tr("游戏库支持直接拖入 .exe / .lnk / .bat / .cmd 启动文件，或拖入解压后的游戏文件夹"))
       return
     }
     if (entries.length > 0) {
@@ -373,7 +375,7 @@ const { dragging: dropActive, dropHandlers } = useFileDrop(async (paths) => {
         }
         await store.reload()
       } catch (err) {
-        error('登记游戏失败：' + errorMessage(err))
+        error(tr("登记游戏失败：") + errorMessage(err))
       } finally {
         registering.value = false
       }
@@ -391,12 +393,12 @@ async function addGames(): Promise<void> {
   preparing.value = true
   let started = false
   const recordAttempt = (status: 'failed' | 'cancelled', message: string): void => {
-    const id = tasks.start('game-scan', '游戏扫描预检')
+    const id = tasks.start('game-scan', tr("游戏扫描预检"))
     tasks.finish(id, status, message, status === 'failed' ? message : undefined)
   }
   try {
     if (!settings.settings.ai.enabled || !settings.settings.ai.api_key.trim()) {
-      const message = '游戏识别要用 AI，先去设置里填好 API Key'
+      const message = tr('游戏识别要用 AI，先去设置里填好 API Key')
       recordAttempt('failed', message)
       toast(message)
       void router.push({ name: 'settings', query: { tab: 'ai' } })
@@ -404,7 +406,7 @@ async function addGames(): Promise<void> {
     }
     const dirs = await window.baoyi.game.pickDirectories()
     if (pageDisposed || dirs.length === 0) {
-      recordAttempt('cancelled', pageDisposed ? '已离开页面，未启动扫描' : '未选择目录，未启动扫描')
+      recordAttempt('cancelled', pageDisposed ? tr("已离开页面，未启动扫描") : tr("未选择目录，未启动扫描"))
       return
     }
     started = true
@@ -412,42 +414,42 @@ async function addGames(): Promise<void> {
     const stopped = operation.stopping.value
     await store.reload()
     if (stopped) {
-      toast('扫描已停止：已注册 ' + r.registered + ' 个，已完成的结果已保留')
+      toast(tr("扫描已停止：已注册 ") + r.registered + tr(" 个，已完成的结果已保留"))
     } else if (r.candidates === 0) {
-      toast('这些目录里没找到游戏（没有可执行文件，或者只是一层收纳目录）')
+      toast(tr("这些目录里没找到游戏（没有可执行文件，或者只是一层收纳目录）"))
     } else if (r.registered > 0) {
-      const message = '识别出 ' + r.registered + ' 个游戏' +
-        (r.skipped > 0 ? '，跳过 ' + r.skipped + ' 个' : '') +
-        (r.failed > 0 ? '，' + r.failed + ' 个失败' : '')
+      const message = tr('识别出 ') + r.registered + tr(' 个游戏') +
+        (r.skipped > 0 ? tr('，跳过 ') + r.skipped + tr(' 个') : '') +
+        (r.failed > 0 ? '，' + r.failed + tr(' 个失败') : '')
       if (r.failed > 0) toast(message)
       else success(message)
     } else if (r.failed > 0) {
-      error('扫描到 ' + r.candidates + ' 个候选，但没有注册成功，' + r.failed + ' 个识别失败，请查看识别日志')
+      error(tr("扫描到 ") + r.candidates + tr(" 个候选，但没有注册成功，") + r.failed + tr(" 个识别失败，请查看识别日志"))
     } else {
-      toast('扫描到 ' + r.candidates + ' 个候选，全部跳过；可到识别日志查看原因')
+      toast(tr("扫描到 ") + r.candidates + tr(" 个候选，全部跳过；可到识别日志查看原因"))
     }
   } catch (err) {
     if (!started) recordAttempt('failed', errorMessage(err))
-    error('扫描没能完成：' + errorMessage(err))
+    error(tr("扫描没能完成：") + errorMessage(err))
   } finally {
     preparing.value = false
   }
 }
 
 const emptyHint = computed(() => {
-  if (store.keyword.trim()) return { title: '没有匹配的游戏', desc: '换个关键词，或清空搜索' }
+  if (store.keyword.trim()) return { title: tr('没有匹配的游戏'), desc: tr('换个关键词，或清空搜索') }
   if (store.selection.kind === 'status')
-    return { title: `「${store.heading}」里还没有游戏`, desc: '在详情页可以改游玩状态' }
+    return { title: tr('「{p0}」里还没有游戏', {p0: store.heading}), desc: tr('在详情页可以改游玩状态') }
   if (store.counts.all === 0)
-    return { title: '游戏库还是空的', desc: '点右上角「加游戏」，选择本地启动程序；也可用 AI 扫描整个目录' }
-  return { title: '这里还没有内容', desc: '换个分类看看' }
+    return { title: tr('游戏库还是空的'), desc: tr('点右上角「加游戏」，选择本地启动程序；也可用 AI 扫描整个目录') }
+  return { title: tr('这里还没有内容'), desc: tr('换个分类看看') }
 })
 </script>
 
 <template>
   <ProjectImportDialog v-if="projectPreview" :preview="projectPreview" @close="projectPreview=null" @completed="projectsImported"/>
   <div class="home" v-on="dropHandlers" @keydown="selection.key">
-    <DropZoneOverlay :active="dropActive" title="松开以加入游戏库" hint="支持拖入游戏启动文件（.exe / .lnk / .bat）直接登记，或拖入游戏目录扫描识别" />
+    <DropZoneOverlay :active="dropActive" :title="$t('松开以加入游戏库')" :hint="$t('支持拖入游戏启动文件（.exe / .lnk / .bat）直接登记，或拖入游戏目录扫描识别')" />
     <Sidebar />
 
     <main class="home__main">
@@ -464,12 +466,12 @@ const emptyHint = computed(() => {
             v-model="store.keyword"
             class="search__input"
             type="text"
-            aria-label="搜索游戏"
-            placeholder="搜索游戏名、简介、标签"
+            :aria-label="$t('搜索游戏')"
+            :placeholder="$t('搜索游戏名、简介、标签')"
             @input="onKeyword"
           />
           <kbd v-if="!store.keyword">Ctrl K</kbd>
-          <button v-if="store.keyword" class="search__clear" title="清空" @click="clearKeyword">
+          <button v-if="store.keyword" class="search__clear" :title="$t('清空')" @click="clearKeyword">
             <X :size="14" />
           </button>
         </div>
@@ -477,7 +479,7 @@ const emptyHint = computed(() => {
         <div class="toolbar__actions">
 
 
-          <select v-model="store.sort" class="select" aria-label="游戏排序" @change="store.load()">
+          <select v-model="store.sort" class="select" :aria-label="$t('游戏排序')" @change="store.load()">
             <option v-for="o in SORTS" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
 
@@ -488,28 +490,24 @@ const emptyHint = computed(() => {
 
 
           <button style="order:2" ref="bulkTrigger" v-if="!selecting" class="btn btn--ghost" :aria-pressed="selecting" :disabled="store.items.length === 0 || store.loading || coversBusy" @click="toggleSelection">
-            <ListChecks :size="15" />
-            批量管理
-          </button>
+            <ListChecks :size="15" />{{ $t("批量管理") }}</button>
 
-          <LibraryToolbarMenu label="视图">
-          <div class="view-section"><span>封面形状</span><div class="view-seg"><button :aria-pressed="coverShape==='portrait'" @click="coverShape='portrait'">竖版 2:3</button><button :aria-pressed="coverShape==='landscape'" @click="coverShape='landscape'">横版 16:9</button></div></div>
-          <div class="view-section"><span>分组</span><div class="view-seg"><button v-for="(label,key) in {none:'不分组',category:'分类',directory:'一级文件夹'}" :key="key" :aria-pressed="grouping===key" @click="grouping=key">{{label}}</button></div></div>
-          <label class="card-size">卡片大小 {{cardSize}} px<input v-model.number="cardSize" type="range" min="110" max="260" step="10" aria-label="游戏卡片大小"/></label>
+          <LibraryToolbarMenu :label="$t('视图')">
+          <div class="view-section"><span>{{ $t("封面形状") }}</span><div class="view-seg"><button :aria-pressed="coverShape==='portrait'" @click="coverShape='portrait'">{{ $t("竖版 2:3") }}</button><button :aria-pressed="coverShape==='landscape'" @click="coverShape='landscape'">{{ $t("横版 16:9") }}</button></div></div>
+          <div class="view-section"><span>{{ $t("分组") }}</span><div class="view-seg"><button v-for="(label,key) in {none:$t('不分组'),category:$t('分类'),directory:$t('一级文件夹')}" :key="key" :aria-pressed="grouping===key" @click="grouping=key">{{label}}</button></div></div>
+          <label class="card-size">{{ $t("卡片大小 {p0} px", {p0: (cardSize)}) }}<input v-model.number="cardSize" type="range" min="110" max="260" step="10" :aria-label="$t('游戏卡片大小')"/></label>
           </LibraryToolbarMenu>
-          <LibraryToolbarMenu style="order:3" label="更多">
-          <button class="btn btn--ghost" :disabled="previewingProjects || scanning" @click="previewProjects"><FolderPlus :size="15"/>{{previewingProjects?'读取清单中…':'从项目清单登记'}}</button>
-          <button class="btn btn--ghost" :disabled="previewingProjects || scanning" @click="restoreProjectArtwork">撤销项目图片更新</button>
-          <button class="btn btn--ghost" :disabled="scanning" title="扫描目录并由 AI 识别游戏" @click="addGames">
-            <FolderPlus :size="15" />
-            AI 扫描
-          </button>
-          <button class="btn btn--ghost" :disabled="bulkBusy || coversBusy || coverScope.length === 0" :title="selecting ? '只补齐当前筛选中已选择游戏的缺失封面' : '为当前筛选列表补齐缺失封面'" @click="fillMissingCovers">
+          <LibraryToolbarMenu style="order:3" :label="$t('更多')">
+          <button class="btn btn--ghost" :disabled="previewingProjects || scanning" @click="previewProjects"><FolderPlus :size="15"/>{{previewingProjects?$t('读取清单中…'):$t('从项目清单登记')}}</button>
+          <button class="btn btn--ghost" :disabled="previewingProjects || scanning" @click="restoreProjectArtwork">{{ $t("撤销项目图片更新") }}</button>
+          <button class="btn btn--ghost" :disabled="scanning" :title="$t('扫描目录并由 AI 识别游戏')" @click="addGames">
+            <FolderPlus :size="15" />{{ $t("AI 扫描") }}</button>
+          <button class="btn btn--ghost" :disabled="bulkBusy || coversBusy || coverScope.length === 0" :title="selecting ? $t('只补齐当前筛选中已选择游戏的缺失封面') : $t('为当前筛选列表补齐缺失封面')" @click="fillMissingCovers">
             <Image :size="15" />
-            {{ coversBusy ? '补图中' : `补齐封面（${store.items.filter(g=>!g.cover_path&&!g.background_path).length} 缺失）` }}
+            {{ coversBusy ? $t('补图中') : $t('补齐封面（{p0} 缺失）', {p0: store.items.filter(g=>!g.cover_path&&!g.background_path).length}) }}
           </button>
-          <button class="btn btn--ghost" @click="store.reload()">重新检查路径</button><button class="btn btn--ghost" @click="store.select({kind:'group',value:'archived'})">查看已归档</button>
-          </LibraryToolbarMenu><button style="order:4" class="btn btn--primary" :disabled="registering" @click="addManualGame"><FilePlus :size="15"/>{{registering?'登记中':'加游戏'}}</button>
+          <button class="btn btn--ghost" @click="store.reload()">{{ $t("重新检查路径") }}</button><button class="btn btn--ghost" @click="store.select({kind:'group',value:'archived'})">{{ $t("查看已归档") }}</button>
+          </LibraryToolbarMenu><button style="order:4" class="btn btn--primary" :disabled="registering" @click="addManualGame"><FilePlus :size="15"/>{{registering?$t('登记中'):$t('加游戏')}}</button>
 
         </div>
       </header>
@@ -520,30 +518,30 @@ const emptyHint = computed(() => {
         <div v-if="scanning" class="progress">
           <div class="progress__bar"><i :style="{ width: `${busyPercent}%` }" /></div>
           <span class="progress__text truncate">{{ busyText }}</span>
-          <button class="btn btn--subtle" :disabled="!operation.running.value || operation.stopping.value || progress?.phase === 'done'" @click="cancelScan">停止</button>
+          <button class="btn btn--subtle" :disabled="!operation.running.value || operation.stopping.value || progress?.phase === 'done'" @click="cancelScan">{{ $t("停止") }}</button>
         </div>
       </Transition>
 
       <p v-if="coverSummary" class="cover-summary" role="status">{{ coverSummary }}</p>
       <div v-if="store.keyword.trim() && (store.selection.kind !== 'group' || store.selection.value !== 'all')" class="kw-hint" role="status">
-        <span>当前同时按关键词「{{ store.keyword.trim() }}」过滤</span>
-        <button type="button" class="btn btn--subtle" @click="clearKeyword">清空关键词</button>
+        <span>{{ $t("当前同时按关键词「{p0}」过滤", {p0: (store.keyword.trim())}) }}</span>
+        <button type="button" class="btn btn--subtle" @click="clearKeyword">{{ $t("清空关键词") }}</button>
       </div>
-      <div v-if="unavailable.length&&!pathDismissed" class="path-alert" role="status"><AlertTriangle :size="16"/><p><strong>{{unavailable.length}} 个游戏</strong>的程序路径不可用，重新定位后可继续启动。</p><button class="btn btn--sm" @click="store.select({kind:'path',value:'unavailable'})">只看这些</button><button class="btn btn--sm" @click="store.reload()">重新检查</button><button class="btn btn--sm btn--icon" aria-label="关闭路径提示" @click="pathDismissed=true"><X :size="14"/></button></div>
+      <div v-if="unavailable.length&&!pathDismissed" class="path-alert" role="status"><AlertTriangle :size="16"/><p><strong>{{ $t("{p0} 个游戏", {p0: (unavailable.length)}) }}</strong>{{ $t("的程序路径不可用，重新定位后可继续启动。") }}</p><button class="btn btn--sm" @click="store.select({kind:'path',value:'unavailable'})">{{ $t("只看这些") }}</button><button class="btn btn--sm" @click="store.reload()">{{ $t("重新检查") }}</button><button class="btn btn--sm btn--icon" :aria-label="$t('关闭路径提示')" @click="pathDismissed=true"><X :size="14"/></button></div>
 
       <section ref="content" class="home__content">
-        <div v-if="resumeGame" class="resume"><div class="resume__cover"><GameCover :item="resumeGame"/></div><div><small>继续游玩</small><h2>{{gameTitle(resumeGame)}}</h2><p>{{formatRelative(resumeGame.last_played_at)}}</p></div><button v-if="resumeGame.linked_files.some(f=>f.type==='trainer'&&f.role!=='usage'&&/\.(exe|bat|cmd|lnk)$/i.test(f.path))" class="btn btn--subtle" :disabled="launching||!!resumeGame.path_state&&resumeGame.path_state!=='present'" @click="resumeLaunch(true)">连同修改器</button><button class="btn btn--subtle" @click="open(resumeGame.id)">查看详情</button><button class="btn btn--primary" :disabled="launching||!!resumeGame.path_state&&resumeGame.path_state!=='present'" @click="resumeLaunch()"><Play :size="15"/>启动</button></div>
+        <div v-if="resumeGame" class="resume"><div class="resume__cover"><GameCover :item="resumeGame"/></div><div><small>{{ $t("继续游玩") }}</small><h2>{{gameTitle(resumeGame)}}</h2><p>{{formatRelative(resumeGame.last_played_at)}}</p></div><button v-if="resumeGame.linked_files.some(f=>f.type==='trainer'&&f.role!=='usage'&&/\.(exe|bat|cmd|lnk)$/i.test(f.path))" class="btn btn--subtle" :disabled="launching||!!resumeGame.path_state&&resumeGame.path_state!=='present'" @click="resumeLaunch(true)">{{ $t("连同修改器") }}</button><button class="btn btn--subtle" @click="open(resumeGame.id)">{{ $t("查看详情") }}</button><button class="btn btn--primary" :disabled="launching||!!resumeGame.path_state&&resumeGame.path_state!=='present'" @click="resumeLaunch()"><Play :size="15"/>{{ $t("启动") }}</button></div>
         <template v-if="store.items.length > 0"><section v-for="block in blocks" :key="block.key" class="game-group"><h2 v-if="block.name">{{block.name}} <small>{{block.items.length}}</small></h2><div class="wall" :style="{gridTemplateColumns:`repeat(auto-fill, minmax(${coverShape==='landscape'?Math.round(cardSize*1.55):cardSize}px, 1fr))`}">
           <GameCard v-for="g in block.items" :key="g.id" :item="g" :cover-shape="coverShape" :selectable="selecting" :selected="selectedIds.has(g.id)" :locked="bulkBusy || coversBusy || store.queryPending" @open="open" @select="toggleSelected" @context="openCardContext" />
         </div></section></template>
         <div v-else-if="!store.loading" class="empty">
           <h2>{{ emptyHint.title }}</h2>
           <p>{{ emptyHint.desc }}</p>
-          <button v-if="filtered" class="btn btn--ghost" @click="clearFilters">清空筛选</button>
+          <button v-if="filtered" class="btn btn--ghost" @click="clearFilters">{{ $t("清空筛选") }}</button>
         </div>
       </section>
     </main>
-    <CardContextMenu ref="ctxMenu" label="游戏卡片操作" :items="ctxMenuItems" />
+    <CardContextMenu ref="ctxMenu" :label="$t('游戏卡片操作')" :items="ctxMenuItems" />
   </div>
 </template>
 

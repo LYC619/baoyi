@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc/handlers'
+import { tr, systemMessage, setNativeLanguage } from './services/system/language.ts'
+
 import { IpcActivity } from './ipc/main-window.ts'
 import { QuitCoordinator, stopServices } from './services/system/lifecycle.ts'
 import { finalizeGameSessions } from './kinds/game/service'
@@ -48,7 +50,7 @@ const quitting = new QuitCoordinator({
     await closeImageThumbnails()
   },
   quit: () => app.quit(),
-  failed: cause => dialog.showErrorBox('尚未退出抱一', '后台任务未能安全停止，资料库仍保持打开。请重试退出。\n'+String(cause))
+  failed: cause => dialog.showErrorBox(tr('尚未退出抱一'), tr('后台任务未能安全停止，资料库仍保持打开。请重试退出。\n{p0}', { p0: systemMessage(cause instanceof Error ? cause.message : String(cause)) }))
 })
 
 // 必须在 app ready 前设置：Chromium 只会在网络栈初始化时读取这项，之后追加不认
@@ -203,6 +205,7 @@ if (!primaryInstance) {
   })
 
   void app.whenReady().then(() => {
+    setNativeLanguage('system', app.getPreferredSystemLanguages())
     if (startupError) throw startupError
     if (quitting.stopping) return
     // 默认是空操作，只有带 BAOYI_TIMING=1 起才真的跑
@@ -210,6 +213,7 @@ if (!primaryInstance) {
 
     registerFileProtocol()
     interruptRunningTasks(getDb())
+    setNativeLanguage(getSettings(getDb()).language, app.getPreferredSystemLanguages())
     ipc = registerIpcHandlers(getWindow, activity)
     // 代理不 await：它只影响联网刮削，拦住建窗口不值得。里面自己吞异常 ——
     // 填错一个代理地址不该变成「应用打不开」
@@ -232,8 +236,8 @@ if (!primaryInstance) {
     })
   }).catch(cause => {
     console.error('[抱一] 启动已停止：', cause)
-    dialog.showErrorBox('抱一未能安全启动',
-      `未继续载入资料库。请保留数据与已有快照，检查磁盘空间和目录权限后重试。\n\n数据目录：${app.getPath('userData')}\n\n${cause instanceof Error ? cause.message : String(cause)}`)
+    dialog.showErrorBox(tr('抱一未能安全启动'),
+      tr('未继续载入资料库。请保留数据与已有快照，检查磁盘空间和目录权限后重试。\n\n数据目录：{p0}\n\n{p1}', { p0: app.getPath('userData'), p1: systemMessage(cause instanceof Error ? cause.message : String(cause)) }))
     closeDb()
     app.exit(1)
   })

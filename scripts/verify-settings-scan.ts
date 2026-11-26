@@ -342,7 +342,7 @@ await test('扫描页面绑定当前扫描状态，软件识别按钮不泄漏�
   assert.match(source, /v-if="scanRunning"/)
   assert.match(source, /\{\{ scanPhaseLabel \}\}/)
   assert.match(source, /width: `\$\{scanPercent\}%`/)
-  assert.match(source, /<section v-if="activeModule === 'software'" class="panel">\s*<h2 class="sec-head">AI 识别/)
+  assert.match(source, /<section v-if="activeModule === 'software'" class="panel">\s*<h2 class="sec-head">\{\{ \$t\("AI 识别"\) \}\}/)
   assert.match(source, /v-if="activeModule === 'software' && skippedCount > 0"/)
 })
 

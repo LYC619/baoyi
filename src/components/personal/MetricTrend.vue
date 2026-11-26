@@ -39,7 +39,7 @@ const average = computed(() =>
     <svg
       viewBox="0 0 600 165"
       role="img"
-      :aria-label="label + '的最近记录趋势'"
+      :aria-label="label + $t('的最近记录趋势')"
       @mouseleave="active = ''"
     >
       <template v-for="(y, i) in [25, 75, 125]" :key="y">
@@ -52,7 +52,7 @@ const average = computed(() =>
           stroke-dasharray="4 4"
         />
         <text x="53" :y="y + 4" text-anchor="end">
-          {{ (range.max - (i * (range.max - range.min)) / 2).toLocaleString(undefined, { maximumSignificantDigits: 4 }) }}
+          {{ (range.max - (i * (range.max - range.min)) / 2).toLocaleString($locale, { maximumSignificantDigits: 4 }) }}
         </text>
       </template>
       <polyline
@@ -81,10 +81,10 @@ const average = computed(() =>
     </svg>
     <p aria-live="polite">
       {{ selected?.date }} · <strong>{{ selected?.value }} {{ unit }}</strong>
-      <span>平均 {{ average.toFixed(2) }} {{ unit }} · {{ active ? '悬停查看' : '最近一次记录' }}</span>
+      <span>{{ $t("平均 {p0} {p1} · {p2}", {p0: (average.toFixed(2)), p1: (unit), p2: (active ? $t('悬停查看') : $t('最近一次记录'))}) }}</span>
     </p>
   </div>
-  <p v-else class="ws-muted">暂无数值记录</p>
+  <p v-else class="ws-muted">{{ $t("暂无数值记录") }}</p>
 </template>
 <style scoped>
 .metric-trend svg {

@@ -22,33 +22,33 @@ async function activate(versionId:string){await action(()=>window.baoyi.archive.
 async function history(){if(note.value?.sessionId){const assistant=useArchiveAssistant();await assistant.show();await assistant.load(note.value.sessionId)}}
 </script>
 <template>
-  <section class="insight-panel" aria-label="资料精读速览">
-    <header><h3>精读速览</h3><span v-if="note?.userEdited" class="ws-badge">人工修订</span><span v-else-if="note" class="ws-badge">已生成</span></header>
-    <p v-if="running" role="status">{{run?.phase}} <button class="ws-button" @click="queue.cancel(run!.id)">停止</button></p>
-    <p v-else-if="run&&['failed','interrupted','cancelled'].includes(run.status)" class="ws-error">{{run.error||'精读已停止，已有笔记保留'}}</p>
+  <section class="insight-panel" :aria-label="$t('资料精读速览')">
+    <header><h3>{{ $t("精读速览") }}</h3><span v-if="note?.userEdited" class="ws-badge">{{ $t("人工修订") }}</span><span v-else-if="note" class="ws-badge">{{ $t("已生成") }}</span></header>
+    <p v-if="running" role="status">{{run?.phase}} <button class="ws-button" @click="queue.cancel(run!.id)">{{ $t("停止") }}</button></p>
+    <p v-else-if="run&&['failed','interrupted','cancelled'].includes(run.status)" class="ws-error">{{run.error||$t('精读已停止，已有笔记保留')}}</p>
     <div v-if="editing&&draft" @keydown.ctrl.enter.prevent="save">
-      <label>核心价值<textarea v-model="draft.coreValue" aria-label="编辑核心价值" rows="3" maxlength="120"/></label>
-      <label v-for="(item,index) in draft.keyConclusions" :key="index">结论 {{index+1}}<textarea v-if="item.status==='supported'" v-model="item.text" :aria-label="'编辑结论 '+(index+1)" rows="2" maxlength="180"/><small v-else>证据不足</small></label>
-      <label>建议标签<input v-model="tagText" aria-label="编辑精读标签" placeholder="逗号分隔"/></label>
-      <div class="insight-actions"><button class="ws-button primary" :disabled="saving" @click="save">保存修订</button><button class="ws-button" :disabled="saving" @click="editing=false;load()">取消编辑</button></div>
+      <label>{{ $t("核心价值") }}<textarea v-model="draft.coreValue" :aria-label="$t('编辑核心价值')" rows="3" maxlength="120"/></label>
+      <label v-for="(item,index) in draft.keyConclusions" :key="index">{{ $t("结论 {p0}", {p0: (index+1)}) }}<textarea v-if="item.status==='supported'" v-model="item.text" :aria-label="$t('编辑结论 ')+(index+1)" rows="2" maxlength="180"/><small v-else>{{ $t("证据不足") }}</small></label>
+      <label>{{ $t("建议标签") }}<input v-model="tagText" :aria-label="$t('编辑精读标签')" :placeholder="$t('逗号分隔')"/></label>
+      <div class="insight-actions"><button class="ws-button primary" :disabled="saving" @click="save">{{ $t("保存修订") }}</button><button class="ws-button" :disabled="saving" @click="editing=false;load()">{{ $t("取消编辑") }}</button></div>
     </div>
     <template v-else-if="note">
       <p class="insight-value">{{note.coreValue}}</p>
-      <ol><li v-for="(conclusion,index) in note.keyConclusions" :key="index">{{conclusion.text||'证据不足'}}</li></ol>
-      <p class="insight-tags">{{categories.find(category=>category.id===note?.suggestedCategoryId)?.name||'暂无分类建议'}} <span v-for="tag in note.suggestedTags" :key="tag">#{{tag}}</span></p>
-      <div class="insight-actions"><button class="ws-button" @click="edit">编辑并保存</button><button class="ws-button" :disabled="saving" @click="adopt">采用分类与标签</button><button v-if="actionId" class="ws-button" :disabled="saving" @click="undo">撤销采用</button></div>
-      <details><summary>原文证据与覆盖范围</summary>
-        <p>{{note.coverage.complete?'完整文字提取':'局部精读'}} · {{note.coverage.characters.toLocaleString()}} 字符<span v-if="note.coverage.totalPages"> · {{note.coverage.pages.length}} / {{note.coverage.totalPages}} 页</span></p>
+      <ol><li v-for="(conclusion,index) in note.keyConclusions" :key="index">{{conclusion.text||$t('证据不足')}}</li></ol>
+      <p class="insight-tags">{{categories.find(category=>category.id===note?.suggestedCategoryId)?.name||$t('暂无分类建议')}} <span v-for="tag in note.suggestedTags" :key="tag">#{{tag}}</span></p>
+      <div class="insight-actions"><button class="ws-button" @click="edit">{{ $t("编辑并保存") }}</button><button class="ws-button" :disabled="saving" @click="adopt">{{ $t("采用分类与标签") }}</button><button v-if="actionId" class="ws-button" :disabled="saving" @click="undo">{{ $t("撤销采用") }}</button></div>
+      <details><summary>{{ $t("原文证据与覆盖范围") }}</summary>
+        <p>{{ $t("{p0} · {p1} 字符", {p0: (note.coverage.complete?$t('完整文字提取'):$t('局部精读')), p1: (note.coverage.characters.toLocaleString($locale))}) }}<span v-if="note.coverage.totalPages">{{ $t("· {p0} / {p1} 页", {p0: (note.coverage.pages.length), p1: (note.coverage.totalPages)}) }}</span></p>
         <p v-for="reason in note.coverage.reasons" :key="reason" class="ws-muted">{{reason}}</p>
-        <button v-for="evidence in note.evidence" :key="evidence.id" class="insight-quote" @click="source(evidence)"><small>{{evidence.page?'第 '+evidence.page+' 页':'第 '+(evidence.startLine||1)+' 行'}}</small><q>{{evidence.quote}}</q></button>
+        <button v-for="evidence in note.evidence" :key="evidence.id" class="insight-quote" @click="source(evidence)"><small>{{evidence.page?$t('第 ')+evidence.page+$t(' 页'):$t('第 ')+(evidence.startLine||1)+$t(' 行')}}</small><q>{{evidence.quote}}</q></button>
         <p v-for="limitation in note.limitations" :key="limitation">{{limitation}}</p>
       </details>
-      <small class="ws-muted">{{data?.sourceMessage}} · {{new Date(note.generatedAt).toLocaleString()}} · {{note.model}}</small>
-      <button class="insight-history" @click="history">查看提炼会话</button>
-      <details v-if="data&&data.history.length>1"><summary>版本记录（{{data.history.length}}）</summary><div v-for="version in data.history" :key="version.id" class="insight-version"><span>v{{version.revision}} · {{version.userEdited?'人工修订':'生成稿'}}</span><button class="ws-button" :disabled="version.active||saving" @click="activate(version.id)">{{version.active?'当前':'设为当前'}}</button></div></details>
+      <small class="ws-muted">{{data?.sourceMessage}} · {{new Date(note.generatedAt).toLocaleString($locale)}} · {{note.model}}</small>
+      <button class="insight-history" @click="history">{{ $t("查看提炼会话") }}</button>
+      <details v-if="data&&data.history.length>1"><summary>{{ $t("版本记录（{p0}）", {p0: (data.history.length)}) }}</summary><div v-for="version in data.history" :key="version.id" class="insight-version"><span>v{{version.revision}} · {{version.userEdited?$t('人工修订'):$t('生成稿')}}</span><button class="ws-button" :disabled="version.active||saving" @click="activate(version.id)">{{version.active?$t('当前'):$t('设为当前')}}</button></div></details>
     </template>
-    <p v-else class="ws-muted">在归档助理中按你的问题研读原文，保留可核对的引用。旧精读版本可在这里查看和编辑。</p>
-    <button v-if="!editing" class="ws-button" :disabled="!!running||queue.busy.value" @click="queue.open([id])">在归档助理中精读</button>
+    <p v-else class="ws-muted">{{ $t("在归档助理中按你的问题研读原文，保留可核对的引用。旧精读版本可在这里查看和编辑。") }}</p>
+    <button v-if="!editing" class="ws-button" :disabled="!!running||queue.busy.value" @click="queue.open([id])">{{ $t("在归档助理中精读") }}</button>
     <p v-if="error||queue.error.value" class="ws-error" role="alert">{{error||queue.error.value}}</p>
   </section>
 </template>

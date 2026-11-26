@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { latestOnly, STALE } from '@/composables/latestOnly'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
@@ -104,17 +106,17 @@ const entries = computed(() =>
 
 const backups = ref<SaveBackup[]>([])
 const detailTabs = computed(() => [
-  { id: 'overview', label: '简介', icon: FileText },
-  { id: 'trainer', label: '工具与修改器', icon: Wrench, count: trainers.value.length },
-  { id: 'guide', label: '攻略与说明', icon: BookOpen, count: guides.value.length },
+  { id: 'overview', label: tr('简介'), icon: FileText },
+  { id: 'trainer', label: tr('工具与修改器'), icon: Wrench, count: trainers.value.length },
+  { id: 'guide', label: tr('攻略与说明'), icon: BookOpen, count: guides.value.length },
   {
     id: 'saves',
-    label: '存档与备份',
+    label: tr('存档与备份'),
     icon: Save,
     dot: !!item.value?.save_paths.length && !backups.value.length,
   },
-  { id: 'files', label: '文件与封面', icon: Image, count: entries.value.length },
-  { id: 'notes', label: '笔记', icon: StickyNote, count: gameNotes.value.length },
+  { id: 'files', label: tr('文件与封面'), icon: Image, count: entries.value.length },
+  { id: 'notes', label: tr('笔记'), icon: StickyNote, count: gameNotes.value.length },
 ])
 
 async function leaveNotes() {
@@ -179,7 +181,7 @@ async function relocate(mode: 'directory' | 'file' = 'directory') {
     if (updated) {
       item.value = updated
       await store.reload()
-      success('路径已更新，游玩记录与存档信息已保留')
+      success(tr("路径已更新，游玩记录与存档信息已保留"))
     }
   } catch (cause) {
     error(errorMessage(cause))
@@ -205,7 +207,7 @@ async function load(): Promise<void> {
     if (result === STALE) return
     item.value = result
   } catch (err) {
-    error(`读取游戏失败：${errorMessage(err)}`)
+    error(tr("读取游戏失败：{p0}", {p0: (errorMessage(err))}))
     item.value = null
   }
   loading.value = false
@@ -259,7 +261,7 @@ async function pickCover(): Promise<void> {
     if (r.item) item.value = r.item
     success(r.message)
   } catch (err) {
-    coverMiss.value = `更换封面失败：${errorMessage(err)}`
+    coverMiss.value = tr("更换封面失败：{p0}", {p0: (errorMessage(err))})
     error(coverMiss.value)
   }
 }
@@ -267,9 +269,9 @@ async function pickCover(): Promise<void> {
 async function clearCover(): Promise<void> {
   if (!item.value?.cover_path) return
   const ok = await confirmDialog({
-    title: '恢复默认封面？',
-    message: '将移除抱一保存的封面副本并恢复自动构图，你原有的本地图片文件不会受影响。',
-    confirmText: '恢复默认',
+    title: tr('恢复默认封面？'),
+    message: tr("将移除抱一保存的封面副本并恢复自动构图，你原有的本地图片文件不会受影响。"),
+    confirmText: tr('恢复默认'),
   })
   if (!ok) return
   closeCoverHits()
@@ -282,7 +284,7 @@ async function clearCover(): Promise<void> {
     })
     if (result !== STALE && result?.item) item.value = result.item
   } catch (err) {
-    error(`移除封面失败：${errorMessage(err)}`)
+    error(tr("移除封面失败：{p0}", {p0: (errorMessage(err))}))
   }
 }
 
@@ -292,8 +294,8 @@ const coverHits = ref<CoverCandidate[]>([])
 const coverQuery = ref('')
 const coverDiagnostics = ref<GameCoverDiagnostic[]>([])
 const brokenPreviews = ref(new Set<string>())
-const COVER_SOURCE_LABEL = { local: '本地图片', official: '官方', steam: 'Steam', search: '图片搜索' }
-const COVER_STAGE_LABEL = { identity: '名称核对', lookup: '检索', network: '网络', decode: '解析', cache: '缓存', write: '保存' }
+const COVER_SOURCE_LABEL = { get local() { return tr('本地图片') }, get official() { return tr('官方') }, steam: 'Steam', get search() { return tr('图片搜索') } }
+const COVER_STAGE_LABEL = { get identity() { return tr('名称核对') }, get lookup() { return tr('检索') }, get network() { return tr('网络') }, get decode() { return tr('解析') }, get cache() { return tr('缓存') }, get write() { return tr('保存') } }
 const coverMiss = ref('')
 
 async function searchCovers(): Promise<void> {
@@ -304,7 +306,7 @@ async function searchCovers(): Promise<void> {
   coverHits.value = []
   coverDiagnostics.value = []
   brokenPreviews.value = new Set()
-  const taskId = tasks.start('game-scan', `查找游戏封面：${title.value}`, { total: 1, current: title.value })
+  const taskId = tasks.start('game-scan', tr("查找游戏封面：{p0}", {p0: (title.value)}), { total: 1, current: title.value })
   try {
     const r = await findCovers(async () => {
       try {
@@ -321,12 +323,12 @@ async function searchCovers(): Promise<void> {
           taskId,
           result.ok ? 'success' : 'failed',
           result.ok
-            ? `找到 ${result.candidates.filter((candidate) => candidate.status === 'ready').length} 张可用封面`
+            ? tr("找到 {p0} 张可用封面", {p0: (result.candidates.filter((candidate) => candidate.status === 'ready').length)})
             : result.message
         )
         return result
       } catch (err) {
-        tasks.finish(taskId, 'failed', `搜索出错：${errorMessage(err)}`)
+        tasks.finish(taskId, 'failed', tr("搜索出错：{p0}", {p0: (errorMessage(err))}))
         throw err
       }
     })
@@ -337,7 +339,7 @@ async function searchCovers(): Promise<void> {
     if (!r.ok) coverMiss.value = r.message
     else if (r.message) toast(r.message)
   } catch (err) {
-    coverMiss.value = `搜索出错：${errorMessage(err)}`
+    coverMiss.value = tr("搜索出错：{p0}", {p0: (errorMessage(err))})
   }
   coverSearching.value = false
 }
@@ -352,7 +354,7 @@ async function useCover(url: string): Promise<void> {
     return
   }
   coverPicking.value = url
-  const taskId = tasks.start('game-scan', `设置游戏封面：${title.value}`, { total: 1, current: title.value })
+  const taskId = tasks.start('game-scan', tr("设置游戏封面：{p0}", {p0: (title.value)}), { total: 1, current: title.value })
   try {
     const r = await chooseCover(async () => {
       try {
@@ -361,12 +363,12 @@ async function useCover(url: string): Promise<void> {
         tasks.finish(
           taskId,
           result.ok ? 'success' : 'failed',
-          result.message || (result.ok ? '封面已设置' : '设置封面失败')
+          result.message || (result.ok ? tr("封面已设置") : tr("设置封面失败"))
         )
         if (result.ok) void store.load()
         return result
       } catch (err) {
-        tasks.finish(taskId, 'failed', `设置封面失败：${errorMessage(err)}`)
+        tasks.finish(taskId, 'failed', tr("设置封面失败：{p0}", {p0: (errorMessage(err))}))
         throw err
       }
     })
@@ -380,7 +382,7 @@ async function useCover(url: string): Promise<void> {
       success(r.message)
     }
   } catch (err) {
-    coverMiss.value = `设置封面失败：${errorMessage(err)}`
+    coverMiss.value = tr("设置封面失败：{p0}", {p0: (errorMessage(err))})
     error(coverMiss.value)
   }
   coverPicking.value = ''
@@ -390,16 +392,16 @@ async function recoverCover(): Promise<void> {
   if (!item.value || coverPicking.value) return
   closeCoverHits()
   coverPicking.value = 'recover'
-  const taskId = tasks.start('game-scan', `恢复游戏封面：${title.value}`, { total: 1, current: title.value })
+  const taskId = tasks.start('game-scan', tr("恢复游戏封面：{p0}", {p0: (title.value)}), { total: 1, current: title.value })
   try {
     const result = await chooseCover(async () => {
       try {
         const rebuilt = await window.baoyi.game.rebuildCovers([props.id])
         const message = rebuilt.failed
-          ? '封面恢复未成功，可重新搜索或选择本地图片'
+          ? tr('封面恢复未成功，可重新搜索或选择本地图片')
           : rebuilt.updated
-            ? '封面已恢复'
-            : '封面未更改，已保留当前选择'
+            ? tr('封面已恢复')
+            : tr('封面未更改，已保留当前选择')
         tasks.update(taskId, { processed: rebuilt.processed, total: rebuilt.processed, percent: 100 })
         tasks.finish(taskId, rebuilt.failed ? 'failed' : 'success', message)
         const updated = await window.baoyi.game.get(props.id)
@@ -410,7 +412,7 @@ async function recoverCover(): Promise<void> {
           message: rebuilt.failed ? updated?.cover_detail || message : rebuilt.updated ? message : '',
         }
       } catch (err) {
-        tasks.finish(taskId, 'failed', `恢复封面失败：${errorMessage(err)}`)
+        tasks.finish(taskId, 'failed', tr("恢复封面失败：{p0}", {p0: (errorMessage(err))}))
         throw err
       }
     })
@@ -419,7 +421,7 @@ async function recoverCover(): Promise<void> {
     coverMiss.value = result.ok ? '' : result.message
     if (result.ok && result.message) success(result.message)
   } catch (err) {
-    coverMiss.value = `恢复封面失败：${errorMessage(err)}`
+    coverMiss.value = tr("恢复封面失败：{p0}", {p0: (errorMessage(err))})
   }
   coverPicking.value = ''
 }
@@ -432,7 +434,7 @@ function previewFailed(candidate: CoverCandidate): void {
     source: candidate.source,
     stage: 'cache',
     status: 'failed',
-    message: '本地预览无法显示，请重新搜索封面',
+    message: tr("本地预览无法显示，请重新搜索封面"),
     route: '本地预览缓存',
     url: candidate.url,
   })
@@ -467,7 +469,7 @@ const { save, commitTags, toggleArchive, reveal, copyPath } = useResourceDetail(
 
 async function removeSavePath(path: string): Promise<void> {
   if (!item.value) return
-  const ok = await confirmDialog({ title: '移除这条存档路径？', message: `${path}\n\n仅从当前游戏记录中移除这条路径，本地存档文件和已有备份记录都会保留。`, confirmText: '移除路径', tone: 'danger' })
+  const ok = await confirmDialog({ title: tr('移除这条存档路径？'), message: tr("{p0}\n\n仅从当前游戏记录中移除这条路径，本地存档文件和已有备份记录都会保留。", {p0: (path)}), confirmText: tr('移除路径'), tone: 'danger' })
   if (!ok || !item.value) return
   void save({ save_paths: item.value.save_paths.filter((s) => s.path !== path) })
 }
@@ -479,18 +481,18 @@ async function addSavePath(): Promise<void> {
 
   const already = item.value.save_paths.some((s) => s.path.toLowerCase() === check.path.toLowerCase())
   if (already) {
-    toast('这条路径已经登记过了')
+    toast(tr("这条路径已经登记过了"))
     return
   }
   if (!check.exists) {
-    error(`无法读取该目录：${check.path}`)
+    error(tr("无法读取该目录：{p0}", {p0: (check.path)}))
     return
   }
   if (check.files === 0) {
     const ok = await confirmDialog({
-      title: '目录当前为空，仍要登记吗？',
-      message: `${check.path}\n\n如果游戏尚未产生存档，可以先登记此路径；在目录内出现真实存档前不会生成空备份。`,
-      confirmText: '仍然登记',
+      title: tr('目录当前为空，仍要登记吗？'),
+      message: tr("{p0}\n\n如果游戏尚未产生存档，可以先登记此路径；在目录内出现真实存档前不会生成空备份。", {p0: (check.path)}),
+      confirmText: tr('仍然登记'),
     })
     if (!ok) return
   }
@@ -500,7 +502,7 @@ async function addSavePath(): Promise<void> {
     { path: check.path, verified_at: check.files > 0 ? Date.now() : 0 },
   ]
   await save({ save_paths: next })
-  success(check.files > 0 ? `已登记，检测到 ${check.files} 个文件` : '已登记存档路径')
+  success(check.files > 0 ? tr("已登记，检测到 {p0} 个文件", {p0: (check.files)}) : tr("已登记存档路径"))
 }
 
 const verifying = ref('')
@@ -510,16 +512,16 @@ async function verifySavePath(target: string): Promise<void> {
   try {
     const check = await window.baoyi.game.verifySavePath(item.value.id, target)
     if (!check.exists) {
-      error('未找到该目录，存档可能已被移动或所在磁盘未连接')
+      error(tr("未找到该目录，存档可能已被移动或所在磁盘未连接"))
     } else if (check.files === 0) {
-      toast('目录存在，但当前暂无存档文件')
+      toast(tr("目录存在，但当前暂无存档文件"))
     } else {
-      success(`路径正常，共 ${check.files} 个文件（${formatBytes(check.bytes)}）`)
+      success(tr("路径正常，共 {p0} 个文件（{p1}）", {p0: (check.files), p1: (formatBytes(check.bytes))}))
       store.clearStale(props.id)
       await load()
     }
   } catch (err) {
-    error(`验证失败：${errorMessage(err)}`)
+    error(tr("验证失败：{p0}", {p0: (errorMessage(err))}))
   } finally {
     verifying.value = ''
   }
@@ -551,7 +553,7 @@ async function loadBackups(): Promise<void> {
     const rows = await readBackups()
     if (rows !== STALE) backups.value = rows
   } catch (err) {
-    error(`读取备份列表失败：${errorMessage(err)}`)
+    error(tr("读取备份列表失败：{p0}", {p0: (errorMessage(err))}))
   }
 }
 
@@ -569,8 +571,8 @@ async function backupSave(target: string, note?: string): Promise<void> {
     if (signal.aborted) return
     if (
       !(await askSaveConfirm(
-        '确认备份存档',
-        `备份范围：${target}\n${scope.files} 个文件，共 ${formatBytes(scope.bytes)}\n仅备份此条已登记路径；其他目录及设备内部存档请分别备份。`
+        tr("确认备份存档"),
+        tr("备份范围：{p0}\n{p1} 个文件，共 {p2}\n仅备份此条已登记路径；其他目录及设备内部存档请分别备份。", {p0: (target), p1: (scope.files), p2: (formatBytes(scope.bytes))})
       ))
     ) {
       return
@@ -583,10 +585,10 @@ async function backupSave(target: string, note?: string): Promise<void> {
     }
     await refreshBackups()
     if (signal.aborted) return
-    success(`${r.message}，共 ${formatBytes(r.backup?.size_bytes ?? 0)}`)
+    success(tr("{p0}，共 {p1}", {p0: (r.message), p1: (formatBytes(r.backup?.size_bytes ?? 0))}))
     await pruneOver(r.over)
   } catch (err) {
-    if (!signal.aborted) error(`备份未完成：${errorMessage(err)}`)
+    if (!signal.aborted) error(tr("备份未完成：{p0}", {p0: (errorMessage(err))}))
   } finally {
     if (!signal.aborted) backingUp.value = ''
   }
@@ -597,9 +599,9 @@ async function pruneOver(over: SaveBackup[]): Promise<void> {
   if (over.length === 0) return
   const lines = over.map((b) => `· ${formatDateTime(b.created_at)}　${formatBytes(b.size_bytes)}`).join('\n')
   const ok = await confirmDialog({
-    title: `备份超出保留上限（${settings.settings.save_backup_keep} 份）`,
-    message: `是否清理最早的 ${over.length} 份旧备份？\n${lines}\n\n清理后对应备份文件将从磁盘删除；选择保留也不影响当前备份。`,
-    confirmText: '清理旧备份',
+    title: tr('备份超出保留上限（{p0} 份）', {p0: settings.settings.save_backup_keep}),
+    message: tr("是否清理最早的 {p0} 份旧备份？\n{p1}\n\n清理后对应备份文件将从磁盘删除；选择保留也不影响当前备份。", {p0: (over.length), p1: (lines)}),
+    confirmText: tr('清理旧备份'),
     tone: 'danger',
   })
   if (!ok) return
@@ -616,8 +618,8 @@ async function pruneOver(over: SaveBackup[]): Promise<void> {
     }
   }
   await refreshBackups()
-  if (done > 0) success(`已清理 ${done} 份旧备份`)
-  if (failed.length > 0) error(`${failed.length} 份未能清理：${failed[0]}`)
+  if (done > 0) success(tr("已清理 {p0} 份旧备份", {p0: (done)}))
+  if (failed.length > 0) error(tr("{p0} 份未能清理：{p1}", {p0: (failed.length), p1: (failed[0])}))
 }
 
 async function restore(b: SaveBackup): Promise<void> {
@@ -627,18 +629,18 @@ async function restore(b: SaveBackup): Promise<void> {
     const p = await window.baoyi.game.previewRestore(b.id, restoreTargets.value[b.id] || b.save_path)
     if (signal.aborted) return
     const lines = [
-      ['新增', p.added],
-      ['替换', p.changed],
-      ['移出当前目录', p.removed],
+      [tr("新增"), p.added],
+      [tr("替换"), p.changed],
+      [tr("移出当前目录"), p.removed],
     ] as const
     const detail = lines
       .map(([label, files]) => `${label} ${files.length}：${files.slice(0, 8).join('、')}${files.length > 8 ? '…' : ''}`)
       .join('\n')
     if (
       !(await askSaveConfirm(
-        `还原「${formatDateTime(b.created_at)}」存档备份`,
-        `目标：${p.target}\n${detail}\n保持相同 ${p.unchanged} 个文件\n\n还原前会先自动备份当前存档，请确认游戏已关闭。`,
-        '确认还原'
+        tr("还原「{p0}」存档备份", {p0: (formatDateTime(b.created_at))}),
+        tr("目标：{p0}\n{p1}\n保持相同 {p2} 个文件\n\n还原前会先自动备份当前存档，请确认游戏已关闭。", {p0: (p.target), p1: (detail), p2: (p.unchanged)}),
+        tr("确认还原")
       ))
     ) {
       return
@@ -650,7 +652,7 @@ async function restore(b: SaveBackup): Promise<void> {
     if (r.ok) success(r.message)
     else error(r.message)
   } catch (err) {
-    if (!signal.aborted) error(`还原未完成：${errorMessage(err)}`)
+    if (!signal.aborted) error(tr("还原未完成：{p0}", {p0: (errorMessage(err))}))
   } finally {
     if (!signal.aborted) restoring.value = ''
   }
@@ -658,9 +660,9 @@ async function restore(b: SaveBackup): Promise<void> {
 
 async function dropBackup(b: SaveBackup): Promise<void> {
   const ok = await confirmDialog({
-    title: `删除「${formatDateTime(b.created_at)}」这份备份？`,
-    message: `${b.backup_dir}\n\n备份文件将从本地磁盘删除且无法恢复。`,
-    confirmText: '删除备份',
+    title: tr('删除「{p0}」这份备份？', {p0: formatDateTime(b.created_at)}),
+    message: tr("{p0}\n\n备份文件将从本地磁盘删除且无法恢复。", {p0: (b.backup_dir)}),
+    confirmText: tr('删除备份'),
     tone: 'danger',
   })
   if (!ok) return
@@ -670,7 +672,7 @@ async function dropBackup(b: SaveBackup): Promise<void> {
     if (r.ok) success(r.message)
     else error(r.message)
   } catch (err) {
-    error(`删除失败：${errorMessage(err)}`)
+    error(tr("删除失败：{p0}", {p0: (errorMessage(err))}))
   }
 }
 
@@ -728,7 +730,7 @@ onMounted(() => {
     void load()
     if (e.counted) success(e.message)
     else toast(e.message)
-    if (e.status_changed) toast(`状态已更新为「${PLAY_STATUS_LABEL[e.play_status]}」`)
+    if (e.status_changed) toast(tr("状态已更新为「{p0}」", {p0: (PLAY_STATUS_LABEL[e.play_status])}))
   })
   void refreshRunning()
 })
@@ -741,14 +743,14 @@ function openOfficial(): void {
 async function removeItem(): Promise<void> {
   if (!item.value) return
   const ok = await confirmDialog({
-    title: `从游戏库移除「${title.value}」？`,
-    message: '仅移除抱一中的库记录，本地游戏文件与已有存档备份均会保留。',
-    confirmText: '移除记录',
+    title: tr('从游戏库移除「{p0}」？', {p0: title.value}),
+    message: tr("仅移除抱一中的库记录，本地游戏文件与已有存档备份均会保留。"),
+    confirmText: tr('移除记录'),
     tone: 'danger',
   })
   if (!ok) return
   await store.remove(item.value.id)
-  success('已从游戏库移除')
+  success(tr("已从游戏库移除"))
   void router.push({ name: 'game-home' })
 }
 </script>
@@ -761,42 +763,39 @@ async function removeItem(): Promise<void> {
       class="detail"
       @scroll="scrolled = ($event.target as HTMLElement).scrollTop > 140"
     >
-      <div v-if="loading" class="detail__state">载入中…</div>
+      <div v-if="loading" class="detail__state">{{ $t("载入中…") }}</div>
       <div v-else-if="!item" class="detail__state">
-        <p>这条记录不存在或已被移除。</p>
-        <button type="button" class="btn btn--ghost" @click="router.push({ name: 'game-home' })">
-          返回游戏库
-        </button>
+        <p>{{ $t("这条记录不存在或已被移除。") }}</p>
+        <button type="button" class="btn btn--ghost" @click="router.push({ name: 'game-home' })">{{ $t("返回游戏库") }}</button>
       </div>
 
       <template v-else>
         <header class="head" :class="{ 'head--scrolled': scrolled }">
           <button type="button" class="btn btn--subtle" @click="router.push({ name: 'game-home' })">
-            <ArrowLeft :size="14" />游戏库
-          </button>
+            <ArrowLeft :size="14" />{{ $t("游戏库") }}</button>
           <span class="breadcrumb-sep" :class="{ visible: scrolled }">/</span>
           <span class="breadcrumb-title" :class="{ visible: scrolled }">{{ title }}</span>
           <div class="head__actions">
 
             <button type="button" :class="!isWindowsGameEntry(item.path) ? 'btn btn--primary' : 'btn btn--ghost'" @click="reveal">
-              <FolderOpen :size="14" />{{ !isWindowsGameEntry(item.path) ? '打开安装包目录' : '打开文件夹' }}
+              <FolderOpen :size="14" />{{ !isWindowsGameEntry(item.path) ? $t('打开安装包目录') : $t('打开文件夹') }}
 
             </button>
             <button
               type="button"
               class="btn btn--ghost btn--icon"
               :disabled="!item.official_url"
-              aria-label="官网"
+              :aria-label="$t('官网')"
               @click="openOfficial"
             >
               <ExternalLink :size="14" />
             </button>
-            <LibraryToolbarMenu icon="more" label="游戏操作">
+            <LibraryToolbarMenu icon="more" :label="$t('游戏操作')">
               <button type="button" @click="toggleArchive">
-                {{ item.is_archived ? '取消归档' : '归档' }}
+                {{ item.is_archived ? $t('取消归档') : $t('归档') }}
               </button>
-              <button type="button" @click="copyPath(item.path)">复制路径</button>
-              <button type="button" @click="removeItem">从库里移除</button>
+              <button type="button" @click="copyPath(item.path)">{{ $t("复制路径") }}</button>
+              <button type="button" @click="removeItem">{{ $t("从库里移除") }}</button>
             </LibraryToolbarMenu>
             <div class="split-launch">
               <button
@@ -805,18 +804,18 @@ async function removeItem(): Promise<void> {
                 :disabled="launchDisabled()"
                 :title="
                   !isWindowsGameEntry(item.path)
-                    ? '安装包请在对应设备使用'
+                    ? $t('安装包请在对应设备使用')
                     : pathUnavailable
-                      ? '请先重新定位游戏程序'
-                      : '启动游戏'
+                      ? $t('请先重新定位游戏程序')
+                      : $t('启动游戏')
                 "
                 @click="launch()"
               >
                 <Play :size="14" />{{
-                  !isWindowsGameEntry(item.path) ? '安卓资料' : running ? '正在运行' : '启动'
+                  !isWindowsGameEntry(item.path) ? $t('安卓资料') : running ? $t('正在运行') : $t('启动')
                 }}
               </button>
-              <LibraryToolbarMenu icon="chevron" label="选择启动方式">
+              <LibraryToolbarMenu icon="chevron" :label="$t('选择启动方式')">
                 <button
                   v-for="entry in entries"
                   :key="entry.path"
@@ -832,12 +831,10 @@ async function removeItem(): Promise<void> {
                   type="button"
                   :disabled="launchDisabled()"
                   @click="launch({ trainers: [tool.path] })"
-                >
-                  连同 {{ tool.label }} 启动
-                </button>
+                >{{ $t("连同 {p0} 启动", {p0: (tool.label)}) }}</button>
                 <template v-if="executableTrainers.length > 1">
                   <div class="launch-trainer-group" @click.stop>
-                    <small>勾选随游戏启动的修改器</small>
+                    <small>{{ $t("勾选随游戏启动的修改器") }}</small>
                     <label v-for="tool in executableTrainers" :key="'chk:' + tool.path" class="launch-trainer-opt">
                       <input
                         type="checkbox"
@@ -851,9 +848,7 @@ async function removeItem(): Promise<void> {
                     type="button"
                     :disabled="launchDisabled() || selectedTrainers.length === 0"
                     @click="launch({ trainers: [...selectedTrainers] })"
-                  >
-                    启动游戏 + 已勾 {{ selectedTrainers.length }} 项
-                  </button>
+                  >{{ $t("启动游戏 + 已勾 {p0} 项", {p0: (selectedTrainers.length)}) }}</button>
                 </template>
               </LibraryToolbarMenu>
             </div>
@@ -869,31 +864,29 @@ async function removeItem(): Promise<void> {
             />
             <div class="hero-cover" :class="{ 'hero-cover--wide': heroWide }">
               <GameCover :item="item" :shape="heroWide ? 'wide' : 'vert'" @failed="coverBroken = true" />
-              <button type="button" class="manage-cover btn btn--ghost" @click="activeTab = 'files'">
-                管理封面
-              </button>
+              <button type="button" class="manage-cover btn btn--ghost" @click="activeTab = 'files'">{{ $t("管理封面") }}</button>
             </div>
 
             <div class="hero__text">
               <input
                 class="hero__name"
                 :value="item.name_zh"
-                placeholder="游戏名"
-                aria-label="游戏名"
+                :placeholder="$t('游戏名')"
+                :aria-label="$t('游戏名')"
                 @change="save({ name_zh: ($event.target as HTMLInputElement).value.trim() })"
               />
               <input
                 class="hero__en"
                 :value="item.name_en"
-                placeholder="原名 / 英文名"
-                aria-label="原名"
+                :placeholder="$t('原名 / 英文名')"
+                :aria-label="$t('原名')"
                 @change="save({ name_en: ($event.target as HTMLInputElement).value.trim() })"
               />
               <input
                 class="hero__summary"
                 :value="item.summary"
-                placeholder="一句话说明"
-                aria-label="一句话说明"
+                :placeholder="$t('一句话说明')"
+                :aria-label="$t('一句话说明')"
                 @change="save({ summary: ($event.target as HTMLInputElement).value.trim() })"
               />
               <div class="hero-status">
@@ -916,34 +909,32 @@ async function removeItem(): Promise<void> {
                   @click="save({ identity_confirmed: !item.identity_confirmed })"
                 >
                   <BadgeCheck :size="13" />{{
-                    item.identity_confirmed ? item.identity_name || item.name_en || title : '名称待确认 · 点击确认'
+                    item.identity_confirmed ? item.identity_name || item.name_en || title : $t('名称待确认 · 点击确认')
                   }}
                 </button>
               </div>
               <div class="hero-stats">
                 <div>
-                  <small>游玩时长</small><b>{{ formatPlaytime(item.total_playtime_sec) }}</b>
+                  <small>{{ $t("游玩时长") }}</small><b>{{ formatPlaytime(item.total_playtime_sec) }}</b>
                 </div>
                 <div>
-                  <small>上次游玩</small><b>{{ item.last_played_at ? formatRelative(item.last_played_at) : '未玩过' }}</b>
+                  <small>{{ $t("上次游玩") }}</small><b>{{ item.last_played_at ? formatRelative(item.last_played_at) : $t('未玩过') }}</b>
                 </div>
                 <div>
-                  <small>启动次数</small><b>{{ item.use_count || '未启动' }}</b>
+                  <small>{{ $t("启动次数") }}</small><b>{{ item.use_count || $t('未启动') }}</b>
                 </div>
                 <div>
-                  <small>存档备份</small><b>{{ backups.length }} 份</b>
+                  <small>{{ $t("存档备份") }}</small><b>{{ $t("{p0} 份", {p0: (backups.length)}) }}</b>
                 </div>
               </div>
             </div>
 
             <aside class="hero-meta">
-              <h3>归类</h3>
-              <label class="cat-combo">
-                分类
-                <input
+              <h3>{{ $t("归类") }}</h3>
+              <label class="cat-combo">{{ $t("分类") }}<input
                   :value="item.category"
                   autocomplete="off"
-                  aria-label="游戏分类"
+                  :aria-label="$t('游戏分类')"
                   @focus="categoryOpen = true"
                   @click="categoryOpen = true"
                   @blur="closeCategoryDropdown"
@@ -965,20 +956,20 @@ async function removeItem(): Promise<void> {
 
               </label>
               <div class="hero-tags">
-                <span>标签</span>
+                <span>{{ $t("标签") }}</span>
                 <div>
                   <button
                     v-for="t in item.tags"
                     :key="t"
                     type="button"
-                    :aria-label="'删除标签 ' + t"
+                    :aria-label="$t('删除标签 ') + t"
                     @click="save({ tags: item.tags.filter((v) => v !== t) })"
                   >
                     {{ t }} ×
                   </button>
                   <input
-                    aria-label="添加游戏标签"
-                    placeholder="+ 添加"
+                    :aria-label="$t('添加游戏标签')"
+                    :placeholder="$t('+ 添加')"
                     @keydown.enter="
                       !$event.isComposing &&
                         commitTags([...item.tags, ($event.target as HTMLInputElement).value].join('、'));
@@ -987,13 +978,13 @@ async function removeItem(): Promise<void> {
                   />
                 </div>
               </div>
-              <h3>记录</h3>
+              <h3>{{ $t("记录") }}</h3>
               <dl class="facts">
-                <dt>加入</dt>
+                <dt>{{ $t("加入") }}</dt>
                 <dd>{{ formatDate(item.created_at) }}</dd>
-                <dt>目录</dt>
+                <dt>{{ $t("目录") }}</dt>
                 <dd class="truncate" :title="item.source_dir">{{ item.source_dir.split(/[\\/]/).pop() }}</dd>
-                <dt>入口</dt>
+                <dt>{{ $t("入口") }}</dt>
                 <dd class="truncate" :title="item.path">{{ item.file_name }}</dd>
               </dl>
             </aside>
@@ -1004,18 +995,16 @@ async function removeItem(): Promise<void> {
             <span>
               {{
                 item.path_state === 'offline'
-                  ? '游戏所在磁盘离线，请先连接磁盘。'
-                  : '程序路径不可用，可能已被移动或改名。'
+                  ? $t('游戏所在磁盘离线，请先连接磁盘。')
+                  : $t('程序路径不可用，可能已被移动或改名。')
               }}
             </span>
-            <button type="button" class="btn btn--ghost" @click="recheck">重新检查</button>
-            <button type="button" class="btn btn--primary" :disabled="relocating" @click="relocate()">
-              重新定位
-            </button>
+            <button type="button" class="btn btn--ghost" @click="recheck">{{ $t("重新检查") }}</button>
+            <button type="button" class="btn btn--primary" :disabled="relocating" @click="relocate()">{{ $t("重新定位") }}</button>
           </div>
 
           <div ref="tabRoot" class="game-tabs">
-            <DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="game" label="游戏详情" />
+            <DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="game" :label="$t('游戏详情')" />
           </div>
 
           <div
@@ -1028,44 +1017,44 @@ async function removeItem(): Promise<void> {
           >
             <div class="quick-cards">
               <button type="button" @click="activeTab = 'trainer'">
-                <span><Wrench :size="14" />修改器</span>
-                <b>{{ trainers.length }} 个</b>
+                <span><Wrench :size="14" />{{ $t("修改器") }}</span>
+                <b>{{ $t("{p0} 个", {p0: (trainers.length)}) }}</b>
                 <small>{{
                   trainers
                     .flatMap((t) => t.features || [])
                     .slice(0, 3)
                     .map((f) => f.label)
-                    .join(' · ') || '功能与用法'
+                    .join(' · ') || $t('功能与用法')
                 }}</small>
               </button>
               <button type="button" @click="activeTab = 'guide'">
-                <span><BookOpen :size="14" />攻略与说明</span>
-                <b>{{ guides.length }} 份</b>
+                <span><BookOpen :size="14" />{{ $t("攻略与说明") }}</span>
+                <b>{{ $t("{p0} 份", {p0: (guides.length)}) }}</b>
                 <small>
-                  {{ guides.find((f) => f.read_progress)?.label || '本地攻略与资料'
+                  {{ guides.find((f) => f.read_progress)?.label || $t('本地攻略与资料')
                   }}{{
                     guides.some((f) => f.read_progress)
-                      ? ' · 读到 ' + Math.round((guides.find((f) => f.read_progress)?.read_progress || 0) * 100) + '%'
+                      ? $t(' · 读到 ') + Math.round((guides.find((f) => f.read_progress)?.read_progress || 0) * 100) + '%'
                       : ''
                   }}
                 </small>
               </button>
               <button type="button" @click="activeTab = 'saves'">
-                <span><Save :size="14" />存档备份</span>
-                <b>{{ backups.length }} 份</b>
+                <span><Save :size="14" />{{ $t("存档备份") }}</span>
+                <b>{{ $t("{p0} 份", {p0: (backups.length)}) }}</b>
                 <small>{{
                   backups[0]
-                    ? '最新 ' + formatDateTime(backups[0].created_at)
+                    ? $t('最新 ') + formatDateTime(backups[0].created_at)
                     : item.save_paths.length
-                      ? '有存档，尚未备份'
-                      : '尚未指定存档'
+                      ? $t('有存档，尚未备份')
+                      : $t('尚未指定存档')
                 }}</small>
               </button>
               <button type="button" @click="activeTab = 'notes'">
-                <span><StickyNote :size="14" />笔记</span>
-                <b>{{ gameNotes.length }} 条</b>
+                <span><StickyNote :size="14" />{{ $t("笔记") }}</span>
+                <b>{{ $t("{p0} 条", {p0: (gameNotes.length)}) }}</b>
                 <small>{{
-                  gameNotes.slice().sort((a, b) => b.updated_at - a.updated_at)[0]?.title || '记下你的游玩进度'
+                  gameNotes.slice().sort((a, b) => b.updated_at - a.updated_at)[0]?.title || $t('记下你的游玩进度')
                 }}</small>
               </button>
             </div>
@@ -1075,28 +1064,26 @@ async function removeItem(): Promise<void> {
             <ResourceBacklinksPanel :resource-id="item.id" />
 
             <section class="panel description-panel">
-              <h2 class="sec-title">我的简介与补充 <small>失焦自动保存</small></h2>
-              <p v-if="report" class="description-hint">
-                这里保留你的编辑和早期介绍；最新修复情况见上方状态及使用导航。
-              </p>
+              <h2 class="sec-title">{{ $t("我的简介与补充") }}<small>{{ $t("失焦自动保存") }}</small></h2>
+              <p v-if="report" class="description-hint">{{ $t("这里保留你的编辑和早期介绍；最新修复情况见上方状态及使用导航。") }}</p>
               <EditableField
                 :model-value="item.description"
                 multiline
-                placeholder="讲的是什么、玩法是什么样的"
+                :placeholder="$t('讲的是什么、玩法是什么样的')"
                 @commit="save({ description: $event })"
               />
             </section>
 
-            <section v-if="report" class="panel project-record" aria-label="精修工作记录">
+            <section v-if="report" class="panel project-record" :aria-label="$t('精修工作记录')">
               <div class="project-record__head">
-                <h2 class="sec-title">精修工作记录</h2>
-                <button type="button" class="btn btn--ghost" @click="readReport">阅读完整精修记录</button>
+                <h2 class="sec-title">{{ $t("精修工作记录") }}</h2>
+                <button type="button" class="btn btn--ghost" @click="readReport">{{ $t("阅读完整精修记录") }}</button>
               </div>
               <details class="project-record__details">
-                <summary>展开工作摘要与历史说明</summary>
+                <summary>{{ $t("展开工作摘要与历史说明") }}</summary>
                 <div class="project-record__sections">
                   <p v-for="(section, i) in projectSections" :key="i">{{ section }}</p>
-                  <p v-if="!projectSections.length">完整工作内容与验证范围见精修记录。</p>
+                  <p v-if="!projectSections.length">{{ $t("完整工作内容与验证范围见精修记录。") }}</p>
                 </div>
               </details>
             </section>

@@ -29,7 +29,7 @@ for (const mode of ['blocked-snapshot-directory', 'corrupt-database', 'future-sc
   fs.writeFileSync(path.join(profile, 'process.log'), log)
   assert.equal(code, 1, mode + ' must stop startup')
   const message = JSON.parse(fs.readFileSync(result, 'utf8'))
-  assert.equal(message.windows, 0); assert.match(message.title, /安全启动/); assert.ok(message.content.includes(profile))
+  assert.equal(message.windows, 0); assert.match(message.title, /安全启动|failed to start safely/); assert.ok(message.content.includes(profile))
   assert.deepEqual(fs.readFileSync(file), before, mode + ' must leave the original database untouched')
   console.log('PASS real Electron startup failure: ' + mode)
 }

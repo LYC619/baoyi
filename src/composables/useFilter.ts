@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { computed } from 'vue'
 import type { MasteryLevel, SoftwareQuery } from '@/types'
 import { useSettingsStore } from '@/stores/settings'
@@ -5,10 +7,10 @@ import { useSoftwareStore } from '@/stores/software'
 import { MASTERY_META, MASTERY_ORDER } from '@/utils'
 
 export const SORT_OPTIONS: Array<{ value: NonNullable<SoftwareQuery['sort']>; label: string }> = [
-  { value: 'recent', label: '最近使用' },
-  { value: 'count', label: '使用最多' },
-  { value: 'name', label: '名称' },
-  { value: 'added', label: '最近添加' }
+  { value: 'recent', get label() { return tr("最近使用") } },
+  { value: 'count', get label() { return tr("使用最多") } },
+  { value: 'name', get label() { return tr("名称") } },
+  { value: 'added', get label() { return tr("最近添加") } }
 ]
 
 export const MASTERY_OPTIONS = MASTERY_ORDER.map((value) => ({

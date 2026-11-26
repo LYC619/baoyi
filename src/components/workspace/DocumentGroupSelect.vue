@@ -23,17 +23,17 @@ async function create() {
 </script>
 <template>
   <div class="document-group-field">
-    <select :value="modelValue" aria-label="设置自定义分组" :disabled="disabled || busy" @change="change">
-      <option value="">无分组</option>
+    <select :value="modelValue" :aria-label="$t('设置自定义分组')" :disabled="disabled || busy" @change="change">
+      <option value="">{{ $t("无分组") }}</option>
       <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option>
-      <option value="__new__">＋ 新建分组…</option>
+      <option value="__new__">{{ $t("＋ 新建分组…") }}</option>
     </select>
     <form v-if="creating" class="new-group" @submit.prevent="create">
-      <input v-model="name" aria-label="新分组名称" placeholder="新分组名称" maxlength="120" :disabled="busy" />
-      <button class="ws-button" :disabled="busy || !name.trim()">新建</button>
-      <button type="button" class="ws-icon" aria-label="取消新建分组" :disabled="busy" @click="creating = false">×</button>
+      <input v-model="name" :aria-label="$t('新分组名称')" :placeholder="$t('新分组名称')" maxlength="120" :disabled="busy" />
+      <button class="ws-button" :disabled="busy || !name.trim()">{{ $t("新建") }}</button>
+      <button type="button" class="ws-icon" :aria-label="$t('取消新建分组')" :disabled="busy" @click="creating = false">×</button>
     </form>
-    <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
+    <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
   </div>
 </template>
 <style scoped>

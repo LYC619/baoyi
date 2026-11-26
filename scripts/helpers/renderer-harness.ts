@@ -13,6 +13,8 @@ export function createRendererLoader(mocks: Record<string, unknown>, globals: Re
     const absolute = path.resolve(file)
     if (cache.has(absolute)) return cache.get(absolute)!.exports
     let source = fs.readFileSync(absolute, 'utf8')
+    // transpileModule emits default JSON imports as require(...).default.
+    if (absolute.endsWith('.json')) return { default: JSON.parse(source) }
     if (absolute.endsWith('.vue')) source = compileScript(parse(source).descriptor, { id: 'regression', inlineTemplate }).content
     const compiled = ts.transpileModule(source, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }

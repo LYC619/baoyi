@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { BookOpen, Plus, FolderOpen, Maximize, Minimize, Search, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
@@ -88,9 +90,9 @@ const visible = computed(() => {
 })
 const groups = computed(() =>
   [
-    { id: 'start', label: '从这里开始' },
-    { id: 'guide', label: '攻略与说明' },
-    { id: 'record', label: '精修与核查记录' },
+    { id: 'start', label: tr('从这里开始') },
+    { id: 'guide', label: tr('攻略与说明') },
+    { id: 'record', label: tr('精修与核查记录') },
   ]
     .map((group) => ({
       ...group,
@@ -108,7 +110,7 @@ const activeSheetData = computed(() => {
   if (doc.value.allSheets?.length) {
     return doc.value.allSheets[activeSheet.value] ?? doc.value.allSheets[0]
   }
-  return { name: doc.value.sheets?.[0] || '工作表', rows: doc.value.rows ?? [], truncated: doc.value.truncated }
+  return { name: doc.value.sheets?.[0] || tr("工作表"), rows: doc.value.rows ?? [], truncated: doc.value.truncated }
 })
 
 // PDF embedded reader state
@@ -345,24 +347,24 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="docs-panel" :class="{ 'docs-panel--full': full }" aria-label="攻略阅读">
+  <section class="docs-panel" :class="{ 'docs-panel--full': full }" :aria-label="$t('攻略阅读')">
     <aside class="docs-nav">
       <header>
         <label>
           <Search :size="14" />
-          <input v-model="query" aria-label="搜索攻略与说明" placeholder="搜索标题或正文关键词" />
+          <input v-model="query" :aria-label="$t('搜索攻略与说明')" :placeholder="$t('搜索标题或正文关键词')" />
         </label>
         <button
           class="btn btn--icon"
           :disabled="busy || game.linked_files.length >= 20"
-          aria-label="关联资料"
+          :aria-label="$t('关联资料')"
           @click="add"
         >
           <Plus :size="16" />
         </button>
       </header>
-      <p v-if="!links.length" class="empty">还没有攻略。关联 Markdown、TXT、PDF、XLSX 或其他本地资料。</p>
-      <p v-if="links.length && !visible.length" class="empty">没有匹配的资料，试试其他关键词。</p>
+      <p v-if="!links.length" class="empty">{{ $t("还没有攻略。关联 Markdown、TXT、PDF、XLSX 或其他本地资料。") }}</p>
+      <p v-if="links.length && !visible.length" class="empty">{{ $t("没有匹配的资料，试试其他关键词。") }}</p>
       <section v-for="group in groups" :key="group.id" class="doc-group">
         <h4>
           {{ group.label }} <small>{{ group.files.length }}</small>
@@ -381,10 +383,10 @@ onBeforeUnmount(() => {
               {{ f.path.split('.').pop()?.toUpperCase() }} ·
               {{
                 exists(f) === false
-                  ? '文件缺失'
+                  ? $t('文件缺失')
                   : f.read_progress
-                    ? '读到 ' + Math.round(f.read_progress * 100) + '%'
-                    : '未阅读'
+                    ? $t('读到 ') + Math.round(f.read_progress * 100) + '%'
+                    : $t('未阅读')
               }}
             </small>
             <em v-if="matchSnippet(f)" class="doc-snippet">{{ matchSnippet(f) }}</em>
@@ -400,15 +402,15 @@ onBeforeUnmount(() => {
           <h3>{{ current.label }}</h3>
           <small>
             {{ doc ? formatBytes(doc.bytes) : '' }}
-            {{ doc?.kind === 'pdf' && pdfPages ? `· 共 ${pdfPages} 页` : '' }}
-            {{ doc?.truncated ? '· 仅显示预览范围' : '' }}
+            {{ doc?.kind === 'pdf' && pdfPages ? $t('· 共 {p0} 页', {p0: pdfPages}) : '' }}
+            {{ doc?.truncated ? $t('· 仅显示预览范围') : '' }}
           </small>
         </div>
         <template v-if="doc?.kind === 'pdf'">
           <button
             type="button"
             class="btn btn--icon"
-            aria-label="缩小 PDF"
+            :aria-label="$t('缩小 PDF')"
             :disabled="pdfZoom <= 0.6"
             @click="pdfZoom = Math.max(0.6, +(pdfZoom - 0.15).toFixed(2))"
           >
@@ -420,33 +422,29 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="btn btn--icon"
-            aria-label="放大 PDF"
+            :aria-label="$t('放大 PDF')"
             :disabled="pdfZoom >= 2"
             @click="pdfZoom = Math.min(2, +(pdfZoom + 0.15).toFixed(2))"
           >
             <ZoomIn :size="14" />
           </button>
         </template>
-        <button v-if="current.read_progress" class="btn btn--subtle" @click="resume">继续阅读</button>
-        <button class="btn btn--icon" :aria-label="full ? '退出全屏阅读' : '全屏阅读'" @click="full = !full">
+        <button v-if="current.read_progress" class="btn btn--subtle" @click="resume">{{ $t("继续阅读") }}</button>
+        <button class="btn btn--icon" :aria-label="full ? $t('退出全屏阅读') : $t('全屏阅读')" @click="full = !full">
           <component :is="full ? Minimize : Maximize" :size="15" />
         </button>
-        <button class="btn btn--ghost" :disabled="!exists(current)" @click="open()">系统打开</button>
-        <button class="btn btn--icon" :disabled="!exists(current)" aria-label="定位资料" @click="open(true)">
+        <button class="btn btn--ghost" :disabled="!exists(current)" @click="open()">{{ $t("系统打开") }}</button>
+        <button class="btn btn--icon" :disabled="!exists(current)" :aria-label="$t('定位资料')" @click="open(true)">
           <FolderOpen :size="15" />
         </button>
-        <LibraryToolbarMenu icon="more" label="管理资料">
-          <label>
-            名称
-            <input
+        <LibraryToolbarMenu icon="more" :label="$t('管理资料')">
+          <label>{{ $t("名称") }}<input
               :value="current.label"
               :disabled="busy"
               @change="patch({ label: ($event.target as HTMLInputElement).value })"
             />
           </label>
-          <label>
-            类型
-            <select
+          <label>{{ $t("类型") }}<select
               :value="current.type"
               :disabled="busy"
               @change="patch({ type: ($event.target as HTMLSelectElement).value as LinkedFile['type'] })"
@@ -454,22 +452,22 @@ onBeforeUnmount(() => {
               <option v-for="(label, key) in LINK_TYPE_LABEL" :key="key" :value="key">{{ label }}</option>
             </select>
           </label>
-          <button :disabled="busy" @click="patch(null)">解除关联，保留文件</button>
+          <button :disabled="busy" @click="patch(null)">{{ $t("解除关联，保留文件") }}</button>
         </LibraryToolbarMenu>
       </header>
 
-      <nav v-if="headings.length" class="doc-chapters" aria-label="攻略章节">
+      <nav v-if="headings.length" class="doc-chapters" :aria-label="$t('攻略章节')">
         <button v-for="(h, i) in headings" :key="i" @click="markdown?.jump(i)">{{ h.text }}</button>
       </nav>
 
       <div ref="reader" class="doc-reader reader-viewport" @scroll="scrolled">
-        <p v-if="loading" role="status">读取中…</p>
+        <p v-if="loading" role="status">{{ $t("读取中…") }}</p>
         <p v-else-if="failure" role="alert">{{ failure }}</p>
         <template v-else-if="doc">
           <GameMarkdown v-if="doc.kind === 'md'" ref="markdown" :text="doc.text" :images="doc.images" />
           <pre v-else-if="doc.kind === 'txt'">{{ doc.text }}</pre>
           <template v-else-if="doc.kind === 'xlsx' && activeSheetData">
-            <div v-if="(doc.allSheets?.length ?? 0) > 1" class="sheet-tabs" role="tablist" aria-label="工作表切换">
+            <div v-if="(doc.allSheets?.length ?? 0) > 1" class="sheet-tabs" role="tablist" :aria-label="$t('工作表切换')">
               <button
                 v-for="(sheet, idx) in doc.allSheets"
                 :key="idx"
@@ -484,8 +482,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
             <p class="sheet-names">
-              {{ activeSheetData.name }}（最多预览 50 行 / 50 列{{ activeSheetData.truncated ? '，下方已截断' : '' }}）
-            </p>
+              {{ $t("{p0}（最多预览 50 行 / 50 列{p1}）", {p0: (activeSheetData.name), p1: (activeSheetData.truncated ? $t('，下方已截断') : '')}) }}</p>
             <table>
               <tbody>
                 <tr v-for="(row, i) in activeSheetData.rows" :key="i">
@@ -506,10 +503,10 @@ onBeforeUnmount(() => {
               @error="failure = $event"
             />
           </div>
-          <p v-else class="empty">此格式暂不支持内嵌预览，请使用系统程序打开。</p>
-          <p v-if="doc.truncated" class="preview-limit">已达到预览上限，完整内容请使用系统程序打开。</p>
+          <p v-else class="empty">{{ $t("此格式暂不支持内嵌预览，请使用系统程序打开。") }}</p>
+          <p v-if="doc.truncated" class="preview-limit">{{ $t("已达到预览上限，完整内容请使用系统程序打开。") }}</p>
         </template>
-        <p v-else class="empty">选择左侧资料开始阅读</p>
+        <p v-else class="empty">{{ $t("选择左侧资料开始阅读") }}</p>
       </div>
     </article>
   </section>

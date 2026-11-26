@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { latestOnly, STALE } from '@/composables/latestOnly'
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/utils'
@@ -27,12 +29,12 @@ const route = useRoute()
 const tab = ref('overview')
 
 const tabs = [
-  { id: 'timeline', label: '项目日志' },
-  { id: 'overview', label: '工作区概览' },
-  { id: 'notes', label: '项目便签' },
-  { id: 'chat', label: '归档助理' },
-  { id: 'entries', label: '项目入口' },
-  { id: 'info', label: '项目资料' }
+  { id: 'timeline', get label() { return tr("项目日志") } },
+  { id: 'overview', get label() { return tr("工作区概览") } },
+  { id: 'notes', get label() { return tr("项目便签") } },
+  { id: 'chat', get label() { return tr("归档助理") } },
+  { id: 'entries', get label() { return tr("项目入口") } },
+  { id: 'info', get label() { return tr("项目资料") } }
 ]
 const defaultTab = ref('timeline')
 watch(() => route.query.tab, (value) => {
@@ -95,7 +97,7 @@ async function saveQuickNote() {
     })
     noteContext.value = saved
     quickNoteEditing.value = false
-    success('项目便签已保存')
+    success(tr("项目便签已保存"))
   } catch (e) {
     toastError(errorMessage(e))
   } finally {
@@ -114,7 +116,7 @@ async function openEditorApp(app: ProjectApplication) {
 async function openProjectTerminal() {
   try {
     await window.baoyi.project.openTerminal(props.item.id)
-    success('已在项目根目录打开 PowerShell')
+    success(tr("已在项目根目录打开 PowerShell"))
   } catch (e) {
     toastError(errorMessage(e))
   }
@@ -158,7 +160,7 @@ async function changeTab(value: string) {
 }
 
 async function acceptSession(value: ProjectSession | null, openChat = false) {
-  if (!value || value.projectId !== props.item.id) throw new Error('此对话不存在或不属于当前项目')
+  if (!value || value.projectId !== props.item.id) throw new Error(tr('此对话不存在或不属于当前项目'))
   session.value = value; selected.value = value.id
   if (openChat) tab.value = 'chat'
   if (tab.value === 'chat') await syncRoute('chat')
@@ -231,8 +233,8 @@ onMounted(() => {
 })
 onBeforeUnmount(() => document.removeEventListener('keydown', projectKey))
 
-const labels: Record<string, string> = { name: '名称', summary: '简介', category: '分类', source: '来源', state: '状态', group: '分组', tags: '标签', notes: '备注' }
-const display = (value: unknown) => Array.isArray(value) ? value.join('、') : String(value || '（空）')
+const labels: Record<string, string> = { get name() { return tr('名称') }, get summary() { return tr('简介') }, get category() { return tr('分类') }, get source() { return tr('来源') }, get state() { return tr('状态') }, get group() { return tr('分组') }, get tags() { return tr('标签') }, get notes() { return tr('备注') } }
+const display = (value: unknown) => Array.isArray(value) ? value.join('、') : String(value || tr("（空）"))
 const unsubscribe = window.baoyi.project.onSession((value) => {
   if (value.projectId !== props.item.id || value.id !== selected.value) return
   session.value = value
@@ -244,44 +246,43 @@ onBeforeUnmount(() => { disposed = true; selectionScope.abort(); unsubscribe(); 
 <template>
   <section class="project-workbench">
     <div class="project-launch-toolbar">
-      <button class="pj-button" @click="launcher.open(item)">启动项目</button>
-      <button v-if="launcher.last(item.id)" class="pj-button" @click="launcher.rerun(item)">重跑上次 · {{launcher.last(item.id)?.profileName}}</button>
-      <button v-for="app in availableApps.slice(0, 2)" :key="app.id" class="pj-button" @click="openEditorApp(app)"><Code2 :size="15"/>用 {{app.name}} 打开</button>
-      <button v-if="item.available" class="pj-button" @click="openProjectTerminal"><Terminal :size="15"/>打开终端</button>
+      <button class="pj-button" @click="launcher.open(item)">{{ $t("启动项目") }}</button>
+      <button v-if="launcher.last(item.id)" class="pj-button" @click="launcher.rerun(item)">{{ $t("重跑上次 · {p0}", {p0: (launcher.last(item.id)?.profileName)}) }}</button>
+      <button v-for="app in availableApps.slice(0, 2)" :key="app.id" class="pj-button" @click="openEditorApp(app)"><Code2 :size="15"/>{{ $t("用 {p0} 打开", {p0: (app.name)}) }}</button>
+      <button v-if="item.available" class="pj-button" @click="openProjectTerminal"><Terminal :size="15"/>{{ $t("打开终端") }}</button>
       <span v-for="run in projectRuns" :key="run.id" class="project-active-run">
-        <span class="working-dot"/>运行中 · {{run.profileName}}
-        <button class="pj-button" @click="launcher.showRuns.value=true">查看输出</button>
-        <button class="pj-button" :disabled="launcher.busy.value||run.status==='stopping'" @click="stopProjectRun(run.id)"><Square :size="13"/>停止进程</button>
+        <span class="working-dot"/>{{ $t("运行中 · {p0}", {p0: (run.profileName)}) }}<button class="pj-button" @click="launcher.showRuns.value=true">{{ $t("查看输出") }}</button>
+        <button class="pj-button" :disabled="launcher.busy.value||run.status==='stopping'" @click="stopProjectRun(run.id)"><Square :size="13"/>{{ $t("停止进程") }}</button>
       </span>
     </div>
 
-    <div v-if="tab !== 'notes'" class="project-sticky-note" aria-label="当前进展与下一步摘要">
+    <div v-if="tab !== 'notes'" class="project-sticky-note" :aria-label="$t('当前进展与下一步摘要')">
       <template v-if="!quickNoteEditing">
         <FileText :size="15" class="project-sticky-note__icon"/>
         <div class="project-sticky-note__text">
           <template v-if="noteContext.current || noteContext.next">
-            <span v-if="noteContext.current"><strong>当前进展：</strong>{{noteContext.current}}</span>
-            <span v-if="noteContext.next"><strong>下一步：</strong>{{noteContext.next}}</span>
+            <span v-if="noteContext.current"><strong>{{ $t("当前进展：") }}</strong>{{noteContext.current}}</span>
+            <span v-if="noteContext.next"><strong>{{ $t("下一步：") }}</strong>{{noteContext.next}}</span>
           </template>
-          <span v-else class="project-sticky-note__empty">还没有写当前进展或下一步，随手记一句方便下次直接接上。</span>
+          <span v-else class="project-sticky-note__empty">{{ $t("还没有写当前进展或下一步，随手记一句方便下次直接接上。") }}</span>
         </div>
-        <button class="pj-button" @click="startQuickNoteEdit"><Pencil :size="13"/>随手记一句</button>
-        <button class="pj-button" @click="changeTab('notes')">完整便签</button>
+        <button class="pj-button" @click="startQuickNoteEdit"><Pencil :size="13"/>{{ $t("随手记一句") }}</button>
+        <button class="pj-button" @click="changeTab('notes')">{{ $t("完整便签") }}</button>
       </template>
       <form v-else class="project-sticky-note__form" @submit.prevent="saveQuickNote">
-        <input v-model="quickCurrent" aria-label="快捷当前进展" placeholder="当前做到哪一步…" maxlength="4000"/>
-        <input v-model="quickNext" aria-label="快捷下一步" placeholder="下次打开先做什么…" maxlength="2000"/>
-        <button type="submit" class="pj-button pj-primary" :disabled="quickNoteSaving">{{quickNoteSaving ? '保存中…' : '保存便签'}}</button>
-        <button type="button" class="pj-button" :disabled="quickNoteSaving" @click="quickNoteEditing=false">取消</button>
+        <input v-model="quickCurrent" :aria-label="$t('快捷当前进展')" :placeholder="$t('当前做到哪一步…')" maxlength="4000"/>
+        <input v-model="quickNext" :aria-label="$t('快捷下一步')" :placeholder="$t('下次打开先做什么…')" maxlength="2000"/>
+        <button type="submit" class="pj-button pj-primary" :disabled="quickNoteSaving">{{quickNoteSaving ? $t('保存中…') : $t('保存便签')}}</button>
+        <button type="button" class="pj-button" :disabled="quickNoteSaving" @click="quickNoteEditing=false">{{ $t("取消") }}</button>
       </form>
     </div>
 
-    <DetailTabs :model-value="tab" :tabs="tabs" prefix="project" label="项目详情" @update:model-value="changeTab"/>
-    <p v-if="error" class="pj-error" role="alert">{{error}}</p>
+    <DetailTabs :model-value="tab" :tabs="tabs" prefix="project" :label="$t('项目详情')" @update:model-value="changeTab"/>
+    <p v-if="error" class="pj-error" role="alert">{{$systemMessage(error)}}</p>
     <div v-show="tab==='timeline'" id="project-panel-timeline" role="tabpanel" aria-labelledby="project-tab-timeline"><ProjectTimeline :id="item.id"/></div>
     <div v-show="tab==='notes'" id="project-panel-notes" role="tabpanel" aria-labelledby="project-tab-notes"><ProjectNotes ref="notes" :key="item.id" :item="item"/></div>
     <div v-show="tab==='overview'" id="project-panel-overview" role="tabpanel" aria-labelledby="project-tab-overview"><ProjectWorkspace :id="item.id" :path="item.path" @ask="archiveAssistant.show($event,[item.id])"/></div>
-    <div v-show="tab==='chat'" id="project-panel-chat" role="tabpanel" aria-labelledby="project-tab-chat" class="project-chat"><section class="archive-intro"><Bot :size="28"/><h3>把这个项目交给归档助理</h3><p>带上当前项目，查找文件、理解资料、完善分类与标签，也能关联其他收藏。</p><button class="pj-button pj-primary" @click="archiveAssistant.show(undefined,[item.id])">打开归档助理</button><button class="pj-button" @click="legacy=!legacy">{{legacy?'收起旧对话':'查看升级前的项目对话'}}</button></section><div v-show="legacy"><div class="chat-toolbar"><select v-model="selected" aria-label="项目对话" :disabled="busy" @change="switchSession"><option v-if="!sessions.length" value="">新对话</option><option v-for="s in sessions" :key="s.id" :value="s.id">{{s.title}}</option></select><button v-if="session" class="pj-button" @click="archiveAssistant.show(`请先用 archive_history 读取升级前的项目会话 ${session.id}，kind 为 project，再结合当前资料继续处理尚未完成的归档事项。`,[item.id])">交给归档助理继续</button><span v-if="session?.tokens">{{session.tokens}} tokens</span></div><ProjectRepositoryPanel v-if="session" :session="session" :busy="busy" @updated="session=$event" @working="repositoryBusy=$event"/><div ref="messages" class="chat-messages" aria-live="polite"><div v-if="!session?.messages.length" class="chat-welcome"><p>这里保留升级前的项目对话，新任务可从上方打开归档助理。</p></div><article v-for="message in session?.messages||[]" :key="message.id" class="chat-message" :class="message.role"><span class="chat-author">{{message.role==='user'?'你':'抱一助手'}}</span><details v-if="message.events.length" class="chat-trace"><summary>处理过程 · {{message.events.length}} 条记录</summary><div v-for="(event,i) in message.events" :key="i" :class="{'trace-error':event.error}"><strong>{{event.label}}</strong><pre>{{event.detail}}</pre></div></details><p class="chat-text">{{message.text||'正在查看项目…'}}</p><section v-if="message.proposal" class="chat-proposal"><h4>项目资料建议</h4><div v-for="(value,key) in message.proposal.patch" :key="key"><strong>{{labels[key]||key}}</strong><span class="proposal-before">{{display(message.proposal.before[key])}}</span><span>{{display(value)}}</span></div><button class="pj-button pj-primary" :disabled="busy||message.proposal.applied" @click="apply(message)"><Check :size="15"/>{{message.proposal.applied?'已应用':'应用资料建议'}}</button></section></article><p v-if="session?.error" class="chat-error" role="status">{{session.error}}</p></div></div></div>
+    <div v-show="tab==='chat'" id="project-panel-chat" role="tabpanel" aria-labelledby="project-tab-chat" class="project-chat"><section class="archive-intro"><Bot :size="28"/><h3>{{ $t("把这个项目交给归档助理") }}</h3><p>{{ $t("带上当前项目，查找文件、理解资料、完善分类与标签，也能关联其他收藏。") }}</p><button class="pj-button pj-primary" @click="archiveAssistant.show(undefined,[item.id])">{{ $t("打开归档助理") }}</button><button class="pj-button" @click="legacy=!legacy">{{legacy?$t('收起旧对话'):$t('查看升级前的项目对话')}}</button></section><div v-show="legacy"><div class="chat-toolbar"><select v-model="selected" :aria-label="$t('项目对话')" :disabled="busy" @change="switchSession"><option v-if="!sessions.length" value="">{{ $t("新对话") }}</option><option v-for="s in sessions" :key="s.id" :value="s.id">{{s.title}}</option></select><button v-if="session" class="pj-button" @click="archiveAssistant.show($t('请先用 archive_history 读取升级前的项目会话 {p0}，kind 为 project，再结合当前资料继续处理尚未完成的归档事项。', {p0: session.id}),[item.id])">{{ $t("交给归档助理继续") }}</button><span v-if="session?.tokens">{{session.tokens}} tokens</span></div><ProjectRepositoryPanel v-if="session" :session="session" :busy="busy" @updated="session=$event" @working="repositoryBusy=$event"/><div ref="messages" class="chat-messages" aria-live="polite"><div v-if="!session?.messages.length" class="chat-welcome"><p>{{ $t("这里保留升级前的项目对话，新任务可从上方打开归档助理。") }}</p></div><article v-for="message in session?.messages||[]" :key="message.id" class="chat-message" :class="message.role"><span class="chat-author">{{message.role==='user'?$t('你'):$t('抱一助手')}}</span><details v-if="message.events.length" class="chat-trace"><summary>{{ $t("处理过程 · {p0} 条记录", {p0: (message.events.length)}) }}</summary><div v-for="(event,i) in message.events" :key="i" :class="{'trace-error':event.error}"><strong>{{event.label}}</strong><pre>{{event.detail}}</pre></div></details><p class="chat-text">{{message.text||$t('正在查看项目…')}}</p><section v-if="message.proposal" class="chat-proposal"><h4>{{ $t("项目资料建议") }}</h4><div v-for="(value,key) in message.proposal.patch" :key="key"><strong>{{labels[key]||key}}</strong><span class="proposal-before">{{display(message.proposal.before[key])}}</span><span>{{display(value)}}</span></div><button class="pj-button pj-primary" :disabled="busy||message.proposal.applied" @click="apply(message)"><Check :size="15"/>{{message.proposal.applied?$t('已应用'):$t('应用资料建议')}}</button></section></article><p v-if="session?.error" class="chat-error" role="status">{{$systemMessage(session.error)}}</p></div></div></div>
     <div v-show="tab==='entries'" id="project-panel-entries" role="tabpanel" aria-labelledby="project-tab-entries" class="workbench-content"><slot name="entries"/></div>
     <div v-show="tab==='info'" id="project-panel-info" role="tabpanel" aria-labelledby="project-tab-info" class="workbench-content"><slot name="info"/></div>
   </section>

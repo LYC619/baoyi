@@ -1,11 +1,11 @@
 if (!process.versions.electron) {
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-  const result = require('node:child_process').spawnSync(require('electron'), [__filename], { env, windowsHide: true, encoding: 'utf8' })
-  process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr || '')
-  if (result.error) console.error(result.error)
-  process.exit(result.status === 0 ? 0 : 1)
+  const child = require('node:child_process').spawn(require('electron'), [__filename], { env, windowsHide: true, stdio:'inherit' })
+  child.once('error',error=>{console.error(error);process.exitCode=1})
+  child.once('exit',code=>{process.exitCode=code===0?0:1})
+  return
 }
-const { app, net, session } = require('electron')
+const { app, net, session, BrowserWindow } = require('electron')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -16,14 +16,27 @@ const { buildSync } = require('esbuild')
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'baoyi-network-regression-'))
 app.setPath('userData', path.join(temporary, 'profile'))
 app.commandLine.appendSwitch('disable-gpu')
+app.commandLine.appendSwitch('host-resolver-rules','MAP vdownload.hembed.com 127.0.0.1')
 const bundle = path.join(temporary, 'network.cjs')
 buildSync({ entryPoints: [path.join(__dirname, '../electron/kinds/video/download/chromium-fetch.ts')], outfile: bundle, bundle: true, platform: 'node', format: 'cjs', external: ['electron'] })
 const { createChromiumDownloadFetch } = require(bundle)
+const mediaBundle=path.join(temporary,'media.cjs')
+buildSync({entryPoints:[path.join(__dirname,'../electron/kinds/video/download/media.ts')],outfile:mediaBundle,bundle:true,platform:'node',format:'cjs',external:['electron']})
+const {createVideoMediaTransfer}=require(mediaBundle)
+const media=Buffer.concat([Buffer.from([0,0,0,24]),Buffer.from('ftypisom'),Buffer.alloc(512*1024,37)])
 let failed = 0
 let passed = 0
 const seen = []
 const server = http.createServer((req, res) => {
-  seen.push({ url: req.url, referer: req.headers.referer, cookie: req.headers.cookie })
+  seen.push({ url: req.url, referer: req.headers.referer, cookie: req.headers.cookie, range:req.headers.range })
+  if(req.url==='/continuous'){
+    const m=/^bytes=(\d+)-(\d*)$/.exec(req.headers.range||'')
+    let offset=m?Number(m[1]):0
+    const end=m?.[2]?Number(m[2]):media.length-1
+    res.writeHead(m?206:200,{'Content-Type':'video/mp4','Content-Length':end-offset+1,ETag:'"continuous"',...(m?{'Content-Range':`bytes ${offset}-${end}/${media.length}`}:{})})
+    const timer=setInterval(()=>{const next=Math.min(offset+8192,end+1);res.write(media.subarray(offset,next));offset=next;if(offset>end){clearInterval(timer);res.end()}},2)
+    res.once('close',()=>clearInterval(timer));return
+  }
   if (req.url === '/etag' && req.headers['if-none-match'] === '"fixture"') {
     res.writeHead(304, { etag: '"fixture"' }); res.end()
   } else if (req.url === '/redirect') {
@@ -35,11 +48,13 @@ const server = http.createServer((req, res) => {
   }
 })
 async function test(name, run) {
-  try { await run(); passed++ }
+  console.log('RUN '+name)
+  try { await run(); passed++; console.log('PASS '+name) }
   catch (error) { failed++; console.error('FAIL', name, error.message) }
 }
 
 app.whenReady().then(async () => {
+  const runtimeWindow=new BrowserWindow({show:false})
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const base = `http://127.0.0.1:${server.address().port}`
   const ses = session.fromPartition('network-regression')
@@ -67,6 +82,20 @@ app.whenReady().then(async () => {
   await test('conditional fragment validation returns a bodyless 304 with its strong ETag', async () => {
     const response = await fetch(base + '/etag', init({ 'If-None-Match': '"fixture"' }))
     assert.equal(response.status, 304); assert.equal(response.body, null); assert.equal(response.headers.get('etag'), '"fixture"')
+  })
+  await test('continuous CDN uses real Chromium response, cancellation and verified suffix resume',async()=>{
+    const transfer=createVideoMediaTransfer({fetch,settings:()=>({video_download_connections:1}),ffmpeg:()=>null})
+    const url='http://vdownload.hembed.com:'+server.address().port+'/continuous'
+    const first=seen.length,destination=path.join(temporary,'continuous.mp4')
+    await transfer({url,destination,referer:'https://hanime1.me/watch?v=1',signal:AbortSignal.timeout(10000)})
+    assert.deepEqual(fs.readFileSync(destination),media)
+    assert.deepEqual(seen.slice(first).map(r=>r.range),[undefined])
+    const stop=new AbortController(),resume=path.join(temporary,'resume.mp4')
+    await assert.rejects(transfer({url,destination:resume,referer:'https://hanime1.me/watch?v=1',signal:AbortSignal.any([stop.signal,AbortSignal.timeout(5000)]),onProgress:p=>{if(p.receivedBytes>0){stop.abort(new Error('pause fixture'));}}}),/pause fixture/)
+    const before=seen.length
+    await transfer({url,destination:resume,referer:'https://hanime1.me/watch?v=1',signal:AbortSignal.timeout(10000)})
+    assert.deepEqual(fs.readFileSync(resume),media)
+    assert.ok(seen.slice(before).some(r=>/^bytes=[1-9]\d*-$/.test(r.range||'')))
   })
   await test('session configured proxy carries download request', async () => {
     await ses.setProxy({ mode: 'fixed_servers', proxyRules: base, proxyBypassRules: '<-loopback>' })

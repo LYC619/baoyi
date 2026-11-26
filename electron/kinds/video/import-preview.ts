@@ -8,6 +8,7 @@ import type { VideoImportRuntime } from './service.ts'
 import { getVideo, updateVideo, videoOwnerForFiles } from './db.ts'
 import { replayVideoImport, videoImportFiles, verifyVideoImportFiles, videoImportLibraryStamp, type VideoImportCommand, type VideoImportFileStamp } from './import-command.ts'
 import { candidateFingerprint, rememberCandidate } from './scan-state.ts'
+import { isSupportedMediaFile } from './scanner.ts'
 
 interface DraftRow { commands: VideoImportCommand[]; files: VideoImportFileStamp[]; fingerprints?: string[]; edits: VideoImportEdits; originalOwner: string }
 interface Draft { batch: VideoImportBatch; rows: Record<string, DraftRow>; libraryStamp: string }
@@ -139,9 +140,40 @@ export function createVideoImportManager(options: Options) {
     return save(draft)
   }
   async function prepare(roots: string[]) {
-    if (!Array.isArray(roots) || !roots.length || roots.length > 50 || roots.some(root => typeof root !== 'string' || !path.isAbsolute(root) || !fs.statSync(root).isDirectory())) throw new Error('请选择有效的视频目录')
+    if (!Array.isArray(roots) || !roots.length || roots.length > 500) {
+      throw new Error('请选择有效的视频/音频文件或文件夹')
+    }
+    const valid: Array<{ path: string; isDir: boolean }> = []
+    const seen = new Set<string>()
+    for (const root of roots) {
+      if (typeof root !== 'string' || !path.isAbsolute(root)) {
+        throw new Error('请选择有效的视频/音频文件或文件夹')
+      }
+      let stat: fs.Stats
+      try {
+        stat = fs.statSync(root)
+      } catch {
+        throw new Error('所选文件或文件夹不存在，请重新选择')
+      }
+      const isDir = stat.isDirectory()
+      if (!isDir && !(stat.isFile() && isSupportedMediaFile(root))) continue
+      const resolved = path.resolve(root)
+      const lower = resolved.toLowerCase()
+      if (seen.has(lower)) continue
+      seen.add(lower)
+      valid.push({ path: resolved, isDir })
+    }
+    if (!valid.length) {
+      throw new Error('请选择有效的视频/音频文件或文件夹')
+    }
+    const dirPrefixes = valid
+      .filter(item => item.isDir)
+      .map(item => item.path.replace(/[\\/]+$/, '').toLowerCase() + path.sep)
+    const normalized = valid
+      .filter(item => item.isDir || !dirPrefixes.some(prefix => item.path.toLowerCase().startsWith(prefix)))
+      .map(item => item.path)
     const now = Date.now()
-    return scan({ batch: { id: randomUUID(), roots: [...new Set(roots.map(root => path.resolve(root)))], createdAt: now, updatedAt: now, revision: 0,
+    return scan({ batch: { id: randomUUID(), roots: normalized, createdAt: now, updatedAt: now, revision: 0,
       status: 'ready', entries: [], progress: null, activeEntryId: '', error: '', tokens: 0 }, rows: {}, libraryStamp: '' })
   }
   function update(id: string, changes: { selectedIds?: string[]; entry?: { id: string; edits: VideoImportEdits } }) {

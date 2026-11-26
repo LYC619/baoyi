@@ -53,6 +53,7 @@ console.log('PASS real video bulk handlers reject pending writes/removal and pin
 {
   const scope = Vue.effectScope(), calls: any[] = []
   const store = Vue.reactive<any>({ items: [{ id: 'A', category: '电影', episode_total: 1 }, { id: 'B', category: '电影', episode_total: 1 }],
+    get currentItems() { return this.items },
     queryPending: true, querySignature: 'all', selection: { kind: 'group', value: 'all' }, keyword: '', missingPosters: [], counts: {}, reload: async () => {} })
   const view = Vue.reactive({ compact: false, pendingOnly: false, issue: 'any' })
   const hideHentai = Vue.ref(false), privacyReady = Vue.ref(true)

@@ -116,6 +116,25 @@ try {
   await waitFor(() => reopened.evaluate(async () => (await (window as any).baoyi.video.discovery.web.list()).length === 0), 'removed shortcut')
   assert.equal((await reopened.evaluate(() => (window as any).baoyi.video.counts())).all, 0)
   evidence.push('edit-restart-retention-remove-and-narrow-layout')
+  await reopened.evaluate(() => (window as any).baoyi.settings.patch({ language: 'en' }))
+  await application.evaluate(({ BrowserWindow }: any) => {
+    const original = BrowserWindow.prototype.setMenu
+    BrowserWindow.prototype.setMenu = function (value: any) { this.__webBrowserTestMenu = value; return original.call(this, value) }
+  })
+  const englishWindow = application.waitForEvent('window')
+  await reopened.evaluate((url: string) => (window as any).baoyi.video.discovery.web.open(url), base + '/disconnect')
+  const englishViewer = await englishWindow
+  await englishViewer.getByRole('heading', { name: 'Could not load the page' }).waitFor()
+  assert.equal(await englishViewer.locator('html').getAttribute('lang'), 'en')
+  assert.ok((await englishViewer.locator('body').innerText()).includes('Change address'))
+  await menu('Refresh')
+  await englishViewer.getByRole('heading', { name: 'Could not load the page' }).waitFor()
+  const labels = await application.evaluate(({ BrowserWindow }: any) => BrowserWindow.getAllWindows().find((win: any) => win.__webBrowserTestMenu).__webBrowserTestMenu.items.map((item: any) => item.label))
+  assert.ok(labels.includes('Change address') && labels.includes('Return to BaoYi'))
+  assert.doesNotMatch(labels.join(' '), /\p{Script=Han}/u)
+  await englishViewer.screenshot({ path: path.join(output, 'web-browser-error-en.png') })
+  await englishViewer.close()
+  evidence.push('english-native-menu-and-load-error-html')
   assert.deepEqual(errors, [])
   fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ evidence, errors, profile, hits }, null, 2))
   console.log(`Web browser desktop verification: ${evidence.length} checks passed`)

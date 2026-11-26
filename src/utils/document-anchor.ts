@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import type {TextAnchor} from '../types/workspace.ts'
 
 // A change detector, not a security hash; exact text is always checked as well.
@@ -7,7 +9,7 @@ export function textFingerprint(text:string):string {
   return `${text.length}:${a>>>0}:${b>>>0}`
 }
 export function makeTextAnchor(text:string,start:number,end:number,kind:TextAnchor['kind']):TextAnchor {
-  if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<=start||end>text.length||end-start>30000)throw new Error('文字范围无效')
+  if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<=start||end>text.length||end-start>30000)throw new Error(tr('文字范围无效'))
   return {version:1,kind,start,end,exact:text.slice(start,end),prefix:text.slice(Math.max(0,start-48),start),suffix:text.slice(end,end+48),fingerprint:textFingerprint(text)}
 }
 export function resolveTextAnchor(text:string,anchor?:TextAnchor,legacyQuote=''):{start:number;end:number;status:'exact'|'relocated'}|null {
@@ -22,7 +24,7 @@ export function resolveTextAnchor(text:string,anchor?:TextAnchor,legacyQuote='')
 
 /** DOM ranges use the same UTF-16 coordinates as textContent, across inline nodes. */
 export function rangeOffsets(root:Element,range:Range):{start:number;end:number} {
-  if(!root.contains(range.startContainer)||!root.contains(range.endContainer))throw new Error('选文超出正文范围')
+  if(!root.contains(range.startContainer)||!root.contains(range.endContainer))throw new Error(tr('选文超出正文范围'))
   const prefix=range.cloneRange();prefix.selectNodeContents(root);prefix.setEnd(range.startContainer,range.startOffset)
   const start=prefix.toString().length;return {start,end:start+range.toString().length}
 }

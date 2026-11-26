@@ -16,13 +16,13 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 </script>
 <template>
   <div ref="root" class="video-filters" @keydown.esc.stop="open = false">
-    <button class="btn btn--ghost filter-trigger" type="button" :class="{ active: count }" :aria-expanded="open" aria-controls="video-filters-panel" @click="toggle"><SlidersHorizontal :size="15" />筛选<span v-if="count" class="filter-count">{{ count }}</span></button>
-    <form v-if="open" id="video-filters-panel" class="filter-panel" aria-label="筛选影视" @submit.prevent="apply">
-      <header><strong>筛选影视</strong><button class="btn btn--subtle" type="button" aria-label="关闭筛选" @click="open = false"><X :size="14" /></button></header>
-      <fieldset><legend>发布时间</legend><div class="date-range"><label>开始日期<input v-model="draft.publishedFrom" type="date" :max="draft.publishedTo || undefined" /></label><span>—</span><label>结束日期<input v-model="draft.publishedTo" type="date" :min="draft.publishedFrom || undefined" /></label></div><p>合集任意一集在此期间发布即可匹配。</p></fieldset>
-      <label>观看状态<select v-model="draft.status"><option value="">不限</option><option value="unwatched">想看</option><option value="watching">在看</option><option value="watched">看完</option><option value="dropped">弃</option></select></label>
-      <label>本地内容<select v-model="draft.local"><option value="">不限</option><option value="available">有可用视频</option><option value="missing">文件失联</option><option value="none">无可用视频</option></select></label>
-      <footer><button class="btn btn--ghost" type="button" @click="clear">清空筛选</button><button class="btn btn--primary" type="submit">应用筛选</button></footer>
+    <button class="btn btn--ghost filter-trigger" type="button" :class="{ active: count }" :aria-expanded="open" aria-controls="video-filters-panel" @click="toggle"><SlidersHorizontal :size="15" />{{ $t("筛选") }}<span v-if="count" class="filter-count">{{ count }}</span></button>
+    <form v-if="open" id="video-filters-panel" class="filter-panel" :aria-label="$t('筛选影视')" @submit.prevent="apply">
+      <header><strong>{{ $t("筛选影视") }}</strong><button class="btn btn--subtle" type="button" :aria-label="$t('关闭筛选')" @click="open = false"><X :size="14" /></button></header>
+      <fieldset><legend>{{ $t("发布时间") }}</legend><div class="date-range"><label>{{ $t("开始日期") }}<input v-model="draft.publishedFrom" type="date" :max="draft.publishedTo || undefined" /></label><span>—</span><label>{{ $t("结束日期") }}<input v-model="draft.publishedTo" type="date" :min="draft.publishedFrom || undefined" /></label></div><p>{{ $t("合集任意一集在此期间发布即可匹配。") }}</p></fieldset>
+      <label>{{ $t("观看状态") }}<select v-model="draft.status"><option value="">{{ $t("不限") }}</option><option value="unwatched">{{ $t("想看") }}</option><option value="watching">{{ $t("在看") }}</option><option value="watched">{{ $t("看完") }}</option><option value="dropped">{{ $t("弃") }}</option></select></label>
+      <label>{{ $t("本地内容") }}<select v-model="draft.local"><option value="">{{ $t("不限") }}</option><option value="available">{{ $t("有可用视频") }}</option><option value="missing">{{ $t("文件失联") }}</option><option value="none">{{ $t("无可用视频") }}</option></select></label>
+      <footer><button class="btn btn--ghost" type="button" @click="clear">{{ $t("清空筛选") }}</button><button class="btn btn--primary" type="submit">{{ $t("应用筛选") }}</button></footer>
     </form>
   </div>
 </template>

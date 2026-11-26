@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { tr } from '@/i18n'
 import { errorMessage } from '@/utils'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { BookOpen, Star, ExternalLink, FolderOpen } from 'lucide-vue-next'
@@ -36,7 +37,7 @@ watch(
 watch(
   () => props.item.tags.join('，'),
   (value) => {
-    if (document.activeElement?.getAttribute('aria-label') !== '资料标签') draft.value.tags = value
+    if (document.activeElement?.getAttribute('aria-label') !== tr('资料标签')) draft.value.tags = value
   }
 )
 
@@ -87,72 +88,65 @@ onBeforeUnmount(() => clearTimeout(timer))
     <input
       v-model="draft.name"
       class="detail-title"
-      aria-label="资料标题"
+      :aria-label="$t('资料标题')"
       @blur="saveField('name')"
       @keydown.enter="($event.target as HTMLInputElement).blur()"
     />
     <div class="detail-meta-row">
-      <select :value="item.type" aria-label="资料分类" @change="save({ type: ($event.target as HTMLSelectElement).value })">
-        <optgroup v-for="sub in (['reading', 'archive'] as const)" :key="sub" :label="sub === 'reading' ? '阅读' : '资料'">
+      <select :value="item.type" :aria-label="$t('资料分类')" @change="save({ type: ($event.target as HTMLSelectElement).value })">
+        <optgroup v-for="sub in (['reading', 'archive'] as const)" :key="sub" :label="sub === 'reading' ? $t('阅读') : $t('资料')">
           <option v-for="cat in categories.filter((c) => c.submodule === sub)" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
         </optgroup>
       </select>
       <input
         v-if="!isArchive"
         v-model="draft.author"
-        aria-label="资料作者"
-        placeholder="作者"
+        :aria-label="$t('资料作者')"
+        :placeholder="$t('作者')"
         @blur="saveField('author')"
         @keydown.enter="($event.target as HTMLInputElement).blur()"
       />
       <input
         v-else
         v-model="draft.counterpart"
-        aria-label="相关方或颁发机构"
-        placeholder="颁发机构或相关方"
+        :aria-label="$t('相关方或颁发机构')"
+        :placeholder="$t('颁发机构或相关方')"
         @blur="saveField('counterpart')"
         @keydown.enter="($event.target as HTMLInputElement).blur()"
       />
     </div>
     <div v-if="isArchive" class="detail-dates-row">
-      <label>
-        签发 / 签订日期
-        <input v-model="draft.issuedOn" type="date" aria-label="签发或签订日期" @change="saveField('issuedOn')" />
+      <label>{{ $t("签发 / 签订日期") }}<input v-model="draft.issuedOn" type="date" :aria-label="$t('签发或签订日期')" @change="saveField('issuedOn')" />
       </label>
-      <label>
-        有效期至
-        <input v-model="draft.expiresOn" type="date" aria-label="有效期至" @change="saveField('expiresOn')" />
+      <label>{{ $t("有效期至") }}<input v-model="draft.expiresOn" type="date" :aria-label="$t('有效期至')" @change="saveField('expiresOn')" />
       </label>
     </div>
     <div class="detail-actions">
       <button v-if="canReadInline" class="ws-button primary" @click="emit('open')">
-        <BookOpen :size="16" />{{ isArchive ? '查看资料' : '阅读' }}
+        <BookOpen :size="16" />{{ isArchive ? $t('查看资料') : $t('阅读') }}
       </button>
       <button v-else class="ws-button primary" :disabled="!item.available" @click="action('open')">
-        <ExternalLink :size="16" />外部程序打开
-      </button>
+        <ExternalLink :size="16" />{{ $t("外部程序打开") }}</button>
       <button
         class="ws-icon"
-        :title="item.favorite ? '取消收藏' : '收藏'"
-        :aria-label="item.favorite ? '取消收藏' : '收藏'"
+        :title="item.favorite ? $t('取消收藏') : $t('收藏')"
+        :aria-label="item.favorite ? $t('取消收藏') : $t('收藏')"
         :aria-pressed="!!item.favorite"
         @click="save({ favorite: !item.favorite })"
       >
         <Star :size="17" :fill="item.favorite ? 'currentColor' : 'none'" />
       </button>
-      <button v-if="canReadInline" class="ws-icon" title="用外部应用打开" aria-label="用外部应用打开" @click="action('open')">
+      <button v-if="canReadInline" class="ws-icon" :title="$t('用外部应用打开')" :aria-label="$t('用外部应用打开')" @click="action('open')">
         <ExternalLink :size="17" />
       </button>
-      <button class="ws-icon" title="在文件夹中显示" aria-label="在文件夹中显示" @click="action('reveal')">
+      <button class="ws-icon" :title="$t('在文件夹中显示')" :aria-label="$t('在文件夹中显示')" @click="action('reveal')">
         <FolderOpen :size="17" />
       </button>
     </div>
     <DocumentProgress v-if="item.readable" :item="item" />
     <DocumentInsightPanel :id="item.id" :categories="categories" @updated="emit('updated')" />
-    <button v-if="!item.available" class="ws-button" @click="action('relocate')">重新定位</button>
-    <label>
-      分组
-      <DocumentGroupSelect
+    <button v-if="!item.available" class="ws-button" @click="action('relocate')">{{ $t("重新定位") }}</button>
+    <label>{{ $t("分组") }}<DocumentGroupSelect
         :model-value="item.customGroupId || ''"
         :submodule="item.submodule || 'reading'"
         :category-id="item.type"
@@ -161,22 +155,18 @@ onBeforeUnmount(() => clearTimeout(timer))
         @created="emit('updated')"
       />
     </label>
-    <label>
-      标签
-      <input
+    <label>{{ $t("标签") }}<input
         v-model="draft.tags"
-        aria-label="资料标签"
-        placeholder="用逗号分隔标签"
+        :aria-label="$t('资料标签')"
+        :placeholder="$t('用逗号分隔标签')"
         @blur="saveField('tags')"
         @keydown.enter="($event.target as HTMLInputElement).blur()"
       />
     </label>
-    <label>
-      备注
-      <textarea v-model="draft.notes" aria-label="资料备注" placeholder="添加备注…" rows="3" @blur="saveField('notes')" />
+    <label>{{ $t("备注") }}<textarea v-model="draft.notes" :aria-label="$t('资料备注')" :placeholder="$t('添加备注…')" rows="3" @blur="saveField('notes')" />
     </label>
-    <small class="save-state" role="status">{{ saving ? '正在保存…' : saved ? '已保存' : '' }}</small>
-    <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
+    <small class="save-state" role="status">{{ saving ? $t('正在保存…') : saved ? $t('已保存') : '' }}</small>
+    <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
   </div>
 </template>
 

@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { computed, reactive, toRefs } from 'vue'
 import type {
   VideoSeriesCatalog,
@@ -68,18 +70,18 @@ export function useVideoSeriesDownload(resourceId: string) {
     state.error = ''
     state.catalog = null
     state.selectedVideoCodes = []
-    const taskId = taskCenter.start('video-series-download', '解析系列播放清单', { current: resourceId })
+    const taskId = taskCenter.start('video-series-download', tr("解析系列播放清单"), { current: resourceId })
     try {
       const catalog = await window.baoyi.video.downloadSeries(resourceId)
       state.catalog = catalog
       state.selectedVideoCodes = catalog.episodes.map(episode => episode.videoCode)
-      taskCenter.update(taskId, { processed: catalog.episodes.length, total: catalog.episodes.length, current: catalog.title, message: `已找到 ${catalog.episodes.length} 集` })
+      taskCenter.update(taskId, { processed: catalog.episodes.length, total: catalog.episodes.length, current: catalog.title, message: tr("已找到 {p0} 集", {p0: (catalog.episodes.length)}) })
       catalog.warnings.forEach(warning => taskCenter.log(taskId, 'warn', warning))
-      taskCenter.finish(taskId, 'success', `已找到 ${catalog.episodes.length} 集`)
+      taskCenter.finish(taskId, 'success', tr("已找到 {p0} 集", {p0: (catalog.episodes.length)}))
       return catalog
     } catch (error) {
       state.error = errorMessage(error)
-      taskCenter.finish(taskId, 'failed', '解析系列失败', state.error)
+      taskCenter.finish(taskId, 'failed', tr("解析系列失败"), state.error)
       return null
     } finally {
       state.resolving = false
@@ -89,18 +91,18 @@ export function useVideoSeriesDownload(resourceId: string) {
   async function download(sourceLabel = state.sourceLabel): Promise<VideoSeriesDownloadResult | null> {
     if (state.downloading || state.resolving || !state.catalog) return null
     if (sourceLabel.length > 40) {
-      state.error = '清晰度选项无效'
+      state.error = tr("清晰度选项无效")
       return null
     }
     const videoCodes = [...state.selectedVideoCodes]
     if (!videoCodes.length || new Set(videoCodes).size !== videoCodes.length ||
       videoCodes.some(code => !state.catalog!.episodes.some(episode => episode.videoCode === code))) {
-      state.error = '请从播放清单中选择要下载的集数'
+      state.error = tr("请从播放清单中选择要下载的集数")
       return null
     }
     const requestId = `series-download-${nextRequestId++}`
-    const taskId = taskCenter.start('video-series-download', `下载系列：${state.catalog.title}`, {
-      current: state.catalog.title, total: videoCodes.length, message: '准备选择保存目录'
+    const taskId = taskCenter.start('video-series-download', tr("下载系列：{p0}", {p0: (state.catalog.title)}), {
+      current: state.catalog.title, total: videoCodes.length, message: tr("准备选择保存目录")
     })
     state.sourceLabel = sourceLabel
     state.requestId = requestId
@@ -114,7 +116,7 @@ export function useVideoSeriesDownload(resourceId: string) {
       requestId, resourceId, phase: 'choosing', episodeIndex: 0,
       episodeTotal: videoCodes.length, videoCode: state.catalog.videoCode,
       title: state.catalog.title, receivedBytes: 0, totalBytes: 0,
-      bytesPerSecond: 0, message: '请选择系列保存目录'
+      bytesPerSecond: 0, message: tr("请选择系列保存目录")
     }
     let unsubscribe: (() => void) | undefined
     let milestone = ''
@@ -143,7 +145,7 @@ export function useVideoSeriesDownload(resourceId: string) {
           : state.catalog?.title ?? resourceId
         const transferring = progress.phase === 'downloading' || progress.phase === 'finalizing'
         const message = transferring
-          ? `${progress.message} · ${formatBytes(progress.receivedBytes)} / ${progress.totalBytes > 0 ? formatBytes(progress.totalBytes) : '大小未知'} · ${formatBytes(progress.bytesPerSecond)}/秒`
+          ? tr('{p0} · {p1} / {p2} · {p3}/秒', {p0: progress.message, p1: formatBytes(progress.receivedBytes), p2: progress.totalBytes > 0 ? formatBytes(progress.totalBytes) : tr('大小未知'), p3: formatBytes(progress.bytesPerSecond)})
           : progress.message
         const nextMilestone = `${progress.episodeIndex}:${progress.phase}:${progress.totalBytes > 0 ? Math.floor(progress.receivedBytes * 10 / progress.totalBytes) : 0}`
         taskCenter.update(taskId, {
@@ -161,10 +163,10 @@ export function useVideoSeriesDownload(resourceId: string) {
       state.result = result
       state.error = result.status === 'failed' ? result.message : ''
       state.progress = { ...state.progress, episodeTotal: result.total, message: result.message }
-      const summary = `${result.message}；完成 ${result.completed}，失败 ${result.failed}，跳过 ${result.skipped}，未完成 ${Math.max(0, result.total - result.completed - result.failed - result.skipped)}`
+      const summary = tr("{p0}；完成 {p1}，失败 {p2}，跳过 {p3}，未完成 {p4}", {p0: (result.message), p1: (result.completed), p2: (result.failed), p3: (result.skipped), p4: (Math.max(0, result.total - result.completed - result.failed - result.skipped))})
       taskCenter.update(taskId, { processed: result.completed + result.failed + result.skipped, total: result.total, message: summary })
       result.warnings.forEach(warning => taskCenter.log(taskId, 'warn', warning))
-      if (result.path) taskCenter.log(taskId, 'info', `保存目录：${result.path}`)
+      if (result.path) taskCenter.log(taskId, 'info', tr("保存目录：{p0}", {p0: (result.path)}))
       if (result.status === 'success') {
         taskCenter.finish(taskId, 'success', summary)
       } else if (result.status === 'cancelled') {
@@ -175,7 +177,7 @@ export function useVideoSeriesDownload(resourceId: string) {
       return result
     } catch (error) {
       state.error = errorMessage(error)
-      taskCenter.finish(taskId, 'failed', '系列下载失败', state.error)
+      taskCenter.finish(taskId, 'failed', tr("系列下载失败"), state.error)
       return null
     } finally {
       unsubscribe?.()
@@ -185,14 +187,14 @@ export function useVideoSeriesDownload(resourceId: string) {
   }
 
   async function cancel(): Promise<{ ok: boolean; message?: string }> {
-    if (!state.downloading || !state.requestId || state.cancelling) return { ok: false, message: '当前没有可取消的系列下载' }
+    if (!state.downloading || !state.requestId || state.cancelling) return { ok: false, message: tr("当前没有可取消的系列下载") }
     const requestId = state.requestId
     state.cancelling = true
     try {
       const result = await window.baoyi.video.cancelDownload(requestId)
       if (state.requestId === requestId && state.downloading && !result.ok) {
         state.cancelling = false
-        state.error = result.message || '取消下载失败'
+        state.error = result.message || tr("取消下载失败")
       }
       return result
     } catch (error) {
@@ -212,7 +214,7 @@ export function useVideoSeriesDownload(resourceId: string) {
     const catalog = await resolve()
     if (!catalog) return null
     if (failed.some(code => !catalog.episodes.some(episode => episode.videoCode === code))) {
-      state.error = '部分失败集数已不在播放清单中，请重新选择'
+      state.error = tr("部分失败集数已不在播放清单中，请重新选择")
       return null
     }
     state.selectedVideoCodes = failed
@@ -223,7 +225,7 @@ export function useVideoSeriesDownload(resourceId: string) {
     if (!state.result?.path) return false
     try {
       const ok = await window.baoyi.video.revealDownload(state.result.requestId)
-      if (!ok) state.error = '无法打开保存目录，请确认目录仍然存在'
+      if (!ok) state.error = tr("无法打开保存目录，请确认目录仍然存在")
       return ok
     }
     catch (error) { state.error = errorMessage(error); return false }

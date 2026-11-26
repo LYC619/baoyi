@@ -1,3 +1,5 @@
+
+import { tr } from '../i18n/index.ts'
 import type { DocumentItem, DocumentProjectReference } from '../types/workspace'
 
 export function recentGroupDocuments(rows: readonly DocumentItem[]): DocumentItem[] {
@@ -48,7 +50,7 @@ export function documentSections(rows: DocumentItem[], groupBy: string, names: M
     const keys = groupBy === 'tag' ? [...new Set(item.tags.length ? item.tags : [''])]
       : [groupBy === 'category' ? item.type : groupBy === 'source' ? item.sourceDir || '' : groupBy === 'custom' ? item.customGroupId || '' : 'all']
     for (const key of keys) {
-      const label = groupBy === 'none' ? title : groupBy === 'category' ? item.typeName : groupBy === 'custom' ? names.get(key) || '未分组' : groupBy === 'source' ? key || '来源未记录' : key || '无标签'
+      const label = groupBy === 'none' ? title : groupBy === 'category' ? item.typeName : groupBy === 'custom' ? names.get(key) || tr("未分组") : groupBy === 'source' ? key || tr("来源未记录") : key || tr("无标签")
       if (!groups.has(key)) groups.set(key, { key: groupBy + ':' + key, title: label, items: [] })
       groups.get(key)!.items.push(item)
     }

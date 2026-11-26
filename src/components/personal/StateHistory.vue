@@ -32,10 +32,10 @@ const latest = computed(() => rows.value.at(-1));
       <h3>
         {{ metric.name }} <span class="ws-muted">{{ metric.data.unit }}</span>
       </h3>
-      <span class="ws-muted">最近 {{ recent.length }} 条记录</span>
+      <span class="ws-muted">{{ $t("最近 {p0} 条记录", {p0: (recent.length)}) }}</span>
     </header>
-    <p v-if="latest" class="ws-muted">最近一次 · {{ latest.data.date }} <strong>{{ latest.data.value }} {{ metric.data.unit }}</strong></p>
-    <p v-else class="ws-muted">还没有记录，在上方选择此指标并填入数值。</p>
+    <p v-if="latest" class="ws-muted">{{ $t("最近一次 · {p0}", {p0: (latest.data.date)}) }}<strong>{{ latest.data.value }} {{ metric.data.unit }}</strong></p>
+    <p v-else class="ws-muted">{{ $t("还没有记录，在上方选择此指标并填入数值。") }}</p>
     <MetricTrend
       :values="
         recent.map((r) => ({
@@ -52,17 +52,17 @@ const latest = computed(() => rows.value.at(-1));
         <span>{{ record.data.date }}</span
         ><strong>{{ record.data.value }} {{ metric.data.unit }}</strong
         ><span class="state-note">{{ record.body }}</span
-        ><button class="ws-button" @click="emit('edit', record)">编辑</button
+        ><button class="ws-button" @click="emit('edit', record)">{{ $t("编辑") }}</button
         ><button
           class="ws-icon"
-          aria-label="删除状态记录"
+          :aria-label="$t('删除状态记录')"
           @click="emit('remove', record)"
         >
           ×
         </button>
       </article>
     </div>
-    <nav v-if="rows.length > pageSize" class="ws-toolbar" :aria-label="metric.name + '历史分页'"><button class="ws-button" :disabled="page === 1" @click="page--">上一页</button><span>{{ page }} / {{ pages }} 页 · 共 {{ rows.length }} 条</span><button class="ws-button" :disabled="page === pages" @click="page++">下一页</button></nav>
+    <nav v-if="rows.length > pageSize" class="ws-toolbar" :aria-label="metric.name + $t('历史分页')"><button class="ws-button" :disabled="page === 1" @click="page--">{{ $t("上一页") }}</button><span>{{ $t("{p0} / {p1} 页 · 共 {p2} 条", {p0: (page), p1: (pages), p2: (rows.length)}) }}</span><button class="ws-button" :disabled="page === pages" @click="page++">{{ $t("下一页") }}</button></nav>
   </section>
 </template>
 <style scoped>

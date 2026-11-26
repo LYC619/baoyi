@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed } from 'vue'
 import { ArrowDownToLine, CheckCircle2, Download, FolderOpen, Loader2, RefreshCw, X } from 'lucide-vue-next'
 import { useVideoDownload } from '@/composables/useVideoDownload'
@@ -15,19 +17,19 @@ const selectedSource = computed(() => catalog.value?.sources.find(source => sour
 const percent = computed(() => progress.value.totalBytes > 0
   ? Math.min(100, Math.floor(progress.value.receivedBytes * 100 / progress.value.totalBytes)) : 0)
 const statusText = computed(() => {
-  if (resolving.value) return '正在读取播放器信息…'
-  if (cancelling.value) return '正在取消并清理临时文件…'
-  if (downloading.value) return progress.value.message || '正在下载…'
-  if (result.value?.status === 'success') return '下载完成，已归档并入库'
+  if (resolving.value) return tr('正在读取播放器信息…')
+  if (cancelling.value) return tr('正在取消并清理临时文件…')
+  if (downloading.value) return progress.value.message || tr("正在下载…")
+  if (result.value?.status === 'success') return tr('下载完成，已归档并入库')
   if (result.value?.status === 'cancelled') return result.value.message
-  return error.value || '先解析播放器以获取可下载清晰度'
+  return error.value || tr("先解析播放器以获取可下载清晰度")
 })
-const displayTitle = computed(() => catalog.value?.title || '尚未解析站点标题')
+const displayTitle = computed(() => catalog.value?.title || tr("尚未解析站点标题"))
 const displayCode = computed(() => catalog.value?.videoCode || props.hanimeId)
 const warnings = computed(() => [...new Set([...(catalog.value?.warnings ?? []), ...(result.value?.warnings ?? [])])])
 
 function bytes(value: number): string { return value > 0 ? formatBytes(value) : '0 B' }
-function speed(value: number): string { return `${bytes(value)}/秒` }
+function speed(value: number): string { return tr("{p0}/秒", {p0: (bytes(value))}) }
 async function resolve(): Promise<void> { await download.resolve() }
 async function start(): Promise<void> {
   const result = await download.download()
@@ -41,30 +43,30 @@ async function reveal(): Promise<void> { await download.reveal() }
   <div class="single-download">
     <div class="single-download__head">
       <div>
-        <h2 class="sec-title">单集下载</h2>
-        <p class="single-download__note">仅保存视频文件，不改动本地条目、海报或观看状态。</p>
+        <h2 class="sec-title">{{ $t("单集下载") }}</h2>
+        <p class="single-download__note">{{ $t("仅保存视频文件，不改动本地条目、海报或观看状态。") }}</p>
       </div>
       <button
         type="button"
         class="btn btn--subtle"
         :disabled="resolving || downloading"
-        :title="catalog ? '重新读取播放器清晰度' : '读取播放器清晰度'"
+        :title="catalog ? $t('重新读取播放器清晰度') : $t('读取播放器清晰度')"
         @click="resolve"
       >
         <Loader2 v-if="resolving" :size="14" class="spin" />
         <RefreshCw v-else :size="14" />
-        {{ catalog ? '重新解析' : '解析清晰度' }}
+        {{ catalog ? $t('重新解析') : $t('解析清晰度') }}
       </button>
     </div>
 
     <dl class="single-download__facts">
-      <dt>站点标题</dt><dd :title="displayTitle">{{ displayTitle }}</dd>
-      <dt>站点编号</dt><dd>{{ displayCode }}</dd>
+      <dt>{{ $t("站点标题") }}</dt><dd :title="displayTitle">{{ displayTitle }}</dd>
+      <dt>{{ $t("站点编号") }}</dt><dd>{{ displayCode }}</dd>
     </dl>
 
     <div v-if="catalog" class="single-download__controls">
       <label class="single-download__select">
-        <span>清晰度</span>
+        <span>{{ $t("清晰度") }}</span>
         <select v-model="selectedSourceId" :disabled="downloading">
           <option v-for="source in catalog.sources" :key="source.id" :value="source.id">
             {{ source.label }} .{{ source.extension.toUpperCase() }}
@@ -72,14 +74,12 @@ async function reveal(): Promise<void> { await download.reveal() }
         </select>
       </label>
       <button type="button" class="btn btn--primary" :disabled="!selectedSource || downloading" @click="start">
-        <Download :size="14" />
-        另存为并下载
-      </button>
+        <Download :size="14" />{{ $t("另存为并下载") }}</button>
     </div>
 
     <div v-if="warnings.length" class="single-download__warnings">
       <ArrowDownToLine :size="14" />
-      <span v-for="warning in warnings" :key="warning">{{ warning }}</span>
+      <span v-for="warning in warnings" :key="warning">{{ $systemMessage(warning) }}</span>
     </div>
 
     <div v-if="downloading || result" class="single-download__progress">
@@ -91,24 +91,22 @@ async function reveal(): Promise<void> { await download.reveal() }
         <i :style="progress.totalBytes > 0 ? { width: `${percent}%` } : undefined" />
       </div>
       <div class="single-download__meta">
-        <span>{{ bytes(progress.receivedBytes) }} / {{ progress.totalBytes > 0 ? bytes(progress.totalBytes) : '大小未知' }}</span>
+        <span>{{ bytes(progress.receivedBytes) }} / {{ progress.totalBytes > 0 ? bytes(progress.totalBytes) : $t('大小未知') }}</span>
         <span>{{ speed(progress.bytesPerSecond) }}</span>
       </div>
       <div class="single-download__actions">
         <button v-if="downloading" type="button" class="btn btn--ghost" :disabled="cancelling" @click="cancel">
           <Loader2 v-if="cancelling" :size="14" class="spin" />
           <X v-else :size="14" />
-          {{ cancelling ? '正在取消…' : '取消下载' }}
+          {{ cancelling ? $t('正在取消…') : $t('取消下载') }}
         </button>
         <button v-if="result?.status === 'success' && path" type="button" class="btn btn--ghost" @click="reveal">
-          <FolderOpen :size="14" />
-          打开所在位置
-        </button>
+          <FolderOpen :size="14" />{{ $t("打开所在位置") }}</button>
         <CheckCircle2 v-if="result?.status === 'success'" :size="16" class="single-download__ok" />
       </div>
     </div>
 
-    <p v-if="error && !downloading" class="single-download__error">{{ error }}</p>
+    <p v-if="error && !downloading" class="single-download__error">{{ $systemMessage(error) }}</p>
 </div>
 </template>
 

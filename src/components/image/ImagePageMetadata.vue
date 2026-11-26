@@ -17,9 +17,9 @@ onBeforeUnmount(() => { revision++ })
 </script>
 
 <template>
-  <output class="page-metadata" aria-label="当前图片规格" aria-live="polite">
+  <output class="page-metadata" :aria-label="$t('当前图片规格')" aria-live="polite">
     <template v-if="info">{{ info.width }} × {{ info.height }} · {{ info.format }}<br />{{ formatBytes(info.size) }}<template v-if="info.photo"><br v-if="info.photo.takenAt || info.photo.camera"/>{{ [info.photo.takenAt,info.photo.camera].filter(Boolean).join(' · ') }}<br v-if="info.photo.exposure || info.photo.aperture"/>{{ [info.photo.lens,info.photo.exposure,info.photo.aperture,info.photo.iso ? 'ISO '+info.photo.iso : '',info.photo.focalLength].filter(Boolean).join(' · ') }}</template></template>
-    <template v-else>{{ failed ? '规格不可用' : '读取规格中' }}</template>
+    <template v-else>{{ failed ? $t('规格不可用') : $t('读取规格中') }}</template>
   </output>
 </template>
 

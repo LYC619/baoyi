@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { app, dialog, shell, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -78,7 +79,7 @@ export function registerProjectIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
   })
   const confirmQuit=async()=>{
       if(!runs.busy)return true
-      const options={type:'question' as const,title:'项目命令仍在运行',message:'停止项目命令并退出抱一？',detail:'独立终端不受影响。托管命令会先正常停止，五秒后结束仍未退出的关联程序。',buttons:['停止任务并退出','返回'],defaultId:1,cancelId:1,noLink:true}
+      const options={type:'question' as const,title:tr("项目命令仍在运行"),message:tr("停止项目命令并退出抱一？"),detail:tr("独立终端不受影响。托管命令会先正常停止，五秒后结束仍未退出的关联程序。"),buttons:[tr("停止任务并退出"),tr("返回")],defaultId:1,cancelId:1,noLink:true}
       const win=getWindow(),result=win?await dialog.showMessageBox(win,options):await dialog.showMessageBox(options)
       return result.response===0
   }
@@ -107,7 +108,7 @@ export function registerProjectIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
   handle('applications',()=>new ProjectApplications(getDb()).list())
   handle('select-application',async id=>{
     if(!['vscode','cursor'].includes(id))throw new Error('未知应用')
-    const answer=await dialog.showOpenDialog(getWindow()!,{title:'选择已安装的 '+(id==='vscode'?'VS Code':'Cursor'),properties:['openFile'],filters:[{name:'Windows 应用',extensions:['exe']}]})
+    const answer=await dialog.showOpenDialog(getWindow()!,{title:tr("选择已安装的 ")+(id==='vscode'?'VS Code':'Cursor'),properties:['openFile'],filters:[{name:tr("Windows 应用"),extensions:['exe']}]})
     restoreWindowFocus(getWindow());if(answer.canceled||!answer.filePaths[0])return false
     await new ProjectApplications(getDb()).select(id,answer.filePaths[0]);return true
   })
@@ -118,7 +119,7 @@ export function registerProjectIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
   handle('scripts',(id,relative='')=>discoverProjectScripts(projectRoot(reqId(id)),optString(relative,'relative',{max:2048})??''))
   const openFile=async(target:string)=>{
     if(/\.(bat|cmd|ps1|vbs|js|mjs|py|sh|lnk|exe|com|msi|scr)$/i.test(target)){
-      const answer=await dialog.showMessageBox(getWindow()!,{type:'question',title:'打开项目文件',message:'按系统关联打开此程序、脚本或快捷方式？',detail:target,buttons:['取消','打开'],defaultId:0,cancelId:0})
+      const answer=await dialog.showMessageBox(getWindow()!,{type:'question',title:tr("打开项目文件"),message:tr("按系统关联打开此程序、脚本或快捷方式？"),detail:target,buttons:[tr("取消"),tr("打开")],defaultId:0,cancelId:0})
       restoreWindowFocus(getWindow());if(answer.response!==1)return false
     }
     const error=await shell.openPath(target);if(error)throw new Error(error);return true
@@ -224,7 +225,7 @@ export function registerProjectIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
         await new Promise<void>((resolve,reject)=>{const child=spawn(entry.path,entry.args,{cwd:entry.cwd||(root?.isDirectory()?item.path:path.dirname(item.path)),shell:false,detached:true,stdio:'ignore',windowsHide:true});child.once('error',reject);child.once('spawn',()=>{child.unref();resolve()})})
       }else{
         if(/\.(bat|cmd|ps1|vbs|js|mjs|py|sh|lnk)$/i.test(entry.path)){
-          const result=await dialog.showMessageBox(getWindow()!,{type:'question',title:'打开项目脚本',message:'按系统关联打开此脚本或快捷方式？',detail:entry.path,buttons:['取消','打开'],defaultId:0,cancelId:0});if(result.response!==1)return
+          const result=await dialog.showMessageBox(getWindow()!,{type:'question',title:tr("打开项目脚本"),message:tr("按系统关联打开此脚本或快捷方式？"),detail:entry.path,buttons:[tr("取消"),tr("打开")],defaultId:0,cancelId:0});if(result.response!==1)return
         }
         const error=await shell.openPath(entry.path);if(error)throw new Error(error)
       }
@@ -235,7 +236,7 @@ export function registerProjectIpc(getWindow:()=>BrowserWindow|null,ipc:Pick<Ipc
   handle('relocate',async(id:string)=>{
     assertProjectRunsStopped(id);assertLibraryIdle();const item=library().get(id);if(!item)throw new Error('项目不存在')
     const oldExists=await fs.lstat(item.path).catch(cause => { if (cause.code === 'ENOENT' || cause.code === 'ENOTDIR') return null; throw cause });if(oldExists)throw new Error('原位置仍存在；需要改变位置请使用移动项目')
-    const kind=await dialog.showMessageBox(getWindow()!,{type:'question',title:'重新定位项目',message:'项目的新主位置是文件夹还是文件？',detail:item.path,buttons:['文件夹','文件','取消'],defaultId:0,cancelId:2,noLink:true})
+    const kind=await dialog.showMessageBox(getWindow()!,{type:'question',title:tr("重新定位项目"),message:tr("项目的新主位置是文件夹还是文件？"),detail:item.path,buttons:[tr("文件夹"),tr("文件"),tr("取消")],defaultId:0,cancelId:2,noLink:true})
     restoreWindowFocus(getWindow());if(kind.response===2)return null
     const target=await pick(kind.response===0);if(!target)return null
     return projectOperation(async()=>{

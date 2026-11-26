@@ -1,54 +1,66 @@
 # 抱一 · BaoYi
 
+**简体中文** · [English](README.en.md)
+
 > 知止而后得。
 
-本地资源掌控工具。资源库管“物”，项目记录“事”，个人入口管理“我”；资料、摘录、项目与技能相互引用。
+管理文件、项目与个人记录的本地 Windows 工作区。把值得留下的内容放在一起，也保留它们之间的关系：资料关联项目，项目连接技能，笔记跟着事情走。
 
-## 源码 0.20.5 · 2026-11-23
+## 从这里开始
 
-当前源码（Schema v33）包含全模块日常使用体验优化（音频子模块独立与播放清单、漫画底部全宽进度条与连翻、文库阅读偏好与编码记忆、游戏脚本游玩记录与内嵌 PDF/配图攻略、软件重定位与卡片右键菜单、项目顶置便签与一键运行、个人手动建技能卡与到期提醒、跨模块全局搜索跳转、设置同栏分组与全局网络代理、宽屏归档助理左右并排分栏及一键附带当前条目），以及六大库拖拽入库、归档助理 22 工具离线评测套件、七域服务分层与全量 IPC 运行时参数校验。0.20.5 已完成本地目录版打包与 50 组隔离成品 E2E 验证，尚未作为公开安装包附件发布。
+- **下载程序：** [GitHub Releases](https://github.com/LYC619/baoyi/releases)。以各版本说明和实际附件为准，源码与文档可能领先于公开程序。
+- **开始使用：** [使用指南](docs/site/zh-CN/guide.md)、[常见问题](docs/site/zh-CN/faq.md)、[隐私说明](docs/site/zh-CN/privacy.md)。
+- **自行构建：** [开发说明](docs/site/zh-CN/development.md)。
+- **部署官网与打包：** [部署说明](docs/site/zh-CN/deployment.md)。
 
-- [0.20.5 版本说明](docs/releases/0.20.5.md) · [0.20.4 版本说明](docs/releases/0.20.4.md) · [架构与 IPC 索引](docs/architecture-and-ipc.md)
-- 最新公开下载仍是 [Windows x64 版本 0.19.1](https://github.com/LYC619/baoyi/releases/tag/v0.19.1) · [0.19.1 版本说明](docs/releases/0.19.1.md)
+完整解压 Windows 程序后打开 `抱一.exe`，保留同目录下的运行库与资源。首次启动可选择简体中文或 English，之后从「设置 → 外观」切换；AI 配置可以跳过。
 
-下载 `BaoYi-0.19.1-windows-x64.zip`，解压完整目录后启动 `抱一.exe`。请保留全部 DLL 与 resources 文件；标准版使用 AppData 资料库。升级前备份资料库，退出旧版后再启动新版。程序未进行代码签名。
+## 日常能做什么
 
-## 功能
+| 入口 | 主要用途 |
+| --- | --- |
+| 文库 | 阅读 PDF、Markdown、TXT，保存书签摘录，为项目关联资料和证据 |
+| 项目 | 集中当前进展、下一步、相关文件、编辑器、终端和本地启动命令 |
+| 个人 | 记录技能实践、背包费用与到期、状态指标、经历和轻量待办 |
+| 软件和游戏 | 扫描目录、确认入库、启动程序、关联攻略和管理已支持的存档备份 |
+| 影音与图片 | 整理影视音频，浏览照片漫画，按需使用在线来源 |
+| 归档助理 | 检索和阅读收藏，维护已支持的记录，预览文件整理 |
 
-| 模块 | 已有能力 |
-|---|---|
-| 个人 | 总览、技能实践与自评、背包费用/续费/暂缓提醒、状态指标和趋势、奖项与经历、轻量待办；关联项目与凭证 |
-| 软件 | 拖拽/目录扫描、智能识别、多启动端、分类标签、批量管理、使用记录、目录归置与链接整理 |
-| 游戏工作区 | 拖拽/清单导入、横竖双版封面预览选择与撤销、简明游玩入口、修改器/攻略/MOD 关联与阅读、多篇笔记、存档核验与备份还原 |
-| 影视与音乐 | 拖拽/目录扫描、课程合集、海报、智能整理、下载任务；内嵌试看、250ms 悬停代表帧；影视发现页；在线音乐搜索试听下载、全局播放与同步歌词 |
-| 图片 / 漫画 | 拖拽导入、Pica 与 JM 来源、选章下载、代理选择、暂停续传、补章与恢复核验；缩放阅读、书签、进度、批量整理、选页封面和照片 EXIF |
-| 资料 | 拖拽/预览导入、PDF/Markdown/TXT 四套纸色阅读与跨页拖选、书签摘录与引用；精读结论、原文证据与覆盖范围 |
-| 项目 | 当前情况/下一步/关键 Prompt 自动保存，规则链接、Git 状态、多入口与编辑器；托管启动/停止、动态端口、限定范围的交接 Prompt |
-| 归档助理 | 全局对话、资源与正文繁简检索、来源引用、分类保存与中文变更撤销、文件核验整理、记忆、方法及任务续接 |
-| 公共能力 | 本地 SQLite、设置、代理、后台任务、资料库与助手备份恢复、升级前快照、媒体详情页反向关联面板 |
+核心浏览使用本地存储；AI 识别需要兼容模型服务，在线来源受权限和可用性影响。桌面交付面向 Windows x64，当前不提供托管个人资料库的网页版。
 
-智能识别与归档助理需要配置支持工具调用的模型服务；在线来源受账号权限、代理、网络和站点可用性影响。Office/EPUB 调用外部应用；PDF 不含 OCR 或文字重排。归档助理嵌入 Hermes v0.22.7 原版 Python 内核，第三方许可声明见 `docs/third-party/`。
+## 本地开发
 
-## 开发
-
-技术栈：Electron 44、Vue 3、TypeScript、Vite 8、Pinia、SQLite。开发环境需要 Node.js 22.12 或更高版本。
+需要 Node.js 22.12 或更新版本，桌面打包使用 Windows。
 
 ```powershell
 npm ci
 npm run dev
 npm run typecheck
 npm run build
-npm run docs:check
-npm run selfcheck
-npm run eval:archive
-npm run test:unit
-npm run prepare:hermes
-npm run prepare:comic
-npm run dist:dir
+npm run i18n:check
 ```
 
-`prepare:hermes` 与 `prepare:comic` 首次需要开发机 Python 与联网，按固定摘要准备独立运行组件；成品用户无需安装 Python。`dist:dir` 输出到 `release/<package.json 版本>/win-unpacked/`，其他打包方式见 [发布与打包](docs/releases/README.md)。
+按修改范围运行模块测试、`npm run selfcheck`、`npm run eval:archive` 和 `npm run docs:check`。归档助理、漫画和部分媒体测试需要对应运行组件或 FFmpeg，准备步骤见开发说明。
 
-## 数据与源码
+官网可独立构建：
 
-源码不包含用户资料库、账号配置、阅读档案、会话记录或本机验证 profile。所有测试均使用独立隔离目录。标准目录版使用 `%APPDATA%\抱一`；便携数据模式是另一个构建目标。
+```powershell
+npm ci --ignore-scripts
+npm run site:build
+npm run site:check
+npm run site:preview
+```
+
+网站源码在 `docs/site`，生成内容在 `output/site`，GitHub Pages 部署流程位于 `.github/workflows/pages.yml`。仓库包含可部署网站不代表公网已经启用。
+
+## 数据与恢复
+
+从「设置 → 数据管理」查看实际数据位置。标准版通常使用 `%APPDATA%\抱一`，明确标注为便携数据的版本使用程序旁的 `data`。资料库与关联源文件分别保留备份；仅移除库记录和删除本地文件是两种操作。
+
+不要把日常资料库直接作为问题附件。截图和日志先去除密钥、账户令牌、私人路径与正文；向远程 AI 提交敏感资料前先阅读隐私说明。
+
+## 参与与许可
+
+[贡献说明](CONTRIBUTING.md) · [安全问题](SECURITY.md) · [架构索引](docs/architecture-and-ipc.md)
+
+抱一源码使用 [MIT 许可](LICENSE)，第三方组件保留各自许可与[声明](docs/third-party)。

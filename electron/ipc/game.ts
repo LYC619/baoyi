@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { dialog, shell, type BrowserWindow } from 'electron'
 import fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -60,7 +61,7 @@ export function registerGameIpc(
       ? [{ name: 'Android 安装包', extensions: ['apk'] }]
       : [{ name: '游戏入口', extensions: ['exe', 'lnk', 'bat', 'cmd'] }]
     const selected = await dialog.showOpenDialog(win, {
-      title: mode === 'directory' ? '选择重命名或移动后的游戏文件夹' : isAndroid ? '选择安卓安装包' : '选择游戏主程序',
+      title: mode === 'directory' ? tr("选择重命名或移动后的游戏文件夹") : isAndroid ? tr("选择安卓安装包") : tr("选择游戏主程序"),
       properties: [mode === 'directory' ? 'openDirectory' : 'openFile'],
       ...(mode === 'file' ? { filters: entryFilters } : {})
     })
@@ -81,7 +82,7 @@ export function registerGameIpc(
         )?.isFile()
       ) {
         const picked = await dialog.showOpenDialog(win, {
-          title: isAndroid ? '目录内未找到原安装包，请选择 .apk 文件' : '目录内未找到原入口，请选择主程序',
+          title: isAndroid ? tr("目录内未找到原安装包，请选择 .apk 文件") : tr("目录内未找到原入口，请选择主程序"),
           defaultPath: directory,
           properties: ['openFile'],
           filters: entryFilters
@@ -130,9 +131,9 @@ export function registerGameIpc(
     const win = getWindow()
     if (!win || win.isDestroyed()) return null
     const selected = await dialog.showOpenDialog(win, {
-      title: '选择游戏启动文件',
+      title: tr("选择游戏启动文件"),
       properties: ['openFile'],
-      filters: [{ name: '游戏启动文件', extensions: ['exe', 'lnk', 'bat', 'cmd'] }]
+      filters: [{ name: tr("游戏启动文件"), extensions: ['exe', 'lnk', 'bat', 'cmd'] }]
     })
     if (selected.canceled || !selected.filePaths[0]) return null
     return registerManualGame(selected.filePaths[0])
@@ -142,7 +143,7 @@ export function registerGameIpc(
     const win = getWindow()
     if (!win) return []
     const result = await dialog.showOpenDialog(win, {
-      title: '选择游戏目录（可多选）',
+      title: tr("选择游戏目录（可多选）"),
       properties: ['openDirectory', 'multiSelections']
     })
     return result.canceled ? [] : result.filePaths
@@ -152,7 +153,7 @@ export function registerGameIpc(
     const win = getWindow()
     if (!win) return null
     const result = await dialog.showOpenDialog(win, {
-      title: '选择这个游戏的存档目录',
+      title: tr("选择这个游戏的存档目录"),
       properties: ['openDirectory']
     })
     if (result.canceled || result.filePaths.length === 0) return null
@@ -206,7 +207,7 @@ export function registerGameIpc(
     const win = getWindow()
     if (!win || win.isDestroyed()) return null
     const result = await dialog.showOpenDialog(win, {
-      title: safeKind === 'dir' ? '选择要关联的文件夹（MOD、整合包…）' : '选择要关联的文件（攻略、修改器…）',
+      title: safeKind === 'dir' ? tr("选择要关联的文件夹（MOD、整合包…）") : tr("选择要关联的文件（攻略、修改器…）"),
       properties: safeKind === 'dir' ? ['openDirectory', 'multiSelections'] : ['openFile', 'multiSelections']
     })
     if (result.canceled || result.filePaths.length === 0) return null
@@ -226,9 +227,9 @@ export function registerGameIpc(
     const win = getWindow()
     if (!win || win.isDestroyed()) return null
     const result = await dialog.showOpenDialog(win, {
-      title: '选择封面图（竖版 2:3 效果最好）',
+      title: tr("选择封面图（竖版 2:3 效果最好）"),
       properties: ['openFile'],
-      filters: [{ name: '图片', extensions: COVER_EXTS.map((e) => e.slice(1)) }]
+      filters: [{ name: tr("图片"), extensions: COVER_EXTS.map((e) => e.slice(1)) }]
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const outcome = setGameCover(safeId, result.filePaths[0])

@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -60,7 +61,7 @@ export function registerDiscoveryIpc(getWindow: () => BrowserWindow | null, ipcM
   })
   ipcMain.handle('video-discovery:import', async event => {
     assertMain(event)
-    const picked = await dialog.showOpenDialog(getWindow()!, { title: '导入视频来源目录', properties: ['openFile'], filters: [{ name: '视频来源目录', extensions: ['json'] }] })
+    const picked = await dialog.showOpenDialog(getWindow()!, { title: tr("导入视频来源目录"), properties: ['openFile'], filters: [{ name: tr("视频来源目录"), extensions: ['json'] }] })
     if (picked.canceled || !picked.filePaths[0]) return null
     const stat = await fs.stat(picked.filePaths[0])
     if (!stat.isFile() || stat.size > 5 * 1024 * 1024) throw new Error('来源目录必须是 5 MB 以内的 JSON 文件')
@@ -68,7 +69,7 @@ export function registerDiscoveryIpc(getWindow: () => BrowserWindow | null, ipcM
   })
   ipcMain.handle('video-discovery:export', async (event, sourceId: string) => {
     assertMain(event); const value = catalogue.get(reqId(sourceId, 'sourceId'))
-    const picked = await dialog.showSaveDialog(getWindow()!, { title: '导出来源目录', defaultPath: value.id + '.json', filters: [{ name: 'JSON', extensions: ['json'] }] })
+    const picked = await dialog.showSaveDialog(getWindow()!, { title: tr("导出来源目录"), defaultPath: value.id + '.json', filters: [{ name: 'JSON', extensions: ['json'] }] })
     if (picked.canceled || !picked.filePath) return false
     await fs.writeFile(picked.filePath, JSON.stringify(value, null, 2), 'utf8'); return true
   })

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 /**
  * 整理预览面板。
@@ -36,12 +38,12 @@ const selectedLinks = ref<string[]>([])
 const actionBusy = ref(false)
 const refreshing = ref(false)
 const busy = computed(() => loading.value || actionBusy.value || refreshing.value || organize.running.value)
-onBeforeRouteLeave(() => { if (actionBusy.value || refreshing.value || organize.running.value) { toast('目录操作尚未结束，请稍后再离开'); return false } return true })
+onBeforeRouteLeave(() => { if (actionBusy.value || refreshing.value || organize.running.value) { toast(tr("目录操作尚未结束，请稍后再离开")); return false } return true })
 
 const ACTIONS: Array<{ value: OrganizeAction; label: string }> = [
-  { value: 'move', label: '剪切移动' },
-  { value: 'junction', label: '创建链接' },
-  { value: 'skip', label: '跳过' }
+  { value: 'move', get label() { return tr("剪切移动") } },
+  { value: 'junction', get label() { return tr("创建链接") } },
+  { value: 'skip', get label() { return tr("跳过") } }
 ]
 
 /** 进不来预览时的原因。空串 = 正常 */
@@ -85,21 +87,21 @@ async function refreshEntry(id: string): Promise<void> {
     organizedEntries.value.sort((a, b) => a.folder_category.localeCompare(b.folder_category, 'zh') || a.name.localeCompare(b.name, 'zh'))
     entries.value = [...entries.value.filter(e => e.software_id !== id), ...pending]
     await Promise.all([categories.load('software'), store.reload()])
-  } catch (cause) { error(`操作后读取条目失败，请点击同步重试：${errorMessage(cause)}`) }
+  } catch (cause) { error(tr("操作后读取条目失败，请点击同步重试：{p0}", {p0: (errorMessage(cause))})) }
   finally { refreshing.value = false }
 }
 
 async function cleanLinks(): Promise<void> {
   if (busy.value || !selectedLinks.value.length) return
-  if (!(await confirmDialog({ title: `清理所选 ${selectedLinks.value.length} 个孤立链接？`, message: `仅删除失效的目录链接入口，真实软件文件保留。\n${selectedLinks.value.join('\n')}`, confirmText: '清理链接', tone: 'danger' }))) return
+  if (!(await confirmDialog({ title: tr('清理所选 {p0} 个孤立链接？', {p0: selectedLinks.value.length}), message: tr("仅删除失效的目录链接入口，真实软件文件保留。\n{p0}", {p0: (selectedLinks.value.join('\n'))}), confirmText: tr('清理链接'), tone: 'danger' }))) return
   actionBusy.value = true
   try {
     const result = await organize.removeLinks(selectedLinks.value)
     const removed = new Set(result.removed_paths)
     if (syncReport.value) syncReport.value.orphan_links = syncReport.value.orphan_links.filter(link => !removed.has(link.path))
     selectedLinks.value = selectedLinks.value.filter(link => !removed.has(link))
-    if (result.failed) error(`清理 ${result.removed} 个，失败 ${result.failed} 个：${result.notes.join('；')}`)
-    else success(`已清理 ${result.removed} 个孤立链接`)
+    if (result.failed) error(tr("清理 {p0} 个，失败 {p1} 个：{p2}", {p0: (result.removed), p1: (result.failed), p2: (result.notes.join('；'))}))
+    else success(tr("已清理 {p0} 个孤立链接", {p0: (result.removed)}))
   } catch (cause) { error(errorMessage(cause)) }
   finally { actionBusy.value = false }
 }
@@ -137,26 +139,26 @@ function skipWarned(): void {
   // warn 带着「还没被跳过」的过滤，必须在循环改掉 action 之前读
   const n = tally.value.warn
   for (const e of entries.value) if (e.warning) e.action = 'skip'
-  toast(`已把 ${n} 条带提示的改为跳过`)
+  toast(tr("已把 {p0} 条带提示的改为跳过", {p0: (n)}))
 }
 
 async function execute(): Promise<void> {
   if (busy.value) return
   if (actionable.value === 0) {
-    toast('没有要执行的条目')
+    toast(tr("没有要执行的条目"))
     return
   }
 
   const warned = tally.value.warn
   const lines = [
-    `即将处理 ${actionable.value} 条：剪切移动 ${tally.value.move} 条，创建链接 ${tally.value.junction} 条。`,
+    tr("即将处理 {p0} 条：剪切移动 {p1} 条，创建链接 {p2} 条。", {p0: (actionable.value), p1: (tally.value.move), p2: (tally.value.junction)}),
     '',
-    '剪切会真的移动磁盘上的文件夹。链接不动任何文件。',
-    warned > 0 ? `其中 ${warned} 条带有提示信息，建议先逐条看过。` : '',
+    tr("剪切会真的移动磁盘上的文件夹。链接不动任何文件。"),
+    warned > 0 ? tr("其中 {p0} 条带有提示信息，建议先逐条看过。", {p0: (warned)}) : '',
     '',
-    '执行后可以在设置 → 目录整理里撤销。确认继续？'
+    tr("执行后可以在设置 → 目录整理里撤销。确认继续？")
   ].filter(Boolean)
-  if (!(await confirmDialog({ title: '确认执行目录整理？', message: lines.join('\n'), confirmText: '开始整理' }))) return
+  if (!(await confirmDialog({ title: tr('确认执行目录整理？'), message: lines.join('\n'), confirmText: tr('开始整理') }))) return
 
   let result: OrganizeResult | null = null
   try {
@@ -169,7 +171,7 @@ async function execute(): Promise<void> {
       }))
     )
   } catch (err) {
-    error(`整理执行失败：${errorMessage(err)}`)
+    error(tr("整理执行失败：{p0}", {p0: (errorMessage(err))}))
   }
 
   // 就算 run 抛了错也要刷新：主进程可能已经执行完前几条命令，
@@ -178,12 +180,12 @@ async function execute(): Promise<void> {
   if (!result) return
   completed.value = result
 
-  const parts = [`移动 ${result.moved} 条`, `链接 ${result.linked} 条`]
+  const parts = [tr("移动 {p0} 条", {p0: (result.moved)}), tr("链接 {p0} 条", {p0: (result.linked)})]
   if (result.failed > 0) {
-    error(`整理完成，但 ${result.failed} 条失败：${parts.join('，')}。到设置里查看明细`)
+    error(tr("整理完成，但 {p0} 条失败：{p1}。到设置里查看明细", {p0: (result.failed), p1: (parts.join('，'))}))
     return
   }
-  success(`整理完成：${parts.join('，')}`)
+  success(tr("整理完成：{p0}", {p0: (parts.join('，'))}))
 }
 </script>
 
@@ -191,66 +193,64 @@ async function execute(): Promise<void> {
   <div class="organize">
     <header class="head">
       <button class="btn btn--subtle" :disabled="busy" @click="router.push({ name: 'home' })">
-        <ArrowLeft :size="16" />
-        软件库
-      </button>
-      <h1>软件目录整理</h1>
-      <button class="btn btn--ghost head__sync" :disabled="busy" @click="initialLoad"><Loader2 v-if="loading" :size="14" class="spin" />同步整理目录</button>
+        <ArrowLeft :size="16" />{{ $t("软件库") }}</button>
+      <h1>{{ $t("软件目录整理") }}</h1>
+      <button class="btn btn--ghost head__sync" :disabled="busy" @click="initialLoad"><Loader2 v-if="loading" :size="14" class="spin" />{{ $t("同步整理目录") }}</button>
     </header>
 
-    <nav class="organize-tabs" aria-label="整理视图">
-      <button :class="{ chosen: active === 'pending' }" :aria-pressed="active === 'pending'" :disabled="busy" @click="active = 'pending'">待整理 <span>{{ entries.length }}</span></button>
-      <button :class="{ chosen: active === 'organized' }" :aria-pressed="active === 'organized'" :disabled="busy" @click="active = 'organized'">已整理 <span>{{ organizedEntries.length }}</span></button>
+    <nav class="organize-tabs" :aria-label="$t('整理视图')">
+      <button :class="{ chosen: active === 'pending' }" :aria-pressed="active === 'pending'" :disabled="busy" @click="active = 'pending'">{{ $t("待整理") }}<span>{{ entries.length }}</span></button>
+      <button :class="{ chosen: active === 'organized' }" :aria-pressed="active === 'organized'" :disabled="busy" @click="active = 'organized'">{{ $t("已整理") }}<span>{{ organizedEntries.length }}</span></button>
     </nav>
 
     <div class="body">
-      <section v-if="syncReport && !loading && root" class="panel sync-report" aria-label="整理目录同步结果">
-        <p role="status">{{ syncReport.ran ? '同步完成' : '同步未执行' }}：新增分类 {{ syncReport.categories_added.length }}，新增软件 {{ syncReport.software_added.length }}，修复路径 {{ syncReport.healed.length }}，更新分类 {{ syncReport.recategorized.length }}。</p>
-        <p class="hint">进入本页时自动同步，也可手动刷新。新软件会进入“待识别”，可按需补充资料。</p>
+      <section v-if="syncReport && !loading && root" class="panel sync-report" :aria-label="$t('整理目录同步结果')">
+        <p role="status">{{ $t("{p0}：新增分类 {p1}，新增软件 {p2}，修复路径 {p3}，更新分类 {p4}。", {p0: (syncReport.ran ? $t('同步完成') : $t('同步未执行')), p1: (syncReport.categories_added.length), p2: (syncReport.software_added.length), p3: (syncReport.healed.length), p4: (syncReport.recategorized.length)}) }}</p>
+        <p class="hint">{{ $t("进入本页时自动同步，也可手动刷新。新软件会进入“待识别”，可按需补充资料。") }}</p>
         <details v-if="syncReport.notes.length || syncReport.missing.length || syncReport.skipped_dirs.length || syncReport.categories_added.length || syncReport.software_added.length || syncReport.healed.length || syncReport.recategorized.length">
-          <summary>查看同步明细</summary><ul>
-            <li v-for="name in syncReport.categories_added" :key="'category-' + name">新增分类：{{ name }}</li>
-            <li v-for="row in syncReport.software_added" :key="'add-' + row.dir">新增软件：{{ row.name }}（{{ row.category }}）</li>
-            <li v-for="row in syncReport.healed" :key="'heal-' + row.from">修复路径：{{ row.name }} · {{ row.from }} → {{ row.to }}</li>
-            <li v-for="(row, i) in syncReport.recategorized" :key="'recategory-' + i">更新分类：{{ row.name }} · {{ row.from }} → {{ row.to }}</li>
-            <li v-for="row in syncReport.missing" :key="'missing-' + row.dir" class="warning">目录缺失（记录保留）：{{ row.name }} · {{ row.dir }}</li>
-            <li v-for="row in syncReport.skipped_dirs" :key="row.dir">{{ row.reason === 'no-exe' ? '未找到主程序' : '同名目录无法确定对应关系' }}：{{ row.dir }}</li>
+          <summary>{{ $t("查看同步明细") }}</summary><ul>
+            <li v-for="name in syncReport.categories_added" :key="'category-' + name">{{ $t("新增分类：{p0}", {p0: (name)}) }}</li>
+            <li v-for="row in syncReport.software_added" :key="'add-' + row.dir">{{ $t("新增软件：{p0}（{p1}）", {p0: (row.name), p1: (row.category)}) }}</li>
+            <li v-for="row in syncReport.healed" :key="'heal-' + row.from">{{ $t("修复路径：{p0} · {p1} → {p2}", {p0: (row.name), p1: (row.from), p2: (row.to)}) }}</li>
+            <li v-for="(row, i) in syncReport.recategorized" :key="'recategory-' + i">{{ $t("更新分类：{p0} · {p1} → {p2}", {p0: (row.name), p1: (row.from), p2: (row.to)}) }}</li>
+            <li v-for="row in syncReport.missing" :key="'missing-' + row.dir" class="warning">{{ $t("目录缺失（记录保留）：{p0} · {p1}", {p0: (row.name), p1: (row.dir)}) }}</li>
+            <li v-for="row in syncReport.skipped_dirs" :key="row.dir">{{ row.reason === 'no-exe' ? $t('未找到主程序') : $t('同名目录无法确定对应关系') }}：{{ row.dir }}</li>
             <li v-for="note in syncReport.notes" :key="note" class="warning">{{ note }}</li>
           </ul>
         </details>
         <details v-if="syncReport.orphan_links.length" class="orphan-links">
-          <summary>发现 {{ syncReport.orphan_links.length }} 个孤立链接</summary>
-          <p class="hint">这些链接没有软件记录对应。勾选需要清理的链接，目标文件会保留。</p>
-          <label v-for="link in syncReport.orphan_links" :key="link.path"><input v-model="selectedLinks" :value="link.path" type="checkbox" :disabled="busy" /><span>{{ link.name }} · {{ link.broken ? '目标失效' : link.ours ? '抱一链接' : '来源未确认' }}<small class="mono">{{ link.path }} → {{ link.target || '无法读取目标' }}</small></span></label>
-          <button class="btn btn--ghost" :disabled="busy || !selectedLinks.length" @click="cleanLinks">清理所选 {{ selectedLinks.length }} 个链接</button>
+          <summary>{{ $t("发现 {p0} 个孤立链接", {p0: (syncReport.orphan_links.length)}) }}</summary>
+          <p class="hint">{{ $t("这些链接没有软件记录对应。勾选需要清理的链接，目标文件会保留。") }}</p>
+          <label v-for="link in syncReport.orphan_links" :key="link.path"><input v-model="selectedLinks" :value="link.path" type="checkbox" :disabled="busy" /><span>{{ link.name }} · {{ link.broken ? $t('目标失效') : link.ours ? $t('抱一链接') : $t('来源未确认') }}<small class="mono">{{ link.path }} → {{ link.target || $t('无法读取目标') }}</small></span></label>
+          <button class="btn btn--ghost" :disabled="busy || !selectedLinks.length" @click="cleanLinks">{{ $t("清理所选 {p0} 个链接", {p0: (selectedLinks.length)}) }}</button>
         </details>
       </section>
-      <section v-if="completed" class="panel organize-result" aria-label="本次整理结果">
-        <p role="status">本次整理：移动 {{ completed.moved }} 项，创建链接 {{ completed.linked }} 项，跳过 {{ completed.skipped }} 项，失败 {{ completed.failed }} 项。</p>
-        <details v-if="completed.failed"><summary>查看未完成项目</summary><ul><li v-for="(step, index) in completed.steps.filter(step => !step.ok)" :key="index">{{ step.name }}：{{ step.note }}</li></ul></details>
-        <p class="hint">右上角设置 → 软件 → 目录整理，可设置目标目录、查看记录与撤销。</p>
+      <section v-if="completed" class="panel organize-result" :aria-label="$t('本次整理结果')">
+        <p role="status">{{ $t("本次整理：移动 {p0} 项，创建链接 {p1} 项，跳过 {p2} 项，失败 {p3} 项。", {p0: (completed.moved), p1: (completed.linked), p2: (completed.skipped), p3: (completed.failed)}) }}</p>
+        <details v-if="completed.failed"><summary>{{ $t("查看未完成项目") }}</summary><ul><li v-for="(step, index) in completed.steps.filter(step => !step.ok)" :key="index">{{ step.name }}：{{ step.note }}</li></ul></details>
+        <p class="hint">{{ $t("右上角设置 → 软件 → 目录整理，可设置目标目录、查看记录与撤销。") }}</p>
       </section>
-      <p v-if="loading" class="state">正在同步目录并读取软件…</p>
+      <p v-if="loading" class="state">{{ $t("正在同步目录并读取软件…") }}</p>
 
       <div v-else-if="loadError" class="state">
-        <h2>没能生成整理方案</h2>
+        <h2>{{ $t("没能生成整理方案") }}</h2>
         <p class="err">{{ loadError }}</p>
-        <button class="btn btn--primary" @click="initialLoad">重试</button>
+        <button class="btn btn--primary" @click="initialLoad">{{ $t("重试") }}</button>
       </div>
 
       <div v-else-if="!root" class="state">
-        <h2>还没有设置整理目标目录</h2>
-        <p>整理需要一个归置软件的根目录，比如 E:\Toolkit。它和扫描目录是分开的。</p>
-        <p class="hint">右上角设置 → 软件 → 目录整理，可设置目标目录、查看记录与撤销。</p>
+        <h2>{{ $t("还没有设置整理目标目录") }}</h2>
+        <p>{{ $t("整理需要一个归置软件的根目录，比如 E:\\Toolkit。它和扫描目录是分开的。") }}</p>
+        <p class="hint">{{ $t("右上角设置 → 软件 → 目录整理，可设置目标目录、查看记录与撤销。") }}</p>
       </div>
 
       <OrganizedSoftware v-else-if="active === 'organized'" :entries="organizedEntries" :categories="categories.list.map(c => c.name)" :busy="busy" @busy="actionBusy = $event" @refresh="refreshEntry" />
 
       <div v-else-if="entries.length === 0" class="state">
-        <h2>没有需要整理的软件</h2>
-        <p>已经归置的软件保留在“已整理”页，可继续调整分类、移动位置或转换链接。</p>
-        <button class="btn btn--primary" @click="active = 'organized'">查看已整理软件</button>
-        <button class="btn btn--ghost" @click="router.push({ name: 'home' })">返回卡片墙</button>
+        <h2>{{ $t("没有需要整理的软件") }}</h2>
+        <p>{{ $t("已经归置的软件保留在“已整理”页，可继续调整分类、移动位置或转换链接。") }}</p>
+        <button class="btn btn--primary" @click="active = 'organized'">{{ $t("查看已整理软件") }}</button>
+        <button class="btn btn--ghost" @click="router.push({ name: 'home' })">{{ $t("返回卡片墙") }}</button>
       </div>
 
       <template v-else>
@@ -260,37 +260,31 @@ async function execute(): Promise<void> {
             <span class="mono truncate" :title="root">{{ root }}</span>
           </div>
           <p class="intro__text">
-            <b>剪切移动</b>会把软件的整个文件夹搬到目标位置，并把文件夹名规范成英文正式名；
-            <b>创建链接</b>只在目标位置放一个 junction 指向原处，磁盘上的文件一步不动。
-            绿色软件默认剪切，安装版除非判定为可安全移动，一律只做链接。
-            每一条都可以自己改。
-          </p>
+            <b>{{ $t("剪切移动") }}</b>{{ $t("会把软件的整个文件夹搬到目标位置，并把文件夹名规范成英文正式名；") }}<b>{{ $t("创建链接") }}</b>{{ $t("只在目标位置放一个 junction 指向原处，磁盘上的文件一步不动。 绿色软件默认剪切，安装版除非判定为可安全移动，一律只做链接。 每一条都可以自己改。") }}</p>
           <ul class="tally">
-            <li><b>{{ tally.move }}</b><span>剪切移动</span></li>
-            <li><b>{{ tally.junction }}</b><span>创建链接</span></li>
-            <li><b>{{ tally.skip }}</b><span>跳过</span></li>
-            <li :class="{ warn: tally.warn > 0 }"><b>{{ tally.warn }}</b><span>带提示</span></li>
+            <li><b>{{ tally.move }}</b><span>{{ $t("剪切移动") }}</span></li>
+            <li><b>{{ tally.junction }}</b><span>{{ $t("创建链接") }}</span></li>
+            <li><b>{{ tally.skip }}</b><span>{{ $t("跳过") }}</span></li>
+            <li :class="{ warn: tally.warn > 0 }"><b>{{ tally.warn }}</b><span>{{ $t("带提示") }}</span></li>
           </ul>
           <div class="row">
-            <span class="hint">全部改为</span>
+            <span class="hint">{{ $t("全部改为") }}</span>
             <div class="segmented">
               <button v-for="a in ACTIONS" :key="a.value" @click="setAll(a.value)">
                 {{ a.label }}
               </button>
             </div>
             <button v-if="tally.warn > 0" class="btn btn--ghost" @click="skipWarned">
-              <AlertTriangle :size="14" />
-              带提示的全部跳过
-            </button>
+              <AlertTriangle :size="14" />{{ $t("带提示的全部跳过") }}</button>
           </div>
         </section>
 
         <section class="panel table">
           <div class="table__head">
-            <span>软件</span>
-            <span>操作</span>
-            <span>目标分类</span>
-            <span>目标文件夹名</span>
+            <span>{{ $t("软件") }}</span>
+            <span>{{ $t("操作") }}</span>
+            <span>{{ $t("目标分类") }}</span>
+            <span>{{ $t("目标文件夹名") }}</span>
           </div>
 
           <article
@@ -301,8 +295,8 @@ async function execute(): Promise<void> {
           >
             <div class="line__name">
               <div class="line__title">
-                <Leaf v-if="e.is_portable === true" :size="13" class="leaf" title="绿色软件" />
-                <Link2 v-if="e.link_target" :size="13" class="linked" title="当前已是链接" />
+                <Leaf v-if="e.is_portable === true" :size="13" class="leaf" :title="$t('绿色软件')" />
+                <Link2 v-if="e.link_target" :size="13" class="linked" :title="$t('当前已是链接')" />
                 <span class="truncate" :title="e.name">{{ e.name }}</span>
                 <AlertTriangle
                   v-if="e.warning"
@@ -314,11 +308,11 @@ async function execute(): Promise<void> {
               <span class="line__from mono truncate" :title="e.from_dir">{{ e.from_dir }}</span>
               <div class="line__flags">
                 <TagBadge
-                  :label="e.is_portable === true ? '绿色' : e.is_portable === false ? '安装版' : '未判断'"
+                  :label="e.is_portable === true ? $t('绿色') : e.is_portable === false ? $t('安装版') : $t('未判断')"
                   :tone="e.is_portable === true ? 'success' : 'muted'"
                 />
                 <TagBadge
-                  :label="{ safe: '可安全移动', risky: '有风险', unknown: '风险未知' }[e.move_risk]"
+                  :label="{ safe: $t('可安全移动'), risky: $t('有风险'), unknown: $t('风险未知') }[e.move_risk]"
                   :tone="e.move_risk === 'safe' ? 'success' : e.move_risk === 'risky' ? 'warning' : 'muted'"
                 />
               </div>
@@ -326,14 +320,14 @@ async function execute(): Promise<void> {
 
             <select
               class="select"
-              :aria-label="`${e.name}的整理操作`"
+              :aria-label="$t('{p0}的整理操作', {p0: e.name})"
               :value="e.action"
               @change="setAction(e, ($event.target as HTMLSelectElement).value)"
             >
               <option v-for="a in ACTIONS" :key="a.value" :value="a.value">{{ a.label }}</option>
             </select>
 
-            <select v-model="e.category" class="select" :aria-label="`${e.name}的目标分类`" :disabled="e.action === 'skip'">
+            <select v-model="e.category" class="select" :aria-label="$t('{p0}的目标分类', {p0: e.name})" :disabled="e.action === 'skip'">
               <option v-for="c in categories.list" :key="c.id" :value="c.name">{{ c.name }}</option>
             </select>
 
@@ -343,21 +337,19 @@ async function execute(): Promise<void> {
                 class="input"
                 spellcheck="false"
                 :disabled="e.action === 'skip'"
-                placeholder="文件夹名"
+                :placeholder="$t('文件夹名')"
               />
               <span class="line__to mono truncate" :title="targetOf(e)">{{ targetOf(e) }}</span>
             </div>
 
-            <p v-if="e.warning" class="line__warning">{{ e.warning }}</p>
+            <p v-if="e.warning" class="line__warning">{{ $systemMessage(e.warning) }}</p>
           </article>
         </section>
       </template>
     </div>
 
     <footer v-if="!loading && active === 'pending' && entries.length > 0 && root" class="bar">
-      <span class="bar__count">
-        将处理 {{ actionable }} / {{ entries.length }} 条
-      </span>
+      <span class="bar__count">{{ $t("将处理 {p0} / {p1} 条", {p0: (actionable), p1: (entries.length)}) }}</span>
 
       <div v-if="organize.running.value" class="bar__progress">
         <div class="bar__track"><i :style="{ width: `${organize.percent.value}%` }" /></div>
@@ -368,16 +360,14 @@ async function execute(): Promise<void> {
 
       <div class="bar__ops">
         <button class="btn btn--subtle" :disabled="organize.running.value" @click="router.push({ name: 'home' })">
-          {{ completed ? '完成并返回软件库' : '取消' }}
+          {{ completed ? $t('完成并返回软件库') : $t('取消') }}
         </button>
         <button
           class="btn btn--primary"
           :disabled="organize.running.value || actionable === 0"
           @click="execute"
         >
-          <Loader2 v-if="organize.running.value" :size="14" class="spin" />
-          执行整理
-        </button>
+          <Loader2 v-if="organize.running.value" :size="14" class="spin" />{{ $t("执行整理") }}</button>
       </div>
     </footer>
   </div>

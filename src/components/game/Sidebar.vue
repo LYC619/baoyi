@@ -18,7 +18,7 @@ const isActive = (kind: string, value: string) => store.activeKey === kind + ':'
 <template>
   <LibrarySidebar
     class="game-sidebar"
-    all-label="全部游戏"
+    :all-label="$t('全部游戏')"
     :all-icon="Gamepad2"
     :all-count="store.counts.all"
     :active-key="store.activeKey"
@@ -35,7 +35,7 @@ const isActive = (kind: string, value: string) => store.activeKey === kind + ':'
         :class="{ 'row--active': isActive('path', 'unavailable') }"
         @click="select({ kind: 'path', value: 'unavailable' })"
       >
-        <Unlink :size="15" /><span class="row__label">路径不可用</span>
+        <Unlink :size="15" /><span class="row__label">{{ $t("路径不可用") }}</span>
         <span class="row__count">{{ store.unavailableCount }}</span>
       </button>
       <template v-if="store.androidCount > 0">
@@ -44,7 +44,7 @@ const isActive = (kind: string, value: string) => store.activeKey === kind + ':'
           :class="{ 'row--active': isActive('platform', 'windows') }"
           @click="select({ kind: 'platform', value: 'windows' })"
         >
-          <Monitor :size="15" /><span class="row__label">电脑游戏</span>
+          <Monitor :size="15" /><span class="row__label">{{ $t("电脑游戏") }}</span>
           <span class="row__count">{{ store.windowsCount }}</span>
         </button>
         <button
@@ -52,12 +52,12 @@ const isActive = (kind: string, value: string) => store.activeKey === kind + ':'
           :class="{ 'row--active': isActive('platform', 'android') }"
           @click="select({ kind: 'platform', value: 'android' })"
         >
-          <Smartphone :size="15" /><span class="row__label">安卓游戏</span>
+          <Smartphone :size="15" /><span class="row__label">{{ $t("安卓游戏") }}</span>
           <span class="row__count">{{ store.androidCount }}</span>
         </button>
       </template>
       <template v-if="store.projectCounts.all">
-        <p class="sidebar__title">精修档案</p>
+        <p class="sidebar__title">{{ $t("精修档案") }}</p>
         <button
           v-for="(label, key) in PROJECT_FILTERS"
           :key="key"
@@ -69,10 +69,10 @@ const isActive = (kind: string, value: string) => store.activeKey === kind + ':'
           <span class="row__count">{{ store.projectCounts[key] }}</span>
         </button>
         <button class="row" :disabled="store.checkingProjects" @click="store.checkProjects()">
-          {{ store.checkingProjects ? '检查中…' : '检查资料更新' }}
+          {{ store.checkingProjects ? $t('检查中…') : $t('检查资料更新') }}
         </button>
       </template>
-      <p class="sidebar__title">状态</p>
+      <p class="sidebar__title">{{ $t("状态") }}</p>
       <button
         v-for="s in STATUSES"
         :key="s"
@@ -92,17 +92,17 @@ const isActive = (kind: string, value: string) => store.activeKey === kind + ':'
         :class="{ 'row--active': isActive('uncategorized', 'uncategorized') }"
         @click="select({ kind: 'uncategorized', value: 'uncategorized' })"
       >
-        <Box :size="15" /><span class="row__label">未分类</span>
+        <Box :size="15" /><span class="row__label">{{ $t("未分类") }}</span>
         <span class="row__count">{{ store.counts.uncategorized || 0 }}</span>
       </button>
     </template>
     <template #after-tags>
-      <p class="sidebar__title">存档</p>
+      <p class="sidebar__title">{{ $t("存档") }}</p>
       <button
-        v-for="(label, key) in { unbacked: '未备份', backed: '已备份', none: '未发现存档' }"
+        v-for="(label, key) in { unbacked: $t('未备份'), backed: $t('已备份'), none: $t('未发现存档') }"
         :key="key"
         class="row"
-        :title="label + '的游戏数量'"
+        :title="label + $t('的游戏数量')"
         :class="{ 'row--active': isActive('save', key) }"
         @click="select({ kind: 'save', value: key })"
       >
@@ -117,7 +117,7 @@ const isActive = (kind: string, value: string) => store.activeKey === kind + ':'
           :class="{ 'row--active': isActive('group', 'archived') }"
           @click="select({ kind: 'group', value: 'archived' })"
         >
-          <Archive :size="15" /><span class="row__label">已归档</span>
+          <Archive :size="15" /><span class="row__label">{{ $t("已归档") }}</span>
           <span class="row__count">{{ store.counts.archived }}</span>
         </button>
       </template>

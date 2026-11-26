@@ -24,11 +24,11 @@ onBeforeUnmount(() => { stop(); document.removeEventListener('keydown', keydown)
   <Teleport to="body">
     <div class="discovery-player-overlay" @click.self="close">
       <section ref="panel" class="discovery-player" role="dialog" aria-modal="true" aria-labelledby="discovery-player-title">
-        <header><div><p>正在观看</p><h2 id="discovery-player-title">{{ card.entry.title }}</h2></div><button class="btn btn--primary" :disabled="busy || !card.entry.downloads.length" @click="download"><Download :size="16" />下载保存</button><button class="btn btn--ghost" aria-label="关闭播放器" @click="close"><X :size="20" /></button></header>
-        <p v-if="busy" class="player-message" role="status">正在读取播放资料…</p>
-        <video v-else-if="card.entry.mediaUrl" ref="video" :src="card.entry.mediaUrl" controls autoplay playsinline tabindex="0" @error="playbackError = '视频暂时无法播放，可能是来源限制或当前格式不受支持。可尝试下载保存或打开来源页面。'" />
-        <div v-else class="player-empty"><p>此作品未提供可内置播放的媒体文件。</p><p>可以打开来源页面继续观看。</p></div>
-        <footer><p v-if="error || playbackError" class="player-error" role="alert">{{ playbackError || error }}</p><button class="btn btn--ghost" :disabled="!card.entry.pageUrl && !card.entry.playUrl" @click="stop(); emit('page')"><ExternalLink :size="14" />打开来源页面</button></footer>
+        <header><div><p>{{ $t("正在观看") }}</p><h2 id="discovery-player-title">{{ card.entry.title }}</h2></div><button class="btn btn--primary" :disabled="busy || !card.entry.downloads.length" @click="download"><Download :size="16" />{{ $t("下载保存") }}</button><button class="btn btn--ghost" :aria-label="$t('关闭播放器')" @click="close"><X :size="20" /></button></header>
+        <p v-if="busy" class="player-message" role="status">{{ $t("正在读取播放资料…") }}</p>
+        <video v-else-if="card.entry.mediaUrl" ref="video" :src="card.entry.mediaUrl" controls autoplay playsinline tabindex="0" @error="playbackError = $t('视频暂时无法播放，可能是来源限制或当前格式不受支持。可尝试下载保存或打开来源页面。')" />
+        <div v-else class="player-empty"><p>{{ $t("此作品未提供可内置播放的媒体文件。") }}</p><p>{{ $t("可以打开来源页面继续观看。") }}</p></div>
+        <footer><p v-if="error || playbackError" class="player-error" role="alert">{{ playbackError || error }}</p><button class="btn btn--ghost" :disabled="!card.entry.pageUrl && !card.entry.playUrl" @click="stop(); emit('page')"><ExternalLink :size="14" />{{ $t("打开来源页面") }}</button></footer>
       </section>
     </div>
   </Teleport>

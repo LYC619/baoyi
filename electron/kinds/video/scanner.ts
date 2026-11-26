@@ -41,6 +41,11 @@ const VIDEO_EXTS = new Set([
   '.divx', '.mk3d', '.3gp', '.asf', '.mxf', '.f4v'
 ])
 
+export function isSupportedMediaFile(filePath: string): boolean {
+  const ext = path.extname(String(filePath || '')).toLowerCase()
+  return VIDEO_EXTS.has(ext) || isAudioFile(filePath)
+}
+
 /** 外挂字幕。同 Emby.Naming 的 SubtitleFileExtensions */
 const SUBTITLE_EXTS = new Set(['.srt', '.ass', '.ssa', '.sub', '.idx', '.sup', '.vtt', '.smi', '.sami', '.mks'])
 

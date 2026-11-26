@@ -70,18 +70,53 @@ test('show with explicit resource ids opens a clean session instead of mixing in
   assert.equal(a.context.value[0].id,'doc-1')
 })
 
-test('undoAll reverses all applied actions in order and refreshes audit list',async()=>{
-  const undone:string[]=[]
+test('undoAll reverses only current-turn actions of the selected session and ignores empty sessions',async()=>{
+  const undone:string[]=[],queries:Array<string|undefined>=[]
   const list=[
-    {id:'act-2',targetId:'d1',kind:'document',name:'文档1',reason:'改标签',before:{},after:{},state:'applied',createdAt:2},
-    {id:'act-1',targetId:'d1',kind:'document',name:'文档1',reason:'改备注',before:{},after:{},state:'applied',createdAt:1}
+    {id:'new-2',sessionId:'s1',targetId:'d1',kind:'document',name:'文档1',reason:'本轮改标签',before:{},after:{},state:'applied',createdAt:120},
+    {id:'new-1',sessionId:'s1',targetId:'d1',kind:'document',name:'文档1',reason:'本轮改备注',before:{},after:{},state:'applied',createdAt:110},
+    {id:'old-1',sessionId:'s1',targetId:'d2',kind:'document',name:'文档2',reason:'旧轮修改',before:{},after:{},state:'applied',createdAt:10},
+    {id:'other-1',sessionId:'s2',targetId:'d3',kind:'document',name:'文档3',reason:'其他对话',before:{},after:{},state:'applied',createdAt:130}
   ]
   const {a}=fixture({
-    actions:async()=>list.map(x=>({...x,state:undone.includes(x.id)?'undone':'applied'})),
-    undo:async(id:string)=>{undone.push(id);return {ok:true,reason:'已撤销'}}
+    actions:async(sid?:string)=>{
+      queries.push(sid)
+      return list.filter(x=>!sid||x.sessionId===sid).map(x=>({...x,state:undone.includes(x.id)?'undone':'applied'}))
+    },
+    undo:async(id:string)=>{undone.push(id);return {undone:true,reason:'已恢复修改前内容'}}
   })
+  // Empty session must never query undefined or undo across conversations.
   await a.undoAll()
-  assert.deepEqual(undone,['act-2','act-1'])
-  assert.ok(a.actions.value.every((x:any)=>x.state==='undone'))
-  assert.equal(a.notice.value,'已撤回 2 项修改')
+  assert.deepEqual(queries,[])
+  assert.deepEqual(undone,[])
+
+  a.selected.value='s1'
+  a.lastRun.value={sessionId:'s1',status:'completed',text:'本轮',error:'',startedAt:100,updatedAt:130}
+  a.actions.value=list.filter(x=>x.sessionId==='s1')
+  assert.deepEqual(a.turnActions.value.map((x:any)=>x.id),['new-2','new-1'])
+
+  await a.undoAll()
+  assert.deepEqual(queries,['s1','s1'])
+  assert.deepEqual(undone,['new-2','new-1'])
+  assert.equal(a.turnActions.value.length,0)
+  assert.equal(a.actions.value.find((x:any)=>x.id==='old-1')?.state,'applied')
+  assert.equal(a.notice.value,'已撤回本轮 2 项修改')
+})
+
+test('undoAll reports honest counts and reasons when backend preserves later manual edits',async()=>{
+  const list=[
+    {id:'act-2',sessionId:'s1',targetId:'d1',kind:'document',name:'文档1',reason:'改标签',before:{},after:{},state:'applied',createdAt:120},
+    {id:'act-1',sessionId:'s1',targetId:'d2',kind:'document',name:'文档2',reason:'改备注',before:{},after:{},state:'applied',createdAt:110}
+  ]
+  const {a}=fixture({
+    actions:async()=>list,
+    undo:async()=>({undone:false,reason:'记录已有后续修改，已保留现状'})
+  })
+  a.selected.value='s1'
+  a.lastRun.value={sessionId:'s1',status:'completed',text:'本轮',error:'',startedAt:100,updatedAt:130}
+  await a.undoAll()
+  assert.match(a.notice.value,/未撤回任何修改/)
+  assert.match(a.notice.value,/2 项已保留现状/)
+  assert.match(a.notice.value,/后续修改/)
+  assert.equal(a.actions.value.filter((x:any)=>x.state==='applied').length,2)
 })

@@ -17,10 +17,10 @@ onMounted(()=>{place();window.addEventListener('resize',close);window.addEventLi
 onBeforeUnmount(()=>{cancelAnimationFrame(animation);window.removeEventListener('resize',close);window.removeEventListener('scroll',close,true)})
 </script>
 <template>
-  <Teleport to="body"><section ref="root" class="video-hover" :class="{closing}" :style="{left:box.left+'px',top:box.top+'px',width:box.width+'px'}" aria-label="视频悬浮预览" @pointerenter="emit('enter')" @pointerleave="emit('leave')" @focusin="emit('enter')" @focusout="!root?.contains($event.relatedTarget as Node)&&emit('leave')" @keydown="key">
-    <button class="video-hover-picture" :style="state?.url?frameStyle:{}" aria-label="打开视频详情" @pointermove="move" @click="emit('open')"><span v-if="!state?.url" role="status">{{message||state?.message||'正在准备预览帧…'}}</span></button>
-    <div class="video-hover-track" role="slider" tabindex="0" aria-label="预览时间" :aria-valuenow="Math.round(position*(state?.duration||0))" :aria-valuemin="0" :aria-valuemax="state?.duration||0" @pointermove="move"><i :style="{width:position*100+'%'}"/></div>
-    <footer><span :title="label">{{label||'本地视频'}}</span><time>{{formatPosition(state?.times[frameIndex]||0)||'0:00'}} / {{formatPosition(state?.duration||0)||'0:00'}}</time><button aria-label="从当前帧试看" @click="emit('play')"><Play :size="15"/></button></footer>
+  <Teleport to="body"><section ref="root" class="video-hover" :class="{closing}" :style="{left:box.left+'px',top:box.top+'px',width:box.width+'px'}" :aria-label="$t('视频悬浮预览')" @pointerenter="emit('enter')" @pointerleave="emit('leave')" @focusin="emit('enter')" @focusout="!root?.contains($event.relatedTarget as Node)&&emit('leave')" @keydown="key">
+    <button class="video-hover-picture" :style="state?.url?frameStyle:{}" :aria-label="$t('打开视频详情')" @pointermove="move" @click="emit('open')"><span v-if="!state?.url" role="status">{{message||state?.message||$t('正在准备预览帧…')}}</span></button>
+    <div class="video-hover-track" role="slider" tabindex="0" :aria-label="$t('预览时间')" :aria-valuenow="Math.round(position*(state?.duration||0))" :aria-valuemin="0" :aria-valuemax="state?.duration||0" @pointermove="move"><i :style="{width:position*100+'%'}"/></div>
+    <footer><span :title="label">{{label||$t('本地视频')}}</span><time>{{formatPosition(state?.times[frameIndex]||0)||'0:00'}} / {{formatPosition(state?.duration||0)||'0:00'}}</time><button :aria-label="$t('从当前帧试看')" @click="emit('play')"><Play :size="15"/></button></footer>
   </section></Teleport>
 </template>
 <style scoped>

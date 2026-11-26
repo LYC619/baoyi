@@ -11,7 +11,7 @@ const progress = computed(() => documentProgress(props.item))
       <div
         class="progress-track"
         role="progressbar"
-        :aria-label="item.name + '阅读进度'"
+        :aria-label="item.name + $t('阅读进度')"
         :aria-valuenow="progress"
         aria-valuemin="0"
         aria-valuemax="100"
@@ -19,12 +19,11 @@ const progress = computed(() => documentProgress(props.item))
         <span :style="{ width: progress + '%' }" />
       </div>
       <span class="progress-value">{{
-        progress === 100 ? '100%' : '约 ' + progress + '%'
+        progress === 100 ? '100%' : $t('约 ') + progress + '%'
       }}</span>
     </div>
-    <span v-else class="progress-pending">进度待载入</span>
-    <small v-if="item.pageCount">第 {{ item.position.page }} / {{ item.pageCount }}
-      {{ item.format === 'pdf' ? '页' : item.type === 'novel' ? '章' : '段' }}</small>
+    <span v-else class="progress-pending">{{ $t("进度待载入") }}</span>
+    <small v-if="item.pageCount">{{ $t("第 {p0} / {p1} {p2}", {p0: (item.position.page), p1: (item.pageCount), p2: (item.format === 'pdf' ? $t('页') : item.type === 'novel' ? $t('章') : $t('段'))}) }}</small>
   </div>
 </template>
 <style scoped>

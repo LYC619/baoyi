@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 /**
  * 最近的搜索调用记录。从识别日志的 web_search 事件里现取，不新建表 ——
  * 每一次搜索本来就完整记在那里了，再存一份就有两个会不一致的真相。
@@ -17,10 +19,10 @@ const loading = ref(false)
 const loadError = ref('')
 
 const STATUS_META: Record<SearchCallRecord['status'], { label: string; tone: 'success' | 'warning' | 'muted' }> = {
-  ok: { label: '成功', tone: 'success' },
-  empty: { label: '无结果', tone: 'muted' },
-  timeout: { label: '超时', tone: 'warning' },
-  failed: { label: '失败', tone: 'warning' }
+  ok: { get label() { return tr("成功") }, tone: 'success' },
+  empty: { get label() { return tr("无结果") }, tone: 'muted' },
+  timeout: { get label() { return tr("超时") }, tone: 'warning' },
+  failed: { get label() { return tr("失败") }, tone: 'warning' }
 }
 
 function callTime(ts: number): string {
@@ -48,16 +50,13 @@ defineExpose({ reload: load })
 </script>
 
 <template>
-  <section class="search-calls" aria-label="搜索调用记录">
+  <section class="search-calls" :aria-label="$t('搜索调用记录')">
     <div class="search-calls__head">
-      <h3>最近搜索调用</h3>
-      <button type="button" class="btn btn--subtle" :disabled="loading" @click="load">刷新</button>
+      <h3>{{ $t("最近搜索调用") }}</h3>
+      <button type="button" class="btn btn--subtle" :disabled="loading" @click="load">{{ $t("刷新") }}</button>
     </div>
-    <p class="search-calls__desc">
-      最近 {{ limit }} 次 <span class="mono">web_search</span> 调用，从识别日志里提取 ——
-      时间精确到「哪一次识别」，同一次识别里的几次搜索共用一个时间戳。清空识别日志会连带清掉它。
-    </p>
-    <p v-if="loadError" class="search-calls__empty" role="alert">读取失败：{{ loadError }}</p>
+    <p class="search-calls__desc">{{ $t("最近 {p0} 次", {p0: (limit)}) }}<span class="mono">web_search</span>{{ $t("调用，从识别日志里提取 —— 时间精确到「哪一次识别」，同一次识别里的几次搜索共用一个时间戳。清空识别日志会连带清掉它。") }}</p>
+    <p v-if="loadError" class="search-calls__empty" role="alert">{{ $t("读取失败：{p0}", {p0: (loadError)}) }}</p>
     <ul v-else-if="calls.length" class="calls">
       <li v-for="(c, i) in calls" :key="i">
         <span class="calls__time mono">{{ callTime(c.at) }}</span>
@@ -67,7 +66,7 @@ defineExpose({ reload: load })
         <TagBadge :label="STATUS_META[c.status].label" :tone="STATUS_META[c.status].tone" />
       </li>
     </ul>
-    <p v-else class="search-calls__empty">{{ loading ? '读取中…' : '还没有搜索调用记录。开启搜索并跑一次识别之后，认不出来的条目会触发它。' }}</p>
+    <p v-else class="search-calls__empty">{{ loading ? $t('读取中…') : $t('还没有搜索调用记录。开启搜索并跑一次识别之后，认不出来的条目会触发它。') }}</p>
   </section>
 </template>
 

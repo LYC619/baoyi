@@ -154,6 +154,8 @@ export interface AppSettings {
   video_import_agent?: boolean
   video_organize_root?: string
   theme: 'dark' | 'light'
+  /** Interface language; independent from resource title preference. */
+  language: 'system' | 'zh-CN' | 'en'
   view_mode: 'grid' | 'list'
   /** 影视海报墙一格的最小宽度（像素）。缺省 150，和游戏封面墙同尺寸；用户在影视库工具栏拖滑块改 */
   video_card_size?: number

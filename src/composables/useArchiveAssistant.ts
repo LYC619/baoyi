@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { latestOnly, STALE } from './latestOnly'
 import { errorMessage } from '@/utils'
 import { computed, ref } from 'vue'
@@ -44,6 +46,14 @@ let latestRun: ArchiveRun | null = null
 
 const busy = computed(() => !!active.value)
 const visibleLive = computed(() => (liveSession.value === selected.value ? live.value : []))
+const turnActions = computed(() => {
+  const sid = selected.value
+  const run = lastRun.value
+  if (!sid || !run || run.sessionId !== sid) return []
+  return actions.value.filter(
+    (item) => item.state !== 'undone' && item.sessionId === sid && item.createdAt >= run.startedAt
+  )
+})
 
 function init() {
   if (initialized) return
@@ -110,7 +120,7 @@ async function load(id: string) {
     const [state, audit] = await Promise.all([window.baoyi.archive.session(id), window.baoyi.archive.actions(id)])
     if (request !== revision) return false
     if (!state) {
-      error.value = '这段对话已不可用'
+      error.value = tr("这段对话已不可用")
       return false
     }
     selected.value = state.session.id
@@ -180,9 +190,9 @@ async function loadMethod(name: string, ids: string[] = []) {
   const scope = generation
   await show(undefined, ids)
   if (scope !== generation || error.value) return
-  const instruction = `请加载归档方法 ${JSON.stringify(name)}，按该方法处理${ids.length ? '附带的资料' : '我指定的资料'}。`
+  const instruction = ids.length ? tr('请加载归档方法 {p0}，按该方法处理附带的资料。', { p0: JSON.stringify(name) }) : tr('请加载归档方法 {p0}，按该方法处理我指定的资料。', { p0: JSON.stringify(name) })
   if (!draft.value.includes(instruction)) draft.value = instruction + (draft.value ? '\n\n' + draft.value : '')
-  notice.value = '方法已加入输入框；补充问题后发送即可开始。'
+  notice.value = tr("方法已加入输入框；补充问题后发送即可开始。")
   methodRevision.value++
 }
 
@@ -197,13 +207,13 @@ async function send() {
   try {
     if (active.value) {
       if (selected.value !== active.value.sessionId) {
-        throw new Error('请先返回正在进行的对话，或停止后新建对话')
+        throw new Error(tr('请先返回正在进行的对话，或停止后新建对话'))
       }
       const accepted = await window.baoyi.archive.steer(text)
       if (sendingGeneration !== generation) return
-      if (!accepted) throw new Error('当前步骤正在收尾，请稍后发送；输入已保留')
+      if (!accepted) throw new Error(tr('当前步骤正在收尾，请稍后发送；输入已保留'))
       live.value.push({ key: crypto.randomUUID(), role: 'user', text })
-      notice.value = '补充已送达当前任务'
+      notice.value = tr("补充已送达当前任务")
       draft.value = ''
       return
     }
@@ -243,7 +253,7 @@ async function stop() {
   error.value = ''
   try {
     await window.baoyi.archive.cancel()
-    notice.value = '正在停止，已完成的整理会保留'
+    notice.value = tr("正在停止，已完成的整理会保留")
   } catch (e) {
     error.value = errorMessage(e)
   }
@@ -259,24 +269,62 @@ async function undo(id: string) {
   }
 }
 
+let undoingAll = false
+
 async function undoAll() {
+  const sessionId = selected.value
+  const run = lastRun.value
+  if (!sessionId || !run || run.sessionId !== sessionId || undoingAll || busy.value) return
+  undoingAll = true
   error.value = ''
+  notice.value = ''
+  const scopeGen = generation
+  const scopeRev = revision
+  const turnStartedAt = run.startedAt
+  let undoneCount = 0
+  let keptCount = 0
+  const keptReasons = new Set<string>()
   try {
-    const list = await window.baoyi.archive.actions(selected.value || undefined)
-    const pending = list.filter((item) => item.state !== 'undone')
-    if (!pending.length) return
-    let count = 0
-    for (const item of pending) {
-      await window.baoyi.archive.undo(item.id)
-      count++
+    const list = await window.baoyi.archive.actions(sessionId)
+    if (scopeGen !== generation || scopeRev !== revision) return
+    const pending = list.filter(
+      (item) => item.state !== 'undone' && item.sessionId === sessionId && item.createdAt >= turnStartedAt
+    )
+    if (!pending.length) {
+      actions.value = list
+      notice.value = tr("本轮没有可撤回的修改")
+      return
     }
-    actions.value = await window.baoyi.archive.actions(selected.value || undefined)
-    notice.value = `已撤回 ${count} 项修改`
+    for (const item of pending) {
+      const result = await window.baoyi.archive.undo(item.id)
+      if (result?.undone === true) {
+        undoneCount++
+      } else {
+        keptCount++
+        if (result?.reason) keptReasons.add(result.reason)
+      }
+    }
+    const refreshed = await window.baoyi.archive.actions(sessionId)
+    if (scopeGen !== generation || scopeRev !== revision) return
+    actions.value = refreshed
+    const reasonText = [...keptReasons].join('；')
+    if (undoneCount > 0 && keptCount === 0) {
+      notice.value = tr("已撤回本轮 {p0} 项修改", {p0: (undoneCount)})
+    } else if (undoneCount > 0 && keptCount > 0) {
+      notice.value = tr("已撤回 {p0} 项修改，{p1} 项已保留现状{p2}", {p0: (undoneCount), p1: (keptCount), p2: (reasonText ? `（${reasonText}）` : '')})
+    } else if (keptCount > 0) {
+      notice.value = tr("未撤回任何修改：{p0} 项已保留现状{p1}", {p0: (keptCount), p1: (reasonText ? `（${reasonText}）` : '')})
+    }
   } catch (e) {
-    error.value = errorMessage(e)
-    try {
-      actions.value = await window.baoyi.archive.actions(selected.value || undefined)
-    } catch { /* best-effort */ }
+    if (scopeGen === generation && scopeRev === revision) {
+      error.value = undoneCount > 0 ? tr("已撤回 {p0} 项，其余撤回失败：{p1}", {p0: (undoneCount), p1: (errorMessage(e))}) : errorMessage(e)
+      try {
+        const refreshed = await window.baoyi.archive.actions(sessionId)
+        if (scopeGen === generation && scopeRev === revision) actions.value = refreshed
+      } catch { /* best-effort */ }
+    }
+  } finally {
+    undoingAll = false
   }
 }
 
@@ -319,6 +367,7 @@ export function useArchiveAssistant() {
     context,
     active,
     lastRun,
+    turnActions,
     visibleLive,
     busy,
     configured,

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { errorMessage } from '@/utils'
 import { ref, computed, watch, nextTick, onBeforeUnmount } from "vue";
 import { Plus, Sparkles } from "lucide-vue-next";
@@ -120,8 +122,9 @@ const latest = (card: SkillCard, key: string, version: number) =>
 const currentMetrics = (card: SkillCard) =>
   card.metrics.filter(
     (m) =>
+      !m.archived &&
       !card.metrics.some(
-        (other) => other.key === m.key && other.version > m.version,
+        (other) => !other.archived && other.key === m.key && other.version > m.version,
       ),
   );
 
@@ -163,7 +166,7 @@ async function submitManualCard() {
     const usedKeys = new Set<string>();
     const metrics = cardForm.value.metrics.map((m, idx) => {
       const label = m.label.trim();
-      if (!label) throw new Error(`请填写第 ${idx + 1} 项指标名称`);
+      if (!label) throw new Error(tr('请填写第 {p0} 项指标名称', {p0: idx + 1}));
       let key = (m.key || `metric_${idx + 1}`).trim();
       while (usedKeys.has(key)) key = `${key}_${idx + 1}`;
       usedKeys.add(key);
@@ -222,7 +225,7 @@ async function submitManualRecord() {
           : Number(String(rawVal).trim())
         : String(rawVal).trim();
     if (metric.type === "number" && !Number.isFinite(finalVal)) {
-      throw new Error("请填写有效数字");
+      throw new Error(tr('请填写有效数字'));
     }
     await workspace.skills.record({
       cardId: card.id,
@@ -246,77 +249,69 @@ defineExpose({ openCreate });
 </script>
 <template>
   <section class="skill-browser">
-    <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
+    <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
     <article
       v-for="proposal in proposals"
       :key="proposal.id"
       class="ws-panel skill-draft"
     >
       <header class="ws-section-head">
-        <h2>技能草案 · 待确认</h2>
-        <span class="ws-badge">确认前不会录入</span>
+        <h2>{{ $t("技能草案 · 待确认") }}</h2>
+        <span class="ws-badge">{{ $t("确认前不会录入") }}</span>
       </header>
-      <label>技能名称<input v-model="proposal.draft.name" maxlength="300" /></label>
-      <label>事实摘要<textarea v-model="proposal.draft.summary" maxlength="10000" /></label>
+      <label>{{ $t("技能名称") }}<input v-model="proposal.draft.name" maxlength="300" /></label>
+      <label>{{ $t("事实摘要") }}<textarea v-model="proposal.draft.summary" maxlength="10000" /></label>
       <div
         v-for="metric in proposal.draft.metrics"
         :key="metric.key"
         class="metric-edit"
       >
-        <label>指标<input v-model="metric.label" maxlength="300" /></label>
-        <label>单位<input v-model="metric.unit" maxlength="50" /></label>
-        <label>类型<select v-model="metric.type">
-          <option value="number">数值</option>
-          <option value="text">文本</option>
-          <option value="date">日期</option>
+        <label>{{ $t("指标") }}<input v-model="metric.label" maxlength="300" /></label>
+        <label>{{ $t("单位") }}<input v-model="metric.unit" maxlength="50" /></label>
+        <label>{{ $t("类型") }}<select v-model="metric.type">
+          <option value="number">{{ $t("数值") }}</option>
+          <option value="text">{{ $t("文本") }}</option>
+          <option value="date">{{ $t("日期") }}</option>
         </select></label>
       </div>
-      <p class="ws-muted">
-        新口径另存版本，历史记录保留原单位和定义，不混合绘图。
-      </p>
+      <p class="ws-muted">{{ $t("新口径另存版本，历史记录保留原单位和定义，不混合绘图。") }}</p>
       <div class="ws-toolbar">
         <button
           class="ws-button primary"
           :disabled="busy"
           @click="act(() => workspace.skills.confirm(proposal.id, plain(proposal.draft)))"
-        >
-          确认录入
-        </button>
+        >{{ $t("确认录入") }}</button>
         <button
           class="ws-button"
           :disabled="busy"
           @click="act(() => workspace.skills.cancel(proposal.id))"
-        >
-          取消草案
-        </button>
+        >{{ $t("取消草案") }}</button>
       </div>
     </article>
     <div v-if="!cards.length && !proposals.length" class="ws-empty">
-      <h2>从一项具体实践开始</h2>
-      <p>可以直接手动创建技能卡片和指标，也可以让归档助理从已有记录中帮你整理草案。</p>
+      <h2>{{ $t("从一项具体实践开始") }}</h2>
+      <p>{{ $t("可以直接手动创建技能卡片和指标，也可以让归档助理从已有记录中帮你整理草案。") }}</p>
       <div class="skill-empty-actions">
         <button class="ws-button primary" @click="openCreate()">
-          <Plus :size="15" />新建技能卡片
-        </button>
+          <Plus :size="15" />{{ $t("新建技能卡片") }}</button>
         <button
           class="ws-button"
-          @click="emit('compose', '帮我建立一张技能卡片，先查已有技能和相关资源。')"
+          @click="emit('compose', $t('帮我建立一张技能卡片，先查已有技能和相关资源。'))"
         >
-          <Sparkles :size="15" />让归档助理帮忙整理
-        </button>
+          <Sparkles :size="15" />{{ $t("让归档助理帮忙整理") }}</button>
       </div>
     </div>
     <details v-if="cards.some((c) => c.parentId)" class="skill-hierarchy">
-      <summary>技能层级</summary>
+      <summary>{{ $t("技能层级") }}</summary>
       <SkillTree :cards="cards" @select="selected = $event" />
     </details>
     <div class="ws-toolbar">
-      <input v-model="view.query" aria-label="搜索技能" placeholder="搜索技能、实践摘要或指标" />
-      <small class="ws-muted" role="status">{{ filtered.length }} / {{ cards.length }} 项技能</small>
-      <button v-if="view.query" class="ws-button" @click="view.query = ''">清除筛选</button>
+      <input v-model="view.query" :aria-label="$t('搜索技能')" :placeholder="$t('搜索技能、实践摘要或指标')" />
+      <small class="ws-muted" role="status">{{ $t("{p0} / {p1} 项技能", {p0: (filtered.length), p1: (cards.length)}) }}</small>
+      <button v-if="view.query" class="ws-button" @click="view.query = ''">{{ $t("清除筛选") }}</button>
     </div>
-    <p v-if="cards.length && !filtered.length" class="ws-empty">没有符合条件的技能，试试其他关键词。</p>
-    <p v-if="selected && !currentCard" class="ws-muted">此技能已不存在或暂未载入。</p>
+    <p v-if="cards.length && !filtered.length" class="ws-empty">{{ $t("没有符合条件的技能，试试其他关键词。") }}</p>
+    <p v-if="selected && !currentCard" class="ws-muted">{{ $t("此技能已不存在或暂未载入。") }}</p>
     <div v-if="!currentCard" class="skill-grid">
       <button
         v-for="card in filtered"
@@ -327,7 +322,7 @@ defineExpose({ openCreate });
       >
         <small v-if="card.parentId" class="ws-muted">{{ cards.find((c) => c.id === card.parentId)?.name }} /</small>
         <h3>{{ card.name }}</h3>
-        <p class="ws-muted">{{ card.summary || "尚未补充事实摘要" }}</p>
+        <p class="ws-muted">{{ card.summary || $t('尚未补充事实摘要') }}</p>
         <div
           v-for="metric in currentMetrics(card).slice(0, 3)"
           :key="metric.key"
@@ -335,17 +330,15 @@ defineExpose({ openCreate });
         >
           <span>{{ metric.label }}</span>
           <strong>
-            {{ latest(card, metric.key, metric.version)?.value ?? "暂无记录" }}
+            {{ latest(card, metric.key, metric.version)?.value ?? $t('暂无记录') }}
             {{ latest(card, metric.key, metric.version) ? metric.unit : "" }}
           </strong>
         </div>
-        <p v-if="!card.metrics.length" class="ws-muted">
-          历史技能 · 原始描述已保留
-        </p>
+        <p v-if="!currentMetrics(card).length" class="ws-muted">{{ $t("历史技能 · 原始描述已保留") }}</p>
       </button>
     </div>
     <div v-if="currentCard" ref="detail" tabindex="-1" class="skill-detail-container">
-      <button class="ws-button" @click="selected = ''">返回技能列表</button>
+      <button class="ws-button" @click="selected = ''">{{ $t("返回技能列表") }}</button>
       <article
         v-for="card in [currentCard]"
         :key="card.id"
@@ -355,20 +348,19 @@ defineExpose({ openCreate });
           <h2>{{ card.name }}</h2>
           <div class="ws-toolbar">
             <button class="ws-button primary" @click="openRecordDialog(card)">
-              <Plus :size="14" />{{ card.metrics.length ? '记一次实践' : '补充指标并记录' }}
+              <Plus :size="14" />{{ currentMetrics(card).length ? $t('记一次实践') : $t('补充指标并记录') }}
             </button>
             <button
               class="ws-button"
-              @click="emit('compose', `为技能“${card.name}”追加一条事实记录，先读取现有指标。`)"
+              @click="emit('compose', $t('为技能“{p0}”追加一条事实记录，先读取现有指标。', {p0: card.name}))"
             >
-              <Sparkles :size="14" />让助理帮记
-            </button>
+              <Sparkles :size="14" />{{ $t("让助理帮记") }}</button>
           </div>
         </header>
         <div class="ws-toolbar">
-          <button class="ws-button" @click="openCreate(card)">编辑技能与指标</button>
-          <button class="ws-button" @click="emit('edit', card.id)">编辑描述</button>
-          <button class="ws-button danger" @click="emit('remove', card.id)">删除技能</button>
+          <button class="ws-button" @click="openCreate(card)">{{ $t("编辑技能与指标") }}</button>
+          <button class="ws-button" @click="emit('edit', card.id)">{{ $t("编辑描述") }}</button>
+          <button class="ws-button danger" @click="emit('remove', card.id)">{{ $t("删除技能") }}</button>
         </div>
         <p class="ws-pre">{{ card.summary }}</p>
         <section
@@ -377,7 +369,7 @@ defineExpose({ openCreate });
         >
           <h3>
             {{ metric.label }}
-            <small class="ws-muted">{{ metric.unit }} · 口径 {{ metric.version }}</small>
+            <small class="ws-muted">{{ $t("{p0} · 口径 {p1}", {p0: (metric.unit), p1: (metric.version)}) }}<template v-if="metric.archived">{{ $t("· 已停用（保留历史记录）") }}</template></small>
           </h3>
           <MetricTrend
             v-if="metric.type === 'number'"
@@ -408,69 +400,63 @@ defineExpose({ openCreate });
               class="ws-button"
               :disabled="busy"
               @click="act(() => workspace.skills.undoRecord(record.id))"
-            >
-              撤销记录
-            </button>
+            >{{ $t("撤销记录") }}</button>
           </div>
         </section>
-        <ResourceLinks owner="skill" :id="card.id" title="相关项目与凭证" />
+        <ResourceLinks owner="skill" :id="card.id" :title="$t('相关项目与凭证')" />
       </article>
     </div>
 
     <ProjectDialog
       v-if="cardDialog"
-      :title="cardForm.cardId ? '编辑技能卡片与指标' : '新建技能卡片'"
+      :title="cardForm.cardId ? $t('编辑技能卡片与指标') : $t('新建技能卡片')"
       :busy="busy"
       @close="cardDialog = false"
     >
       <form id="manual-skill-card-form" class="ws ws-form" @submit.prevent="submitManualCard">
         <p v-if="cardFormError" class="ws-error" role="alert">{{ cardFormError }}</p>
-        <label>技能名称<input v-model="cardForm.name" required maxlength="300" placeholder="例如：跑步、吉他、英语阅读" /></label>
-        <label v-if="cards.filter((c) => c.id !== cardForm.cardId).length">
-          上级技能（可选）
-          <select v-model="cardForm.parentId" aria-label="上级技能">
-            <option value="">无上级技能</option>
+        <label>{{ $t("技能名称") }}<input v-model="cardForm.name" required maxlength="300" :placeholder="$t('例如：跑步、吉他、英语阅读')" /></label>
+        <label v-if="cards.filter((c) => c.id !== cardForm.cardId).length">{{ $t("上级技能（可选）") }}<select v-model="cardForm.parentId" :aria-label="$t('上级技能')">
+            <option value="">{{ $t("无上级技能") }}</option>
             <option v-for="c in cards.filter((x) => x.id !== cardForm.cardId)" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
         </label>
-        <label>实践摘要<textarea v-model="cardForm.summary" rows="3" maxlength="10000" placeholder="记录常用方法、阶段目标或代表成果（可选）" /></label>
+        <label>{{ $t("实践摘要") }}<textarea v-model="cardForm.summary" rows="3" maxlength="10000" :placeholder="$t('记录常用方法、阶段目标或代表成果（可选）')" /></label>
         <div class="skill-metrics-editor">
           <div class="ws-section-head">
-            <strong>衡量指标（1–12 项）</strong>
-            <button type="button" class="ws-button" :disabled="cardForm.metrics.length >= 12" @click="addMetricRow">+ 添加指标</button>
+            <strong>{{ $t("衡量指标（1–12 项）") }}</strong>
+            <button type="button" class="ws-button" :disabled="cardForm.metrics.length >= 12" @click="addMetricRow">{{ $t("+ 添加指标") }}</button>
           </div>
           <div v-for="(m, idx) in cardForm.metrics" :key="m.key" class="metric-edit-row">
-            <input v-model="m.label" required maxlength="300" :aria-label="`指标名称 ${idx + 1}`" placeholder="指标名，如 10公里用时 / 完成曲目" />
-            <input v-model="m.unit" maxlength="50" :aria-label="`指标单位 ${idx + 1}`" placeholder="单位，如 分钟 / 首" />
-            <select v-model="m.type" :aria-label="`指标类型 ${idx + 1}`">
-              <option value="number">数值</option>
-              <option value="text">文本</option>
-              <option value="date">日期</option>
+            <input v-model="m.label" required maxlength="300" :aria-label="$t('指标名称 {p0}', {p0: idx + 1})" :placeholder="$t('指标名，如 10公里用时 / 完成曲目')" />
+            <input v-model="m.unit" maxlength="50" :aria-label="$t('指标单位 {p0}', {p0: idx + 1})" :placeholder="$t('单位，如 分钟 / 首')" />
+            <select v-model="m.type" :aria-label="$t('指标类型 {p0}', {p0: idx + 1})">
+              <option value="number">{{ $t("数值") }}</option>
+              <option value="text">{{ $t("文本") }}</option>
+              <option value="date">{{ $t("日期") }}</option>
             </select>
-            <button v-if="cardForm.metrics.length > 1" type="button" class="ws-icon" aria-label="移除此指标" @click="removeMetricRow(idx)">×</button>
+            <button v-if="cardForm.metrics.length > 1" type="button" class="ws-icon" :aria-label="$t('移除此指标')" @click="removeMetricRow(idx)">×</button>
           </div>
-          <p class="ws-muted">修改已有指标的单位或类型时会自动保存为新口径版本，不会改乱历史记录。</p>
+          <p class="ws-muted">{{ $t("修改已有指标的单位或类型时会自动保存为新口径版本；移除指标后会停用该指标，已有历史实践记录仍会保留。") }}</p>
         </div>
       </form>
       <template #footer>
         <div class="ws ws-toolbar">
-          <button type="button" class="ws-button" :disabled="busy" @click="cardDialog = false">取消</button>
-          <button type="submit" form="manual-skill-card-form" class="ws-button primary" :disabled="busy">保存技能卡片</button>
+          <button type="button" class="ws-button" :disabled="busy" @click="cardDialog = false">{{ $t("取消") }}</button>
+          <button type="submit" form="manual-skill-card-form" class="ws-button primary" :disabled="busy">{{ $t("保存技能卡片") }}</button>
         </div>
       </template>
     </ProjectDialog>
 
     <ProjectDialog
       v-if="recordDialog && currentCard"
-      :title="`记一次实践 · ${currentCard.name}`"
+      :title="$t('记一次实践 · {p0}', {p0: currentCard.name})"
       :busy="busy"
       @close="recordDialog = false"
     >
       <form id="manual-skill-record-form" class="ws ws-form" @submit.prevent="submitManualRecord">
         <p v-if="recordFormError" class="ws-error" role="alert">{{ recordFormError }}</p>
-        <label>
-          选择指标
-          <select v-model="recordForm.metricKey" aria-label="记录指标" required>
+        <label>{{ $t("选择指标") }}<select v-model="recordForm.metricKey" :aria-label="$t('记录指标')" required>
             <option v-for="m in currentMetrics(currentCard)" :key="m.key" :value="m.key">
               {{ m.label }}{{ m.unit ? `（${m.unit}）` : '' }}
             </option>
@@ -478,21 +464,21 @@ defineExpose({ openCreate });
         </label>
         <div class="ws-two">
           <label>
-            {{ selectedRecordMetric?.type === 'number' ? `本次数值${selectedRecordMetric.unit ? '（' + selectedRecordMetric.unit + '）' : ''}` : selectedRecordMetric?.type === 'date' ? '日期值' : '记录内容' }}
+            {{ selectedRecordMetric?.type === 'number' ? $t('本次数值{p0}', {p0: selectedRecordMetric.unit ? '（' + selectedRecordMetric.unit + '）' : ''}) : selectedRecordMetric?.type === 'date' ? $t('日期值') : $t('记录内容') }}
             <input
               v-if="selectedRecordMetric?.type === 'number'"
               v-model.number="recordForm.value"
               type="number"
               step="any"
               required
-              aria-label="实践数值"
+              :aria-label="$t('实践数值')"
             />
             <input
               v-else-if="selectedRecordMetric?.type === 'date'"
               v-model="recordForm.value"
               type="date"
               required
-              aria-label="实践日期值"
+              :aria-label="$t('实践日期值')"
             />
             <input
               v-else
@@ -500,18 +486,18 @@ defineExpose({ openCreate });
               type="text"
               required
               maxlength="4000"
-              aria-label="实践内容"
-              placeholder="例如：完成一首指弹曲目"
+              :aria-label="$t('实践内容')"
+              :placeholder="$t('例如：完成一首指弹曲目')"
             />
           </label>
-          <label>实践日期<input v-model="recordForm.date" type="date" required aria-label="实践发生日期" /></label>
+          <label>{{ $t("实践日期") }}<input v-model="recordForm.date" type="date" required :aria-label="$t('实践发生日期')" /></label>
         </div>
-        <label>实践说明 / 凭证备注<input v-model="recordForm.evidence" maxlength="4000" aria-label="实践说明" placeholder="例如：晨跑记录、课堂练习或作品链接（可选）" /></label>
+        <label>{{ $t("实践说明 / 凭证备注") }}<input v-model="recordForm.evidence" maxlength="4000" :aria-label="$t('实践说明')" :placeholder="$t('例如：晨跑记录、课堂练习或作品链接（可选）')" /></label>
       </form>
       <template #footer>
         <div class="ws ws-toolbar">
-          <button type="button" class="ws-button" :disabled="busy" @click="recordDialog = false">取消</button>
-          <button type="submit" form="manual-skill-record-form" class="ws-button primary" :disabled="busy">保存这次记录</button>
+          <button type="button" class="ws-button" :disabled="busy" @click="recordDialog = false">{{ $t("取消") }}</button>
+          <button type="submit" form="manual-skill-record-form" class="ws-button primary" :disabled="busy">{{ $t("保存这次记录") }}</button>
         </div>
       </template>
     </ProjectDialog>

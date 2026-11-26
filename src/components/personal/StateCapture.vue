@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { errorMessage } from '@/utils'
 import { nextTick, ref } from "vue";
 import { workspace, localDate } from "@/utils/workspace-api";
@@ -29,7 +31,7 @@ async function save() {
   busy.value = true;
   error.value = "";
   try {
-    if (typeof value.value !== "number") throw new Error("请输入数值");
+    if (typeof value.value !== "number") throw new Error(tr('请输入数值'));
     await workspace.personal.captureState(
       name.value,
       unit.value,
@@ -65,37 +67,37 @@ async function save() {
       <input
         v-model="name"
         @input="metricId = ''"
-        aria-label="快捷状态名称"
-        placeholder="指标名称，例如体重"
+        :aria-label="$t('快捷状态名称')"
+        :placeholder="$t('指标名称，例如体重')"
         required
         maxlength="300"
       /><input
         v-model="unit"
         @input="metricId = ''"
-        aria-label="快捷状态单位"
-        placeholder="单位，例如 kg"
+        :aria-label="$t('快捷状态单位')"
+        :placeholder="$t('单位，例如 kg')"
         maxlength="50"
       /><input
         ref="valueInput"
         v-model.number="value"
-        aria-label="快捷状态数值"
+        :aria-label="$t('快捷状态数值')"
         type="number"
         step="any"
         required
-        placeholder="数值"
+        :placeholder="$t('数值')"
       /><input
         v-model="date"
-        aria-label="快捷状态日期"
+        :aria-label="$t('快捷状态日期')"
         type="date"
         required
       /><input
         v-model="note"
-        aria-label="快捷状态备注"
-        placeholder="备注（可选）"
+        :aria-label="$t('快捷状态备注')"
+        :placeholder="$t('备注（可选）')"
         maxlength="500"
-      /><button class="ws-button primary" :disabled="busy">记录状态</button>
+      /><button class="ws-button primary" :disabled="busy">{{ $t("记录状态") }}</button>
     </div>
-    <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
+    <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
   </form>
 </template>
 <style scoped>

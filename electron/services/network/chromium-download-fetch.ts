@@ -1,4 +1,3 @@
-import { Readable } from 'node:stream'
 import type { ClientRequest, ClientRequestConstructorOptions, Session } from 'electron'
 
 /**
@@ -22,7 +21,10 @@ export function createChromiumDownloadFetch(
       // CDN requests require the watch-page Referer. Chromium rejects an explicit
       // full cross-origin Referer under its default strict-origin policy.
       const credentials = init?.credentials === 'omit' ? 'omit' : 'include'
-      const req = request({ url, method: 'GET', session, useSessionCookies: credentials === 'include', credentials, redirect: 'manual', referrerPolicy: 'unsafe-url' })
+      const req = request({ url, method: 'GET', session, useSessionCookies: credentials === 'include', credentials, redirect: 'manual', cache: init?.cache, referrerPolicy: 'unsafe-url' })
+      // A signal abort also closes the response. Cancel the native URLLoader only once.
+      let requestAborted=false
+      const cancelRequest=()=>{if(!requestAborted){requestAborted=true;req.abort()}}
       let incoming: any
       let settled = false
       const cleanup = () => signal?.removeEventListener('abort', abort)
@@ -33,7 +35,7 @@ export function createChromiumDownloadFetch(
       }
       const abort = () => {
         fail(signal?.reason instanceof Error ? signal.reason : new Error('下载已取消'))
-        req.abort()
+        cancelRequest()
       }
       req.on('error', fail)
       req.on('redirect', (status, _method, location) => {
@@ -42,14 +44,14 @@ export function createChromiumDownloadFetch(
         settled = true
         cleanup()
         resolve(new Response(null, { status, headers: { location } }))
-        req.abort()
+        cancelRequest()
       })
       req.on('response', (response: any) => {
         if (settled) { response.destroy(); return }
         incoming = response
         let ended = false
         response.once('end', () => { ended = true; cleanup() })
-        response.once('close', () => { cleanup(); if (!ended) req.abort() })
+        response.once('close', () => { cleanup(); if (!ended) cancelRequest() })
         response.on('error', fail)
         try {
           const headers = new Headers()
@@ -57,12 +59,28 @@ export function createChromiumDownloadFetch(
             for (const value of Array.isArray(values) ? values : [values]) if (value !== undefined) headers.append(name, value)
           }
           const noBody = [204, 205, 304].includes(response.statusCode)
-          const body = noBody ? null : Readable.toWeb(response as any) as ReadableStream<Uint8Array>
+          // Keep a byte-bounded bridge. Electron's native stream must be resumed
+          // by the consumer, and cancelled once, without Node's toWeb adapter.
+          let bodySettled=false
+          const body = noBody ? null : new ReadableStream<Uint8Array>({
+            start(controller) {
+              response.on('data',(chunk:Buffer)=>{
+                if(bodySettled)return
+                controller.enqueue(new Uint8Array(chunk))
+                if((controller.desiredSize??0)<=0)response.pause()
+              })
+              response.once('end',()=>{if(!bodySettled){bodySettled=true;controller.close()}})
+              response.once('error',(error:Error)=>{if(!bodySettled){bodySettled=true;controller.error(error)}})
+              response.once('close',()=>{if(!bodySettled){bodySettled=true;controller.error(new Error('下载连接中断，请重试'))}})
+            },
+            pull(){if(!bodySettled)response.resume()},
+            cancel(){bodySettled=true;cancelRequest();response.destroy()}
+          },{highWaterMark:256*1024,size:chunk=>chunk.byteLength})
           const result = new Response(body, { status: response.statusCode, headers })
           settled = true
           resolve(result)
           if (noBody) response.resume()
-        } catch (err) { fail(err instanceof Error ? err : new Error(String(err))); req.abort() }
+        } catch (err) { fail(err instanceof Error ? err : new Error(String(err))); cancelRequest() }
       })
       signal?.addEventListener('abort', abort, { once: true })
       try {
@@ -72,7 +90,7 @@ export function createChromiumDownloadFetch(
           req.setHeader(name, value)
         })
         req.end()
-      } catch (err) { fail(err instanceof Error ? err : new Error(String(err))); req.abort() }
+      } catch (err) { fail(err instanceof Error ? err : new Error(String(err))); cancelRequest() }
     })
   }
 }

@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { app,dialog, nativeImage, shell, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
@@ -47,7 +48,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
   write('preferences:save',(module,value)=>preferences().save(reqString(module,'module',{max:64}) as any,reqRecord(value,'value') as any))
   handle('preferences:data-directory',dataDirectory)
   handle('preferences:choose-data-directory',()=>operation(async()=>{
-    const result=await dialog.showOpenDialog(getWindow()!,{title:'选择资料数据目录',defaultPath:dataDirectory()||lastDirectory(),properties:['openDirectory','createDirectory']});restoreWindowFocus(getWindow())
+    const result=await dialog.showOpenDialog(getWindow()!,{title:tr("选择资料数据目录"),defaultPath:dataDirectory()||lastDirectory(),properties:['openDirectory','createDirectory']});restoreWindowFocus(getWindow())
     if(result.canceled||!result.filePaths[0])return null
     const directory=result.filePaths[0];await actualDirectory(directory)
     getDb().prepare("INSERT INTO settings(key,value) VALUES('document_data_dir',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(directory));changed();return directory
@@ -86,7 +87,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
   handle('recycle:restore',(id,alternate=false)=>operation(async()=>{
     id=reqId(id);alternate=optBool(alternate,'alternate')??false;const service=recycle(),record=service.get(id),targets:Record<string,string>={}
     if(alternate){for(const file of record.files.filter(f=>f.state==='stored'&&!f.restoredTo)){
-      const result=await dialog.showSaveDialog(getWindow()!,{title:'恢复资料到新位置（不覆盖现有文件）',defaultPath:file.source});restoreWindowFocus(getWindow())
+      const result=await dialog.showSaveDialog(getWindow()!,{title:tr("恢复资料到新位置（不覆盖现有文件）"),defaultPath:file.source});restoreWindowFocus(getWindow())
       if(result.canceled||!result.filePath)return
       targets[file.source]=result.filePath
     }}
@@ -107,7 +108,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
   let filePreview:{token:string;plan:DocumentFilePlan;db:ReturnType<typeof getDb>}|null=null
   handle('files:choose',projectId=>operation(async()=>{
     projectId=reqId(projectId,'projectId');links().owner('project',projectId)
-    const result=await dialog.showOpenDialog(getWindow()!,{title:'选择要关联的电脑文件',properties:['openFile']})
+    const result=await dialog.showOpenDialog(getWindow()!,{title:tr("选择要关联的电脑文件"),properties:['openFile']})
     restoreWindowFocus(getWindow());fileChoice=null;filePreview=null
     if(result.canceled||!result.filePaths[0])return null
     fileChoice={token:randomUUID(),projectId,source:result.filePaths[0],at:Date.now(),db:getDb()}
@@ -136,7 +137,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
   handle('files:operations',id=>{const safeId=reqId(id);links().owner('project',safeId);return new DocumentFiles(getDb()).operations().filter(op=>op.projectId===safeId&&op.state!=='done')})
   handle('files:recover',id=>operation(async()=>{try{return await new DocumentFiles(getDb()).recover(reqId(id))}finally{changed()}}))
   const exportFile = async (name: string, content: string, obsidian = false) => {
-    const result = await dialog.showSaveDialog(getWindow()!, { title: obsidian ? '导出到 Obsidian 库中的文件' : '导出 Markdown', defaultPath: name.replace(/[<>:"/\\|?*]/g, '_') + '.md', filters: [{name:'Markdown',extensions:['md']}] })
+    const result = await dialog.showSaveDialog(getWindow()!, { title: obsidian ? tr("导出到 Obsidian 库中的文件") : tr("导出 Markdown"), defaultPath: name.replace(/[<>:"/\\|?*]/g, '_') + '.md', filters: [{name:'Markdown',extensions:['md']}] })
     restoreWindowFocus(getWindow())
     if (result.canceled || !result.filePath) return null
     if (getDb().prepare('SELECT id FROM resource WHERE path=? COLLATE NOCASE').get(path.resolve(result.filePath))) throw new Error('导出不能覆盖已登记的原文件，请另选文件名')
@@ -170,7 +171,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
       }
       targetPaths = provided
     } else {
-      const result = await dialog.showOpenDialog(getWindow()!, {title:'选择资料',defaultPath:lastDirectory(),properties:directory?['openDirectory']:['openFile','multiSelections']})
+      const result = await dialog.showOpenDialog(getWindow()!, {title:tr("选择资料"),defaultPath:lastDirectory(),properties:directory?['openDirectory']:['openFile','multiSelections']})
       restoreWindowFocus(getWindow()); if (result.canceled || !result.filePaths.length) return null
       rememberDirectory(directory?result.filePaths[0]:path.dirname(result.filePaths[0]))
       targetPaths = result.filePaths
@@ -227,7 +228,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
     id = reqId(id)
     const item = docs().require(id)
     if (item.available) throw new Error('原文件仍存在，请先在文件管理器中移动文件')
-    const result = await dialog.showOpenDialog(getWindow()!,{title:'重新定位原资料',defaultPath:lastDirectory()||path.dirname(item.path),properties:['openFile'],filters:[{name:item.format,extensions:[item.format]}]})
+    const result = await dialog.showOpenDialog(getWindow()!,{title:tr("重新定位原资料"),defaultPath:lastDirectory()||path.dirname(item.path),properties:['openFile'],filters:[{name:item.format,extensions:[item.format]}]})
     restoreWindowFocus(getWindow()); if (result.canceled || !result.filePaths[0]) return null
     rememberDirectory(path.dirname(result.filePaths[0]));
     const value = await docs().relocate(id,result.filePaths[0]); changed(); return value
@@ -249,7 +250,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
     const win = getWindow()
     if (!win) return null
     const result = await dialog.showOpenDialog(win, {
-      title: '选择整理目标根目录',
+      title: tr("选择整理目标根目录"),
       defaultPath:lastDirectory(),
       properties: ['openDirectory', 'createDirectory']
     })
@@ -289,7 +290,7 @@ export function registerWorkspaceIpc(getWindow: () => BrowserWindow | null, ipc:
   handle('skills:list',()=>skills().list());handle('skills:proposals',()=>skills().proposals())
   write('skills:save',draft=>skills().saveManual(reqRecord(draft,'draft') as any));write('skills:record',input=>skills().record(reqRecord(input,'input') as any));write('skills:confirm',(id,draft)=>skills().confirm(reqId(id),optRecord(draft,'draft') as any));write('skills:cancel',id=>skills().cancel(reqId(id)));write('skills:undo-record',id=>skills().undoRecord(reqId(id)))
   handle('personal:choose-avatar',()=>operation(async()=>{
-    const result=await dialog.showOpenDialog(getWindow()!,{title:'选择个人头像',properties:['openFile'],filters:[{name:'图片',extensions:['png','jpg','jpeg','webp']}]});restoreWindowFocus(getWindow())
+    const result=await dialog.showOpenDialog(getWindow()!,{title:tr("选择个人头像"),properties:['openFile'],filters:[{name:tr("图片"),extensions:['png','jpg','jpeg','webp']}]});restoreWindowFocus(getWindow())
     if(result.canceled||!result.filePaths[0])return null
     const file=result.filePaths[0];if((await fs.stat(file)).size>10*1024*1024)throw new Error('头像图片请小于 10 MB')
     const image=nativeImage.createFromBuffer(await fs.readFile(file));if(image.isEmpty())throw new Error('无法读取这张图片')

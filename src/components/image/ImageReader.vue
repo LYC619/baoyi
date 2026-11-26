@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { errorMessage } from '@/utils'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, X, Maximize, Minimize2, Move, RotateCw, ZoomIn, ZoomOut, RotateCcw, Bookmark, BookMarked, Check, Settings2, Save, Trash2, RectangleVertical, Columns2, Rows3 } from 'lucide-vue-next'
@@ -249,7 +251,7 @@ function moveWindowTo(event: PointerEvent) {
 }
 function constrainWindow() { if (position.value && root.value) position.value = { left: Math.max(0, Math.min(position.value.left, window.innerWidth - root.value.offsetWidth)), top: Math.max(36, Math.min(position.value.top, window.innerHeight - root.value.offsetHeight)) } }
 function minimize() { minimized.value = !minimized.value; if (!minimized.value) void nextTick(() => root.value?.focus()) }
-async function fullscreen() { try { if (document.fullscreenElement) await document.exitFullscreen(); else await root.value?.requestFullscreen() } catch { error.value = '当前窗口无法进入全屏' } }
+async function fullscreen() { try { if (document.fullscreenElement) await document.exitFullscreen(); else await root.value?.requestFullscreen() } catch { error.value = tr("当前窗口无法进入全屏") } }
 async function close() { clearTimeout(saveTimer); if (prefsTimer) await savePreferences(); await preferenceWrites; await persist(); if (document.fullscreenElement) await document.exitFullscreen(); emit('close') }
 watch([canvas, layout, () => prefs.value.mode], setupPan, { flush: 'post' })
 watch(index, value => { jumpPage.value = value + 1 })
@@ -277,69 +279,69 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('keydown', k
 </script>
 
 <template>
-  <Teleport to="body"><section ref="root" class="image-reader" :class="{ idle: idle && !panel, maximized, minimized, 'layout-bars': barLayout === 'bars' }" :style="minimized?dockStyle:position&&!maximized&&!minimized?{left:position.left+'px',top:position.top+'px',right:'auto'}:{}" tabindex="-1" role="dialog" aria-modal="false" :aria-label="`阅读 ${item.name}`" @pointermove="wake" @focusin="wake">
+  <Teleport to="body"><section ref="root" class="image-reader" :class="{ idle: idle && !panel, maximized, minimized, 'layout-bars': barLayout === 'bars' }" :style="minimized?dockStyle:position&&!maximized&&!minimized?{left:position.left+'px',top:position.top+'px',right:'auto'}:{}" tabindex="-1" role="dialog" aria-modal="false" :aria-label="$t('阅读 {p0}', {p0: item.name})" @pointermove="wake" @focusin="wake">
     <header class="reader-title" @pointerdown="moveWindow" @pointermove="moveWindowTo" @pointerup="windowDrag=undefined" @lostpointercapture="windowDrag=undefined" @dblclick="!minimized && (maximized=!maximized)">
-      <Move :size="14"/><strong :title="minimized ? '点击展开阅读器：' + item.name : item.name" :class="{ 'reader-title-expand': minimized }" @click="minimized && minimize()">{{item.name}}</strong><span v-if="!minimized">拖动标题移动窗口</span>
-      <button :aria-label="minimized?'展开阅读器':'收起阅读器'" :title="minimized?'展开':'收起'" @click="minimize"><Minimize2 :size="16"/></button>
-      <button v-if="!minimized" :aria-label="maximized?'还原阅读窗口':'最大化阅读窗口'" title="最大化 / 还原" @click="maximized=!maximized"><Maximize :size="16"/></button>
-      <button aria-label="关闭阅读器" title="关闭阅读器" @click="close"><X :size="20"/></button>
+      <Move :size="14"/><strong :title="minimized ? $t('点击展开阅读器：') + item.name : item.name" :class="{ 'reader-title-expand': minimized }" @click="minimized && minimize()">{{item.name}}</strong><span v-if="!minimized">{{ $t("拖动标题移动窗口") }}</span>
+      <button :aria-label="minimized?$t('展开阅读器'):$t('收起阅读器')" :title="minimized?$t('展开'):$t('收起')" @click="minimize"><Minimize2 :size="16"/></button>
+      <button v-if="!minimized" :aria-label="maximized?$t('还原阅读窗口'):$t('最大化阅读窗口')" :title="$t('最大化 / 还原')" @click="maximized=!maximized"><Maximize :size="16"/></button>
+      <button :aria-label="$t('关闭阅读器')" :title="$t('关闭阅读器')" @click="close"><X :size="20"/></button>
     </header>
     <header class="reader-tools">
-      <select v-if="item.type==='comic'" :value="chapter" aria-label="阅读章节" @change="changeChapter"><option v-for="c in validChapters" :key="c.id" :value="c.id">{{ c.title }}</option></select>
-      <div v-if="item.type==='comic' && validChapters.length > 1" class="reader-chapter-step" role="group" aria-label="切换章节">
-        <button type="button" aria-label="上一话" title="上一话（[）" :disabled="!hasPrevChapter" @click="stepChapter(-1)"><ChevronLeft :size="16"/></button>
-        <button type="button" aria-label="下一话" title="下一话（]）" :disabled="!hasNextChapter" @click="stepChapter(1)"><ChevronRight :size="16"/></button>
+      <select v-if="item.type==='comic'" :value="chapter" :aria-label="$t('阅读章节')" @change="changeChapter"><option v-for="c in validChapters" :key="c.id" :value="c.id">{{ c.title }}</option></select>
+      <div v-if="item.type==='comic' && validChapters.length > 1" class="reader-chapter-step" role="group" :aria-label="$t('切换章节')">
+        <button type="button" :aria-label="$t('上一话')" :title="$t('上一话（[）')" :disabled="!hasPrevChapter" @click="stepChapter(-1)"><ChevronLeft :size="16"/></button>
+        <button type="button" :aria-label="$t('下一话')" :title="$t('下一话（]）')" :disabled="!hasNextChapter" @click="stepChapter(1)"><ChevronRight :size="16"/></button>
       </div>
-      <div v-if="item.type==='comic'" class="reader-modes" role="group" aria-label="阅读模式">
-        <button aria-label="单页阅读" title="单页" :aria-pressed="prefs.mode==='single'" @click="prefs.mode='single';changePrefs()"><RectangleVertical :size="17" /><span>单页</span></button>
-        <button aria-label="双页阅读" title="双页" :aria-pressed="prefs.mode==='double'" @click="prefs.mode='double';changePrefs()"><Columns2 :size="17" /><span>双页</span></button>
-        <button aria-label="连续阅读" title="纵向连续" :aria-pressed="prefs.mode==='scroll'" @click="prefs.mode='scroll';changePrefs()"><Rows3 :size="17" /><span>连续</span></button>
+      <div v-if="item.type==='comic'" class="reader-modes" role="group" :aria-label="$t('阅读模式')">
+        <button :aria-label="$t('单页阅读')" :title="$t('单页')" :aria-pressed="prefs.mode==='single'" @click="prefs.mode='single';changePrefs()"><RectangleVertical :size="17" /><span>{{ $t("单页") }}</span></button>
+        <button :aria-label="$t('双页阅读')" :title="$t('双页')" :aria-pressed="prefs.mode==='double'" @click="prefs.mode='double';changePrefs()"><Columns2 :size="17" /><span>{{ $t("双页") }}</span></button>
+        <button :aria-label="$t('连续阅读')" :title="$t('纵向连续')" :aria-pressed="prefs.mode==='scroll'" @click="prefs.mode='scroll';changePrefs()"><Rows3 :size="17" /><span>{{ $t("连续") }}</span></button>
       </div>
-      <div class="reader-zoom"><button aria-label="缩小图片" title="缩小" :disabled="prefs.zoom<=0.25" @click="zoom(prefs.zoom-0.25)"><ZoomOut :size="18" /></button><output aria-label="缩放比例">{{ Math.round(prefs.zoom*100) }}%</output><button aria-label="放大图片" title="放大" :disabled="prefs.zoom>=4" @click="zoom(prefs.zoom+0.25)"><ZoomIn :size="18" /></button><button aria-label="重置缩放" title="重置缩放与位置" @click="resetZoom"><RotateCcw :size="17" /></button></div>
-      <button v-if="prefs.mode!=='scroll'" aria-label="旋转图片" title="旋转图片" @click="rotation=(rotation+90)%360"><RotateCw :size="18" /></button>
-      <button :aria-label="currentBookmark?'移除当前书签':'添加书签'" :title="currentBookmark?'移除当前书签':'添加书签'" :aria-pressed="!!currentBookmark" :disabled="busy" @click="toggleBookmark"><Bookmark :size="18" /></button>
-      <button aria-label="书签列表" title="书签列表" :aria-pressed="panel==='bookmarks'" @click="panel=panel==='bookmarks'?'':'bookmarks'"><BookMarked :size="18" /></button>
-      <button v-if="item.type==='comic'" :aria-label="read?'标记为未读':'标记为已读'" :title="read?'标记为未读':'标记为已读'" :aria-pressed="read" @click="toggleRead"><Check :size="18" /></button>
-      <button aria-label="阅读设置" title="阅读设置" :aria-pressed="panel==='settings'" @click="panel=panel==='settings'?'':'settings'"><Settings2 :size="18" /></button>
-      <button aria-label="全屏阅读" title="全屏阅读" @click="fullscreen"><Maximize :size="19" /></button>
+      <div class="reader-zoom"><button :aria-label="$t('缩小图片')" :title="$t('缩小')" :disabled="prefs.zoom<=0.25" @click="zoom(prefs.zoom-0.25)"><ZoomOut :size="18" /></button><output :aria-label="$t('缩放比例')">{{ Math.round(prefs.zoom*100) }}%</output><button :aria-label="$t('放大图片')" :title="$t('放大')" :disabled="prefs.zoom>=4" @click="zoom(prefs.zoom+0.25)"><ZoomIn :size="18" /></button><button :aria-label="$t('重置缩放')" :title="$t('重置缩放与位置')" @click="resetZoom"><RotateCcw :size="17" /></button></div>
+      <button v-if="prefs.mode!=='scroll'" :aria-label="$t('旋转图片')" :title="$t('旋转图片')" @click="rotation=(rotation+90)%360"><RotateCw :size="18" /></button>
+      <button :aria-label="currentBookmark?$t('移除当前书签'):$t('添加书签')" :title="currentBookmark?$t('移除当前书签'):$t('添加书签')" :aria-pressed="!!currentBookmark" :disabled="busy" @click="toggleBookmark"><Bookmark :size="18" /></button>
+      <button :aria-label="$t('书签列表')" :title="$t('书签列表')" :aria-pressed="panel==='bookmarks'" @click="panel=panel==='bookmarks'?'':'bookmarks'"><BookMarked :size="18" /></button>
+      <button v-if="item.type==='comic'" :aria-label="read?$t('标记为未读'):$t('标记为已读')" :title="read?$t('标记为未读'):$t('标记为已读')" :aria-pressed="read" @click="toggleRead"><Check :size="18" /></button>
+      <button :aria-label="$t('阅读设置')" :title="$t('阅读设置')" :aria-pressed="panel==='settings'" @click="panel=panel==='settings'?'':'settings'"><Settings2 :size="18" /></button>
+      <button :aria-label="$t('全屏阅读')" :title="$t('全屏阅读')" @click="fullscreen"><Maximize :size="19" /></button>
     </header>
-    <p v-if="error" class="reader-error" role="alert">{{ error }}</p>
+    <p v-if="error" class="reader-error" role="alert">{{ $systemMessage(error) }}</p>
     <div class="reader-body">
       <div ref="viewport" class="reader-viewport" :class="['reader-'+prefs.mode,'reader-fit-'+prefs.fit]" @scroll.passive="scroll" @wheel="wheel" @pointerdown="dragStart" @pointermove="dragMove" @pointerup="dragEnd" @pointercancel="drag=undefined;pointerDownAt=undefined" @lostpointercapture="drag=undefined" @dblclick="toggleDoubleClickZoom">
         <div v-if="prefs.mode==='scroll'" class="reader-strip" :style="{width:stripWidth+'px'}">
           <div :style="{height:starts[first]+'px'}" />
-          <div v-for="(p,i) in strip" :key="p.id" class="reader-strip-page" :style="{height:sizes[first+i]+'px',width:stripWidths[first+i]+'px'}"><img v-if="!failed.has(p.id)" :src="`baoyi://image/${p.id}`" :alt="`第 ${p.ordinal+1} 页`" draggable="false" @load="loaded($event,p.id)" @error="failed.add(p.id)" /><div v-else class="reader-missing">第 {{ p.ordinal+1 }} 页无法读取</div></div>
+          <div v-for="(p,i) in strip" :key="p.id" class="reader-strip-page" :style="{height:sizes[first+i]+'px',width:stripWidths[first+i]+'px'}"><img v-if="!failed.has(p.id)" :src="`baoyi://image/${p.id}`" :alt="$t('第 {p0} 页', {p0: p.ordinal+1})" draggable="false" @load="loaded($event,p.id)" @error="failed.add(p.id)" /><div v-else class="reader-missing">{{ $t("第 {p0} 页无法读取", {p0: (p.ordinal+1)}) }}</div></div>
           <div :style="{height:(starts[pages.length]-starts[last])+'px'}" />
         </div>
         <div v-else ref="canvas" class="reader-spread" :class="{rtl:prefs.direction==='rtl'}" :style="{width:layout.width+'px',height:layout.height+'px',marginLeft:-layout.width/2+'px',marginTop:-layout.height/2+'px'}" @panzoomchange="panChanged">
-          <div v-for="(p,i) in spread" :key="p.id" class="reader-sheet" :style="{width:layout.sheets[i].width+'px',height:layout.sheets[i].height+'px'}"><img v-if="!failed.has(p.id)" :src="`baoyi://image/${p.id}`" :alt="`第 ${p.ordinal+1} 页`" draggable="false" :style="{width:layout.sheets[i].imageWidth+'px',height:layout.sheets[i].imageHeight+'px',transform:`rotate(${rotation}deg)`}" @load="loaded($event,p.id)" @error="failed.add(p.id)" /><div v-else class="reader-missing">这一页无法读取</div></div>
+          <div v-for="(p,i) in spread" :key="p.id" class="reader-sheet" :style="{width:layout.sheets[i].width+'px',height:layout.sheets[i].height+'px'}"><img v-if="!failed.has(p.id)" :src="`baoyi://image/${p.id}`" :alt="$t('第 {p0} 页', {p0: p.ordinal+1})" draggable="false" :style="{width:layout.sheets[i].imageWidth+'px',height:layout.sheets[i].imageHeight+'px',transform:`rotate(${rotation}deg)`}" @load="loaded($event,p.id)" @error="failed.add(p.id)" /><div v-else class="reader-missing">{{ $t("这一页无法读取") }}</div></div>
         </div>
-        <button v-if="prefs.mode!=='scroll'" type="button" class="reader-edge reader-edge-left" :disabled="prefs.direction==='rtl' ? !canStepNext : !canStepPrev" :title="prefs.direction==='rtl'?'下一页':'上一页'" @click.stop="step(prefs.direction==='rtl' ? 1 : -1)"><ChevronLeft :size="22"/></button>
-        <button v-if="prefs.mode!=='scroll'" type="button" class="reader-edge reader-edge-right" :disabled="prefs.direction==='rtl' ? !canStepPrev : !canStepNext" :title="prefs.direction==='rtl'?'上一页':'下一页'" @click.stop="step(prefs.direction==='rtl' ? -1 : 1)"><ChevronRight :size="22"/></button>
+        <button v-if="prefs.mode!=='scroll'" type="button" class="reader-edge reader-edge-left" :disabled="prefs.direction==='rtl' ? !canStepNext : !canStepPrev" :title="prefs.direction==='rtl'?$t('下一页'):$t('上一页')" @click.stop="step(prefs.direction==='rtl' ? 1 : -1)"><ChevronLeft :size="22"/></button>
+        <button v-if="prefs.mode!=='scroll'" type="button" class="reader-edge reader-edge-right" :disabled="prefs.direction==='rtl' ? !canStepPrev : !canStepNext" :title="prefs.direction==='rtl'?$t('上一页'):$t('下一页')" @click.stop="step(prefs.direction==='rtl' ? -1 : 1)"><ChevronRight :size="22"/></button>
       </div>
-      <aside v-if="panel" class="reader-panel" :aria-label="panel==='settings'?'作品阅读设置':'作品书签'">
-        <header><h2>{{ panel==='settings'?'阅读设置':'书签' }}</h2><button aria-label="关闭阅读面板" title="关闭面板" @click="panel=''"><X :size="17" /></button></header>
+      <aside v-if="panel" class="reader-panel" :aria-label="panel==='settings'?$t('作品阅读设置'):$t('作品书签')">
+        <header><h2>{{ panel==='settings'?$t('阅读设置'):$t('书签') }}</h2><button :aria-label="$t('关闭阅读面板')" :title="$t('关闭面板')" @click="panel=''"><X :size="17" /></button></header>
         <template v-if="panel==='settings'">
-          <p class="reader-scope">{{ customized?'此作品设置':'全局默认' }}</p>
-          <label>图片缩放<select v-model="prefs.fit" aria-label="图片缩放" @change="changePrefs"><option value="screen">适屏</option><option value="width">适宽</option><option value="original">原始尺寸</option></select></label>
-          <label>栏位布局<select v-model="barLayout" aria-label="栏位布局"><option value="sides">两侧竖栏（省纵向空间）</option><option value="bars">上下横栏（底部宽进度条）</option></select></label>
-          <template v-if="item.type==='comic'"><label>阅读方向<select v-model="prefs.direction" aria-label="阅读方向" @change="changePrefs"><option value="ltr">从左到右</option><option value="rtl">从右到左</option></select></label><label class="reader-check"><input v-model="prefs.coverSingle" type="checkbox" @change="changePrefs" />封面独立成页</label></template>
-          <div class="reader-defaults"><button :disabled="busy" @click="defaults(false)"><Save :size="16" />设为全局默认</button><button :disabled="busy||!customized" @click="defaults(true)"><RotateCcw :size="16" />使用全局默认</button></div>
-          <div class="reader-help"><h3>操作提示</h3><p>点击画布左/右侧或方向键翻页，双击切换 200% 缩放</p><p>适屏时滚轮翻页，放大后滚轮移动图片</p><p>连续模式：滚轮、空格 / Page Down 向下阅读</p><p>[ / ] 切换上下话 · Ctrl + 滚轮缩放 · F 全屏</p><p>Home / End 首末页 · Esc 返回</p></div>
+          <p class="reader-scope">{{ customized?$t('此作品设置'):$t('全局默认') }}</p>
+          <label>{{ $t("图片缩放") }}<select v-model="prefs.fit" :aria-label="$t('图片缩放')" @change="changePrefs"><option value="screen">{{ $t("适屏") }}</option><option value="width">{{ $t("适宽") }}</option><option value="original">{{ $t("原始尺寸") }}</option></select></label>
+          <label>{{ $t("栏位布局") }}<select v-model="barLayout" :aria-label="$t('栏位布局')"><option value="sides">{{ $t("两侧竖栏（省纵向空间）") }}</option><option value="bars">{{ $t("上下横栏（底部宽进度条）") }}</option></select></label>
+          <template v-if="item.type==='comic'"><label>{{ $t("阅读方向") }}<select v-model="prefs.direction" :aria-label="$t('阅读方向')" @change="changePrefs"><option value="ltr">{{ $t("从左到右") }}</option><option value="rtl">{{ $t("从右到左") }}</option></select></label><label class="reader-check"><input v-model="prefs.coverSingle" type="checkbox" @change="changePrefs" />{{ $t("封面独立成页") }}</label></template>
+          <div class="reader-defaults"><button :disabled="busy" @click="defaults(false)"><Save :size="16" />{{ $t("设为全局默认") }}</button><button :disabled="busy||!customized" @click="defaults(true)"><RotateCcw :size="16" />{{ $t("使用全局默认") }}</button></div>
+          <div class="reader-help"><h3>{{ $t("操作提示") }}</h3><p>{{ $t("点击画布左/右侧或方向键翻页，双击切换 200% 缩放") }}</p><p>{{ $t("适屏时滚轮翻页，放大后滚轮移动图片") }}</p><p>{{ $t("连续模式：滚轮、空格 / Page Down 向下阅读") }}</p><p>{{ $t("[ / ] 切换上下话 · Ctrl + 滚轮缩放 · F 全屏") }}</p><p>{{ $t("Home / End 首末页 · Esc 返回") }}</p></div>
         </template>
-        <template v-else><p v-if="!bookmarks.length" class="reader-scope">暂无书签</p><div v-for="b in bookmarks" :key="b.id" class="reader-bookmark"><button :aria-label="`跳转到第 ${b.ordinal+1} 页`" :disabled="b.missing" @click="jumpBookmark(b)"><Bookmark :size="16" />第 {{ b.ordinal+1 }} 页{{ b.missing?' · 缺失':'' }}</button><input :value="b.label" aria-label="书签名称" placeholder="书签名称" maxlength="200" :disabled="busy" @change="renameBookmark(b,$event)" /><button :aria-label="`删除第 ${b.ordinal+1} 页书签`" title="删除书签" :disabled="busy" @click="removeBookmark(b)"><Trash2 :size="16" /></button></div></template>
+        <template v-else><p v-if="!bookmarks.length" class="reader-scope">{{ $t("暂无书签") }}</p><div v-for="b in bookmarks" :key="b.id" class="reader-bookmark"><button :aria-label="$t('跳转到第 {p0} 页', {p0: b.ordinal+1})" :disabled="b.missing" @click="jumpBookmark(b)"><Bookmark :size="16" />{{ $t("第 {p0} 页{p1}", {p0: (b.ordinal+1), p1: (b.missing?$t(' · 缺失'):'')}) }}</button><input :value="b.label" :aria-label="$t('书签名称')" :placeholder="$t('书签名称')" maxlength="200" :disabled="busy" @change="renameBookmark(b,$event)" /><button :aria-label="$t('删除第 {p0} 页书签', {p0: b.ordinal+1})" :title="$t('删除书签')" :disabled="busy" @click="removeBookmark(b)"><Trash2 :size="16" /></button></div></template>
       </aside>
     </div>
     <footer class="reader-bottom">
-      <button aria-label="前一页" title="前一页" :disabled="!canStepPrev" @click="step(-1)"><ArrowRight v-if="prefs.direction==='rtl'" :size="18"/><ArrowLeft v-else :size="18" /></button>
-      <span>{{ index+1 }} / {{ pages.length }} {{ item.type==='comic' ? '页' : '张' }}</span>
-      <input type="range" class="reader-progress-slider" aria-label="阅读进度" :min="0" :max="Math.max(0,pages.length-1)" :value="index" :dir="barLayout==='bars' ? prefs.direction : 'ltr'" @input="go(Number(($event.target as HTMLInputElement).value))" />
-      <button aria-label="后一页" title="后一页" :disabled="!canStepNext" @click="step(1)"><ArrowLeft v-if="prefs.direction==='rtl'" :size="18"/><ArrowRight v-else :size="18" /></button>
+      <button :aria-label="$t('前一页')" :title="$t('前一页')" :disabled="!canStepPrev" @click="step(-1)"><ArrowRight v-if="prefs.direction==='rtl'" :size="18"/><ArrowLeft v-else :size="18" /></button>
+      <span>{{ index+1 }} / {{ pages.length }} {{ item.type==='comic' ? $t('页') : $t('张') }}</span>
+      <input type="range" class="reader-progress-slider" :aria-label="$t('阅读进度')" :min="0" :max="Math.max(0,pages.length-1)" :value="index" :dir="barLayout==='bars' ? prefs.direction : 'ltr'" @input="go(Number(($event.target as HTMLInputElement).value))" />
+      <button :aria-label="$t('后一页')" :title="$t('后一页')" :disabled="!canStepNext" @click="step(1)"><ArrowLeft v-if="prefs.direction==='rtl'" :size="18"/><ArrowRight v-else :size="18" /></button>
       <div v-if="item.type==='comic' && (prevSibling || nextSibling)" class="reader-sibling-nav">
-        <button v-if="prevSibling" type="button" class="reader-vol-btn" :title="'上一册：' + prevSibling.name" @click="reader.switchSibling(-1)">上一册</button>
-        <button v-if="nextSibling && atEnd" type="button" class="reader-vol-btn reader-vol-next" :title="'下一册：' + nextSibling.name" @click="reader.switchSibling(1)">下一册</button>
+        <button v-if="prevSibling" type="button" class="reader-vol-btn" :title="$t('上一册：') + prevSibling.name" @click="reader.switchSibling(-1)">{{ $t("上一册") }}</button>
+        <button v-if="nextSibling && atEnd" type="button" class="reader-vol-btn reader-vol-next" :title="$t('下一册：') + nextSibling.name" @click="reader.switchSibling(1)">{{ $t("下一册") }}</button>
       </div>
-      <form class="reader-jump" novalidate @submit.prevent="jump"><label>跳至<input v-model="jumpPage" type="number" min="1" :max="pages.length" step="1" aria-label="跳转页码" /></label><button type="submit" title="跳转到指定页" aria-label="跳转到指定页">{{ item.type==='comic' ? '页' : '张' }}</button></form>
+      <form class="reader-jump" novalidate @submit.prevent="jump"><label>{{ $t("跳至") }}<input v-model="jumpPage" type="number" min="1" :max="pages.length" step="1" :aria-label="$t('跳转页码')" /></label><button type="submit" :title="$t('跳转到指定页')" :aria-label="$t('跳转到指定页')">{{ item.type==='comic' ? $t('页') : $t('张') }}</button></form>
       <ImagePageMetadata :page-id="page?.id || ''" />
     </footer>
   </section></Teleport>

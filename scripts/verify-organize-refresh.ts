@@ -28,7 +28,8 @@ const render = scope.run(() => load('src/pages/software/Organize.vue').default.s
 function nodes(node: any): any[] {
   return !node || typeof node !== 'object' ? [] : [node, ...(Array.isArray(node.children) ? node.children.flatMap(nodes) : [])]
 }
-function tree() { return nodes(render({}, [])) }
+const i18n = load('src/i18n/index.ts')
+function tree() { return nodes(render({ $t: i18n.tr, $systemMessage: i18n.systemMessage, $locale: i18n.locale.value }, [])) }
 await mount()
 const tabs = tree().find(n => n.props?.['aria-label'] === '整理视图')
 tabs.children[1].props.onClick()

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../../i18n/index.ts'
+
 import { onMounted, ref, watch } from 'vue'
 import { FolderOpen, FolderPlus } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
@@ -30,7 +32,7 @@ async function pickBackupRoot(): Promise<void> {
   if (!dir) return
   await settings.patch({ save_backup_root: dir })
   await loadBackupRoot()
-  success('存档备份目录已保存')
+  success(tr("存档备份目录已保存"))
 }
 
 async function resetBackupRoot(): Promise<void> {
@@ -54,7 +56,7 @@ async function saveKeep(): Promise<void> {
   keep.value = safe
   if (safe === settings.settings.save_backup_keep) return
   await settings.patch({ save_backup_keep: safe })
-  success(safe > 0 ? `超过 ${safe} 份时会提示` : '已改为不限份数')
+  success(safe > 0 ? tr("超过 {p0} 份时会提示", {p0: (safe)}) : tr("已改为不限份数"))
 }
 
 watch(() => settings.settings.save_backup_keep, (v) => { keep.value = v })
@@ -63,43 +65,35 @@ onMounted(loadBackupRoot)
 
 <template>
 <section class="panel">
-  <h2 class="sec-head">存档备份目录</h2>
+  <h2 class="sec-head">{{ $t("存档备份目录") }}</h2>
   <div class="datadir">
-    <span class="datadir__label">存放位置</span>
+    <span class="datadir__label">{{ $t("存放位置") }}</span>
     <button
       class="datadir__path mono truncate"
       :title="backupRoot"
       @click="openBackupRoot"
     >
-      {{ backupRoot || '读取中…' }}
+      {{ backupRoot || $t('读取中…') }}
     </button>
-    <button class="btn btn--subtle" title="在资源管理器中打开" @click="openBackupRoot">
+    <button class="btn btn--subtle" :title="$t('在资源管理器中打开')" @click="openBackupRoot">
       <FolderOpen :size="14" />
     </button>
   </div>
-  <p class="sec-desc">
-    游戏详情页里「备份存档」复制出来的拷贝都放在这里，一次备份一个目录，
-    目录名是「游戏名_编号 / 时间戳_存档目录名」。抱一不自动备份，
-    超出保留上限时也只会问你一句，不会自己删。
-  </p>
+  <p class="sec-desc">{{ $t("游戏详情页里「备份存档」复制出来的拷贝都放在这里，一次备份一个目录， 目录名是「游戏名_编号 / 时间戳_存档目录名」。抱一不自动备份， 超出保留上限时也只会问你一句，不会自己删。") }}</p>
 
   <div class="row">
     <button class="btn btn--ghost" @click="pickBackupRoot">
-      <FolderPlus :size="14" />
-      换一个位置
-    </button>
+      <FolderPlus :size="14" />{{ $t("换一个位置") }}</button>
     <button
       v-if="settings.settings.save_backup_root"
       class="btn btn--subtle"
       @click="resetBackupRoot"
-    >
-      用默认位置
-    </button>
+    >{{ $t("用默认位置") }}</button>
     <span class="hint">
       {{
         settings.settings.save_backup_root
-          ? '已指定，改这里不会搬走已有的备份'
-          : '当前用的是用户数据目录下的 save-backups'
+          ? $t('已指定，改这里不会搬走已有的备份')
+          : $t('当前用的是用户数据目录下的 save-backups')
       }}
     </span>
   </div>
@@ -113,12 +107,12 @@ onMounted(loadBackupRoot)
       max="999"
       @blur="saveKeep"
     />
-    <span class="hint">份保留上限</span>
+    <span class="hint">{{ $t("份保留上限") }}</span>
     <span class="hint">
       {{
         keep > 0
-          ? `同一条存档路径超过 ${keep} 份时，备份完问你要不要删掉最早的几份`
-          : '填 0 表示不限，永不提示'
+          ? $t('同一条存档路径超过 {p0} 份时，备份完问你要不要删掉最早的几份', {p0: keep})
+          : $t('填 0 表示不限，永不提示')
       }}
     </span>
   </div>

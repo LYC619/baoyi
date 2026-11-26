@@ -21,8 +21,8 @@ onBeforeUnmount(() => { revision++; observer?.disconnect() })
 </script>
 <template>
   <div ref="root" class="discovery-poster">
-    <img v-if="url && !failed" :src="url" :alt="title + '封面'" @error="failed = true" />
-    <div v-else class="discovery-poster__fallback"><Film :size="28" :stroke-width="1" /><span>{{ title }}</span><small v-if="failed">封面暂不可用</small></div>
+    <img v-if="url && !failed" :src="url" :alt="title + $t('封面')" @error="failed = true" />
+    <div v-else class="discovery-poster__fallback"><Film :size="28" :stroke-width="1" /><span>{{ title }}</span><small v-if="failed">{{ $t("封面暂不可用") }}</small></div>
     <slot />
   </div>
 </template>

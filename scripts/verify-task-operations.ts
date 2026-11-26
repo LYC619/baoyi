@@ -52,7 +52,7 @@ function harness() {
       onChanged: (cb: (p: any) => void) => { listeners.set('preview', new Set([cb])); return () => listeners.delete('preview') }
     }
   })
-  const store = { reload: async () => {}, merge: () => {}, load: async () => {}, counts: { all: 0 }, items: [], selection: {} }
+  const store = { reload: async () => {}, merge: () => {}, load: async () => {}, counts: { all: 0 }, items: [], get currentItems() { return this.items }, selection: {} }
   const load = createRendererLoader({
     vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: (cb: () => void) => unmount.push(cb) },
     'vue-router': { useRouter: () => ({ push: () => {}, replace: () => {}, currentRoute: Vue.ref({ query: {} }) }) },

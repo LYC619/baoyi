@@ -57,6 +57,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 默认不藏。默认藏的话，装完看不见自己刮进来的东西，会当成刮削坏了
   hide_hentai: false,
   theme: 'dark',
+  language: 'system',
   view_mode: 'grid',
   video_card_size: 150,
   group_by_category: false,

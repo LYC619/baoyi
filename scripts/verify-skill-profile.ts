@@ -78,3 +78,61 @@ test('手动保存技能卡片无需 AI 草案即可建立与更新指标，并�
   const measured = personal.captureState('睡眠时长', '小时', 7.5, '2026-11-22', undefined, '早睡测试备注')
   assert.equal(measured.body, '早睡测试备注')
 })
+
+test('移除技能指标会保存活动集合，停用指标不出现在编辑集且保留历史实践记录与备份', t => {
+  const db = new DatabaseSync(':memory:'); db.exec('PRAGMA foreign_keys=ON'); initSchema(db, KINDS); db.exec(VIDEO_JOBS_SQL); t.after(() => db.close())
+  const skills = new SkillProfiles(db)
+  // Case 1: removing a metric with no records removes it from re-read metrics
+  const plain = skills.saveManual({
+    name: '泳姿训练',
+    summary: '基础训练',
+    metrics: [
+      { key: 'a', label: '距离', unit: '米', type: 'number' },
+      { key: 'b', label: '配速', unit: '秒', type: 'number' }
+    ]
+  })
+  assert.deepEqual(plain.metrics.map(m => m.key), ['a', 'b'])
+  const afterRemoveEmpty = skills.saveManual({
+    cardId: plain.id,
+    name: '泳姿训练',
+    summary: '基础训练',
+    metrics: [{ key: 'b', label: '配速', unit: '秒', type: 'number' }]
+  })
+  assert.deepEqual(afterRemoveEmpty.metrics.map(m => m.key), ['b'])
+
+  // Case 2: removing a metric that has historical records preserves records and marks metric archived
+  const card = skills.saveManual({
+    name: '钢琴练习',
+    summary: '指法与曲目',
+    metrics: [
+      { key: 'etude', label: '练习曲', unit: '首', type: 'number' },
+      { key: 'minutes', label: '时长', unit: '分钟', type: 'number' }
+    ]
+  })
+  skills.record({ cardId: card.id, metricKey: 'etude', version: 1, value: 2, date: '2026-11-22', requestId: 'rec-etude-1', evidence: '晚间练习' })
+  const narrowed = skills.saveManual({
+    cardId: card.id,
+    name: '钢琴练习',
+    summary: '指法与曲目',
+    metrics: [{ key: 'minutes', label: '时长', unit: '分钟', type: 'number' }]
+  })
+  assert.deepEqual(narrowed.metrics.filter(m => !m.archived).map(m => m.key), ['minutes'])
+  const retired = narrowed.metrics.find(m => m.key === 'etude')
+  assert.equal(retired?.archived, true)
+  assert.equal(narrowed.records.length, 1)
+  assert.equal(narrowed.records[0].metricKey, 'etude')
+  assert.throws(
+    () => skills.record({ cardId: card.id, metricKey: 'etude', version: 1, value: 3, date: '2026-11-23', requestId: 'rec-etude-2', evidence: '停用后' }),
+    /停用/
+  )
+
+  // Backup and restore preserves activeMetrics
+  const backup = buildLibraryBackup(db)
+  const restored = new DatabaseSync(':memory:'); restored.exec('PRAGMA foreign_keys=ON'); initSchema(restored, KINDS); restored.exec(VIDEO_JOBS_SQL); t.after(() => restored.close())
+  restoreLibraryBackup(restored, backup)
+  const restoredPlain = new SkillProfiles(restored).list().find(c => c.id === plain.id)!
+  assert.deepEqual(restoredPlain.metrics.map(m => m.key), ['b'])
+  const restoredPiano = new SkillProfiles(restored).list().find(c => c.id === card.id)!
+  assert.deepEqual(restoredPiano.metrics.filter(m => !m.archived).map(m => m.key), ['minutes'])
+  assert.equal(restoredPiano.records.length, 1)
+})

@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 /**
  * 模块切换的记忆层。
  *
@@ -21,13 +23,13 @@ export interface ModuleTab {
 }
 
 export const MODULE_TABS: ModuleTab[] = [
-  { key: 'personal', label: '个人', home: 'personal-home' },
-  { key: 'project', label: '项目', home: 'project-home' },
-  { key: 'software', label: '软件', home: 'home' },
-  { key: 'game', label: '游戏', home: 'game-home' },
-  { key: 'video', label: '影视', home: 'video-home' },
-  { key: 'image', label: '图片', home: 'image-home' },
-  { key: 'document', label: '文库', home: 'document-home' }
+  { key: 'personal', get label() { return tr("个人") }, home: 'personal-home' },
+  { key: 'project', get label() { return tr("项目") }, home: 'project-home' },
+  { key: 'software', get label() { return tr("软件") }, home: 'home' },
+  { key: 'game', get label() { return tr("游戏") }, home: 'game-home' },
+  { key: 'video', get label() { return tr("影视") }, home: 'video-home' },
+  { key: 'image', get label() { return tr("图片") }, home: 'image-home' },
+  { key: 'document', get label() { return tr("文库") }, home: 'document-home' }
 ]
 
 /**
@@ -86,7 +88,7 @@ export function moduleTarget(key: ModuleKey): string | { name: string } {
   if (back) return back
   const tab = MODULE_TABS.find((t) => t.key === key)
   // 注册表里没有这个 key 属于编码错误，早点炸掉好过静默跳首页
-  if (!tab) throw new Error(`未知模块：${key}`)
+  if (!tab) throw new Error(tr('未知模块：{p0}', {p0: key}))
   return { name: tab.home }
 }
 

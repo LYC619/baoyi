@@ -1,3 +1,4 @@
+import { tr } from '../system/language.ts'
 import { BrowserWindow, Menu, clipboard, type Session } from 'electron'
 import { HANIME_BROWSER_UA, isHanimeHost } from './hanime-network-rules.ts'
 import { toVideoCode } from '../../kinds/video/hentai/selectors.ts'
@@ -16,18 +17,18 @@ export function createHanimeBrowser(deps: { getSession: () => Session; getMainWi
     if (deps.isHidden()) throw new Error('里番内容已隐藏，请先在设置中恢复显示')
     if (input !== undefined && !allowedPage(input)) throw new Error('只能在此窗口打开 Hanime 站点')
     if (window && !window.isDestroyed()) {
-      if (input) void window.loadURL(input).catch(cause => { console.error(cause); if (window && !window.isDestroyed()) window.setTitle('加载失败，可刷新重试 · Hanime') })
+      if (input) void window.loadURL(input).catch(cause => { console.error(cause); if (window && !window.isDestroyed()) window.setTitle(tr('加载失败，可刷新重试 · Hanime')) })
       if (window.isMinimized()) window.restore()
       window.show(); window.focus(); return true
     }
     const main = deps.getMainWindow()
     if (!main || main.isDestroyed()) throw new Error('主窗口不可用')
     const session = deps.getSession()
-    const win = new BrowserWindow({ width:1100,height:820,minWidth:760,minHeight:560,title:'Hanime · 抱一',autoHideMenuBar:false,
+    const win = new BrowserWindow({ width:1100,height:820,minWidth:760,minHeight:560,title:tr('Hanime · 抱一'),autoHideMenuBar:false,
       webPreferences:{ session,contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true } })
     window = win
     const contents = win.webContents
-    const navigate = (url:string) => { if (!win.isDestroyed() && allowedPage(url)) void win.loadURL(url).catch(() => { if (!win.isDestroyed()) win.setTitle('加载失败，可刷新重试 · Hanime') }) }
+    const navigate = (url:string) => { if (!win.isDestroyed() && allowedPage(url)) void win.loadURL(url).catch(() => { if (!win.isDestroyed()) win.setTitle(tr('加载失败，可刷新重试 · Hanime')) }) }
     const download = () => {
       if (deps.isHidden()) { close(); return }
       const current = contents.getURL(), code = allowedPage(current) ? toVideoCode(current) : ''
@@ -41,12 +42,12 @@ export function createHanimeBrowser(deps: { getSession: () => Session; getMainWi
       if (win.isDestroyed() || contents.isDestroyed()) return
       const url = contents.getURL(), valid = allowedPage(url)
       win.setMenu(Menu.buildFromTemplate([
-        { label:'主页',click:()=>navigate(HOME) },
-        { label:'后退',enabled:contents.navigationHistory.canGoBack(),click:()=>contents.navigationHistory.goBack() },
-        { label:'前进',enabled:contents.navigationHistory.canGoForward(),click:()=>contents.navigationHistory.goForward() },
-        { label:'刷新',accelerator:'CmdOrCtrl+R',click:()=>contents.reload() },
-        { label:'下载当前视频',enabled:valid && !!toVideoCode(url),click:download },
-        { label:'复制页面链接',enabled:valid,click:()=>{ const value=contents.getURL(); if (allowedPage(value)) clipboard.writeText(value) } }
+        { label:tr('主页'),click:()=>navigate(HOME) },
+        { label:tr('后退'),enabled:contents.navigationHistory.canGoBack(),click:()=>contents.navigationHistory.goBack() },
+        { label:tr('前进'),enabled:contents.navigationHistory.canGoForward(),click:()=>contents.navigationHistory.goForward() },
+        { label:tr('刷新'),accelerator:'CmdOrCtrl+R',click:()=>contents.reload() },
+        { label:tr('下载当前视频'),enabled:valid && !!toVideoCode(url),click:download },
+        { label:tr('复制页面链接'),enabled:valid,click:()=>{ const value=contents.getURL(); if (allowedPage(value)) clipboard.writeText(value) } }
       ]))
     }
     const blockForeign = (event: Electron.Event, url:string) => { if (!allowedPage(url)) event.preventDefault() }

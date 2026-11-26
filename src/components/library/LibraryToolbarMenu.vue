@@ -35,7 +35,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', outside))
 <template>
   <div ref="root" class="library-toolbar-menu" @focusout="leave" @keydown="key">
     <button ref="trigger" type="button" class="btn btn--subtle" :class="{'btn--icon':icon}" :aria-label="label" :aria-expanded="open" :aria-controls="id" @click="toggle"><template v-if="!icon">{{label}}</template><component :is="icon==='more'?MoreHorizontal:ChevronDown" :size="icon?15:13"/></button>
-    <div v-if="open" :id="id" ref="panel" class="toolbar-popover" role="group" :aria-label="label + '选项'" @click="action"><slot /></div>
+    <div v-if="open" :id="id" ref="panel" class="toolbar-popover" role="group" :aria-label="label + $t('选项')" @click="action"><slot /></div>
   </div>
 </template>
 

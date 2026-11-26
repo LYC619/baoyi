@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { app, dialog, nativeImage, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import path from 'node:path'
 import { coversDir, getDb } from '../services/storage/database.ts'
@@ -20,7 +21,7 @@ export function registerGameProjectIpc(getWindow: () => BrowserWindow | null, ip
   ipcMain.handle('game:preview-projects', async event => {
     assertMain(event)
     preview = null
-    const result = await dialog.showOpenDialog(getWindow()!, { title:'选择游戏项目清单 library.json', properties:['openFile'], filters:[{name:'游戏项目清单',extensions:['json']}] })
+    const result = await dialog.showOpenDialog(getWindow()!, { title:tr("选择游戏项目清单 library.json"), properties:['openFile'], filters:[{name:tr("游戏项目清单"),extensions:['json']}] })
     if (result.canceled || !result.filePaths[0]) return null
     const value = previewGameProjects(getDb(),result.filePaths[0])
     for (const candidate of value.candidates) for (const image of candidate.artwork || []) {
@@ -45,10 +46,10 @@ export function registerGameProjectIpc(getWindow: () => BrowserWindow | null, ip
   ipcMain.handle('game:restore-project-artwork', async event => {
     assertMain(event); assertLibraryIdle()
     const context = artworkContext()
-    const picked = await dialog.showOpenDialog(getWindow()!, {title:'选择图片登记撤销记录 artwork.json', defaultPath:context.recoveryDir, properties:['openFile'], filters:[{name:'图片登记记录',extensions:['json']}]})
+    const picked = await dialog.showOpenDialog(getWindow()!, {title:tr("选择图片登记撤销记录 artwork.json"), defaultPath:context.recoveryDir, properties:['openFile'], filters:[{name:tr("图片登记记录"),extensions:['json']}]})
     if (picked.canceled || !picked.filePaths[0]) return 0
     const names = restoreProjectArtwork(getDb(), picked.filePaths[0], context)
-    const answer = await dialog.showMessageBox(getWindow()!, {type:'question', buttons:['取消','撤销这些图片更新'], defaultId:0, cancelId:0, message:`恢复 ${names.length} 款游戏的登记前图片`, detail:names.join('\n')+'\n攻略、笔记和游玩记录保留。'})
+    const answer = await dialog.showMessageBox(getWindow()!, {type:'question', buttons:[tr("取消"),tr("撤销这些图片更新")], defaultId:0, cancelId:0, message:tr("恢复 {p0} 款游戏的登记前图片", {p0: (names.length)}), detail:names.join('\n')+tr("\n攻略、笔记和游玩记录保留。")})
     if (answer.response !== 1) return 0
     assertLibraryIdle()
     const count = restoreProjectArtwork(getDb(), picked.filePaths[0], context, true).length

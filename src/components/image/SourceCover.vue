@@ -12,7 +12,7 @@ watch(()=>props.url,async url=>{
   finally{if(current===revision)loading.value=false}
 },{immediate:true})
 </script>
-<template><div class="source-cover"><img v-if="image&&!failed" :src="image" :alt="title+'封面'" @error="failed=true"/><span v-else>{{loading?'加载封面…':failed?'封面加载失败':'暂无封面'}}</span></div></template>
+<template><div class="source-cover"><img v-if="image&&!failed" :src="image" :alt="title+$t('封面')" @error="failed=true"/><span v-else>{{loading?$t('加载封面…'):failed?$t('封面加载失败'):$t('暂无封面')}}</span></div></template>
 <style scoped>
 .source-cover{width:86px;aspect-ratio:2/3;flex:none;overflow:hidden;border-radius:5px;background:var(--bg-main);display:flex;align-items:center;justify-content:center}.source-cover img{width:100%;height:100%;object-fit:cover}.source-cover span{padding:8px;font-size:11px;color:var(--text-faint);text-align:center}
 </style>

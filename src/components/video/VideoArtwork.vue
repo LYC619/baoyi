@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed, nextTick, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import { posterUrl } from '@/utils'
 const props = defineProps<{ poster?: string; thumbnail?: string }>()
-const images = computed(() => [{ path: props.poster, label:'竖向海报', role:'portrait' }, { path:props.thumbnail, label:'横向预览图', role:'landscape' }]
+const images = computed(() => [{ path: props.poster, label:tr('竖向海报'), role:'portrait' }, { path:props.thumbnail, label:tr('横向预览图'), role:'landscape' }]
   .filter((image,index,all) => image.path && all.findIndex(other=>other.path===image.path)===index))
 const selected = ref<(typeof images.value)[number] | null>(null)
 const dialog = ref<HTMLDialogElement | null>(null)
@@ -11,8 +13,8 @@ async function enlarge(image: (typeof images.value)[number]) { selected.value=im
 </script>
 <template>
   <div v-if="images.length" class="episode-artwork">
-    <button v-for="image in images" :key="image.path" type="button" class="artwork-open" :class="'artwork-open--' + image.role" :aria-label="'放大' + image.label" @click="enlarge(image)"><img :src="posterUrl(image.path!)" :alt="image.label" /></button>
-    <Teleport to="body"><dialog ref="dialog" class="artwork-lightbox" aria-label="查看图片" @click.self="dialog?.close()" @close="selected = null"><button class="lightbox-close" type="button" aria-label="关闭图片" autofocus @click="dialog?.close()"><X :size="22" /></button><img v-if="selected" :src="posterUrl(selected.path!)" :alt="selected.label" /></dialog></Teleport>
+    <button v-for="image in images" :key="image.path" type="button" class="artwork-open" :class="'artwork-open--' + image.role" :aria-label="$t('放大') + image.label" @click="enlarge(image)"><img :src="posterUrl(image.path!)" :alt="image.label" /></button>
+    <Teleport to="body"><dialog ref="dialog" class="artwork-lightbox" :aria-label="$t('查看图片')" @click.self="dialog?.close()" @close="selected = null"><button class="lightbox-close" type="button" :aria-label="$t('关闭图片')" autofocus @click="dialog?.close()"><X :size="22" /></button><img v-if="selected" :src="posterUrl(selected.path!)" :alt="selected.label" /></dialog></Teleport>
   </div>
 </template>
 <style scoped>

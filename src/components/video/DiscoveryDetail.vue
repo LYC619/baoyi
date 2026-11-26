@@ -23,31 +23,31 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); if (pr
   <Teleport to="body">
     <div class="discovery-detail-overlay" @click.self="emit('close')">
       <section ref="panel" class="discovery-detail" role="dialog" aria-modal="true" aria-labelledby="discovery-detail-title">
-        <button class="detail-close btn btn--ghost" aria-label="关闭作品详情" @click="emit('close')"><X :size="20" /></button>
+        <button class="detail-close btn btn--ghost" :aria-label="$t('关闭作品详情')" @click="emit('close')"><X :size="20" /></button>
         <div class="detail-cover"><DiscoveryPoster :source-id="sourceId" :entry-id="card.entry.id" :title="card.entry.title" :cover-url="card.entry.coverUrl" /></div>
         <div class="detail-body">
           <p class="eyebrow">{{ sourceName }}<span v-if="card.entry.code"> · {{ card.entry.code }}</span></p>
           <h2 id="discovery-detail-title">{{ card.entry.title }}</h2>
-          <p v-if="error" class="detail-error" role="alert">{{ error }}</p>
-          <div v-if="error && retryable" class="detail-actions"><button class="btn btn--ghost" :disabled="loading" @click="emit('retry')">重试详情</button><button class="btn btn--ghost" @click="emit('page')">打开来源网页</button><span class="detail-hint">当前显示已缓存资料。</span></div>
-          <p class="detail-facts"><span v-if="card.entry.year">{{ card.entry.year }}</span><span v-if="card.entry.rating">来源评分 {{ Number(card.entry.rating.value.toFixed(1)) }} / {{ card.entry.rating.scale }} · {{ card.entry.rating.votes }} 人</span><span v-if="card.resourceId" class="owned">本地已收录</span></p>
+          <p v-if="error" class="detail-error" role="alert">{{ $systemMessage(error) }}</p>
+          <div v-if="error && retryable" class="detail-actions"><button class="btn btn--ghost" :disabled="loading" @click="emit('retry')">{{ $t("重试详情") }}</button><button class="btn btn--ghost" @click="emit('page')">{{ $t("打开来源网页") }}</button><span class="detail-hint">{{ $t("当前显示已缓存资料。") }}</span></div>
+          <p class="detail-facts"><span v-if="card.entry.year">{{ card.entry.year }}</span><span v-if="card.entry.rating">{{ $t("来源评分 {p0} / {p1} · {p2} 人", {p0: (Number(card.entry.rating.value.toFixed(1))), p1: (card.entry.rating.scale), p2: (card.entry.rating.votes)}) }}</span><span v-if="card.resourceId" class="owned">{{ $t("本地已收录") }}</span></p>
           <div class="detail-tags"><span v-for="tag in card.entry.tags" :key="tag">{{ tag }}</span></div>
           <div class="detail-actions">
-            <button class="btn btn--primary" :disabled="loading || (!card.entry.mediaUrl && !card.entry.playUrl && !card.entry.pageUrl && !card.entry.code)" @click="emit('play')"><Play :size="15" />观看</button>
-            <button class="btn btn--subtle" :disabled="loading || (!card.entry.downloads.length && !card.entry.code)" @click="emit('download')"><Download :size="15" />下载保存</button>
-            <button class="btn btn--ghost" :aria-pressed="card.mark.favorite" :disabled="busy" @click="emit('mark', { favorite: !card.mark.favorite })"><Heart :size="16" :fill="card.mark.favorite ? 'currentColor' : 'none'" />{{ card.mark.favorite ? '已收藏' : '收藏' }}</button>
+            <button class="btn btn--primary" :disabled="loading || (!card.entry.mediaUrl && !card.entry.playUrl && !card.entry.pageUrl && !card.entry.code)" @click="emit('play')"><Play :size="15" />{{ $t("观看") }}</button>
+            <button class="btn btn--subtle" :disabled="loading || (!card.entry.downloads.length && !card.entry.code)" @click="emit('download')"><Download :size="15" />{{ $t("下载保存") }}</button>
+            <button class="btn btn--ghost" :aria-pressed="card.mark.favorite" :disabled="busy" @click="emit('mark', { favorite: !card.mark.favorite })"><Heart :size="16" :fill="card.mark.favorite ? 'currentColor' : 'none'" />{{ card.mark.favorite ? $t('已收藏') : $t('收藏') }}</button>
           </div>
-          <p v-if="loading" class="detail-hint" role="status">正在补齐作品详情和可用文件…</p>
-          <p v-else-if="!card.entry.downloads.length && card.entry.code" class="detail-hint">在线片源将在下载时按番号自动解析（需要本机已安装 FFmpeg）。</p>
-          <p v-else-if="!card.entry.downloads.length" class="detail-hint">此来源未提供可下载文件。</p>
-          <p class="description">{{ card.entry.description || '来源暂未提供简介。' }}</p>
+          <p v-if="loading" class="detail-hint" role="status">{{ $t("正在补齐作品详情和可用文件…") }}</p>
+          <p v-else-if="!card.entry.downloads.length && card.entry.code" class="detail-hint">{{ $t("在线片源将在下载时按番号自动解析（需要本机已安装 FFmpeg）。") }}</p>
+          <p v-else-if="!card.entry.downloads.length" class="detail-hint">{{ $t("此来源未提供可下载文件。") }}</p>
+          <p class="description">{{ card.entry.description || $t('来源暂未提供简介。') }}</p>
           <ul v-if="card.entry.rankings.length" class="detail-rankings"><li v-for="(ranking, index) in card.entry.rankings" :key="index"><strong>#{{ ranking.position }}</strong><span>{{ ranking.name }}<small>{{ ranking.source }}{{ ranking.period ? ' · ' + ranking.period : '' }}</small></span></li></ul>
           <div class="personal-state">
-            <label>我的评分<select class="select" aria-label="我的评分" :value="card.mark.userRating" :disabled="busy" @change="emit('mark', { userRating: Number(($event.target as HTMLSelectElement).value) })"><option :value="0">未评分</option><option v-for="score in 5" :key="score" :value="score">{{ score }} 星</option></select></label>
-            <button class="btn btn--ghost" :aria-pressed="card.mark.watched" :disabled="busy" @click="emit('mark', { watched: !card.mark.watched })">{{ card.mark.watched ? '已看过' : '标记看过' }}</button>
+            <label>{{ $t("我的评分") }}<select class="select" :aria-label="$t('我的评分')" :value="card.mark.userRating" :disabled="busy" @change="emit('mark', { userRating: Number(($event.target as HTMLSelectElement).value) })"><option :value="0">{{ $t("未评分") }}</option><option v-for="score in 5" :key="score" :value="score">{{ $t("{p0} 星", {p0: (score)}) }}</option></select></label>
+            <button class="btn btn--ghost" :aria-pressed="card.mark.watched" :disabled="busy" @click="emit('mark', { watched: !card.mark.watched })">{{ card.mark.watched ? $t('已看过') : $t('标记看过') }}</button>
           </div>
-          <label class="notes">我的备注<textarea v-model="notes" class="input" rows="3" maxlength="4000" placeholder="记下你的想法" @blur="notes !== card.mark.notes && emit('mark', { notes })" /></label>
-          <div class="detail-links"><button class="btn btn--ghost" :disabled="!card.entry.pageUrl && !card.entry.playUrl" @click="emit('page')"><ExternalLink :size="14" />来源页面</button><button v-if="card.resourceId" class="btn btn--ghost" @click="emit('local')"><FolderOpen :size="14" />查看本地作品</button></div>
+          <label class="notes">{{ $t("我的备注") }}<textarea v-model="notes" class="input" rows="3" maxlength="4000" :placeholder="$t('记下你的想法')" @blur="notes !== card.mark.notes && emit('mark', { notes })" /></label>
+          <div class="detail-links"><button class="btn btn--ghost" :disabled="!card.entry.pageUrl && !card.entry.playUrl" @click="emit('page')"><ExternalLink :size="14" />{{ $t("来源页面") }}</button><button v-if="card.resourceId" class="btn btn--ghost" @click="emit('local')"><FolderOpen :size="14" />{{ $t("查看本地作品") }}</button></div>
         </div>
       </section>
     </div>

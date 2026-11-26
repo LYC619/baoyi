@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import DetailTabs from '@/components/ui/DetailTabs.vue'
@@ -45,9 +47,9 @@ const props = defineProps<{ id: string }>()
 const router = useRouter()
 const route = useRoute()
 const detailTabs = [
-  { id: 'overview', label: '简介' },
-  { id: 'notes', label: '使用心得' },
-  { id: 'files', label: '文件与启动' },
+  { id: 'overview', get label() { return tr("简介") } },
+  { id: 'notes', get label() { return tr("使用心得") } },
+  { id: 'files', get label() { return tr("文件与启动") } },
 ]
 const activeTab = ref(detailTabs.some((tab) => tab.id === route.query.tab) ? String(route.query.tab) : 'overview')
 watch(activeTab, (tab) => {
@@ -84,7 +86,7 @@ async function load(): Promise<void> {
     item.value = await window.baoyi.software.get(props.id)
     await checkExePresent()
   } catch (err) {
-    error(`读取条目失败：${errorMessage(err)}`)
+    error(tr("读取条目失败：{p0}", {p0: (errorMessage(err))}))
     item.value = null
   } finally {
     loading.value = false
@@ -123,7 +125,7 @@ const { save, commitTags, toggleArchive, reveal, copyPath } = useResourceDetail(
   item,
   reveal: (id) => window.baoyi.software.revealInFolder(id),
   parseTags: parseList,
-  archivedMessage: (archived) => (archived ? '已归档，主列表不再默认展示' : '已取消归档'),
+  archivedMessage: (archived) => (archived ? tr("已归档，主列表不再默认展示") : tr("已取消归档")),
   async update(current, patch) {
     let holdsCategoryLock = false
     try {
@@ -134,9 +136,9 @@ const { save, commitTags, toggleArchive, reveal, copyPath } = useResourceDetail(
         const moves = await previewSoftwareCategoryChanges([current.id], patch.category)
         if (moves.length) {
           const ok = await confirmDialog({
-            title: '同步整理目录分类',
+            get title() { return tr("同步整理目录分类") },
             message: categoryMoveConfirmation(moves),
-            confirmText: '确认迁移',
+            get confirmText() { return tr("确认迁移") },
           })
           if (!ok) return null
           const p = moves[0].preview
@@ -165,10 +167,10 @@ async function launchWith(launcherPath: string): Promise<void> {
       item.value.last_used_at = Date.now()
       item.value.use_count += 1
     } else if (!ok) {
-      error('启动失败，文件可能已被移动或删除')
+      error(tr("启动失败，文件可能已被移动或删除"))
     }
   } catch (err) {
-    error(`启动失败：${errorMessage(err)}`)
+    error(tr("启动失败：{p0}", {p0: (errorMessage(err))}))
   }
 }
 
@@ -187,11 +189,11 @@ async function setDefaultLauncher(launcherPath: string): Promise<void> {
     const updated = await store.update(item.value.id, { launchers, exe_path: launcherPath })
     if (updated) {
       item.value = updated
-      success('已切换默认启动端')
+      success(tr("已切换默认启动端"))
       await checkExePresent()
     }
   } catch {
-    error('切换失败：该程序已登记在另一个条目下')
+    error(tr("切换失败：该程序已登记在另一个条目下"))
   }
 }
 
@@ -203,7 +205,7 @@ async function relocate(mode: 'directory' | 'file' = 'directory'): Promise<void>
     if (updated) {
       item.value = updated
       await Promise.all([store.reload(), checkExePresent()])
-      success('软件路径已更新')
+      success(tr("软件路径已更新"))
     }
   } catch (err) {
     error(errorMessage(err))
@@ -219,7 +221,7 @@ async function addLauncher(): Promise<void> {
     if (updated) {
       item.value = updated
       void store.load()
-      success('已添加启动项')
+      success(tr("已添加启动项"))
     }
   } catch (err) {
     error(errorMessage(err))
@@ -242,9 +244,9 @@ async function removeLauncher(targetPath: string): Promise<void> {
   const target = item.value.launchers.find((l) => l.path === targetPath)
   if (!target || target.is_default) return
   const ok = await confirmDialog({
-    title: `移除启动项「${target.label || target.path.split('\\').pop()}」？`,
-    message: '仅从当前软件的启动列表中移除，不会删除本地程序文件。',
-    confirmText: '移除启动项',
+    title: tr('移除启动项「{p0}」？', {p0: target.label || target.path.split('\\').pop()}),
+    message: tr("仅从当前软件的启动列表中移除，不会删除本地程序文件。"),
+    confirmText: tr('移除启动项'),
     tone: 'danger',
   })
   if (!ok || !item.value) return
@@ -261,11 +263,11 @@ async function removeItem(): Promise<void> {
   if (!item.value) return
   const linked = item.value.link_target !== ''
   const ok = await confirmDialog({
-    title: `从软件库移除「${name.value}」？`,
+    title: tr('从软件库移除「{p0}」？', {p0: name.value}),
     message: linked
-      ? '此条目在整理目录中存有目录链接：链接会一并清理，真实软件文件保留不动。'
-      : '仅移除抱一中的库记录，不会删除本地软件文件。',
-    confirmText: '移除记录',
+      ? tr("此条目在整理目录中存有目录链接：链接会一并清理，真实软件文件保留不动。")
+      : tr("仅移除抱一中的库记录，不会删除本地软件文件。"),
+    confirmText: tr('移除记录'),
     tone: 'danger',
   })
   if (!ok) return
@@ -277,7 +279,7 @@ async function removeItem(): Promise<void> {
     }
     success(result.message)
   } catch (err) {
-    error(`移除失败：${errorMessage(err)}`)
+    error(tr("移除失败：{p0}", {p0: (errorMessage(err))}))
     return
   }
   void router.push({ name: 'home' })
@@ -288,10 +290,10 @@ async function reidentify(): Promise<void> {
   try {
     const result = await ai.complete([item.value.id])
     await load()
-    if (result.registered > 0) success('已重新识别')
-    else error('未能完成识别，请检查设置中的模型连接')
+    if (result.registered > 0) success(tr("已重新识别"))
+    else error(tr("未能完成识别，请检查设置中的模型连接"))
   } catch (err) {
-    error(`识别失败：${errorMessage(err)}`)
+    error(tr("识别失败：{p0}", {p0: (errorMessage(err))}))
   }
 }
 
@@ -324,7 +326,7 @@ async function pickIcon(): Promise<void> {
     void store.load()
     success(r.message)
   } catch (err) {
-    error(`更换图标失败：${errorMessage(err)}`)
+    error(tr("更换图标失败：{p0}", {p0: (errorMessage(err))}))
   } finally {
     iconBusy.value = false
   }
@@ -337,9 +339,9 @@ async function refetchIcon(): Promise<void> {
     const updated = await window.baoyi.software.clearIcon(item.value.id)
     if (updated) item.value = updated
     void store.load()
-    toast(updated?.icon_path ? '已重新提取程序图标' : '程序内未包含可用图标，已使用文字占位')
+    toast(updated?.icon_path ? tr("已重新提取程序图标") : tr("程序内未包含可用图标，已使用文字占位"))
   } catch (err) {
-    error(`重新提取失败：${errorMessage(err)}`)
+    error(tr("重新提取失败：{p0}", {p0: (errorMessage(err))}))
   } finally {
     iconBusy.value = false
   }
@@ -354,9 +356,9 @@ const linkBusy = ref(false)
 async function toEntity(): Promise<void> {
   if (!item.value) return
   const ok = await confirmDialog({
-    title: '将真实文件搬入整理目录？',
-    message: `${item.value.link_target}\n→ ${locationDir.value}\n\n搬移完成后原目录将腾空，此条目变为实体目录。`,
-    confirmText: '确认搬移',
+    title: tr('将真实文件搬入整理目录？'),
+    message: tr("{p0}\n→ {p1}\n\n搬移完成后原目录将腾空，此条目变为实体目录。", {p0: (item.value.link_target), p1: (locationDir.value)}),
+    confirmText: tr('确认搬移'),
   })
   if (!ok) return
   linkBusy.value = true
@@ -365,7 +367,7 @@ async function toEntity(): Promise<void> {
     await load()
     r.ok ? success(r.message) : error(r.message)
   } catch (err) {
-    error(`转换失败：${errorMessage(err)}`)
+    error(tr("转换失败：{p0}", {p0: (errorMessage(err))}))
   } finally {
     linkBusy.value = false
   }
@@ -374,9 +376,9 @@ async function toEntity(): Promise<void> {
 async function dropLink(): Promise<void> {
   if (!item.value) return
   const ok = await confirmDialog({
-    title: '移除整理目录链接？',
-    message: '仅移除整理目录中的链接，真实文件保持不动，条目路径退回原安装目录。',
-    confirmText: '移除链接',
+    title: tr('移除整理目录链接？'),
+    message: tr("仅移除整理目录中的链接，真实文件保持不动，条目路径退回原安装目录。"),
+    confirmText: tr('移除链接'),
   })
   if (!ok) return
   linkBusy.value = true
@@ -385,7 +387,7 @@ async function dropLink(): Promise<void> {
     await load()
     r.ok ? success(r.message) : error(r.message)
   } catch (err) {
-    error(`移除失败：${errorMessage(err)}`)
+    error(tr("移除失败：{p0}", {p0: (errorMessage(err))}))
   } finally {
     linkBusy.value = false
   }
@@ -394,67 +396,57 @@ async function dropLink(): Promise<void> {
 
 <template>
   <div class="detail">
-    <div v-if="loading" class="detail__state">载入中…</div>
+    <div v-if="loading" class="detail__state">{{ $t("载入中…") }}</div>
     <div v-else-if="!item" class="detail__state">
-      <p>这条记录不存在或已被移除。</p>
-      <button type="button" class="btn btn--ghost" @click="router.push({ name: 'home' })">返回软件库</button>
+      <p>{{ $t("这条记录不存在或已被移除。") }}</p>
+      <button type="button" class="btn btn--ghost" @click="router.push({ name: 'home' })">{{ $t("返回软件库") }}</button>
     </div>
 
     <template v-else>
       <header class="head">
         <button type="button" class="btn btn--subtle" @click="router.push({ name: 'home' })">
-          <ArrowLeft :size="16" />
-          返回
-        </button>
+          <ArrowLeft :size="16" />{{ $t("返回") }}</button>
 
         <div class="head__actions">
           <div class="split-launch">
             <button type="button" class="btn btn--primary" @click="launch">
             <FolderOpen v-if="isMobilePackage(item.exe_path)" :size="14" />
             <Play v-else :size="14" fill="currentColor" />
-            {{ isMobilePackage(item.exe_path) ? '定位安装包' : '启动' }}
+            {{ isMobilePackage(item.exe_path) ? $t('定位安装包') : $t('启动') }}
           </button>
-            <LibraryToolbarMenu v-if="item.launchers.length > 1" icon="chevron" label="选择启动项">
+            <LibraryToolbarMenu v-if="item.launchers.length > 1" icon="chevron" :label="$t('选择启动项')">
               <button v-for="l in item.launchers" :key="l.path" type="button" @click="launchWith(l.path)">
                 {{ l.is_default ? '★ ' : '' }}{{ l.label || l.path.split('\\').pop() }}
               </button>
             </LibraryToolbarMenu>
           </div>
           <button type="button" class="btn btn--ghost" @click="reveal">
-            <FolderOpen :size="14" />
-            打开所在文件夹
-          </button>
+            <FolderOpen :size="14" />{{ $t("打开所在文件夹") }}</button>
           <button
             type="button"
             class="btn btn--ghost"
             :disabled="!item.official_url"
-            :title="item.official_url || '暂无官网'"
+            :title="item.official_url || $t('暂无官网')"
             @click="openOfficial"
           >
-            <ExternalLink :size="14" />
-            官网
-          </button>
+            <ExternalLink :size="14" />{{ $t("官网") }}</button>
           <button type="button" class="btn btn--ghost" :disabled="ai.running.value" @click="reidentify">
-            <Sparkles :size="14" />
-            重新识别
-          </button>
+            <Sparkles :size="14" />{{ $t("重新识别") }}</button>
           <button type="button" class="btn btn--ghost" @click="toggleArchive">
             <component :is="item.is_archived ? ArchiveRestore : Archive" :size="14" />
-            {{ item.is_archived ? '取消归档' : '归档' }}
+            {{ item.is_archived ? $t('取消归档') : $t('归档') }}
           </button>
           <button type="button" class="btn btn--danger" @click="removeItem">
-            <Trash2 :size="14" />
-            移除
-          </button>
+            <Trash2 :size="14" />{{ $t("移除") }}</button>
         </div>
       </header>
 
       <div class="body detail-body">
         <div v-if="exeMissing" class="path-alert" role="alert">
           <Unlink :size="15" />
-          <span>主程序或安装包路径不可用，可能已改名或移动到其他目录。</span>
-          <button type="button" class="btn btn--ghost" @click="checkExePresent">重新检查</button>
-          <button type="button" class="btn btn--primary" :disabled="relocating" @click="relocate('directory')">重新定位</button>
+          <span>{{ $t("主程序或安装包路径不可用，可能已改名或移动到其他目录。") }}</span>
+          <button type="button" class="btn btn--ghost" @click="checkExePresent">{{ $t("重新检查") }}</button>
+          <button type="button" class="btn btn--primary" :disabled="relocating" @click="relocate('directory')">{{ $t("重新定位") }}</button>
         </div>
         <section class="hero panel">
           <div class="hero__icon">
@@ -464,7 +456,7 @@ async function dropLink(): Promise<void> {
                 type="button"
                 class="hero__iconBtn"
                 :disabled="iconBusy"
-                :title="item.icon_path ? '更换图标' : '选择图标图片'"
+                :title="item.icon_path ? $t('更换图标') : $t('选择图标图片')"
                 @click="pickIcon"
               >
                 <Loader2 v-if="iconBusy" :size="13" class="spin" />
@@ -475,7 +467,7 @@ async function dropLink(): Promise<void> {
                 type="button"
                 class="hero__iconBtn"
                 :disabled="iconBusy"
-                title="重新从程序文件提取默认图标"
+                :title="$t('重新从程序文件提取默认图标')"
                 @click="refetchIcon"
               >
                 <ImageOff :size="13" />
@@ -488,7 +480,7 @@ async function dropLink(): Promise<void> {
               <input
                 class="hero__name"
                 :value="item.name_zh"
-                placeholder="中文名称"
+                :placeholder="$t('中文名称')"
                 spellcheck="false"
                 @blur="save({ name_zh: ($event.target as HTMLInputElement).value })"
                 @keydown.enter="($event.target as HTMLInputElement).blur()"
@@ -496,7 +488,7 @@ async function dropLink(): Promise<void> {
               <input
                 class="hero__en"
                 :value="item.name_en"
-                placeholder="英文原名"
+                :placeholder="$t('英文原名')"
                 spellcheck="false"
                 @blur="save({ name_en: ($event.target as HTMLInputElement).value })"
                 @keydown.enter="($event.target as HTMLInputElement).blur()"
@@ -506,7 +498,7 @@ async function dropLink(): Promise<void> {
             <input
               class="hero__summary"
               :value="item.summary"
-              placeholder="一句话说明（20 字以内）"
+              :placeholder="$t('一句话说明（20 字以内）')"
               spellcheck="false"
               @blur="save({ summary: ($event.target as HTMLInputElement).value })"
               @keydown.enter="($event.target as HTMLInputElement).blur()"
@@ -533,7 +525,7 @@ async function dropLink(): Promise<void> {
           </div>
         </section>
 
-        <DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="software" label="软件详情" />
+        <DetailTabs v-model="activeTab" :tabs="detailTabs" prefix="software" :label="$t('软件详情')" />
 
         <div
           id="software-panel-overview"
@@ -544,53 +536,51 @@ async function dropLink(): Promise<void> {
           class="detail-panel detail-panel--overview"
         >
           <section class="panel">
-            <h2 class="sec-title">功能说明</h2>
+            <h2 class="sec-title">{{ $t("功能说明") }}</h2>
             <EditableField
               :model-value="item.description"
               multiline
-              placeholder="这个软件是做什么的（50-100 字）"
+              :placeholder="$t('这个软件是做什么的（50-100 字）')"
               @commit="save({ description: $event })"
             />
           </section>
           <section class="panel">
-            <h2 class="sec-title">标签</h2>
+            <h2 class="sec-title">{{ $t("标签") }}</h2>
             <div v-if="item.tags.length" class="tag-row">
               <TagBadge v-for="t in item.tags" :key="t" :label="t" />
             </div>
             <EditableField
               :model-value="item.tags.join('、')"
-              placeholder="用顿号或逗号分隔"
+              :placeholder="$t('用顿号或逗号分隔')"
               @commit="commitList('tags', $event)"
             />
           </section>
           <section class="panel">
-            <h2 class="sec-title">使用统计</h2>
+            <h2 class="sec-title">{{ $t("使用统计") }}</h2>
             <dl class="kv">
-              <dt>上次使用</dt>
+              <dt>{{ $t("上次使用") }}</dt>
               <dd :title="activity.hint">
                 {{ activity.label }}
                 <span class="src" :class="`src--${activity.source}`">
-                  {{ { baoyi: '由抱一启动', external: '外部活跃', none: '' }[activity.source] }}
+                  {{ { baoyi: $t('由抱一启动'), external: $t('外部活跃'), none: '' }[activity.source] }}
                 </span>
               </dd>
-              <dt>启动次数</dt>
+              <dt>{{ $t("启动次数") }}</dt>
               <dd>{{ item.use_count }}</dd>
-              <dt>收录于</dt>
+              <dt>{{ $t("收录于") }}</dt>
               <dd>{{ formatDate(item.created_at) }}</dd>
-              <dt>识别状态</dt>
+              <dt>{{ $t("识别状态") }}</dt>
               <dd>
                 <TagBadge
-                  :label="{ done: '已识别', pending: '待识别', failed: '未完成' }[item.ai_status]"
+                  :label="{ done: $t('已识别'), pending: $t('待识别'), failed: $t('未完成') }[item.ai_status]"
                   :tone="item.ai_status === 'done' ? 'success' : item.ai_status === 'failed' ? 'warning' : 'muted'"
                 />
               </dd>
             </dl>
-            <p v-if="activity.source === 'external'" class="sec-note sec-note--foot">
-              尚未通过抱一启动过该软件；此处时间取自软件目录下配置文件的最近修改时间，用于辅助区分近期常用与长期闲置。
-            </p>
+            <p v-if="activity.source === 'external'" class="sec-note sec-note--foot">{{ $t("尚未通过抱一启动过该软件；此处时间取自软件目录下配置文件的最近修改时间，用于辅助区分近期常用与长期闲置。") }}</p>
           </section>
           <section v-if="item.official_url" class="panel">
-            <h2 class="sec-title">官网</h2>
+            <h2 class="sec-title">{{ $t("官网") }}</h2>
             <a :href="item.official_url" target="_blank" rel="noopener noreferrer" class="mono truncate link">
               {{ item.official_url }}
             </a>

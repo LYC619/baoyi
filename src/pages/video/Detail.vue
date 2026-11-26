@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { latestOnly, STALE } from '@/composables/latestOnly'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -63,10 +65,10 @@ const selectedEpisode = computed(
   () => library.value?.contents.find((episode) => episode.id === selectedEpisodeId.value) ?? null
 )
 const detailTabs = computed(() => [
-  { id: 'contents' as const, label: '作品内容', count: library.value?.contents.length || 0 },
-  { id: 'description' as const, label: '剧情简介' },
-  { id: 'notes' as const, label: '个人笔记' },
-  { id: 'files' as const, label: '文件与资料' },
+  { id: 'contents' as const, label: tr('作品内容'), count: library.value?.contents.length || 0 },
+  { id: 'description' as const, label: tr('剧情简介') },
+  { id: 'notes' as const, label: tr('个人笔记') },
+  { id: 'files' as const, label: tr('文件与资料') },
 ])
 
 watch(
@@ -116,7 +118,7 @@ async function scrapeSelected(): Promise<void> {
   try {
     const result = await window.baoyi.video.scrapeEpisode(props.id, selectedEpisode.value.id)
     await refreshLibrary()
-    success(result.warnings.length ? '资料已更新；' + result.warnings[0] : '已更新本集资料与图片')
+    success(result.warnings.length ? tr("资料已更新；") + result.warnings[0] : tr("已更新本集资料与图片"))
   } catch (e) {
     error(errorMessage(e))
   } finally {
@@ -146,9 +148,9 @@ async function saveEpisode(patch: Partial<Episode>): Promise<void> {
       if (index >= 0) Object.assign(library.value.contents[index], result.episode)
     }
     store.merge(result.item)
-    success('已保存单集资料')
+    success(tr("已保存单集资料"))
   } catch (cause) {
-    error('保存单集资料失败：' + errorMessage(cause))
+    error(tr("保存单集资料失败：") + errorMessage(cause))
   } finally {
     busyEpisode.value = ''
   }
@@ -208,8 +210,8 @@ async function load(): Promise<void> {
     library.value = result.library
     episodes.value = result.library?.contents ?? []
   } catch (err) {
-    error(`读取影视条目失败：${errorMessage(err)}`)
-    loadError.value = '读取影视条目失败：' + errorMessage(err)
+    error(tr("读取影视条目失败：{p0}", {p0: (errorMessage(err))}))
+    loadError.value = tr("读取影视条目失败：") + errorMessage(err)
     item.value = null
     episodes.value = []
   }
@@ -227,7 +229,7 @@ async function refreshLibrary(): Promise<void> {
     store.merge(result.item)
     void store.refreshCounts()
   } catch (err) {
-    error('检查文件失败：' + errorMessage(err))
+    error(tr("检查文件失败：") + errorMessage(err))
   }
   checking.value = false
   loading.value = false
@@ -250,7 +252,7 @@ async function checkFiles(): Promise<void> {
     if (sync.warnings.length) toast(sync.message + '；' + sync.warnings[0])
     else success(sync.message)
   } catch (cause) {
-    lastCheck.value = '检查未完成：' + errorMessage(cause)
+    lastCheck.value = tr("检查未完成：") + errorMessage(cause)
     error(lastCheck.value)
   }
   checking.value = false
@@ -346,7 +348,7 @@ async function fetchPoster(): Promise<void> {
     if (r.ok) success(r.message)
     else error(r.message)
   } catch (err) {
-    error(`查找海报失败：${errorMessage(err)}`)
+    error(tr("查找海报失败：{p0}", {p0: (errorMessage(err))}))
   } finally {
     posterBusy.value = false
   }
@@ -368,9 +370,9 @@ async function pickPoster(): Promise<void> {
 async function clearPoster(): Promise<void> {
   if (!item.value?.poster_path) return
   const ok = await confirmDialog({
-    title: '恢复默认海报占位？',
-    message: '将移除抱一保存的海报副本并恢复首字占位，你原有的本地图片不受影响。',
-    confirmText: '移除海报',
+    title: tr('恢复默认海报占位？'),
+    message: tr("将移除抱一保存的海报副本并恢复首字占位，你原有的本地图片不受影响。"),
+    confirmText: tr('移除海报'),
   })
   if (!ok) return
   const updated = await window.baoyi.video.clearPoster(item.value.id)
@@ -387,12 +389,12 @@ async function reidentify(forceHentai: boolean): Promise<void> {
     if (updated) {
       if (item.value?.id === target.id) item.value = updated
       store.merge(updated)
-      success(forceHentai ? '里番资料匹配完成' : '重新识别完成')
+      success(forceHentai ? tr("里番资料匹配完成") : tr("重新识别完成"))
     } else {
-      toast('重新识别已停止，已完成的结果已保留')
+      toast(tr("重新识别已停止，已完成的结果已保留"))
     }
   } catch (err) {
-    error('识别失败：' + errorMessage(err))
+    error(tr("识别失败：") + errorMessage(err))
   } finally {
     refreshingIdentify.value = false
   }
@@ -433,7 +435,7 @@ async function unprotect(fields: string[]): Promise<void> {
     const updated = await store.restoreScraped(item.value.id, fields)
     if (updated) item.value = updated
   } catch (err) {
-    error(`取消保留失败：${errorMessage(err)}`)
+    error(tr("取消保留失败：{p0}", {p0: (errorMessage(err))}))
   }
 }
 
@@ -450,7 +452,7 @@ async function setEpisodeStatus(e: Episode, status: WatchStatus): Promise<void> 
     store.merge(r.item)
     void store.refreshCounts()
   } catch (err) {
-    error(`更新单集状态失败：${errorMessage(err)}`)
+    error(tr("更新单集状态失败：{p0}", {p0: (errorMessage(err))}))
   } finally {
     busyEpisode.value = ''
   }
@@ -489,11 +491,11 @@ const presentCount = computed(
 )
 const playLabel = computed(() =>
   (library.value?.contents.length ?? 0) > 1 && resumeContent.value
-    ? '播放 ' + (resumeContent.value.display_label || resumeContent.value.title || '内容')
-    : '播放'
+    ? tr('播放 ') + (resumeContent.value.display_label || resumeContent.value.title || tr("内容"))
+    : tr('播放')
 )
 const playHint = computed(() =>
-  resumeAsset.value ? '用系统播放器打开：' + resumeAsset.value.path : '没有可用文件，请检查磁盘连接或重新定位文件'
+  resumeAsset.value ? tr('用系统播放器打开：') + resumeAsset.value.path : tr('没有可用文件，请检查磁盘连接或重新定位文件')
 )
 
 async function play(): Promise<void> {
@@ -501,7 +503,7 @@ async function play(): Promise<void> {
   playing.value = true
   try {
     const outcome = await window.baoyi.video.playAsset(resumeAsset.value.id)
-    if (!outcome.ok) error(outcome.message || '无法打开视频文件')
+    if (!outcome.ok) error(outcome.message || tr("无法打开视频文件"))
     store.merge(outcome.item)
     await refreshLibrary()
   } catch (cause) {
@@ -514,7 +516,7 @@ async function play(): Promise<void> {
 async function revealSub(target: string): Promise<void> {
   if (!item.value) return
   const ok = await window.baoyi.video.revealSubtitle(item.value.id, target)
-  if (!ok) error('未找到该字幕文件')
+  if (!ok) error(tr("未找到该字幕文件"))
 }
 
 function openUrl(url: string): void {
@@ -535,7 +537,7 @@ function removeItem(): void {
 async function afterRemoval(): Promise<void> {
   await store.reload()
   if (removalWork.value || !(await window.baoyi.video.get(props.id))) {
-    success('已从影视库移除')
+    success(tr("已从影视库移除"))
     void router.push({ name: 'video-home' })
     return
   }
@@ -554,11 +556,11 @@ function viewCollection(name: string): void {
 
 <template>
   <div class="detail">
-    <div v-if="loading" class="detail__state">载入中…</div>
+    <div v-if="loading" class="detail__state">{{ $t("载入中…") }}</div>
     <div v-else-if="!item || itemHidden" class="detail__state">
-      <p role="status">{{ itemHidden ? '当前作品已隐藏。' : loadError || '这条记录不存在、已被移除或当前不可见。' }}</p>
-      <button v-if="loadError" type="button" class="btn btn--ghost" @click="load">重新加载</button>
-      <button type="button" class="btn btn--ghost" @click="router.push({ name: 'video-home' })">返回影视库</button>
+      <p role="status">{{ itemHidden ? $t('当前作品已隐藏。') : loadError || $t('这条记录不存在、已被移除或当前不可见。') }}</p>
+      <button v-if="loadError" type="button" class="btn btn--ghost" @click="load">{{ $t("重新加载") }}</button>
+      <button type="button" class="btn btn--ghost" @click="router.push({ name: 'video-home' })">{{ $t("返回影视库") }}</button>
     </div>
 
     <AudioDetail
@@ -572,9 +574,7 @@ function viewCollection(name: string): void {
     <template v-else>
       <header class="head">
         <button type="button" class="btn btn--subtle" @click="router.push({ name: 'video-home' })">
-          <ArrowLeft :size="16" />
-          返回影视库
-        </button>
+          <ArrowLeft :size="16" />{{ $t("返回影视库") }}</button>
 
         <div class="head__actions">
           <button
@@ -585,36 +585,30 @@ function viewCollection(name: string): void {
             @click="play"
           >
             <Play :size="14" />
-            {{ playing ? '正在打开…' : playLabel }}
+            {{ playing ? $t('正在打开…') : playLabel }}
           </button>
           <button type="button" class="btn btn--ghost" @click="reveal">
-            <FolderOpen :size="14" />
-            打开所在文件夹
-          </button>
+            <FolderOpen :size="14" />{{ $t("打开所在文件夹") }}</button>
           <button type="button" class="btn btn--ghost" @click="openDownload">
-            <Download :size="14" />下载 / 补齐内容
-          </button>
+            <Download :size="14" />{{ $t("下载 / 补齐内容") }}</button>
           <details ref="moreMenu" class="head__more" @keydown="closeMore">
-            <summary class="btn btn--ghost" aria-label="更多作品操作">
-              <MoreHorizontal :size="16" />更多
-            </summary>
+            <summary class="btn btn--ghost" :aria-label="$t('更多作品操作')">
+              <MoreHorizontal :size="16" />{{ $t("更多") }}</summary>
             <div class="head__moreMenu">
               <button type="button" class="btn btn--ghost" @click="openOrganize('relocate')">
-                <FolderOpen :size="14" />目录管理 / 重新绑定
-              </button>
+                <FolderOpen :size="14" />{{ $t("目录管理 / 重新绑定") }}</button>
               <button
                 v-if="library?.directory"
                 type="button"
                 class="btn btn--ghost"
                 @click="renameOpen = true; moreMenu && (moreMenu.open = false)"
               >
-                <Pencil :size="14" />修改合集名称
-              </button>
+                <Pencil :size="14" />{{ $t("修改合集名称") }}</button>
               <button
                 type="button"
                 class="btn btn--ghost"
                 :disabled="!tmdbUrl"
-                :title="tmdbUrl || '暂无 TMDB 条目'"
+                :title="tmdbUrl || $t('暂无 TMDB 条目')"
                 @click="openUrl(tmdbUrl)"
               >
                 <ExternalLink :size="14" />
@@ -624,12 +618,10 @@ function viewCollection(name: string): void {
                 type="button"
                 class="btn btn--ghost"
                 :disabled="!doubanUrl"
-                :title="doubanUrl || '暂无豆瓣条目'"
+                :title="doubanUrl || $t('暂无豆瓣条目')"
                 @click="openUrl(doubanUrl)"
               >
-                <ExternalLink :size="14" />
-                豆瓣
-              </button>
+                <ExternalLink :size="14" />{{ $t("豆瓣") }}</button>
               <button v-if="hanimeUrl" type="button" class="btn btn--ghost" :title="hanimeUrl" @click="openUrl(hanimeUrl)">
                 <ExternalLink :size="14" />
                 Hanime
@@ -641,31 +633,23 @@ function viewCollection(name: string): void {
                 :title="item.official_url"
                 @click="openUrl(item.official_url)"
               >
-                <ExternalLink :size="14" />
-                来源页面
-              </button>
+                <ExternalLink :size="14" />{{ $t("来源页面") }}</button>
               <button type="button" class="btn btn--ghost" :disabled="reidentifying" @click="reidentify(false)">
-                <component :is="reidentifying ? Loader2 : RefreshCw" :size="14" :class="{ spin: reidentifying }" />
-                重新识别
-              </button>
+                <component :is="reidentifying ? Loader2 : RefreshCw" :size="14" :class="{ spin: reidentifying }" />{{ $t("重新识别") }}</button>
               <button
                 type="button"
                 class="btn btn--ghost"
                 :disabled="reidentifying"
-                title="按里番来源强制匹配资料"
+                :title="$t('按里番来源强制匹配资料')"
                 @click="reidentify(true)"
               >
-                <component :is="reidentifying ? Loader2 : RefreshCw" :size="14" :class="{ spin: reidentifying }" />
-                按里番匹配
-              </button>
+                <component :is="reidentifying ? Loader2 : RefreshCw" :size="14" :class="{ spin: reidentifying }" />{{ $t("按里番匹配") }}</button>
               <button type="button" class="btn btn--ghost" @click="toggleArchive">
                 <component :is="item.is_archived ? ArchiveRestore : Archive" :size="14" />
-                {{ item.is_archived ? '取消归档' : '归档' }}
+                {{ item.is_archived ? $t('取消归档') : $t('归档') }}
               </button>
               <button type="button" class="btn btn--danger" @click="removeItem">
-                <Trash2 :size="14" />
-                移除
-              </button>
+                <Trash2 :size="14" />{{ $t("移除") }}</button>
             </div>
           </details>
         </div>
@@ -723,7 +707,7 @@ function viewCollection(name: string): void {
             @poster-missing="store.markPosterMissing(item.id)"
           />
 
-          <nav class="detail-tabs no-select" role="tablist" aria-label="影视详情" @keydown="tabKeydown">
+          <nav class="detail-tabs no-select" role="tablist" :aria-label="$t('影视详情')" @keydown="tabKeydown">
             <button
               v-for="tab in detailTabs"
               :id="'video-tab-' + tab.id"

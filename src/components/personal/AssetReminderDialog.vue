@@ -31,21 +31,21 @@ async function save() {
 </script>
 
 <template>
-  <ProjectDialog :title="mode === 'renew' ? '已续费' : '暂缓提醒'" :busy="busy" @close="emit('close')">
+  <ProjectDialog :title="mode === 'renew' ? $t('已续费') : $t('暂缓提醒')" :busy="busy" @close="emit('close')">
     <form id="asset-reminder-form" class="ws ws-form" @submit.prevent="save">
       <p>{{ record.name }}</p>
       <template v-if="mode === 'renew'">
-        <p class="ws-muted">原到期日：{{ record.data.expiresOn || '未设置' }}</p>
-        <label>新到期日<input v-model="to" type="date" required /></label>
-        <label>本次费用<input v-model.number="cost" type="number" min="0" max="1000000000" step="any" placeholder="未填写" /></label>
-        <label>币种<input v-model="currency" maxlength="3" :required="cost !== ''" placeholder="CNY / USD" /></label>
+        <p class="ws-muted">{{ $t("原到期日：{p0}", {p0: (record.data.expiresOn || $t('未设置'))}) }}</p>
+        <label>{{ $t("新到期日") }}<input v-model="to" type="date" required /></label>
+        <label>{{ $t("本次费用") }}<input v-model.number="cost" type="number" min="0" max="1000000000" step="any" :placeholder="$t('未填写')" /></label>
+        <label>{{ $t("币种") }}<input v-model="currency" maxlength="3" :required="cost !== ''" placeholder="CNY / USD" /></label>
       </template>
       <template v-else>
-        <label>暂缓时长<select v-model="duration" aria-label="暂缓时长"><option value="7">7 天</option><option value="30">30 天</option><option value="custom">到指定日期</option></select></label>
-        <label v-if="duration === 'custom'">暂缓至<input v-model="customDate" type="date" required :min="today" /></label>
-        <p class="ws-muted">{{ until ? '暂缓至 ' + until + '，当天恢复提醒。' : '请选择晚于今天的日期。' }}这项仍会显示在背包里。</p>
+        <label>{{ $t("暂缓时长") }}<select v-model="duration" :aria-label="$t('暂缓时长')"><option value="7">{{ $t("7 天") }}</option><option value="30">{{ $t("30 天") }}</option><option value="custom">{{ $t("到指定日期") }}</option></select></label>
+        <label v-if="duration === 'custom'">{{ $t("暂缓至") }}<input v-model="customDate" type="date" required :min="today" /></label>
+        <p class="ws-muted">{{ $t("{p0}这项仍会显示在背包里。", {p0: (until ? $t('暂缓至 ') + until + $t('，当天恢复提醒。') : $t('请选择晚于今天的日期。'))}) }}</p>
       </template>
     </form>
-    <template #footer><button class="ws-button" :disabled="busy" @click="emit('close')">取消</button><button class="ws-button primary" form="asset-reminder-form" type="submit" :disabled="busy">{{ busy ? '正在保存…' : mode === 'renew' ? '确认续费' : '确认暂缓' }}</button></template>
+    <template #footer><button class="ws-button" :disabled="busy" @click="emit('close')">{{ $t("取消") }}</button><button class="ws-button primary" form="asset-reminder-form" type="submit" :disabled="busy">{{ busy ? $t('正在保存…') : mode === 'renew' ? $t('确认续费') : $t('确认暂缓') }}</button></template>
   </ProjectDialog>
 </template>

@@ -63,7 +63,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 function findVisiblePageSearch(): HTMLInputElement | null {
   const candidates = document.querySelectorAll<HTMLInputElement>(
-    '.search__input, .pj-search input, input[aria-label*="搜索"], .app__view input[type="search"]'
+    '.search__input, .pj-search input, input[aria-label*="搜索"], input[aria-label*="Search"], input[aria-label*="search"], .app__view input[type="search"]'
   )
   for (const el of candidates) {
     if (el.closest('.archive-panel, dialog, [popover]')) continue

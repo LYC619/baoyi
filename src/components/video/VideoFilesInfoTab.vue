@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { computed } from 'vue'
 import { FolderOpen, Subtitles } from 'lucide-vue-next'
 import { WATCH_STATUS_LABEL } from '@/stores/video'
@@ -40,46 +42,44 @@ const editedFields = computed(() =>
 )
 const embeddedSubs = computed(() => (props.item.subtitle_tracks ?? []).filter((t) => !t.path))
 const externalSubs = computed(() => (props.item.subtitle_tracks ?? []).filter((t) => !!t.path))
-const trackText = (t: MediaTrack): string => [t.label || t.language || '未知', t.codec].filter(Boolean).join(' · ')
+const trackText = (t: MediaTrack): string => [t.label || t.language || tr("未知"), t.codec].filter(Boolean).join(' · ')
 </script>
 
 <template>
   <section id="video-panel-files" role="tabpanel" aria-labelledby="video-tab-files" tabindex="0">
     <div class="detail-info-grid">
       <section class="panel">
-        <h2 class="sec-title">作品目录</h2>
+        <h2 class="sec-title">{{ $t("作品目录") }}</h2>
         <p class="read-text mono">{{ library?.directory?.path || item.path }}</p>
         <div class="file-management-actions">
           <button class="btn btn--ghost" type="button" @click="emit('reveal')">
-            <FolderOpen :size="13" />打开目录
-          </button>
-          <button class="btn btn--ghost" type="button" @click="emit('open-organize', 'relocate')">管理目录</button>
-          <button class="btn btn--subtle" type="button" @click="emit('open-organize', 'history')">整理记录</button>
+            <FolderOpen :size="13" />{{ $t("打开目录") }}</button>
+          <button class="btn btn--ghost" type="button" @click="emit('open-organize', 'relocate')">{{ $t("管理目录") }}</button>
+          <button class="btn btn--subtle" type="button" @click="emit('open-organize', 'history')">{{ $t("整理记录") }}</button>
         </div>
       </section>
 
       <section class="panel">
-        <h2 class="sec-title">收藏分组</h2>
+        <h2 class="sec-title">{{ $t("收藏分组") }}</h2>
         <input
           class="input"
           :value="item.collection_name || ''"
-          aria-label="视频分组"
+          :aria-label="$t('视频分组')"
           maxlength="80"
           list="video-collection-options"
-          placeholder="未分组"
+          :placeholder="$t('未分组')"
           @change="emit('save', { collection_name: ($event.target as HTMLInputElement).value.trim() })"
         />
-        <p class="panel__note">收藏分组用于归拢作品，不会改动磁盘文件位置。</p>
+        <p class="panel__note">{{ $t("收藏分组用于归拢作品，不会改动磁盘文件位置。") }}</p>
         <div class="file-management-actions">
-          <button type="button" class="btn btn--subtle" @click="emit('open-source')">搜索 / 绑定来源</button>
+          <button type="button" class="btn btn--subtle" @click="emit('open-source')">{{ $t("搜索 / 绑定来源") }}</button>
           <button
             v-if="item.collection_name"
             type="button"
             class="btn btn--ghost"
             @click="emit('view-collection', item.collection_name)"
           >
-            <FolderOpen :size="14" /> 查看分组
-          </button>
+            <FolderOpen :size="14" />{{ $t("查看分组") }}</button>
         </div>
         <datalist id="video-collection-options">
           <option v-for="group in collectionGroups" :key="group.name" :value="group.name" />
@@ -87,101 +87,95 @@ const trackText = (t: MediaTrack): string => [t.label || t.language || '未知',
       </section>
 
       <section v-if="editedFields.length > 0" class="panel">
-        <h2 class="sec-title">手动保留的字段</h2>
-        <p class="panel__note">重新识别时以下字段会保留你的手动修改，不会被自动覆盖。</p>
+        <h2 class="sec-title">{{ $t("手动保留的字段") }}</h2>
+        <p class="panel__note">{{ $t("重新识别时以下字段会保留你的手动修改，不会被自动覆盖。") }}</p>
         <ul class="edited">
           <li v-for="f in editedFields" :key="f.field" class="edited__row">
             <span class="edited__name">{{ f.label }}</span>
             <button
               type="button"
               class="edited__undo"
-              title="下次重新识别时允许更新此栏"
+              :title="$t('下次重新识别时允许更新此栏')"
               @click="emit('unprotect', [f.field])"
-            >
-              取消保留
-            </button>
+            >{{ $t("取消保留") }}</button>
           </li>
         </ul>
-        <button v-if="editedFields.length > 1" type="button" class="edited__all" @click="emit('unprotect', [])">
-          全部取消保留
-        </button>
+        <button v-if="editedFields.length > 1" type="button" class="edited__all" @click="emit('unprotect', [])">{{ $t("全部取消保留") }}</button>
       </section>
 
       <section class="panel">
-        <h2 class="sec-title">观看记录</h2>
+        <h2 class="sec-title">{{ $t("观看记录") }}</h2>
         <dl class="facts">
-          <dt>状态</dt>
+          <dt>{{ $t("状态") }}</dt>
           <dd>{{ WATCH_STATUS_LABEL[item.watch_status] }}</dd>
           <template v-if="isSeries">
-            <dt>进度</dt>
-            <dd>已看 {{ item.episode_watched }} 项 · 共 {{ item.episode_total }} 项</dd>
+            <dt>{{ $t("进度") }}</dt>
+            <dd>{{ $t("已看 {p0} 项 · 共 {p1} 项", {p0: (item.episode_watched), p1: (item.episode_total)}) }}</dd>
           </template>
           <template v-else-if="item.position_sec > 0">
-            <dt>播放位置</dt>
+            <dt>{{ $t("播放位置") }}</dt>
             <dd>{{ formatPosition(item.position_sec) }}</dd>
           </template>
-          <dt>上次观看</dt>
-          <dd>{{ item.last_watched_at ? formatRelative(item.last_watched_at) : '未观看' }}</dd>
-          <dt>收录于</dt>
+          <dt>{{ $t("上次观看") }}</dt>
+          <dd>{{ item.last_watched_at ? formatRelative(item.last_watched_at) : $t('未观看') }}</dd>
+          <dt>{{ $t("收录于") }}</dt>
           <dd>{{ formatDate(item.created_at) }}</dd>
         </dl>
       </section>
 
       <section class="panel">
-        <h2 class="sec-title">规格</h2>
+        <h2 class="sec-title">{{ $t("规格") }}</h2>
         <dl class="facts">
           <template v-if="item.video_codec">
-            <dt>编码</dt>
+            <dt>{{ $t("编码") }}</dt>
             <dd>{{ item.video_codec }}</dd>
           </template>
           <template v-if="item.source">
-            <dt>片源</dt>
+            <dt>{{ $t("片源") }}</dt>
             <dd>{{ item.source }}</dd>
           </template>
           <template v-if="item.release_group">
-            <dt>制作组</dt>
+            <dt>{{ $t("制作组") }}</dt>
             <dd>{{ item.release_group }}</dd>
           </template>
           <template v-if="item.audio_tracks.length > 0">
-            <dt>音轨</dt>
+            <dt>{{ $t("音轨") }}</dt>
             <dd>{{ item.audio_tracks.map(trackText).join('，') }}</dd>
           </template>
           <template v-if="embeddedSubs.length > 0">
-            <dt>内嵌字幕</dt>
+            <dt>{{ $t("内嵌字幕") }}</dt>
             <dd>{{ embeddedSubs.map(trackText).join('，') }}</dd>
           </template>
-          <dt>{{ isSeries ? '目录' : '文件' }}</dt>
+          <dt>{{ isSeries ? $t('目录') : $t('文件') }}</dt>
           <dd>
             <button
               type="button"
               class="mono truncate link"
-              :title="`${item.path}（点击复制）`"
+              :title="$t('{p0}（点击复制）', {p0: item.path})"
               @click="emit('copy-path', item.path)"
             >
               {{ item.file_name }}
             </button>
           </dd>
           <template v-if="item.file_size > 0">
-            <dt>大小</dt>
+            <dt>{{ $t("大小") }}</dt>
             <dd>{{ formatBytes(item.file_size) }}</dd>
           </template>
         </dl>
       </section>
 
       <section v-if="externalSubs.length > 0" class="panel">
-        <h2 class="sec-title">
-          外挂字幕
-          <span class="sec-title__count">{{ externalSubs.length }}</span>
+        <h2 class="sec-title">{{ $t("外挂字幕") }}<span class="sec-title__count">{{ externalSubs.length }}</span>
         </h2>
         <ul class="subs">
           <li v-for="sub in externalSubs" :key="sub.path" class="sub">
             <Subtitles :size="13" class="sub__icon" />
-            <span class="sub__label truncate" :title="sub.path">{{ sub.label || sub.language || '字幕' }}</span>
+            <span class="sub__label truncate" :title="sub.path">{{ sub.label || sub.language || $t('字幕') }}</span>
             <span v-if="sub.codec" class="sub__codec mono">{{ sub.codec }}</span>
             <button
               type="button"
               class="sub__act"
-              title="在文件夹中定位字幕文件"
+              :title="$t('在文件夹中定位字幕文件')"
               @click="emit('reveal-sub', sub.path)"
             >
               <FolderOpen :size="12" />

@@ -31,25 +31,23 @@ const emit = defineEmits<{
 
 <template>
   <aside class="ws-sidebar document-sidebar">
-    <nav class="document-subnav" aria-label="子模块切换">
+    <nav class="document-subnav" :aria-label="$t('子模块切换')">
       <button
         type="button"
         :class="{ on: submodule === 'reading' }"
         @click="emit('switch-submodule', 'reading')"
       >
-        <BookOpen :size="18" />阅读
-      </button>
+        <BookOpen :size="18" />{{ $t("阅读") }}</button>
       <button
         type="button"
         :class="{ on: submodule === 'archive' }"
         @click="emit('switch-submodule', 'archive')"
       >
-        <FileText :size="18" />资料
-      </button>
+        <FileText :size="18" />{{ $t("资料") }}</button>
     </nav>
 
     <button type="button" :class="{ active: favorite }" @click="emit('toggle-favorite')">
-      <Star :size="15" />收藏<span>{{ favoriteCount }}</span>
+      <Star :size="15" />{{ $t("收藏") }}<span>{{ favoriteCount }}</span>
     </button>
 
     <div class="sidebar-list">
@@ -67,7 +65,7 @@ const emit = defineEmits<{
 
     <details v-if="sidebarGroups.length > 0" open class="custom-group-filter">
       <hr />
-      <summary>自定义分组</summary>
+      <summary>{{ $t("自定义分组") }}</summary>
       <div class="sidebar-list">
         <button
           v-for="group in sidebarGroups"
@@ -84,27 +82,26 @@ const emit = defineEmits<{
 
     <hr />
     <div class="sidebar-heading-row">
-      <h2>标签</h2>
+      <h2>{{ $t("标签") }}</h2>
       <button
         v-if="selectedType"
         type="button"
         class="ws-icon tag-manage-trigger"
-        :title="`管理「${currentCategoryName}」分类标签`"
-        :aria-label="`管理「${currentCategoryName}」分类标签`"
+        :title="$t('管理「{p0}」分类标签', {p0: currentCategoryName})"
+        :aria-label="$t('管理「{p0}」分类标签', {p0: currentCategoryName})"
         @click="emit('manage-tags')"
       >
         <Tag :size="13" />
       </button>
     </div>
-    <div class="document-tags" aria-label="筛选资料标签">
+    <div class="document-tags" :aria-label="$t('筛选资料标签')">
       <button
         type="button"
         class="tag-pill"
         :class="{ active: !selectedTag && !selectedState }"
         :aria-pressed="!selectedTag && !selectedState"
         @click="emit('clear-tag')"
-      >
-        全部标签<span>{{ baseRowsCount }}</span>
+      >{{ $t("全部标签") }}<span>{{ baseRowsCount }}</span>
       </button>
       <button
         v-for="tag in tags"
@@ -120,7 +117,7 @@ const emit = defineEmits<{
       </button>
     </div>
 
-    <small>知止而后得</small>
+    <small>{{ $t("知止而后得") }}</small>
   </aside>
 </template>
 
@@ -152,6 +149,7 @@ const emit = defineEmits<{
 }
 .document-subnav {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   background: var(--hover-surface);
   padding: 4px;
@@ -159,7 +157,7 @@ const emit = defineEmits<{
   margin-bottom: 14px;
 }
 .document-subnav button {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   justify-content: center;

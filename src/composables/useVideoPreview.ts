@@ -1,3 +1,5 @@
+
+import { tr } from '../i18n/index.ts'
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/utils'
 import {ref} from 'vue'
@@ -23,7 +25,7 @@ async function open(id:string,episodeId='',seconds=0,assetKey=''){
   try{
     const next=await window.baoyi.video.preview.choices(id,episodeId);if(own!==generation)return
     selection.value=next
-    if(!next.assets.length)error.value='没有可试看的本地视频；请在详情中检查文件位置。'
+    if(!next.assets.length)error.value=tr("没有可试看的本地视频；请在详情中检查文件位置。")
     else if(assetKey&&next.assets.some(asset=>asset.key===assetKey))await choose(assetKey)
     else if(next.assets.length===1)await choose(next.assets[0].key)
   }catch(e){if(own===generation)error.value=errorMessage(e)}finally{if(own===generation)busy.value=false}

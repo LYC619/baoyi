@@ -1,3 +1,5 @@
+
+import { tr } from "../../i18n/index.ts"
 import { useToast } from '@/composables/useToast'
 import { computed, ref, watch } from 'vue'
 import type { VideoItem } from '@/types'
@@ -104,25 +106,25 @@ export function useOrganizeSession(options: SessionOptions) {
     targetDirectory.value = ''
     root.value = ''
     copyFiles.value = false
-    notice.value = '显示范围已变化，请重新选择作品或刷新整理记录。'
+    notice.value = tr("显示范围已变化，请重新选择作品或刷新整理记录。")
     if (!works.value.some(work => work.id === survivorId.value)) survivorId.value = ''
   }, { flush: 'sync' })
   const stopInput = watch(requestKey, () => {
-    if (preview.value) notice.value = options.autoPreview?.() ? '' : '选择、资料或目标已变化，请重新预览。'
+    if (preview.value) notice.value = options.autoPreview?.() ? '' : tr("选择、资料或目标已变化，请重新预览。")
     error.value = ''
     schedulePreview()
   }, { flush: 'sync', immediate: true })
 
   function bridge() {
     const api = window.baoyi.videoOrganize
-    if (!api) throw new Error('当前版本尚未提供整理功能，请更新应用后重试')
+    if (!api) throw new Error(tr('当前版本尚未提供整理功能，请更新应用后重试'))
     return api
   }
   function usable(revision: number): boolean { return !disposed && revision === privacyRevision && options.privacyReady() }
   function invalidate(): void {
     if (busy.value === 'apply' || busy.value === 'retry' || busy.value === 'rollback') return
     libraryRevision.value++
-    if (preview.value) notice.value = '作品资料或文件已变化，请重新预览。'
+    if (preview.value) notice.value = tr("作品资料或文件已变化，请重新预览。")
   }
   function organizeRequest(): VideoOrganizeRequest {
     const names = Object.fromEntries(Object.entries(fileNames.value).filter(([, name]) => name.trim()).map(([id, name]) => [id, name.trim()]))
@@ -138,7 +140,7 @@ export function useOrganizeSession(options: SessionOptions) {
   async function previewChanges(kind: Preview['kind']): Promise<void> {
     if (disposed || busy.value || !canPreview.value) return
     if (kind === 'relocate' && (!options.resourceId || !targetDirectory.value.trim())) {
-      error.value = '请填写完整的新作品目录'; return
+      error.value = tr("请填写完整的新作品目录"); return
     }
     const revision = privacyRevision, key = requestKey.value
     busy.value = 'preview'
@@ -152,7 +154,7 @@ export function useOrganizeSession(options: SessionOptions) {
           mode: relocateMode.value, ...(root.value.trim() ? { root: root.value.trim() } : {}) })
       if (!usable(revision) || key !== requestKey.value) return
       const ids = new Set(works.value.map(work => work.id))
-      if (value.kind === 'organize' && value.works.some(work => !ids.has(work.resourceId))) throw new Error('作品范围已变化，请重新选择后预览')
+      if (value.kind === 'organize' && value.works.some(work => !ids.has(work.resourceId))) throw new Error(tr('作品范围已变化，请重新选择后预览'))
       preview.value = value
       reviewedKey.value = key
       invalidated.value = false
@@ -199,7 +201,7 @@ export function useOrganizeSession(options: SessionOptions) {
       if (usable(revision)) {
         invalidated.value = true
         error.value = errorMessage(cause)
-        notice.value = '请重新预览；如果操作已经开始，可刷新整理记录查看逐项结果。'
+        notice.value = tr("请重新预览；如果操作已经开始，可刷新整理记录查看逐项结果。")
       }
       return null
     } finally { busy.value = '' }
@@ -229,7 +231,7 @@ export function useOrganizeSession(options: SessionOptions) {
       journals.value = visible
       historyLoaded.value = true
       notice.value = ''
-    } catch (cause) { if (usable(revision)) error.value = options.privateHidden() ? '读取整理记录失败，请重试。' : errorMessage(cause) }
+    } catch (cause) { if (usable(revision)) error.value = options.privateHidden() ? tr("读取整理记录失败，请重试。") : errorMessage(cause) }
     finally { busy.value = '' }
   }
   async function retry(id: string): Promise<VideoOrganizeJournal | null> {

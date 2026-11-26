@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { latestOnly, STALE } from '@/composables/latestOnly'
 import { errorMessage } from '@/utils'
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
@@ -200,7 +202,7 @@ async function refreshReferences() {
     const refs = await readReferences()
     if (refs !== STALE && !disposed) projectReferences.value = refs
   } catch (e) {
-    if (!disposed) error.value = '项目引用读取失败：' + errorMessage(e)
+    if (!disposed) error.value = tr("项目引用读取失败：") + errorMessage(e)
   }
 }
 
@@ -224,7 +226,7 @@ function toggleSide() {
 const readDocument = latestOnly(async () => {
   const value = await workspace.documents.get(props.id)
   if (lifetime.signal.aborted) return null
-  if (!value) throw new Error('资料索引已移除')
+  if (!value) throw new Error(tr('资料索引已移除'))
   const [notes, preferences] = await Promise.all([
     workspace.documents.annotations(props.id),
     workspace.preferences.get('document'),
@@ -314,7 +316,7 @@ async function savePosition() {
     await workspace.documents.position(id, loc, count)
     if (position.value.page === loc.page && position.value.offset === loc.offset) unsaved.value = false
   } catch (e) {
-    if (!disposed) error.value = '阅读位置未保存：' + errorMessage(e)
+    if (!disposed) error.value = tr("阅读位置未保存：") + errorMessage(e)
   }
 }
 
@@ -323,9 +325,9 @@ async function beforeNavigate() {
   if (
     editing.value &&
     !(await confirmDialog({
-      title: '放弃未保存的标注？',
-      message: '当前标注尚未保存，离开后修改将丢失。',
-      confirmText: '放弃并离开',
+      title: tr('放弃未保存的标注？'),
+      message: tr("当前标注尚未保存，离开后修改将丢失。"),
+      confirmText: tr('放弃并离开'),
       tone: 'danger',
     }))
   ) {
@@ -335,9 +337,9 @@ async function beforeNavigate() {
   if (
     unsaved.value &&
     !(await confirmDialog({
-      title: '阅读位置尚未保存',
-      message: '仍要离开当前阅读页吗？',
-      confirmText: '仍要离开',
+      title: tr('阅读位置尚未保存'),
+      message: tr("仍要离开当前阅读页吗？"),
+      confirmText: tr('仍要离开'),
     }))
   ) {
     return false
@@ -449,7 +451,7 @@ async function highlight() {
     annotations.value = await workspace.documents.annotations(props.id)
     activeAnnotation.value = a.id
     clearSelection()
-    message.value = '已保存高亮，可在标注卡补充想法'
+    message.value = tr("已保存高亮，可在标注卡补充想法")
   })
 }
 async function saveAnnotation() {
@@ -459,7 +461,7 @@ async function saveAnnotation() {
     annotations.value = await workspace.documents.annotations(props.id)
     editing.value = null
     quote.value = ''
-    message.value = '已保存标注'
+    message.value = tr("已保存标注")
   })
 }
 const pageBookmarked = computed(() =>
@@ -474,11 +476,11 @@ async function togglePageBookmark() {
     if (existing) {
       await workspace.documents.removeAnnotation(props.id, existing.id)
       annotations.value = await workspace.documents.annotations(props.id)
-      message.value = '已移除当前页书签'
+      message.value = tr("已移除当前页书签")
     } else {
       const label = novelIndex.value
-        ? novelIndex.value.chapters[currentChapterIndex.value]?.title || `第 ${position.value.page} 章`
-        : `第 ${position.value.page} ${item.value?.format === 'pdf' ? '页' : '段'}`
+        ? novelIndex.value.chapters[currentChapterIndex.value]?.title || tr("第 {p0} 章", {p0: (position.value.page)})
+        : tr('第 {p0} {p1}', {p0: position.value.page, p1: item.value?.format === 'pdf' ? tr('页') : tr('段')})
       await workspace.documents.annotate(props.id, {
         kind: 'bookmark',
         quote: label,
@@ -486,7 +488,7 @@ async function togglePageBookmark() {
         location: plain(position.value),
       })
       annotations.value = await workspace.documents.annotations(props.id)
-      message.value = '已添加当前页书签'
+      message.value = tr("已添加当前页书签")
     }
   })
 }
@@ -501,14 +503,14 @@ async function bookmark() {
     })
     annotations.value = await workspace.documents.annotations(props.id)
     clearSelection()
-    message.value = '已保存书签'
+    message.value = tr("已保存书签")
   })
 }
 async function remove(a: DocumentAnnotation) {
   const ok = await confirmDialog({
-    title: '移除此条标注？',
-    message: '已引用该标注的项目或个人记录会保留当时的原文快照。',
-    confirmText: '移除标注',
+    title: tr('移除此条标注？'),
+    message: tr("已引用该标注的项目或个人记录会保留当时的原文快照。"),
+    confirmText: tr('移除标注'),
     tone: 'danger',
   })
   if (!ok) return
@@ -521,9 +523,9 @@ async function remove(a: DocumentAnnotation) {
 async function removeSelected() {
   if (!selected.value.length) return
   const ok = await confirmDialog({
-    title: `删除选中的 ${selected.value.length} 条标注与书签？`,
-    message: '已建立的跨模块引用会保留原文快照，不会受影响。',
-    confirmText: '删除所选',
+    title: tr('删除选中的 {p0} 条标注与书签？', {p0: selected.value.length}),
+    message: tr("已建立的跨模块引用会保留原文快照，不会受影响。"),
+    confirmText: tr('删除所选'),
     tone: 'danger',
   })
   if (!ok) return
@@ -533,25 +535,25 @@ async function removeSelected() {
       selected.value = selected.value.filter((id) => id !== annotationId)
       annotations.value = annotations.value.filter((a) => a.id !== annotationId)
     }
-    message.value = '已删除所选标注'
+    message.value = tr("已删除所选标注")
   })
 }
 async function exportSelected() {
   await run(async () => {
     const file = await workspace.documents.export(props.id, [...selected.value])
-    if (file) message.value = '已导出到 ' + file
+    if (file) message.value = tr("已导出到 ") + file
   })
 }
 async function copySelected() {
   await run(async () => {
     await window.baoyi.app.copyText(await workspace.documents.markdown(props.id, [...selected.value]))
-    message.value = '已复制 Markdown，包含原文、想法和来源'
+    message.value = tr("已复制 Markdown，包含原文、想法和来源")
   })
 }
 async function copyQuote() {
   await run(async () => {
     await window.baoyi.app.copyText(quote.value)
-    message.value = '已复制选文'
+    message.value = tr("已复制选文")
     clearSelection()
   })
 }
@@ -593,10 +595,10 @@ async function ready() {
           quote: evidence.quote,
           location: { page: evidence.page || 1, offset: 0 },
           line: evidence.startLine,
-          label: evidence.page ? '第 ' + evidence.page + ' 页' : '原文引文',
+          label: evidence.page ? tr("第 ") + evidence.page + tr(" 页") : tr("原文引文"),
         })
       } else {
-        error.value = '这条精读证据已不可用，可从速览重新打开'
+        error.value = tr("这条精读证据已不可用，可从速览重新打开")
       }
     } catch (e) {
       error.value = errorMessage(e)
@@ -611,7 +613,7 @@ watch(
 )
 async function ask() {
   if (!quote.value) return
-  const text = `请解释这段选文的含义，说明依据仅限所选片段并引用原句。\n资料：[${item.value?.name || '当前资料'}](baoyi://resource/${props.id})，阅读位置 ${quoteLocation.value.page}。\n选文：\n${quote.value}`
+  const text = tr("请解释这段选文的含义，说明依据仅限所选片段并引用原句。\n资料：[{p0}](baoyi://resource/{p1})，阅读位置 {p2}。\n选文：\n{p3}", {p0: (item.value?.name || tr('当前资料')), p1: (props.id), p2: (quoteLocation.value.page), p3: (quote.value)})
   clearSelection()
   await archiveAssistant.show(text, [props.id])
 }
@@ -659,47 +661,42 @@ function onFitPdf(mode: 'width' | 'page') {
       v-if="readerSettings.immersive"
       type="button"
       class="immersive-exit-button"
-      title="显示顶栏"
+      :title="$t('显示顶栏')"
       @click="readerSettings.immersive = false"
     >
-      <Minimize2 :size="16" />退出全屏
-    </button>
+      <Minimize2 :size="16" />{{ $t("退出全屏") }}</button>
 
     <p v-if="error" class="ws-error reader-toast" role="alert">
-      {{ error }}
-      <button v-if="unsaved" type="button" class="ws-button" @click="savePosition">重试保存位置</button>
-      <button type="button" class="ws-icon" aria-label="关闭错误" @click="error = ''">×</button>
+      {{ $systemMessage(error) }}
+      <button v-if="unsaved" type="button" class="ws-button" @click="savePosition">{{ $t("重试保存位置") }}</button>
+      <button type="button" class="ws-icon" :aria-label="$t('关闭错误')" @click="error = ''">×</button>
     </p>
     <p v-else-if="message" class="ws-notice reader-toast" role="status">
       {{ message }}
-      <button type="button" class="ws-icon" aria-label="关闭提示" @click="message = ''">×</button>
+      <button type="button" class="ws-icon" :aria-label="$t('关闭提示')" @click="message = ''">×</button>
     </p>
 
     <div
       v-if="quote"
       class="reader-selection"
       role="toolbar"
-      aria-label="选文操作"
+      :aria-label="$t('选文操作')"
       :style="{ left: selectionPoint.x + 'px', top: selectionPoint.y + 'px' }"
       @pointerdown.prevent
       @mousedown.prevent
     >
       <button type="button" class="ws-button" :disabled="busy" @click="bookmark">
-        <Bookmark :size="15" />书签
-      </button>
+        <Bookmark :size="15" />{{ $t("书签") }}</button>
       <button type="button" class="ws-button primary" :disabled="busy" @click="highlight">
-        <Highlighter :size="15" />高亮
-      </button>
+        <Highlighter :size="15" />{{ $t("高亮") }}</button>
       <button type="button" class="ws-button" :disabled="busy" @click="excerpt">
-        <Pencil :size="14" />想法
-      </button>
+        <Pencil :size="14" />{{ $t("想法") }}</button>
       <button type="button" class="ws-button" @click="ask">
-        <Sparkles :size="14" />询问助理
-      </button>
-      <button type="button" class="ws-icon" aria-label="复制选文" @click="copyQuote">
+        <Sparkles :size="14" />{{ $t("询问助理") }}</button>
+      <button type="button" class="ws-icon" :aria-label="$t('复制选文')" @click="copyQuote">
         <Copy :size="15" />
       </button>
-      <button type="button" class="ws-icon" aria-label="取消选文" @click="clearSelection">×</button>
+      <button type="button" class="ws-icon" :aria-label="$t('取消选文')" @click="clearSelection">×</button>
     </div>
 
     <div class="reader-body">
@@ -723,14 +720,14 @@ function onFitPdf(mode: 'width' | 'page') {
       />
       <div v-else class="reader-fallback ws-empty">
         <h2>
-          {{ loading ? '正在打开资料…' : !item?.available ? '原文件暂时找不到' : '使用熟悉的应用查看' }}
+          {{ loading ? $t('正在打开资料…') : !item?.available ? $t('原文件暂时找不到') : $t('使用熟悉的应用查看') }}
         </h2>
         <p>
           {{
             contentError ||
             (!item?.available
-              ? '书签、标注与引用仍保留。重新定位后可继续阅读。'
-              : '此格式可以在外部应用打开，资料信息和关联仍由抱一管理。')
+              ? $t('书签、标注与引用仍保留。重新定位后可继续阅读。')
+              : $t('此格式可以在外部应用打开，资料信息和关联仍由抱一管理。'))
           }}
         </p>
         <button
@@ -744,12 +741,8 @@ function onFitPdf(mode: 'width' | 'page') {
               await load()
             })
           "
-        >
-          重新定位
-        </button>
-        <button v-if="contentError" type="button" class="ws-button" :disabled="busy" @click="load">
-          重试打开
-        </button>
+        >{{ $t("重新定位") }}</button>
+        <button v-if="contentError" type="button" class="ws-button" :disabled="busy" @click="load">{{ $t("重试打开") }}</button>
       </div>
 
       <ReaderAnnotationsSidebar
@@ -777,35 +770,25 @@ function onFitPdf(mode: 'width' | 'page') {
 
     <ProjectDialog
       v-if="editing"
-      :title="editing.id ? '编辑标注' : '补充想法'"
+      :title="editing.id ? $t('编辑标注') : $t('补充想法')"
       :busy="busy"
       @close="editing = null"
     >
       <form id="annotation-form" class="ws ws-form" @submit.prevent="saveAnnotation">
-        <p v-if="error" class="ws-error">{{ error }}</p>
-        <label v-if="editing.kind === 'excerpt'">
-          原文
-          <textarea v-model="editing.quote" required maxlength="30000" readonly />
+        <p v-if="error" class="ws-error">{{ $systemMessage(error) }}</p>
+        <label v-if="editing.kind === 'excerpt'">{{ $t("原文") }}<textarea v-model="editing.quote" required maxlength="30000" readonly />
         </label>
-        <p class="ws-muted">
-          来源位置：第 {{ editing.location.page
-          }}{{ editing.location.anchor?.pages?.length ? '–' + editing.location.anchor.pages.at(-1)!.page : '' }}
-          页/段
-        </p>
-        <label>
-          我的想法
-          <textarea
+        <p class="ws-muted">{{ $t("来源位置：第 {p0}{p1} 页/段", {p0: (editing.location.page), p1: (editing.location.anchor?.pages?.length ? '–' + editing.location.anchor.pages.at(-1)!.page : '')}) }}</p>
+        <label>{{ $t("我的想法") }}<textarea
             v-model="editing.note"
             maxlength="20000"
-            placeholder="记下自己的理解，也可以稍后补充。"
+            :placeholder="$t('记下自己的理解，也可以稍后补充。')"
           />
         </label>
       </form>
       <template #footer>
         <div class="ws">
-          <button class="ws-button primary" form="annotation-form" type="submit" :disabled="busy">
-            保存标注
-          </button>
+          <button class="ws-button primary" form="annotation-form" type="submit" :disabled="busy">{{ $t("保存标注") }}</button>
         </div>
       </template>
     </ProjectDialog>

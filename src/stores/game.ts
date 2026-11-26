@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
 import type { GameCounts, GameItem, GameQuery, PlayStatus, SaveStatus } from '@/types'
@@ -19,10 +21,10 @@ export type GameSelection =
   | { kind: 'tag'; value: string }
 
 export const PLAY_STATUS_LABEL: Record<PlayStatus, string> = {
-  unplayed: '想玩',
-  playing: '在玩',
-  completed: '通关',
-  shelved: '搁置'
+  get unplayed() { return tr('想玩') },
+  get playing() { return tr('在玩') },
+  get completed() { return tr('通关') },
+  get shelved() { return tr('搁置') }
 }
 
 /**
@@ -30,9 +32,9 @@ export const PLAY_STATUS_LABEL: Record<PlayStatus, string> = {
  * 真的不存盘。差别落在用户会不会去手动补一条路径上。
  */
 export const SAVE_STATUS_LABEL: Record<SaveStatus, string> = {
-  unbacked: '未备份',
-  backed: '已备份',
-  none: '未发现存档'
+  get unbacked() { return tr('未备份') },
+  get backed() { return tr('已备份') },
+  get none() { return tr('未发现存档') }
 }
 
 const EMPTY_COUNTS: GameCounts = {
@@ -76,14 +78,14 @@ export const useGameStore = defineStore('game', () => {
 
   const heading = computed(() => {
     if(selection.kind==='project')return PROJECT_FILTERS[selection.value]
-    if (selection.kind === 'path') return '路径不可用'
-    if (selection.kind === 'platform') return selection.value === 'android' ? '安卓游戏' : '电脑游戏'
-    if (selection.kind === 'uncategorized') return '未分类'
+    if (selection.kind === 'path') return tr('路径不可用')
+    if (selection.kind === 'platform') return selection.value === 'android' ? tr('安卓游戏') : tr('电脑游戏')
+    if (selection.kind === 'uncategorized') return tr('未分类')
     if (selection.kind === 'category') return selection.value
     if (selection.kind === 'tag') return `# ${selection.value}`
     if (selection.kind === 'status') return PLAY_STATUS_LABEL[selection.value]
     if (selection.kind === 'save') return SAVE_STATUS_LABEL[selection.value]
-    return selection.value === 'archived' ? '已归档' : '全部游戏'
+    return selection.value === 'archived' ? tr('已归档') : tr('全部游戏')
   })
 
   function buildQuery(): GameQuery {
@@ -108,7 +110,7 @@ export const useGameStore = defineStore('game', () => {
       if (loadRounds.isCurrent(round)) { items.value = selected.kind==='project'?next.filter(g=>matchesProject(g,selected.value)):selected.kind==='path'?next.filter(item=>item.path_state&&item.path_state!=='present'):selected.kind==='platform'?next.filter(item=>selected.value==='android'?/\.apk$/i.test(item.path):!/\.apk$/i.test(item.path)):next; loadedQuery.value = key }
     } catch (err) {
       // 失败时保留旧列表，比清空再显示「游戏库是空的」诚实
-      if (loadRounds.isCurrent(round)) toastError(`读取游戏列表失败：${errorMessage(err)}`)
+      if (loadRounds.isCurrent(round)) toastError(tr("读取游戏列表失败：{p0}", {p0: (errorMessage(err))}))
     } finally {
       if (loadRounds.isCurrent(round)) loading.value = false
     }
@@ -122,7 +124,7 @@ export const useGameStore = defineStore('game', () => {
       if(countsRounds.isCurrent(round)){unavailableCount.value=all.filter(item=>item.path_state&&item.path_state!=='present').length;androidCount.value=all.filter(item=>/\.apk$/i.test(item.path)).length;windowsCount.value=all.length-androidCount.value}
       if (countsRounds.isCurrent(round)) counts.value = next
     } catch (err) {
-      if (countsRounds.isCurrent(round)) toastError(`读取统计失败：${errorMessage(err)}`)
+      if (countsRounds.isCurrent(round)) toastError(tr("读取统计失败：{p0}", {p0: (errorMessage(err))}))
     }
   }
 
@@ -151,7 +153,7 @@ export const useGameStore = defineStore('game', () => {
     } catch (err) {
       // 这是一次顺手的体检，失败了不该拿一条红字挡在用户和他的游戏库之间。
       // 后果只是角标不出现，比「开库先看到一条报错」轻
-      console.warn('存档路径检查失败', errorMessage(err))
+      console.warn(tr("存档路径检查失败"), errorMessage(err))
     }
   }
 

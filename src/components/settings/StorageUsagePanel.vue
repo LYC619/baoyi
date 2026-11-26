@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { HardDrive, RefreshCw } from 'lucide-vue-next'
 import { errorMessage, formatBytes } from '@/utils'
@@ -20,7 +22,7 @@ async function clear() {
     const result = await window.baoyi.data.clearBrowserCache()
     if (token === revision) {
       usage.value = result.usage; error.value = result.warnings.join('；')
-      notice.value = `已清理 ${formatBytes(result.reclaimedBytes)} 浏览缓存，登录状态和资料文件保留`
+      notice.value = tr("已清理 {p0} 浏览缓存，登录状态和资料文件保留", {p0: (formatBytes(result.reclaimedBytes))})
     }
   } catch (cause) { if (token === revision) error.value = errorMessage(cause) }
   finally { if (token === revision) clearing.value = false }
@@ -30,17 +32,17 @@ onMounted(refresh)
 onUnmounted(() => { revision++ })
 </script>
 <template>
-  <section class="storage-usage panel" aria-label="数据占用">
-    <header><h2 class="sec-head"><HardDrive :size="19" />数据占用</h2><button class="btn btn--subtle" aria-label="刷新数据占用" :disabled="loading || clearing" @click="refresh"><RefreshCw :size="15" /></button></header>
-    <p class="sec-desc">这里统计整个应用数据目录。你的软件、视频、图片和文档原文件仍保存在各自的资源目录中。</p>
+  <section class="storage-usage panel" :aria-label="$t('数据占用')">
+    <header><h2 class="sec-head"><HardDrive :size="19" />{{ $t("数据占用") }}</h2><button class="btn btn--subtle" :aria-label="$t('刷新数据占用')" :disabled="loading || clearing" @click="refresh"><RefreshCw :size="15" /></button></header>
+    <p class="sec-desc">{{ $t("这里统计整个应用数据目录。你的软件、视频、图片和文档原文件仍保存在各自的资源目录中。") }}</p>
     <template v-if="usage">
-      <p class="storage-total"><strong>{{ formatBytes(usage.totalBytes) }}</strong><span>应用数据合计 · {{ usage.files.toLocaleString() }} 个文件</span></p>
+      <p class="storage-total"><strong>{{ formatBytes(usage.totalBytes) }}</strong><span>{{ $t("应用数据合计 · {p0} 个文件", {p0: (usage.files.toLocaleString($locale))}) }}</span></p>
       <dl class="storage-items"><template v-for="item in usage.items" :key="item.category"><dt>{{ item.label }}</dt><dd>{{ formatBytes(item.bytes) }}</dd></template></dl>
-      <p v-for="warning in usage.warnings" :key="warning" class="storage-error">{{ warning }}</p>
-    </template><p v-else-if="loading" role="status">正在统计目录占用…</p>
-    <div class="row"><button class="btn btn--ghost" :disabled="loading || clearing" @click="clear">{{ clearing ? '正在清理浏览缓存…' : '清理浏览缓存' }}</button></div>
-    <p class="hint hint--block">清理网页和脚本缓存，保留登录状态、站点数据、下载、海报和快照。下次打开网页时会重新获取所需内容；单个浏览会话的网页磁盘缓存预算为 64 MiB。</p>
-    <p v-if="notice" role="status">{{ notice }}</p><p v-if="error" class="storage-error" role="alert">{{ error }}</p>
+      <p v-for="warning in usage.warnings" :key="warning" class="storage-error">{{ $systemMessage(warning) }}</p>
+    </template><p v-else-if="loading" role="status">{{ $t("正在统计目录占用…") }}</p>
+    <div class="row"><button class="btn btn--ghost" :disabled="loading || clearing" @click="clear">{{ clearing ? $t('正在清理浏览缓存…') : $t('清理浏览缓存') }}</button></div>
+    <p class="hint hint--block">{{ $t("清理网页和脚本缓存，保留登录状态、站点数据、下载、海报和快照。下次打开网页时会重新获取所需内容；单个浏览会话的网页磁盘缓存预算为 64 MiB。") }}</p>
+    <p v-if="notice" role="status">{{ notice }}</p><p v-if="error" class="storage-error" role="alert">{{ $systemMessage(error) }}</p>
   </section>
 </template>
 <style scoped>

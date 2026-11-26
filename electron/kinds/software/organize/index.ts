@@ -34,7 +34,7 @@ import { deleteSoftware, getSoftware, getSoftwareByPath, listSoftware, updateSof
 import { getOrganizePlan, markPlanUndone, remapPaths, saveOrganizePlan } from '../../../services/storage/organize-plans.ts'
 import { getSettings } from '../../../services/storage/settings-store.ts'
 import { listCategories, upsertCategory } from '../../../services/taxonomy/taxonomy-store.ts'
-import { samePath } from '../../../services/system/fstree.ts'
+import { isDriveRoot, samePath } from '../../../services/system/fstree.ts'
 import {
   alreadyOrganized,
   defaultAction,
@@ -60,22 +60,153 @@ import {
 } from './fsops'
 import { describeRefs, hasRefs, scanRefs } from './refs'
 
-const SHARED_LEAF_DIRS = new Set(['downloads', 'desktop', 'documents', '下载', '桌面', '文档'])
+const SHARED_LEAF_DIRS = new Set([
+  'downloads', 'desktop', 'documents', '下载', '桌面', '文档',
+  'program files', 'program files (x86)', 'windows', 'system32'
+])
 
-function isSharedLooseExe(item: SoftwareItem, allItems: SoftwareItem[], scanDirs: string[]): boolean {
-  if (isMobilePackage(item.exe_path) || item.link_target) return false
-  const from = rootDirOf(item)
-  if (!samePath(from, path.dirname(item.exe_path))) return false
-  if ((item.launchers?.length ?? 0) > 1) return false
+const RUNTIME_DEP_EXTS = new Set([
+  '.dll', '.ocx', '.sys', '.drv', '.so', '.pyd', '.asar', '.pak', '.node', '.vdf'
+])
+
+const COMPANION_DIR_NAMES = new Set([
+  'runtime', 'runtimes', 'resources', 'res', 'bin', 'lib', 'libs',
+  'dll', 'dlls', 'plugins', 'modules', 'locales', 'swiftshader',
+  'jre', 'jdk', 'data', 'assets', 'config', 'conf', 'x64', 'x86', 'win32', 'win64'
+])
+
+type OrganizeScope =
+  | { mode: 'mobile' }
+  | { mode: 'directory' }
+  | { mode: 'single-file' }
+  | { mode: 'blocked'; reason: string }
+
+function knownSharedDirReason(from: string): string {
+  if (isDriveRoot(from)) return '所在位置是磁盘或共享根目录'
   const leaf = path.basename(from.replace(/[\\/]+$/, '')).toLowerCase()
   const home = process.env.USERPROFILE || process.env.HOME || ''
-  if (SHARED_LEAF_DIRS.has(leaf) || (home && samePath(from, home))) return true
-  if (scanDirs.some((r) => r && samePath(r, from))) return true
-  return allItems.some(
+  if (SHARED_LEAF_DIRS.has(leaf) || (home && samePath(from, home))) {
+    return '所在位置是系统或个人共用目录'
+  }
+  return ''
+}
+
+/**
+ * 检查共用目录内是否能确认该主程序为无依赖的独立单文件。
+ * 返回空串表示已确认无明显同级/子目录运行依赖；返回非空中文说明表示存在依赖或无法确认，应阻止自动抽离。
+ */
+async function inspectLooseExeBlockReason(dir: string, exePath: string): Promise<string> {
+  const MAX_DEPTH = 2
+  const MAX_ENTRIES_PER_DIR = 200
+  const exeStem = path.basename(exePath, path.extname(exePath)).toLowerCase()
+
+  const walk = async (currentDir: string, depth: number): Promise<string> => {
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = await fsp.readdir(currentDir, { withFileTypes: true })
+    } catch (err: any) {
+      const code = err?.code ? `（${err.code}）` : ''
+      return `无法读取所在目录内容${code}，无法确认主程序是否独立，已阻止自动移动；请检查权限或手工移入独立文件夹后重新定位`
+    }
+    if (entries.length > MAX_ENTRIES_PER_DIR) {
+      return '所在目录内容较多，无法自动确认主程序是否独立无依赖；为避免拆散依赖文件，已阻止自动移动，请先手工移入独立文件夹并重新定位'
+    }
+    for (const entry of entries) {
+      const full = path.join(currentDir, entry.name)
+      if (entry.isSymbolicLink()) {
+        return '所在目录包含符号链接，无法确认主程序是否独立无依赖；请先手工移入独立文件夹并重新定位'
+      }
+      if (entry.isDirectory()) {
+        const lowerName = entry.name.toLowerCase()
+        if (
+          depth === 0 &&
+          (COMPANION_DIR_NAMES.has(lowerName) ||
+            (exeStem && (lowerName === exeStem || lowerName.startsWith(`${exeStem}_` ) || lowerName.startsWith(`${exeStem}-`))))
+        ) {
+          return `所在目录存在可能的程序配套子目录（${entry.name}），仅移动主程序可能导致软件无法启动；请先手工移入独立文件夹并重新定位`
+        }
+        if (depth >= MAX_DEPTH) {
+          return '所在目录包含较深层子目录，无法自动确认主程序是否独立无依赖；请先手工移入独立文件夹并重新定位'
+        }
+        const nestedReason = await walk(full, depth + 1)
+        if (nestedReason) return nestedReason
+        continue
+      }
+      if (!entry.isFile()) continue
+      if (depth === 0 && samePath(full, exePath)) continue
+      if (RUNTIME_DEP_EXTS.has(path.extname(entry.name).toLowerCase())) {
+        return depth === 0
+          ? '同目录存在动态库等依赖文件，仅移动主程序可能导致软件无法启动；请先手工移入独立文件夹并重新定位'
+          : `子目录（${path.relative(dir, full)}）存在动态库或资源依赖文件，仅移动主程序可能导致软件无法启动；请先手工移入独立文件夹并重新定位`
+      }
+    }
+    return ''
+  }
+
+  return walk(dir, 0)
+}
+
+async function classifyOrganizeScope(
+  item: SoftwareItem,
+  allItems: SoftwareItem[],
+  scanDirs: string[]
+): Promise<OrganizeScope> {
+  if (isMobilePackage(item.exe_path)) return { mode: 'mobile' }
+  const from = rootDirOf(item)
+
+  // 1. 已知系统/个人共用目录（如下载、桌面、文档、磁盘根）：绝不允许整目录移动；
+  // 仅当确认是无附属启动项且同目录无运行库依赖的独立单文件时，才允许仅移动该 EXE。
+  const knownShared = knownSharedDirReason(from)
+  if (knownShared) {
+    if (item.link_target) {
+      return {
+        mode: 'blocked',
+        reason: `${knownShared}且存在目录链接，无法自动整理；请先核对目录归属后手动处理`
+      }
+    }
+    const extraLaunchers = (item.launchers ?? []).filter((l) => !samePath(l.path, item.exe_path))
+    if (extraLaunchers.length > 0 || !samePath(from, path.dirname(item.exe_path))) {
+      return {
+        mode: 'blocked',
+        reason: `${knownShared}且关联了多个启动项或子目录，无法安全判断归属；为避免误移无关文件，已阻止整目录整理，请先手工移入独立文件夹并重新定位`
+      }
+    }
+    const depReason = await inspectLooseExeBlockReason(from, item.exe_path)
+    if (depReason) {
+      return {
+        mode: 'blocked',
+        reason: `${knownShared}，${depReason}`
+      }
+    }
+    return { mode: 'single-file' }
+  }
+
+  // 2. 软件根目录等于或包含已配置的扫描目录：既不能推定为单文件（会拆散便携软件的 DLL/配置），
+  // 也不能默认整目录搬迁（会带走自定义收纳目录里的无关文件），一律阻止自动整理待用户确认归属。
+  if (scanDirs.some((r) => r && nestedInside(from, r))) {
+    return {
+      mode: 'blocked',
+      reason: '所在目录与已配置的扫描根目录重合，无法自动区分是独立软件目录还是共用收纳目录；为避免误移无关文件或拆散依赖，已阻止自动整理，请先移入独立子目录并重新定位或调整扫描目录'
+    }
+  }
+
+  // 3. 目录内同时包含或嵌套其他已登记软件：既不能整目录搬走波及他人，
+  // 也不能凭单启动项强行抽走主程序（可能遗留 DLL/资源依赖），一律阻止自动整理。
+  const hasOther = allItems.some(
     (other) =>
       other.id !== item.id &&
-      (samePath(rootDirOf(other), from) || samePath(path.dirname(other.exe_path), from))
+      (samePath(rootDirOf(other), from) ||
+        samePath(path.dirname(other.exe_path), from) ||
+        nestedInside(from, rootDirOf(other)))
   )
+  if (hasOther) {
+    return {
+      mode: 'blocked',
+      reason: '所在目录同时包含其他已登记软件，无法安全整目录移动或单独抽离主程序；请先手工拆分到独立文件夹并重新定位后再整理'
+    }
+  }
+
+  return { mode: 'directory' }
 }
 
 async function moveSingleFile(fromFile: string, toFile: string): Promise<{ ok: boolean; note: string }> {
@@ -122,9 +253,11 @@ export async function previewOrganize(ids?: string[]): Promise<OrganizePreview> 
     if (!ids?.length && (alreadyOrganized(item, root) || isMobilePackage(item.exe_path))) continue
 
     const from = rootDirOf(item)
-    const mobile = isMobilePackage(item.exe_path)
-    const looseSingle = isSharedLooseExe(item, libraryItems, scanDirs)
-    const action = mobile
+    const scope = await classifyOrganizeScope(item, libraryItems, scanDirs)
+    const mobile = scope.mode === 'mobile'
+    const looseSingle = scope.mode === 'single-file'
+    const blocked = scope.mode === 'blocked'
+    const action = mobile || blocked
       ? 'skip'
       : looseSingle
         ? item.is_portable === false && item.move_risk === 'risky'
@@ -139,12 +272,13 @@ export async function previewOrganize(ids?: string[]): Promise<OrganizePreview> 
 
     const warnings: string[] = []
     if (mobile) warnings.push('手机 APP 安装包保留原文件，本次不参与电脑软件的整目录整理')
+    if (scope.mode === 'blocked') warnings.push(scope.reason)
     if (looseSingle) warnings.push('位于共用目录，整理时仅将该单文件移入新建子文件夹，不移动整个上级目录')
     if (!(await exists(looseSingle ? item.exe_path : from))) warnings.push(`源路径已经不在了：${looseSingle ? item.exe_path : from}`)
-    if (!looseSingle && nestedInside(from, to)) warnings.push('目标路径落在源目录内部，无法移动')
+    if (!looseSingle && !blocked && nestedInside(from, to)) warnings.push('目标路径落在源目录内部，无法移动')
 
     // 安装版要剪切：先把证据摆出来
-    if (action === 'move' && item.is_portable !== true && !looseSingle) {
+    if (action === 'move' && item.is_portable !== true && !looseSingle && !blocked) {
       const refs = await scanRefs(from)
       if (hasRefs(refs)) warnings.push(describeRefs(refs))
     }
@@ -229,10 +363,12 @@ export async function runOrganize(
       note: ''
     }
 
-    const looseSingle = isSharedLooseExe(item, libraryItems, scanDirs)
-    if (isMobilePackage(item.exe_path)) {
+    const scope = await classifyOrganizeScope(item, libraryItems, scanDirs)
+    if (scope.mode === 'mobile') {
       step.note = '手机 APP 安装包不参与电脑软件的整目录整理'
-    } else if (looseSingle) {
+    } else if (scope.mode === 'blocked') {
+      step.note = scope.reason
+    } else if (scope.mode === 'single-file') {
       const toExe = path.join(to, path.basename(item.exe_path))
       step.single_file = true
       step.to_exe = toExe

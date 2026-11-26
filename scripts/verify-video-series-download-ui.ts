@@ -183,6 +183,7 @@ const panelLoader = createRendererLoader({
 const Panel = panelLoader('src/components/video/SeriesDownload.vue').default
 async function renderPanel(id: string) {
   const app = Vue.createSSRApp(Panel, { id, hanimeId: '123' })
+  panelLoader('src/i18n/index.ts').installI18n(app)
   app.use(Pinia.createPinia())
   return parse(await renderToString(app))
 }

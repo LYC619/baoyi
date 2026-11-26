@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../i18n/index.ts"
+
 import { computed, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { activeModule, lastNonSettingsPath, moduleTarget, MODULE_TABS, type ModuleKey } from '@/composables/useModules'
@@ -30,13 +32,13 @@ const route = useRoute()
 const router = useRouter()
 
 const MODULE_LABELS: Record<ModuleKey, string> = {
-  software: '软件',
-  game: '游戏',
-  video: '影视',
-  image: '图片',
-  project: '项目',
-  document: '文库',
-  personal: '个人'
+  get software() { return tr('软件') },
+  get game() { return tr('游戏') },
+  get video() { return tr('影视') },
+  get image() { return tr('图片') },
+  get project() { return tr('项目') },
+  get document() { return tr('文库') },
+  get personal() { return tr('个人') }
 }
 
 const GLOBAL_TABS = ['appearance', 'ai', 'proxy', 'search', 'data', 'about']
@@ -46,28 +48,28 @@ const globalScope = computed(
 )
 
 const ALL_TABS = [
-  { id: 'personal', label: '个人设置', icon: Tags, modules: ['personal'] },
-  { id: 'project', label: '项目偏好', icon: FolderTree, modules: ['project'] },
-  { id: 'scan', label: '扫描与识别', icon: Telescope, modules: ['software', 'game', 'video', 'image', 'document'] },
-  { id: 'organize', label: '目录整理', icon: FolderTree, modules: ['software', 'video', 'image', 'document'] },
-  { id: 'categories', label: '分类', icon: FolderTree, modules: ['software', 'game', 'video', 'image', 'document', 'project'] },
-  { id: 'groups', label: '分组', icon: FolderTree, modules: ['document'] },
-  { id: 'tags', label: '标签', icon: Tags, modules: ['software', 'game', 'video', 'image', 'document', 'project'] },
-  { id: 'saves', label: '存档与备份', icon: Database, modules: ['game'] },
-  { id: 'reader', label: '阅读偏好', icon: Eye, modules: ['image', 'document'] },
-  { id: 'metadata', label: '影视刮削', icon: Telescope, modules: ['video'] },
-  { id: 'logs', label: '识别日志', icon: ScrollText, modules: ['software', 'game', 'video'] },
-  { id: 'hentai', label: '里番区基础设置', icon: Eye, modules: ['video'] },
-  { id: 'network', label: '网络与出站代理', icon: Globe, modules: ['video'] },
-  { id: 'downloads', label: '下载与缓存', icon: Download, modules: ['video'] },
-  { id: 'hentai-groups', label: '里番分组', icon: FolderTree, modules: ['video'] },
-  { id: 'hentai-tags', label: '里番标签', icon: Tags, modules: ['video'] },
-  { id: 'appearance', label: '外观', icon: Palette, modules: [] },
-  { id: 'ai', label: 'AI 配置', icon: Bot, modules: [] },
-  { id: 'proxy', label: '网络代理', icon: Globe, modules: [] },
-  { id: 'search', label: '联网搜索', icon: Globe, modules: [] },
-  { id: 'data', label: '数据管理', icon: Database, modules: [] },
-  { id: 'about', label: '关于', icon: Info, modules: [] }
+  { id: 'personal', get label() { return tr("个人设置") }, icon: Tags, modules: ['personal'] },
+  { id: 'project', get label() { return tr("项目偏好") }, icon: FolderTree, modules: ['project'] },
+  { id: 'scan', get label() { return tr("扫描与识别") }, icon: Telescope, modules: ['software', 'game', 'video', 'image', 'document'] },
+  { id: 'organize', get label() { return tr("目录整理") }, icon: FolderTree, modules: ['software', 'video', 'image', 'document'] },
+  { id: 'categories', get label() { return tr("分类") }, icon: FolderTree, modules: ['software', 'game', 'video', 'image', 'document', 'project'] },
+  { id: 'groups', get label() { return tr("分组") }, icon: FolderTree, modules: ['document'] },
+  { id: 'tags', get label() { return tr("标签") }, icon: Tags, modules: ['software', 'game', 'video', 'image', 'document', 'project'] },
+  { id: 'saves', get label() { return tr("存档与备份") }, icon: Database, modules: ['game'] },
+  { id: 'reader', get label() { return tr("阅读偏好") }, icon: Eye, modules: ['image', 'document'] },
+  { id: 'metadata', get label() { return tr("影视刮削") }, icon: Telescope, modules: ['video'] },
+  { id: 'logs', get label() { return tr("识别日志") }, icon: ScrollText, modules: ['software', 'game', 'video'] },
+  { id: 'hentai', get label() { return tr("里番区基础设置") }, icon: Eye, modules: ['video'] },
+  { id: 'network', get label() { return tr("网络与出站代理") }, icon: Globe, modules: ['video'] },
+  { id: 'downloads', get label() { return tr("下载与缓存") }, icon: Download, modules: ['video'] },
+  { id: 'hentai-groups', get label() { return tr("里番分组") }, icon: FolderTree, modules: ['video'] },
+  { id: 'hentai-tags', get label() { return tr("里番标签") }, icon: Tags, modules: ['video'] },
+  { id: 'appearance', get label() { return tr("外观") }, icon: Palette, modules: [] },
+  { id: 'ai', get label() { return tr("AI 配置") }, icon: Bot, modules: [] },
+  { id: 'proxy', get label() { return tr("网络代理") }, icon: Globe, modules: [] },
+  { id: 'search', get label() { return tr("联网搜索") }, icon: Globe, modules: [] },
+  { id: 'data', get label() { return tr("数据管理") }, icon: Database, modules: [] },
+  { id: 'about', get label() { return tr("关于") }, icon: Info, modules: [] }
 ] as const
 
 const moduleTabs = computed(() =>
@@ -165,17 +167,15 @@ const tabProps = computed(() => (tab.value === 'categories' || tab.value === 'ta
   <div class="settings">
     <header class="head">
       <button class="btn btn--subtle" @click="router.push(returnTarget)">
-        <ArrowLeft :size="16" />
-        返回
-      </button>
+        <ArrowLeft :size="16" />{{ $t("返回") }}</button>
       <h1>
-        {{ globalScope ? '全局设置' : '模块设置' }}
+        {{ globalScope ? $t('全局设置') : $t('模块设置') }}
         <span v-if="!globalScope" class="head__module">
           {{ MODULE_LABELS[activeModule] }}
         </span>
       </h1>
-      <nav class="scope-nav" aria-label="设置模块">
-        <button :class="{ on: globalScope }" @click="switchScope('global')">全局</button>
+      <nav class="scope-nav" :aria-label="$t('设置模块')">
+        <button :class="{ on: globalScope }" @click="switchScope('global')">{{ $t("全局") }}</button>
         <button
           v-for="module in MODULE_TABS"
           :key="module.key"
@@ -189,16 +189,16 @@ const tabProps = computed(() => (tab.value === 'categories' || tab.value === 'ta
 
     <div class="layout">
       <nav class="nav no-select">
-        <div class="nav__group-title">{{ MODULE_LABELS[activeModule] }}设置</div>
+        <div class="nav__group-title">{{ $t("{p0}设置", {p0: (MODULE_LABELS[activeModule])}) }}</div>
         <template v-for="t in moduleTabs" :key="t.id">
-          <div v-if="t.id === 'hentai'" class="nav__divider"><span>里番区</span></div>
+          <div v-if="t.id === 'hentai'" class="nav__divider"><span>{{ $t("里番区") }}</span></div>
           <button class="nav__item" :class="{ on: tab === t.id }" @click="go(t.id)">
             <component :is="t.icon" :size="15" />
             {{ t.label }}
           </button>
         </template>
 
-        <div class="nav__group-title nav__group-title--spaced">通用设置</div>
+        <div class="nav__group-title nav__group-title--spaced">{{ $t("通用设置") }}</div>
         <button v-for="t in globalTabs" :key="t.id" class="nav__item" :class="{ on: tab === t.id }" @click="go(t.id)">
           <component :is="t.icon" :size="15" />
           {{ t.label }}

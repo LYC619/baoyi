@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { computed, ref } from 'vue'
 import { errorMessage, plain } from '@/utils'
 import { useTaskCenter } from './useTaskCenter'
@@ -25,7 +27,7 @@ export function useOrganize() {
     unsubscribe = window.baoyi.organize.onProgress((p) => {
       if (!taskId) return
       progress.value = p
-      const message = p.phase === 'done' ? '正在汇总整理结果' : `正在整理 ${p.processed}/${p.total}，${p.failed} 个失败`
+      const message = p.phase === 'done' ? tr('正在汇总整理结果') : tr('正在整理 {p0}/{p1}，{p2} 个失败', {p0: p.processed, p1: p.total, p2: p.failed})
       tasks.update(taskId, { processed: p.processed, total: p.total, current: p.current, message }, { message: message + (p.current ? ' · ' + p.current : '') })
     })
   }
@@ -39,7 +41,7 @@ export function useOrganize() {
   const phaseLabel = computed(() => {
     const p = progress.value
     if (!p || p.phase === 'done') return ''
-    return `正在整理 ${p.processed}/${p.total}${p.failed > 0 ? `（${p.failed} 个失败）` : ''}`
+    return tr('正在整理 {p0}/{p1}{p2}', {p0: p.processed, p1: p.total, p2: p.failed > 0 ? tr('（{p0} 个失败）', {p0: p.failed}) : ''})
   })
 
   function preview(ids?: string[]): Promise<OrganizePreview> {
@@ -51,7 +53,7 @@ export function useOrganize() {
       return { plan_id: '', moved: 0, linked: 0, skipped: 0, failed: 0, steps: [] }
     }
     running.value = true
-    const id = tasks.start('organize', '软件目录整理', { total: commands.length })
+    const id = tasks.start('organize', tr("软件目录整理"), { total: commands.length })
     taskId = id
     progress.value = { phase: 'running', current: '', processed: 0, total: commands.length, failed: 0 }
     try {
@@ -62,11 +64,11 @@ export function useOrganize() {
       for (const step of result.steps) {
         if (!step.ok && step.note) tasks.log(id, 'warn', (step.name ? step.name + '：' : '') + step.note)
       }
-      if (result.failed > 0) tasks.log(id, 'warn', '部分条目整理失败，未完成项保留原位置，请查看整理记录')
-      tasks.finish(id, 'success', `整理完成：${result.moved} 个移动，${result.linked} 个关联，${result.skipped} 个跳过，${result.failed} 个失败`)
+      if (result.failed > 0) tasks.log(id, 'warn', tr("部分条目整理失败，未完成项保留原位置，请查看整理记录"))
+      tasks.finish(id, 'success', tr("整理完成：{p0} 个移动，{p1} 个关联，{p2} 个跳过，{p3} 个失败", {p0: (result.moved), p1: (result.linked), p2: (result.skipped), p3: (result.failed)}))
       return result
     } catch (err) {
-      tasks.finish(id, 'failed', '目录整理失败', errorMessage(err))
+      tasks.finish(id, 'failed', tr("目录整理失败"), errorMessage(err))
       throw err
     } finally {
       taskId = null

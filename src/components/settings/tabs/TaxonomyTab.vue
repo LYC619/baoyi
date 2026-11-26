@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 import { computed, onMounted, ref, watch } from 'vue'
 import { activeModule, type ModuleKey } from '@/composables/useModules'
@@ -105,9 +107,9 @@ const visibleTags = computed(() => {
 })
 
 const TAG_SOURCE_META: Record<Tag['source'], { label: string; tone: 'muted' | 'accent' | 'success' }> = {
-  ai: { label: 'AI 待确认', tone: 'muted' },
-  user: { label: '自建', tone: 'accent' },
-  confirmed: { label: '已确认', tone: 'success' }
+  ai: { get label() { return tr("AI 待确认") }, tone: 'muted' },
+  user: { get label() { return tr("自建") }, tone: 'accent' },
+  confirmed: { get label() { return tr("已确认") }, tone: 'success' }
 }
 
 async function saveCategory(c: Category, patch: Partial<Category>): Promise<boolean> {
@@ -125,7 +127,7 @@ async function addCategory(): Promise<void> {
   const name = newCategory.value.trim()
   if (!name) return
   if (taxonomyCategories.value.some((c) => c.name === name)) {
-    toast('已经有同名分类了')
+    toast(tr("已经有同名分类了"))
     return
   }
   const max = taxonomyCategories.value.reduce((n, c) => Math.max(n, c.sort_order), 0)
@@ -139,8 +141,8 @@ async function shiftCategory(id: string, delta: number): Promise<void> {
 
 async function dropCategory(c: Category): Promise<void> {
   const n = categoryCount.value.get(c.name) ?? 0
-  const warn = n > 0 ? `\n名下 ${n} 个条目会归入「其他」。` : ''
-  if (!(await confirmDialog({ title: `删除分类「${c.name}」？`, message: `${warn ? warn.trim() + '\n' : ''}仅调整库内分类，不会删除任何本地文件。`, confirmText: '删除分类', tone: 'danger' }))) return
+  const warn = n > 0 ? tr("\n名下 {p0} 个条目会归入「其他」。", {p0: (n)}) : ''
+  if (!(await confirmDialog({ title: tr('删除分类「{p0}」？', {p0: c.name}), message: tr("{p0}仅调整库内分类，不会删除任何本地文件。", {p0: (warn ? warn.trim() + '\n' : '')}), confirmText: tr('删除分类'), tone: 'danger' }))) return
   await mutateTaxonomy(() => window.baoyi.categories.remove(c.id))
 }
 
@@ -158,8 +160,8 @@ function onTagRename(t: Tag, e: Event): void {
 }
 
 async function dropTag(t: Tag): Promise<void> {
-  const warn = t.usage_count > 0 ? `\n${t.usage_count} 个条目会失去这个标签。` : ''
-  if (!(await confirmDialog({ title: `删除标签「${t.name}」？`, message: warn ? warn.trim() : '删除后相关条目将移除该标签，本地文件不受影响。', confirmText: '删除标签', tone: 'danger' }))) return
+  const warn = t.usage_count > 0 ? tr("\n{p0} 个条目会失去这个标签。", {p0: (t.usage_count)}) : ''
+  if (!(await confirmDialog({ title: tr('删除标签「{p0}」？', {p0: t.name}), message: warn ? warn.trim() : tr("删除后相关条目将移除该标签，本地文件不受影响。"), confirmText: tr('删除标签'), tone: 'danger' }))) return
   await mutateTaxonomy(() => window.baoyi.tags.remove(t.id))
   mergePick.value = mergePick.value.filter((id) => id !== t.id)
   await refreshTaxonomy()
@@ -176,18 +178,18 @@ async function doMerge(): Promise<void> {
   const into = mergeInto.value
   const from = mergePick.value.filter((id) => id !== into)
   if (into == null || from.length === 0) {
-    toast('先勾选要合并的标签，再选一个目标')
+    toast(tr("先勾选要合并的标签，再选一个目标"))
     return
   }
   const target = tags.value.find((t) => t.id === into)?.name ?? ''
   const names = tags.value.filter((t) => from.includes(t.id)).map((t) => t.name)
-  if (!(await confirmDialog({ title: `合并标签至「${target}」？`, message: `将把「${names.join('、')}」并入「${target}」，相关条目上的标签引用会一并更新。`, confirmText: '确认合并' }))) return
+  if (!(await confirmDialog({ title: tr('合并标签至「{p0}」？', {p0: target}), message: tr("将把「{p0}」并入「{p1}」，相关条目上的标签引用会一并更新。", {p0: (names.join('、')), p1: (target)}), confirmText: tr('确认合并') }))) return
 
   if (!await mutateTaxonomy(() => window.baoyi.tags.merge(from, into))) return
   mergePick.value = []
   mergeInto.value = null
   await refreshTaxonomy()
-  success(`已并入「${target}」`)
+  success(tr("已并入「{p0}」", {p0: (target)}))
 }
 
 onMounted(loadTaxonomy)
@@ -198,28 +200,24 @@ const tab = computed(() => props.section)
 
 <template>
 <fieldset  class="taxonomy-fields" :disabled="taxonomyLoading || taxonomySaving">
-<p v-if="taxonomyLoading" class="hint" role="status">正在读取当前模块…</p>
+<p v-if="taxonomyLoading" class="hint" role="status">{{ $t("正在读取当前模块…") }}</p>
 <section v-if="tab === 'categories'" class="panel">
   <div class="sec-head">
-    <h2>分类</h2>
-    <span class="hint">{{ taxonomyCategories.length }} 个</span>
+    <h2>{{ $t("分类") }}</h2>
+    <span class="hint">{{ $t("{p0} 个", {p0: (taxonomyCategories.length)}) }}</span>
   </div>
-  <p class="sec-desc">
-    分类按<b>用途</b>分 —— 回答的是「我现在要干这件事，该开哪个」，
-    而不是「它属于哪一行」。这份列表和每条的说明会原样注入识别 prompt，
-    所以描述写得越准，AI 归类越稳。
-  </p>
+  <p class="sec-desc">{{ $t("分类按") }}<b>{{ $t("用途") }}</b>{{ $t("分 —— 回答的是「我现在要干这件事，该开哪个」， 而不是「它属于哪一行」。这份列表和每条的说明会原样注入识别 prompt， 所以描述写得越准，AI 归类越稳。") }}</p>
 
   <ul class="cats">
     <li v-for="(c, i) in taxonomyCategories" :key="c.id">
       <div class="cats__line">
         <div class="cats__move">
-          <button :disabled="i === 0" title="上移" @click="shiftCategory(c.id, -1)">
+          <button :disabled="i === 0" :title="$t('上移')" @click="shiftCategory(c.id, -1)">
             <ChevronUp :size="13" />
           </button>
           <button
             :disabled="i === taxonomyCategories.length - 1"
-            title="下移"
+            :title="$t('下移')"
             @click="shiftCategory(c.id, 1)"
           >
             <ChevronDown :size="13" />
@@ -228,13 +226,13 @@ const tab = computed(() => props.section)
         <input
           class="input"
           :value="c.name"
-          placeholder="分类名"
+          :placeholder="$t('分类名')"
           spellcheck="false"
           @blur="onCategoryField(c, 'name', $event)"
           @keydown.enter="($event.target as HTMLInputElement).blur()"
         />
         <span class="cats__n">{{ categoryCount.get(c.name) ?? 0 }}</span>
-        <button class="btn btn--subtle" title="删除" @click="dropCategory(c)">
+        <button class="btn btn--subtle" :title="$t('删除')" @click="dropCategory(c)">
           <Trash2 :size="14" />
         </button>
       </div>
@@ -242,7 +240,7 @@ const tab = computed(() => props.section)
         <input
           class="input"
           :value="c.description"
-          placeholder="一句话说明这个分类装什么（会喂给 AI）"
+          :placeholder="$t('一句话说明这个分类装什么（会喂给 AI）')"
           spellcheck="false"
           @blur="onCategoryField(c, 'description', $event)"
           @keydown.enter="($event.target as HTMLInputElement).blur()"
@@ -250,7 +248,7 @@ const tab = computed(() => props.section)
         <input
           class="input input--icon mono"
           :value="c.icon"
-          placeholder="图标名"
+          :placeholder="$t('图标名')"
           spellcheck="false"
           @blur="onCategoryField(c, 'icon', $event)"
           @keydown.enter="($event.target as HTMLInputElement).blur()"
@@ -263,40 +261,30 @@ const tab = computed(() => props.section)
     <input
       v-model="newCategory"
       class="input"
-      placeholder="新分类名"
+      :placeholder="$t('新分类名')"
       spellcheck="false"
       @keydown.enter="addCategory"
     />
     <button class="btn btn--ghost" :disabled="!newCategory.trim()" @click="addCategory">
-      <Plus :size="14" />
-      添加
-    </button>
+      <Plus :size="14" />{{ $t("添加") }}</button>
   </div>
-  <p class="hint hint--block">
-    图标填 Lucide 名称。内置了 {{ ICON_NAMES.join('、') }}，填别的会退回通用图标。
-  </p>
+  <p class="hint hint--block">{{ $t("图标填 Lucide 名称。内置了 {p0}，填别的会退回通用图标。", {p0: (ICON_NAMES.join('、'))}) }}</p>
 </section>
 
 <VideoTaxonomySettings v-if="tab === 'tags' && activeModule === 'video'" :key="taxonomyLoaded" section="tags" :hentai="false" @updated="loadTaxonomy" />
 <section v-if="tab === 'tags'" class="panel">
   <div class="sec-head">
-    <h2>{{ activeModule === 'video' ? '识别标签池（影视通用）' : '标签' }}</h2>
-    <span class="hint">{{ tags.length }} 个</span>
+    <h2>{{ activeModule === 'video' ? $t('识别标签池（影视通用）') : $t('标签') }}</h2>
+    <span class="hint">{{ $t("{p0} 个", {p0: (tags.length)}) }}</span>
   </div>
-  <p v-if="activeModule === 'video'" class="sec-desc">在此预设识别时优先使用的标签。沿用原有共享标签池：改名、合并或删除会更新全部影视作品中的同名通用标签，包含里番。只修改某个区域时，使用上方影视标签或左侧里番标签。</p>
-  <p v-else class="sec-desc">
-    标签描述<b>特征</b>（便携、开源、CLI），用途交给分类，两边说同一件事就是浪费。
-    只有「自建」和「已确认」的会作为标签池注入 prompt —— AI 自己造的词不进池，
-    否则它造一个新词下一轮就当既成事实继续用，标签只会越长越碎。
-  </p>
+  <p v-if="activeModule === 'video'" class="sec-desc">{{ $t("在此预设识别时优先使用的标签。沿用原有共享标签池：改名、合并或删除会更新全部影视作品中的同名通用标签，包含里番。只修改某个区域时，使用上方影视标签或左侧里番标签。") }}</p>
+  <p v-else class="sec-desc">{{ $t("标签描述") }}<b>{{ $t("特征") }}</b>{{ $t("（便携、开源、CLI），用途交给分类，两边说同一件事就是浪费。 只有「自建」和「已确认」的会作为标签池注入 prompt —— AI 自己造的词不进池， 否则它造一个新词下一轮就当既成事实继续用，标签只会越长越碎。") }}</p>
 
   <div class="row">
     <div class="segmented">
-      <button :class="{ on: tagFilter === 'all' }" @click="tagFilter = 'all'">全部</button>
-      <button :class="{ on: tagFilter === 'ai' }" @click="tagFilter = 'ai'">AI 未确认</button>
-      <button :class="{ on: tagFilter === 'fragment' }" @click="tagFilter = 'fragment'">
-        碎片（≤1）
-      </button>
+      <button :class="{ on: tagFilter === 'all' }" @click="tagFilter = 'all'">{{ $t("全部") }}</button>
+      <button :class="{ on: tagFilter === 'ai' }" @click="tagFilter = 'ai'">{{ $t("AI 未确认") }}</button>
+      <button :class="{ on: tagFilter === 'fragment' }" @click="tagFilter = 'fragment'">{{ $t("碎片（≤1）") }}</button>
     </div>
   </div>
 
@@ -305,7 +293,7 @@ const tab = computed(() => props.section)
       <input
         type="checkbox"
         :checked="mergePick.includes(t.id)"
-        title="勾选后可合并"
+        :title="$t('勾选后可合并')"
         @change="toggleMerge(t.id)"
       />
       <input
@@ -317,39 +305,35 @@ const tab = computed(() => props.section)
       />
       <TagBadge :label="TAG_SOURCE_META[t.source].label" :tone="TAG_SOURCE_META[t.source].tone" />
       <span class="tags__n">{{ t.usage_count }}</span>
-      <button class="btn btn--subtle" title="删除" @click="dropTag(t)">
+      <button class="btn btn--subtle" :title="$t('删除')" @click="dropTag(t)">
         <Trash2 :size="14" />
       </button>
     </li>
   </ul>
   <p v-else class="empty-line">
-    {{ tagFilter === 'all' ? '还没有任何标签，识别几个目录之后就有了。' : '这个筛选下没有标签。' }}
+    {{ tagFilter === 'all' ? $t('还没有任何标签，识别几个目录之后就有了。') : $t('这个筛选下没有标签。') }}
   </p>
 
   <div v-if="mergePick.length > 0" class="row row--gap">
-    <span class="hint">已选 {{ mergePick.length }} 个，并入</span>
+    <span class="hint">{{ $t("已选 {p0} 个，并入", {p0: (mergePick.length)}) }}</span>
     <select v-model.number="mergeInto" class="input input--pick">
-      <option :value="null">选择目标标签</option>
+      <option :value="null">{{ $t("选择目标标签") }}</option>
       <option v-for="t in tags" :key="t.id" :value="t.id">{{ t.name }}</option>
     </select>
     <button class="btn btn--ghost" :disabled="mergeInto == null" @click="doMerge">
-      <Merge :size="14" />
-      合并
-    </button>
+      <Merge :size="14" />{{ $t("合并") }}</button>
   </div>
 
   <div class="row row--gap">
     <input
       v-model="newTag"
       class="input"
-      placeholder="新标签名"
+      :placeholder="$t('新标签名')"
       spellcheck="false"
       @keydown.enter="addTag"
     />
     <button class="btn btn--ghost" :disabled="!newTag.trim()" @click="addTag">
-      <Plus :size="14" />
-      添加
-    </button>
+      <Plus :size="14" />{{ $t("添加") }}</button>
   </div>
 </section>
         </fieldset>

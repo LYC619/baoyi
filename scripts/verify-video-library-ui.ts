@@ -19,7 +19,11 @@ async function test(name: string, run: () => Promise<void>) {
   try { await run(); passed++ }
   catch (error) { failed++; console.error('FAIL', name, error instanceof Error ? error.message : error) }
 }
-async function rows() { return parse(await renderToString(Vue.createSSRApp(Sidebar))).querySelectorAll('button').map(x => x.textContent) }
+async function rows() {
+  const app = Vue.createSSRApp(Sidebar)
+  loader('src/i18n/index.ts').installI18n(app)
+  return parse(await renderToString(app)).querySelectorAll('button').map(x => x.textContent)
+}
 await store.reload()
 await test('hentai is a type row and retired other-category entry stays hidden', async () => {
   const labels = await rows()
@@ -45,6 +49,29 @@ await test('collections retain their scope in queries and headings', async () =>
   await store.load()
   assert.equal(queries.at(-1).type, 'hentai')
   assert.ok((await rows()).some(x => x.includes('站方系列')))
+})
+await test('query changes hide old records while same-query refresh preserves current cards', async () => {
+  let release: (rows: any[]) => void = () => {}
+  const isolated = createRendererLoader({ vue: Vue, pinia: Pinia, '@/composables/useToast': { useToast: () => ({ error: () => {} }) } },
+    { window: { baoyi: { video: { list: () => new Promise<any[]>(resolve => { release = resolve }), counts: async () => counts } } } }, true)
+  Pinia.setActivePinia(Pinia.createPinia())
+  const scoped = isolated('src/stores/video.ts').useVideoStore()
+  scoped.select({kind:'type',value:'audio'})
+  let pending = scoped.load(); await Promise.resolve()
+  release([{id:'audio-cover'}]); await pending
+  assert.deepEqual(scoped.currentItems.map((item:any)=>item.id),['audio-cover'])
+  pending = scoped.load(); await Promise.resolve()
+  assert.equal(scoped.currentItems.length,1,'refresh of the same query must keep its layout')
+  release([{id:'audio-cover'}]); await pending
+  scoped.select({kind:'type',value:'hentai'})
+  pending=scoped.load(); await Promise.resolve()
+  assert.equal(scoped.currentItems.length,0,'old audio records cannot be rendered as video posters')
+  release([{id:'video-cover'}]); await pending
+  assert.deepEqual(scoped.currentItems.map((item:any)=>item.id),['video-cover'])
+  scoped.select({kind:'type',value:'audio'})
+  pending=scoped.load(); await Promise.resolve()
+  assert.equal(scoped.currentItems.length,0,'reverse switch cannot render old video records as audio')
+  release([{id:'audio-cover'}]); await pending
 })
 await test('global hide removes the type row and resets an active hentai selection', async () => {
   counts.hentai_visible = false

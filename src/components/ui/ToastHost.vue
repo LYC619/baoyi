@@ -78,7 +78,7 @@ watch(
     ref="hostEl"
     popover="manual"
     role="region"
-    aria-label="系统提示"
+    :aria-label="$t('系统提示')"
     class="toast-host"
     :style="{ bottom: (footerHeight + 20) + 'px' }"
   >
@@ -93,11 +93,11 @@ watch(
         @focusin="pause(t.id)"
         @focusout="onToastFocusOut(t.id, $event)"
       >
-        <span class="toast__text" :role="t.tone === 'error' ? 'alert' : 'status'">{{ t.text }}</span>
+        <span class="toast__text" :role="t.tone === 'error' ? 'alert' : 'status'">{{ $systemMessage(t.text) }}</span>
         <button
           type="button"
           class="toast__close"
-          aria-label="关闭提示"
+          :aria-label="$t('关闭提示')"
           @click="dismiss(t.id)"
         >
           <X :size="13" />

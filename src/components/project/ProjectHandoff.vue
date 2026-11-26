@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { errorMessage } from '@/utils'
 import {onBeforeUnmount,ref,watch} from 'vue'
 import {Copy,Sparkles} from 'lucide-vue-next'
@@ -30,8 +32,8 @@ async function regenerate(){
   // Generation consumes the previous preview token; always obtain a fresh one.
   if(value?.configured)await generate()
 }
-async function copy(text:string){try{await window.baoyi.app.copyText(text);notice.value='已复制，可以继续使用'}catch(e){error.value=errorMessage(e)}}
-async function adopt(){if(!result.value)return;try{await api.projectHandoffAdopt(props.id,result.value.contextRevision,result.value.prompt);adopted.value=true;notice.value='已设为关键 Prompt'}catch(e){error.value=errorMessage(e)}}
+async function copy(text:string){try{await window.baoyi.app.copyText(text);notice.value=tr("已复制，可以继续使用")}catch(e){error.value=errorMessage(e)}}
+async function adopt(){if(!result.value)return;try{await api.projectHandoffAdopt(props.id,result.value.contextRevision,result.value.prompt);adopted.value=true;notice.value=tr("已设为关键 Prompt")}catch(e){error.value=errorMessage(e)}}
 async function history(){if(!result.value)return;await assistant.show();await assistant.load(result.value.sessionId);emit('close')}
 async function stop(){try{await api.projectHandoffCancel(props.id)}catch(e){error.value=errorMessage(e)}}
 watch(()=>props.id,()=>{result.value=null;preview.value=null;void load(true)},{immediate:true})
@@ -39,27 +41,27 @@ watch(assistant.privacyRevision,()=>emit('close'))
 onBeforeUnmount(()=>{disposed=true;revision++;if(busy.value)void api.projectHandoffCancel(props.id)})
 </script>
 <template>
-  <ProjectDialog title="生成下一步 Prompt" wide @close="emit('close')">
-    <p v-if="loading&&!busy" role="status">正在整理项目便签与 Git 状态…</p>
-    <p v-if="error" class="pj-error" role="alert">{{error}}</p><p v-if="notice" role="status">{{notice}}</p>
+  <ProjectDialog :title="$t('生成下一步 Prompt')" wide @close="emit('close')">
+    <p v-if="loading&&!busy" role="status">{{ $t("正在整理项目便签与 Git 状态…") }}</p>
+    <p v-if="error" class="pj-error" role="alert">{{$systemMessage(error)}}</p><p v-if="notice" role="status">{{notice}}</p>
     <template v-if="result">
-      <h3>{{result.goal}}</h3><div class="handoff-columns"><section><h4>已知事实</h4><ul><li v-for="fact in result.facts" :key="fact">{{fact}}</li></ul></section><section><h4>约束</h4><ul><li v-for="value in result.constraints" :key="value">{{value}}</li></ul></section></div>
-      <h4>建议 Prompt</h4><textarea :value="result.prompt" readonly aria-label="生成的下一步 Prompt" rows="10"/>
-      <h4>验收项</h4><ul><li v-for="value in result.acceptance" :key="value">{{value}}</li></ul>
-      <div class="handoff-actions"><button class="pj-button" @click="copy(result.prompt)"><Copy :size="14"/>复制 Prompt</button><button class="pj-button pj-primary" :disabled="adopted" @click="adopt">{{adopted?'已采用':'设为关键 Prompt'}}</button><button class="pj-button" @click="history">查看生成记录</button><button class="pj-button" :disabled="busy||loading" @click="regenerate">重新生成</button><button class="pj-button" :disabled="busy||loading" @click="adjustScope">返回调整范围</button></div>
+      <h3>{{result.goal}}</h3><div class="handoff-columns"><section><h4>{{ $t("已知事实") }}</h4><ul><li v-for="fact in result.facts" :key="fact">{{fact}}</li></ul></section><section><h4>{{ $t("约束") }}</h4><ul><li v-for="value in result.constraints" :key="value">{{value}}</li></ul></section></div>
+      <h4>{{ $t("建议 Prompt") }}</h4><textarea :value="result.prompt" readonly :aria-label="$t('生成的下一步 Prompt')" rows="10"/>
+      <h4>{{ $t("验收项") }}</h4><ul><li v-for="value in result.acceptance" :key="value">{{value}}</li></ul>
+      <div class="handoff-actions"><button class="pj-button" @click="copy(result.prompt)"><Copy :size="14"/>{{ $t("复制 Prompt") }}</button><button class="pj-button pj-primary" :disabled="adopted" @click="adopt">{{adopted?$t('已采用'):$t('设为关键 Prompt')}}</button><button class="pj-button" @click="history">{{ $t("查看生成记录") }}</button><button class="pj-button" :disabled="busy||loading" @click="regenerate">{{ $t("重新生成") }}</button><button class="pj-button" :disabled="busy||loading" @click="adjustScope">{{ $t("返回调整范围") }}</button></div>
     </template>
     <template v-else-if="preview">
-      <p class="handoff-lead">将项目名称、Git 分支与短状态、便签和规则链接发送给 <strong>{{preview.provider}}</strong>。</p>
-      <p class="pj-muted">生成过程只读取这份快照。完整 Diff、日志和未跟踪文件正文不在范围内。快照及结果会保存在本机助理会话。</p>
-      <label class="handoff-check"><input v-model="includeRules" type="checkbox" :disabled="busy||loading" @change="load()"/>同时发送项目内规则文件正文（总计最多 12,000 字）</label>
-      <details><summary>核对实际发送内容</summary><pre>{{JSON.stringify(preview.snapshot,null,2)}}</pre></details>
-      <p v-for="warning in preview.snapshot.warnings" :key="warning" class="pj-muted">{{warning}}</p>
-      <p v-for="rule in preview.snapshot.rules.filter(value=>value.warning||value.truncated)" :key="rule.path" class="pj-muted">{{rule.path}}：{{rule.warning||'只读取了部分文字'}}</p>
-      <label class="handoff-check"><input v-model="remember" type="checkbox" :disabled="busy"/>记住此项目的发送范围；模型、规则或范围变化时重新预览</label>
-      <div class="handoff-actions"><button class="pj-button pj-primary" :disabled="busy||loading||!preview.configured" @click="generate"><Sparkles :size="15"/>{{busy?'正在生成…':'生成 Prompt'}}</button><button v-if="busy" class="pj-button" @click="stop">停止生成</button><button class="pj-button" @click="copy(preview.localPrompt)"><Copy :size="14"/>复制本地交接模板</button></div>
-      <p v-if="!preview.configured" class="pj-muted">尚未启用模型，可直接使用本地交接模板。</p>
+      <p class="handoff-lead">{{ $t("将项目名称、Git 分支与短状态、便签和规则链接发送给") }}<strong>{{preview.provider}}</strong>。</p>
+      <p class="pj-muted">{{ $t("生成过程只读取这份快照。完整 Diff、日志和未跟踪文件正文不在范围内。快照及结果会保存在本机助理会话。") }}</p>
+      <label class="handoff-check"><input v-model="includeRules" type="checkbox" :disabled="busy||loading" @change="load()"/>{{ $t("同时发送项目内规则文件正文（总计最多 12,000 字）") }}</label>
+      <details><summary>{{ $t("核对实际发送内容") }}</summary><pre>{{JSON.stringify(preview.snapshot,null,2)}}</pre></details>
+      <p v-for="warning in preview.snapshot.warnings" :key="warning" class="pj-muted">{{$systemMessage(warning)}}</p>
+      <p v-for="rule in preview.snapshot.rules.filter(value=>value.warning||value.truncated)" :key="rule.path" class="pj-muted">{{rule.path}}：{{rule.warning||$t('只读取了部分文字')}}</p>
+      <label class="handoff-check"><input v-model="remember" type="checkbox" :disabled="busy"/>{{ $t("记住此项目的发送范围；模型、规则或范围变化时重新预览") }}</label>
+      <div class="handoff-actions"><button class="pj-button pj-primary" :disabled="busy||loading||!preview.configured" @click="generate"><Sparkles :size="15"/>{{busy?$t('正在生成…'):$t('生成 Prompt')}}</button><button v-if="busy" class="pj-button" @click="stop">{{ $t("停止生成") }}</button><button class="pj-button" @click="copy(preview.localPrompt)"><Copy :size="14"/>{{ $t("复制本地交接模板") }}</button></div>
+      <p v-if="!preview.configured" class="pj-muted">{{ $t("尚未启用模型，可直接使用本地交接模板。") }}</p>
     </template>
-    <button v-else-if="!loading&&!busy" class="pj-button" @click="load()">重新整理发送范围</button>
+    <button v-else-if="!loading&&!busy" class="pj-button" @click="load()">{{ $t("重新整理发送范围") }}</button>
   </ProjectDialog>
 </template>
 <style scoped>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowUpRight, Link2, Plus, Search as SearchIcon, Sparkles } from 'lucide-vue-next'
@@ -24,11 +26,11 @@ interface LinkTargetOption {
 }
 
 const OWNER_LABEL: Record<LinkOwner, string> = {
-  project: '项目',
-  event: '项目日志',
-  skill: '技能',
-  experience: '经历',
-  asset: '背包'
+  get project() { return tr('项目') },
+  get event() { return tr('项目日志') },
+  get skill() { return tr('技能') },
+  get experience() { return tr('经历') },
+  get asset() { return tr('背包') }
 }
 
 const props = defineProps<{
@@ -115,7 +117,7 @@ async function togglePicker(): Promise<void> {
         key: `project:${p.id}`,
         ownerType: 'project',
         ownerId: p.id,
-        groupLabel: '项目',
+        get groupLabel() { return tr("项目") },
         name: p.name
       })
     }
@@ -125,7 +127,7 @@ async function togglePicker(): Promise<void> {
         key: `${r.kind}:${r.id}`,
         ownerType: r.kind,
         ownerId: r.id,
-        groupLabel: `个人 · ${OWNER_LABEL[r.kind]}`,
+        groupLabel: tr("个人 · {p0}", {p0: (OWNER_LABEL[r.kind])}),
         name: r.name
       })
     }
@@ -145,7 +147,7 @@ async function addLinkTarget(chosen?: LinkTargetOption): Promise<void> {
   saving.value = true
   try {
     await window.baoyi.workspace.links.add(target.ownerType, target.ownerId, props.resourceId)
-    success(`已关联到「${target.name}」`)
+    success(tr("已关联到「{p0}」", {p0: (target.name)}))
     pickerOpen.value = false
     await loadBacklinks()
   } catch (cause) {
@@ -197,32 +199,31 @@ function askAssistant(): void {
 </script>
 
 <template>
-  <section class="backlinks-panel" aria-label="关联的项目与个人记录">
+  <section class="backlinks-panel" :aria-label="$t('关联的项目与个人记录')">
     <header class="backlinks-panel__head">
       <div class="backlinks-panel__title">
         <Link2 :size="15" />
-        <h2>关联的项目与个人记录</h2>
+        <h2>{{ $t("关联的项目与个人记录") }}</h2>
         <span v-if="backlinks.length" class="backlinks-panel__count">{{ backlinks.length }}</span>
       </div>
       <div class="backlinks-panel__actions">
         <button type="button" class="btn btn--subtle btn--sm" @click="askAssistant">
-          <Sparkles :size="13" />交给归档助理
-        </button>
+          <Sparkles :size="13" />{{ $t("交给归档助理") }}</button>
         <button type="button" class="btn btn--ghost btn--sm" @click="togglePicker">
-          <Plus :size="13" />{{ pickerOpen ? '收起' : '添加关联' }}
+          <Plus :size="13" />{{ pickerOpen ? $t('收起') : $t('添加关联') }}
         </button>
       </div>
     </header>
 
     <div v-if="pickerOpen" class="backlinks-picker">
       <template v-if="loadingOptions">
-        <p class="backlinks-panel__empty">正在读取可关联的项目与个人记录…</p>
+        <p class="backlinks-panel__empty">{{ $t("正在读取可关联的项目与个人记录…") }}</p>
       </template>
       <template v-else-if="!targetOptions.length">
-        <p class="backlinks-panel__empty">暂无进行中的项目或个人技能/经历/背包记录，可先前往「项目」或「个人」建立。</p>
+        <p class="backlinks-panel__empty">{{ $t("暂无进行中的项目或个人技能/经历/背包记录，可先前往「项目」或「个人」建立。") }}</p>
       </template>
       <template v-else-if="!unlinkedTargets.length">
-        <p class="backlinks-panel__empty">当前可关联的项目与个人记录均已建立关联。</p>
+        <p class="backlinks-panel__empty">{{ $t("当前可关联的项目与个人记录均已建立关联。") }}</p>
       </template>
       <div v-else class="backlinks-picker__body">
         <search class="backlinks-picker__search">
@@ -231,8 +232,8 @@ function askAssistant(): void {
             ref="filterInput"
             v-model="filterText"
             type="search"
-            placeholder="输入关键词筛选，点击下方条目直接关联（回车关联首项）…"
-            aria-label="筛选关联目标"
+            :placeholder="$t('输入关键词筛选，点击下方条目直接关联（回车关联首项）…')"
+            :aria-label="$t('筛选关联目标')"
             autocorrect="off"
             autocapitalize="none"
             spellcheck="false"
@@ -252,7 +253,7 @@ function askAssistant(): void {
             <span class="backlinks-candidate__name">{{ opt.name }}</span>
           </button>
         </div>
-        <p v-else class="backlinks-panel__empty">没有匹配的关联目标</p>
+        <p v-else class="backlinks-panel__empty">{{ $t("没有匹配的关联目标") }}</p>
       </div>
     </div>
 
@@ -269,9 +270,7 @@ function askAssistant(): void {
         <ArrowUpRight :size="13" class="backlink-chip__arrow" />
       </button>
     </div>
-    <p v-else-if="!pickerOpen" class="backlinks-panel__empty">
-      尚未关联项目或个人记录。可以把当前条目挂到相关项目、技能或背包记录里，方便来回查看。
-    </p>
+    <p v-else-if="!pickerOpen" class="backlinks-panel__empty">{{ $t("尚未关联项目或个人记录。可以把当前条目挂到相关项目、技能或背包记录里，方便来回查看。") }}</p>
   </section>
 </template>
 

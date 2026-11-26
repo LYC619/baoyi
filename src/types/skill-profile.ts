@@ -4,6 +4,7 @@ export interface SkillMetric {
   unit: string;
   type: "number" | "text" | "date";
   version: number;
+  archived?: boolean;
 }
 export interface SkillDraft {
   cardId?: string;
@@ -11,7 +12,7 @@ export interface SkillDraft {
   name: string;
   summary: string;
   parentId?: string;
-  metrics: Omit<SkillMetric, "version">[];
+  metrics: Omit<SkillMetric, "version" | "archived">[];
 }
 export interface SkillProposal {
   id: string;

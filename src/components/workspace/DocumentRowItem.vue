@@ -43,7 +43,7 @@ function onRowClick() {
       v-if="bulk"
       type="checkbox"
       :checked="checked"
-      :aria-label="'选择资料 ' + item.name"
+      :aria-label="$t('选择资料 ') + item.name"
       @click.stop
       @change="emit('toggle-check')"
     />
@@ -52,7 +52,7 @@ function onRowClick() {
       <strong>
         {{ item.name }}
         <span class="ws-badge">{{ item.typeName }}</span>
-        <span v-if="allSearch" class="ws-badge">{{ item.submodule === 'reading' ? '阅读' : '资料' }}</span>
+        <span v-if="allSearch" class="ws-badge">{{ item.submodule === 'reading' ? $t('阅读') : $t('资料') }}</span>
         <span v-if="showGroupBadge && item.customGroupId" class="ws-badge group-badge">
           {{ customGroups?.find((g) => g.id === item.customGroupId)?.name }}
         </span>
@@ -63,7 +63,7 @@ function onRowClick() {
             ? item.author || item.typeName
             : item.counterpart || item.typeName
         }}
-        <template v-if="item.expiresOn"> · 有效期至 {{ item.expiresOn }} </template>
+        <template v-if="item.expiresOn">{{ $t("· 有效期至 {p0}", {p0: (item.expiresOn)}) }} </template>
       </small>
       <span v-if="item.tags.length" class="row-tags ws-muted" :title="item.tags.join(' · ')">
         {{ item.tags.join(' · ') }}
@@ -77,15 +77,13 @@ function onRowClick() {
     </div>
     <div class="document-row-state">
       <DocumentProgress v-if="item.submodule === 'reading'" :item="item" />
-      <span v-if="projectCount" class="ws-badge project-count">
-        被 {{ projectCount }} 个项目引用
-      </span>
-      <small v-if="!item.available">文件暂不可用</small>
+      <span v-if="projectCount" class="ws-badge project-count">{{ $t("被 {p0} 个项目引用", {p0: (projectCount)}) }}</span>
+      <small v-if="!item.available">{{ $t("文件暂不可用") }}</small>
     </div>
     <button
       type="button"
       class="ws-icon row-open"
-      :aria-label="(item.submodule === 'reading' ? '阅读 ' : '查看 ') + item.name"
+      :aria-label="(item.submodule === 'reading' ? $t('阅读 ') : $t('查看 ')) + item.name"
       @click.stop="emit('open', item)"
     >
       ›

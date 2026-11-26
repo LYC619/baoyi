@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { errorMessage } from '@/utils'
 import { ref, computed, watch } from 'vue'
 import { Tag, Trash2, Check } from 'lucide-vue-next'
@@ -99,7 +101,7 @@ async function apply() {
       }
     }
     emit('updated')
-    message.value = `已更新 ${count} 份资料`
+    message.value = tr("已更新 {p0} 份资料", {p0: (count)})
     if (failures.length) error.value = failures.join('\n')
   })
 }
@@ -131,23 +133,23 @@ async function remove() {
 </script>
 
 <template>
-  <section class="document-bulk-toolbar" aria-label="批量管理资料">
+  <section class="document-bulk-toolbar" :aria-label="$t('批量管理资料')">
     <div class="bulk-inner">
       <div class="bulk-info">
-        <span class="count-badge">已选 <strong>{{ items.length }}</strong> 份</span>
+        <span class="count-badge">{{ $t("已选") }}<strong>{{ items.length }}</strong>{{ $t("份") }}</span>
       </div>
 
       <div class="bulk-actions">
-        <button class="ws-button bulk-btn" :disabled="busy||items.length>20" @click="insightQueue.open(items.map(item=>item.id))">精读所选（最多 20 份）</button>
+        <button class="ws-button bulk-btn" :disabled="busy||items.length>20" @click="insightQueue.open(items.map(item=>item.id))">{{ $t("精读所选（最多 20 份）") }}</button>
         <!-- Category Selector -->
         <div class="bulk-control">
-          <span class="control-label">分类</span>
-          <select v-model="category" aria-label="批量设置分类" :disabled="busy">
-            <option value="">保持原分类</option>
+          <span class="control-label">{{ $t("分类") }}</span>
+          <select v-model="category" :aria-label="$t('批量设置分类')" :disabled="busy">
+            <option value="">{{ $t("保持原分类") }}</option>
             <optgroup
               v-for="sub in (['reading', 'archive'] as const)"
               :key="sub"
-              :label="sub === 'reading' ? '阅读' : '资料'"
+              :label="sub === 'reading' ? $t('阅读') : $t('资料')"
             >
               <option
                 v-for="cat in categories.filter(c => c.submodule === sub)"
@@ -164,7 +166,7 @@ async function remove() {
         <div class="bulk-control">
           <label class="group-toggle">
             <input v-model="setGroup" type="checkbox" :disabled="busy || mixed" />
-            <span>设置分组</span>
+            <span>{{ $t("设置分组") }}</span>
           </label>
           <DocumentGroupSelect
             v-if="setGroup && !mixed"
@@ -175,7 +177,7 @@ async function remove() {
             :disabled="busy"
             @created="emit('updated')"
           />
-          <small v-if="mixed" class="ws-muted">跨模块需先选分类</small>
+          <small v-if="mixed" class="ws-muted">{{ $t("跨模块需先选分类") }}</small>
         </div>
 
         <!-- Tag Management Sub-interface Button -->
@@ -185,8 +187,7 @@ async function remove() {
           :disabled="busy"
           @click="showTagDialog = true"
         >
-          <Tag :size="14" /> 批量设置标签…
-        </button>
+          <Tag :size="14" />{{ $t("批量设置标签…") }}</button>
 
         <div class="action-divider"></div>
 
@@ -197,8 +198,7 @@ async function remove() {
           :disabled="busy || (!category && !setGroup)"
           @click="apply"
         >
-          <Check :size="14" /> 应用修改
-        </button>
+          <Check :size="14" />{{ $t("应用修改") }}</button>
 
         <!-- Delete Selected Button -->
         <button
@@ -207,13 +207,12 @@ async function remove() {
           :disabled="busy"
           @click="deleting = true; error = ''"
         >
-          <Trash2 :size="14" /> 删除所选
-        </button>
+          <Trash2 :size="14" />{{ $t("删除所选") }}</button>
       </div>
     </div>
 
     <p v-if="message" class="bulk-status" role="status">{{ message }}</p>
-    <p v-if="error && !deleting" class="ws-error bulk-status" role="alert">{{ error }}</p>
+    <p v-if="error && !deleting" class="ws-error bulk-status" role="alert">{{ $systemMessage(error) }}</p>
 
     <!-- Tag Management Dialog -->
     <DocumentTagDialog
@@ -229,45 +228,37 @@ async function remove() {
     <!-- Batch Removal Dialog -->
     <ProjectDialog
       v-if="deleting"
-      title="批量删除资料"
+      :title="$t('批量删除资料')"
       :busy="busy"
       @close="deleting = false; preview = null"
     >
       <div class="ws ws-form">
-        <p>已选择 {{ items.length }} 份资料。默认仅从抱一文库中移除索引，原文件、书签、摘录和项目引用快照安全保留。</p>
+        <p>{{ $t("已选择 {p0} 份资料。默认仅从抱一文库中移除索引，原文件、书签、摘录和项目引用快照安全保留。", {p0: (items.length)}) }}</p>
         <label class="check">
-          <input v-model="withFiles" type="checkbox" :disabled="busy" />
-          同时删除源文件（移入资料回收站）
-        </label>
+          <input v-model="withFiles" type="checkbox" :disabled="busy" />{{ $t("同时删除源文件（移入资料回收站）") }}</label>
         <template v-if="withFiles">
-          <p class="ws-muted">
-            将每份资料已登记且可用的源文件移到资料目录下的“回收站”，一个自然月后清理，也可自行恢复或清空。
-          </p>
+          <p class="ws-muted">{{ $t("将每份资料已登记且可用的源文件移到资料目录下的“回收站”，一个自然月后清理，也可自行恢复或清空。") }}</p>
           <button
             class="ws-button"
             type="button"
             :disabled="busy"
             @click="run(async () => { await workspace.preferences.chooseDataDirectory(); preview = null })"
-          >
-            选择资料数据目录
-          </button>
+          >{{ $t("选择资料数据目录") }}</button>
         </template>
         <div v-if="preview" class="batch-preview">
           <div v-for="item in preview.items" :key="item.id">
             <strong>{{ item.name }}</strong>
-            <p v-if="!item.files.length" class="ws-muted">仅移除索引</p>
+            <p v-if="!item.files.length" class="ws-muted">{{ $t("仅移除索引") }}</p>
             <p v-for="file in item.files" :key="file.source" class="ws-path">
               {{ file.source }} → {{ file.stored }}
             </p>
           </div>
         </div>
-        <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
+        <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
       </div>
       <template #footer>
         <div class="ws">
-          <button v-if="!preview" class="ws-button" type="button" :disabled="busy" @click="check">
-            预览删除范围
-          </button>
+          <button v-if="!preview" class="ws-button" type="button" :disabled="busy" @click="check">{{ $t("预览删除范围") }}</button>
           <button
             v-else
             class="ws-button danger"
@@ -275,7 +266,7 @@ async function remove() {
             :disabled="busy"
             @click="remove"
           >
-            {{ withFiles ? '确认移入回收站' : '确认仅移除索引' }}
+            {{ withFiles ? $t('确认移入回收站') : $t('确认仅移除索引') }}
           </button>
         </div>
       </template>

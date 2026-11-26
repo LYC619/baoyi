@@ -30,6 +30,3 @@ reference/
 # Python 验证与打包生成的字节码缓存
 __pycache__/
 *.py[cod]
-
-# Local owner notes are not public source.
-.user/

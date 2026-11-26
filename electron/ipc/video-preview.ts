@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { app, clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -68,7 +69,7 @@ export function registerVideoPreviewIpc(getWindow: () => BrowserWindow | null, i
   handle('copy', async token => clipboard.writeText(await service!.file(reqString(token, 'token', { max: 256 }))))
   handle('reveal', async token => shell.showItemInFolder(await service!.file(reqString(token, 'token', { max: 256 }))))
   handle('pick-player', async () => {
-    const result = await dialog.showOpenDialog(getWindow()!, { title: '选择本地视频播放器（如 PotPlayer、VLC、mpv）', properties: ['openFile'], filters: [{ name: '播放器程序', extensions: ['exe'] }] })
+    const result = await dialog.showOpenDialog(getWindow()!, { title: tr("选择本地视频播放器（如 PotPlayer、VLC、mpv）"), properties: ['openFile'], filters: [{ name: tr("播放器程序"), extensions: ['exe'] }] })
     if (result.canceled || !result.filePaths[0]) return null
     const file = result.filePaths[0]
     if (!/\.exe$/i.test(file) || !(await fs.stat(file)).isFile()) throw new Error('请选择有效的播放器 .exe 程序')

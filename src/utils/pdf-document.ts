@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { getDocument, GlobalWorkerOptions, PDFDataRangeTransport } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { workspace } from './workspace-api'
@@ -27,7 +29,7 @@ export class BaoyiPdfRangeTransport extends PDFDataRangeTransport {
         if (this.stopped) return
         const size = Math.min(1024 * 1024, end - offset)
         const chunk = await (this.read ? this.read(offset, size) : workspace.documents.pdfRange(this.documentId, offset, size))
-        if (chunk.length !== size) throw new Error('PDF 来源已变化或读取不完整，请重新打开')
+        if (chunk.length !== size) throw new Error(tr('PDF 来源已变化或读取不完整，请重新打开'))
         chunks.push(chunk)
       }
       const result = new Uint8Array(length)

@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { latestOnly, STALE } from './latestOnly'
 import { errorMessage } from '@/utils'
 import { computed, reactive, ref, toRefs } from 'vue'
@@ -82,7 +84,7 @@ async function refresh(): Promise<void> {
   if (result === STALE) return
   const [saved, settings] = result
   if (saved.status === 'fulfilled') jobsError.value = ''
-  else jobsError.value = '读取下载任务失败：' + errorMessage(saved.reason)
+  else jobsError.value = tr("读取下载任务失败：") + errorMessage(saved.reason)
   if (settings.status === 'fulfilled' && settings.value && !signal.aborted) applyPreferences(settings.value)
 }
 
@@ -125,7 +127,7 @@ export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/vi
 
   async function prepare(): Promise<VideoDownloadDraft | null> {
     if (current.preparing || current.picking || current.enqueuing) return current.draft
-    if (!discovery && !resourceId && !current.url.trim()) { current.error = '先粘贴来源页面链接'; return null }
+    if (!discovery && !resourceId && !current.url.trim()) { current.error = tr("先粘贴来源页面链接"); return null }
     current.scope.abort(); current.scope = new AbortController()
     const { signal } = current.scope
     current.preparing = true
@@ -170,14 +172,14 @@ export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/vi
   async function enqueue(): Promise<VideoDownloadJob | null> {
     const draft = current.draft
     if (!draft || current.enqueuing || current.preparing || current.picking) return null
-    if (draftHidden.value) { current.error = '此分类已隐藏，请先在设置中恢复显示'; return null }
-    if (needsPrepare.value) { current.error = '链接已更改，请重新解析后再下载'; return null }
+    if (draftHidden.value) { current.error = tr("此分类已隐藏，请先在设置中恢复显示"); return null }
+    if (needsPrepare.value) { current.error = tr("链接已更改，请重新解析后再下载"); return null }
     const videoCodes = [...new Set(current.selectedVideoCodes)]
-    if (!videoCodes.length) { current.error = '请选择要下载的内容'; return null }
+    if (!videoCodes.length) { current.error = tr("请选择要下载的内容"); return null }
     if (videoCodes.some(code => !episodes.value.some(episode => episode.videoCode === code && episode.state !== 'queued' && episode.state !== 'other-work'))) {
-      current.error = '部分内容已排队或不在来源列表中，请重新解析'; return null
+      current.error = tr("部分内容已排队或不在来源列表中，请重新解析"); return null
     }
-    if (!current.title.trim()) { current.error = '请填写作品名称'; return null }
+    if (!current.title.trim()) { current.error = tr("请填写作品名称"); return null }
     current.enqueuing = true
     submittingCodes.value = new Set([...submittingCodes.value, ...videoCodes])
     current.error = ''
@@ -226,23 +228,23 @@ export function useVideoWorkflow(resourceId = '', discovery?: import('@/types/vi
 
   const retry = (id: string, stage: VideoJobRetry) => act(id, async () => {
     const job = jobs.value.find(job => job.id === id)
-    if (!job || active(job)) throw new Error('该任务不可重试或仍在处理中')
+    if (!job || active(job)) throw new Error(tr('该任务不可重试或仍在处理中'))
     const codes = job.items.filter(item => stage !== 'remaining' || item.transfer !== 'complete').map(item => item.videoCode)
-    if (codes.some(code => codeBusy(code, id))) throw new Error('这些内容已在其他下载任务中，请等待当前任务结束')
+    if (codes.some(code => codeBusy(code, id))) throw new Error(tr('这些内容已在其他下载任务中，请等待当前任务结束'))
     submittingCodes.value = new Set([...submittingCodes.value, ...codes])
     try { mergeJob(await window.baoyi.video.retryDownloadJob(id, stage)) }
     finally { submittingCodes.value = new Set([...submittingCodes.value].filter(code => !codes.includes(code))) }
   })
   const cancel = (id: string) => act(id, async () => {
-    if (!(await window.baoyi.video.cancelDownloadJob(id))) throw new Error('任务已结束，无法停止')
+    if (!(await window.baoyi.video.cancelDownloadJob(id))) throw new Error(tr('任务已结束，无法停止'))
     await refresh()
   })
   const dismiss = (id: string) => act(id, async () => {
-    if (!(await window.baoyi.video.dismissDownloadJob(id))) throw new Error('任务仍在处理，先停止再移除')
+    if (!(await window.baoyi.video.dismissDownloadJob(id))) throw new Error(tr('任务仍在处理，先停止再移除'))
     allJobs.value = allJobs.value.filter(job => job.id !== id)
   })
   const reveal = (id: string) => act(id, async () => {
-    if (!(await window.baoyi.video.revealDownloadJob(id))) throw new Error('保存位置暂不可用，请检查磁盘是否在线')
+    if (!(await window.baoyi.video.revealDownloadJob(id))) throw new Error(tr('保存位置暂不可用，请检查磁盘是否在线'))
   })
 
   return { ...toRefs(current), jobs, currentJob, draftHidden, hideHentai, privacyReady, needsPrepare, episodes, jobsError, actionIds,

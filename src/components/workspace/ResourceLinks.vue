@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 import { errorMessage } from '@/utils'
 import { latestOnly, STALE } from '@/composables/latestOnly'
@@ -10,9 +12,8 @@ import ProjectFiles from './ProjectFiles.vue'
 import { workspace, openResource, kindLabels } from '@/utils/workspace-api'
 import type { LinkOwner, ResourceLink, ResourceOption, DocumentAnnotation } from '@/types/workspace'
 
-const props = withDefaults(defineProps<{ owner: LinkOwner; id: string; title?: string }>(), {
-  title: '相关实践与资源'
-})
+const props = defineProps<{ owner: LinkOwner; id: string; title?: string }>()
+const displayTitle = computed(() => props.title ?? tr('相关实践与资源'))
 
 const router = useRouter()
 const route = useRoute()
@@ -28,10 +29,8 @@ const busy = ref(false)
 const error = ref('')
 
 const readLinks = latestOnly((owner: LinkOwner, id: string) => workspace.links.list(owner, id))
-const readAnnotations = latestOnly((id: string) =>
-  options.value.find((x) => x.id === id)?.kind === 'document'
-    ? workspace.documents.annotations(id)
-    : Promise.resolve([])
+const readAnnotations = latestOnly((id: string | null) =>
+  id ? workspace.documents.annotations(id) : Promise.resolve([])
 )
 
 const linkedIds = computed(() => new Set(rows.value.map((r) => r.resourceId).filter(Boolean)))
@@ -56,11 +55,19 @@ async function load() {
   }
 }
 
+function closeDialog() {
+  void readAnnotations(null)
+  show.value = false
+  selected.value = ''
+  annotation.value = ''
+  annotations.value = []
+}
+
 watch(
   () => [props.owner, props.id],
   () => {
     rows.value = []
-    show.value = false
+    closeDialog()
     error.value = ''
     void load()
   },
@@ -68,10 +75,14 @@ watch(
 )
 
 const unsubscribe = workspace.onChanged(() => void load())
-onBeforeUnmount(unsubscribe)
+onBeforeUnmount(() => {
+  void readAnnotations(null)
+  unsubscribe()
+})
 
 async function start() {
   error.value = ''
+  void readAnnotations(null)
   try {
     options.value = await workspace.links.resources()
     selected.value = ''
@@ -86,26 +97,15 @@ async function start() {
   }
 }
 
-watch(selected, async (id) => {
-  annotations.value = []
-  annotation.value = ''
-  if (!id) return
-  try {
-    const value = await readAnnotations(id)
-    if (value !== STALE) annotations.value = value
-  } catch (e) {
-    error.value = errorMessage(e)
-  }
-})
-
 async function saveResourceLink(resourceId: string, annotationId?: string) {
   if (busy.value || !resourceId) return
+  void readAnnotations(null)
   busy.value = true
   error.value = ''
   try {
     await workspace.links.add(props.owner, props.id, resourceId, annotationId || undefined)
     await load()
-    show.value = false
+    closeDialog()
   } catch (e) {
     error.value = errorMessage(e)
   } finally {
@@ -114,19 +114,27 @@ async function saveResourceLink(resourceId: string, annotationId?: string) {
 }
 
 async function clickCandidate(item: ResourceOption) {
+  if (busy.value) return
+  error.value = ''
   if (item.kind !== 'document') {
+    selected.value = ''
+    annotation.value = ''
+    annotations.value = []
     await saveResourceLink(item.id)
     return
   }
   selected.value = item.id
+  annotation.value = ''
+  annotations.value = []
   try {
-    const docNotes = await workspace.documents.annotations(item.id)
+    const docNotes = await readAnnotations(item.id)
+    if (docNotes === STALE || !show.value || selected.value !== item.id) return
     annotations.value = docNotes
     if (!docNotes.length) {
       await saveResourceLink(item.id)
     }
   } catch (e) {
-    error.value = errorMessage(e)
+    if (show.value && selected.value === item.id) error.value = errorMessage(e)
   }
 }
 
@@ -145,9 +153,9 @@ function onSearchKeydown(event: KeyboardEvent) {
 async function remove(row: ResourceLink) {
   if (
     !(await confirmDialog({
-      title: '解除这条关联？',
-      message: '仅解除引用关系，原资料、本地文件与所属记录均会保留。',
-      confirmText: '解除关联'
+      title: tr('解除这条关联？'),
+      message: tr("仅解除引用关系，原资料、本地文件与所属记录均会保留。"),
+      confirmText: tr('解除关联')
     }))
   )
     return
@@ -173,45 +181,45 @@ async function open(row: ResourceLink) {
 <template>
   <section class="ws-links">
     <header class="ws-section-head">
-      <h3>{{ title }} <span class="ws-muted">{{ rows.length }}</span></h3>
+      <h3>{{ displayTitle }} <span class="ws-muted">{{ rows.length }}</span></h3>
       <div class="ws-links-actions">
         <ProjectFiles v-if="owner === 'project'" :project-id="id" inline />
-        <button class="ws-button" :aria-label="'添加' + title" @click="start"><Plus :size="15" />添加关联</button>
+        <button class="ws-button" :aria-label="$t('添加') + displayTitle" @click="start"><Plus :size="15" />{{ $t("添加关联") }}</button>
       </div>
     </header>
-    <p v-if="error && !show" class="ws-error" role="alert">{{ error }}</p>
-    <p v-if="!rows.length" class="ws-muted">关联项目、文库资料、软件或摘录，随时从这里直接跳转。</p>
+    <p v-if="error && !show" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
+    <p v-if="!rows.length" class="ws-muted">{{ $t("关联项目、文库资料、软件或摘录，随时从这里直接跳转。") }}</p>
     <div v-else class="ws-link-grid">
       <article v-for="row in rows" :key="row.id" class="ws-link">
         <Link2 :size="15" />
         <button class="ws-link-main" @click="open(row)">
           <strong>{{ row.name }}</strong>
-          <small>{{ kindLabels[row.kind] || row.kind }}<template v-if="row.missing"> · 原文件或索引暂不可用</template></small>
+          <small>{{ kindLabels[row.kind] || row.kind }}<template v-if="row.missing">{{ $t("· 原文件或索引暂不可用") }}</template></small>
           <p v-if="row.quote" class="ws-pre">{{ row.quote }}</p>
         </button>
-        <button class="ws-icon" :aria-label="'移除关联 ' + row.name" @click="remove(row)"><X :size="14" /></button>
+        <button class="ws-icon" :aria-label="$t('移除关联 ') + row.name" @click="remove(row)"><X :size="14" /></button>
       </article>
     </div>
 
-    <ProjectDialog v-if="show" title="关联资源" :busy="busy" @close="show = false">
+    <ProjectDialog v-if="show" :title="$t('关联资源')" :busy="busy" @close="closeDialog">
       <div class="ws ws-form">
-        <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
+        <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
         <search class="ws-candidate-search">
           <SearchIcon :size="15" />
           <input
             ref="filterInput"
             v-model="query"
             type="search"
-            aria-label="搜索可关联资源"
-            placeholder="输入名称或类型筛选，点击条目直接关联…"
+            :aria-label="$t('搜索可关联资源')"
+            :placeholder="$t('输入名称或类型筛选，点击条目直接关联…')"
             autocorrect="off"
             autocapitalize="none"
             spellcheck="false"
             @keydown="onSearchKeydown"
           />
         </search>
-        <div class="ws-candidate-list" role="listbox" aria-label="选择关联资源">
-          <p v-if="!filtered.length" class="ws-muted">没有匹配的条目，试试其他关键词。</p>
+        <div class="ws-candidate-list" role="listbox" :aria-label="$t('选择关联资源')">
+          <p v-if="!filtered.length" class="ws-muted">{{ $t("没有匹配的条目，试试其他关键词。") }}</p>
           <div
             v-for="r in filtered"
             :key="r.id"
@@ -226,32 +234,27 @@ async function open(row: ResourceLink) {
             >
               <span class="ws-badge">{{ kindLabels[r.kind] || r.kind }}</span>
               <strong>{{ r.name }}</strong>
-              <small v-if="linkedIds.has(r.id)" class="ws-muted">已关联</small>
+              <small v-if="linkedIds.has(r.id)" class="ws-muted">{{ $t("已关联") }}</small>
             </button>
             <button
               type="button"
               class="ws-button"
               :disabled="busy"
               @click="saveResourceLink(r.id)"
-            >
-              直接关联
-            </button>
+            >{{ $t("直接关联") }}</button>
           </div>
         </div>
-        <label v-if="selected && annotations.length">
-          摘录或书签（可选）
-          <select v-model="annotation" aria-label="选择关联摘录">
-            <option value="">关联整份资料</option>
-            <option v-for="a in annotations" :key="a.id" :value="a.id">
-              第 {{ a.location.page }} 页/段 · {{ (a.quote || a.note || '书签').slice(0, 70) }}
+        <label v-if="selected && annotations.length">{{ $t("摘录或书签（可选）") }}<select v-model="annotation" :aria-label="$t('选择关联摘录')">
+            <option value="">{{ $t("关联整份资料") }}</option>
+            <option v-for="a in annotations" :key="a.id" :value="a.id">{{ $t("第 {p0} 页/段 · {p1}", {p0: (a.location.page), p1: ((a.quote || a.note || $t('书签')).slice(0, 70))}) }}
             </option>
           </select>
         </label>
-        <p class="ws-muted">点击条目即可一步建立关联；若文库资料含书签或摘录，可进一步指定具体段落。</p>
+        <p class="ws-muted">{{ $t("点击条目即可一步建立关联；若文库资料含书签或摘录，可进一步指定具体段落。") }}</p>
       </div>
       <template v-if="selected && annotations.length" #footer>
         <div class="ws">
-          <button class="ws-button primary" :disabled="busy || !selected" @click="add">保存关联</button>
+          <button class="ws-button primary" :disabled="busy || !selected" @click="add">{{ $t("保存关联") }}</button>
         </div>
       </template>
     </ProjectDialog>

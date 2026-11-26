@@ -1,4 +1,5 @@
 import vm from 'node:vm'
+import { tr } from '../src/i18n/core.ts'
 import {transform} from 'esbuild'
 import {createBackup,listBackups,previewRestore,restoreBackup,backupScope} from '../electron/kinds/game/backup.ts'
 import assert from 'node:assert/strict'
@@ -82,7 +83,7 @@ test('leaving a game cancels pending save confirmations and stale retention prom
   const extract=async(name:string,endMarker:string)=>{const start=source.indexOf('async function '+name+'('),end=source.indexOf(endMarker,start);return (await transform(source.slice(start,end),{loader:'ts',format:'esm'})).code}
   const backup=await extract('backupSave','\n/**'),restore=await extract('restore','\nasync function dropBackup')
   const lifecycle=(await transform(source.slice(source.indexOf('let saveAction:'),source.indexOf('async function loadBackups')),{loader:'ts',format:'esm'})).code
-  const make=()=>{const calls:string[]=[],unmount:Array<()=>void>=[];const context={AbortController,onBeforeUnmount:(fn:()=>void)=>unmount.push(fn),unmount:()=>unmount.forEach(fn=>fn()),calls,item:{value:{id:'A'}},props:{id:'A'},backingUp:{value:''},restoring:{value:''},restoreTargets:{value:{}},formatBytes:String,formatDateTime:String,refreshBackups:async()=>{},success:()=>{},pruneOver:async()=>{calls.push('prune')},error:()=>{},errorMessage:String,window:{confirm:()=>{calls.push('confirm');return true},baoyi:{game:{previewBackup:async(..._args:any[])=>({files:1,bytes:1}),backupSave:async(id:string)=>{calls.push('backup '+id);return {ok:true,backup:{size_bytes:1},over:[{}]}},previewRestore:async(..._args:any[])=>({added:[],changed:[],removed:[],unchanged:0}),restoreBackup:async()=>{calls.push('restore');return {ok:true}}}}}};vm.createContext(context);vm.runInContext(lifecycle,context);return context}
+  const make=()=>{const calls:string[]=[],unmount:Array<()=>void>=[];const context={tr,AbortController,onBeforeUnmount:(fn:()=>void)=>unmount.push(fn),unmount:()=>unmount.forEach(fn=>fn()),calls,item:{value:{id:'A'}},props:{id:'A'},backingUp:{value:''},restoring:{value:''},restoreTargets:{value:{}},formatBytes:String,formatDateTime:String,refreshBackups:async()=>{},success:()=>{},pruneOver:async()=>{calls.push('prune')},error:()=>{},errorMessage:String,window:{confirm:()=>{calls.push('confirm');return true},baoyi:{game:{previewBackup:async(..._args:any[])=>({files:1,bytes:1}),backupSave:async(id:string)=>{calls.push('backup '+id);return {ok:true,backup:{size_bytes:1},over:[{}]}},previewRestore:async(..._args:any[])=>({added:[],changed:[],removed:[],unchanged:0}),restoreBackup:async()=>{calls.push('restore');return {ok:true}}}}}};vm.createContext(context);vm.runInContext(lifecycle,context);return context}
   for(const method of ['backup','restore']){
     const c=make();let release!:(value:any)=>void;const gate=new Promise<any>(r=>release=r)
     c.window.baoyi.game[method==='backup'?'previewBackup':'previewRestore']=async()=>gate

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { errorMessage } from '@/utils'
 import { computed, ref, watch } from 'vue'
 import { ChevronDown, Download, Loader2, RefreshCw } from 'lucide-vue-next'
@@ -11,7 +13,7 @@ const result = ref<ImageUpdateCheck | null>(null), selected = ref<string[]>([]),
 const downloads = useImageDownloads(), job = computed(() => downloads.jobs.value.find(j => j.id === pending.value))
 const active = computed(() => !!pending.value && (!job.value || ['queued', 'running', 'paused'].includes(job.value.status)))
 const newChapters = computed(() => result.value?.chapters.filter(c => c.status === 'new') || [])
-const labels: Record<ImageChapterUpdate['status'], string> = { new: '新增', downloaded: '已下载', incomplete: '不完整', unverified: '待核对', unavailable: '来源未列出' }
+const labels: Record<ImageChapterUpdate['status'], string> = { get new() { return tr('新增') }, get downloaded() { return tr('已下载') }, get incomplete() { return tr('不完整') }, get unverified() { return tr('待核对') }, get unavailable() { return tr('来源未列出') } }
 async function check() {
   if (busy.value || active.value) return
   expanded.value = true
@@ -23,33 +25,33 @@ async function check() {
 async function download() {
   if (!selected.value.length || busy.value || active.value) return
   busy.value = true; error.value = ''; message.value = ''
-  try { const queued = await window.baoyi.image.downloadUpdates(props.resourceId, [...selected.value]); pending.value = queued.id; message.value = '新章节已加入下载队列'; await downloads.refresh() }
+  try { const queued = await window.baoyi.image.downloadUpdates(props.resourceId, [...selected.value]); pending.value = queued.id; message.value = tr("新章节已加入下载队列"); await downloads.refresh() }
   catch (cause) { error.value = errorMessage(cause) }
   finally { busy.value = false }
 }
 watch([() => job.value?.status, busy], ([status, working]) => {
   if (working) return
-  if (!status) { if (pending.value) { pending.value = ''; message.value = '下载记录已移除' }; return }
+  if (!status) { if (pending.value) { pending.value = ''; message.value = tr("下载记录已移除") }; return }
   if (['queued', 'running', 'paused'].includes(status)) return
   const failure = job.value?.error
   pending.value = ''; result.value = null; selected.value = []
-  if (status === 'success') { message.value = '新增章节已入库'; emit('updated') }
-  else { message.value = ''; error.value = failure || '下载未完成，请检查下载记录' }
+  if (status === 'success') { message.value = tr("新增章节已入库"); emit('updated') }
+  else { message.value = ''; error.value = failure || tr("下载未完成，请检查下载记录") }
 })
 </script>
 
 <template>
-  <section class="image-updates" :class="{ compact }" aria-label="连载更新">
-    <header><h2 v-if="!compact">连载更新</h2><button class="im-button" :disabled="busy || active" @click="check"><Loader2 v-if="busy" :size="16" /><RefreshCw v-else :size="16" />{{ busy ? '正在处理' : '检查连载更新' }}</button><button v-if="compact && (result || error || message)" class="im-icon" :aria-label="expanded?'收起连载更新':'展开连载更新结果'" :aria-expanded="expanded" :aria-controls="'updates-'+resourceId" @click="expanded=!expanded"><ChevronDown :size="16" :style="{transform:expanded?'rotate(180deg)':''}"/></button></header>
+  <section class="image-updates" :class="{ compact }" :aria-label="$t('连载更新')">
+    <header><h2 v-if="!compact">{{ $t("连载更新") }}</h2><button class="im-button" :disabled="busy || active" @click="check"><Loader2 v-if="busy" :size="16" /><RefreshCw v-else :size="16" />{{ busy ? $t('正在处理') : $t('检查连载更新') }}</button><button v-if="compact && (result || error || message)" class="im-icon" :aria-label="expanded?$t('收起连载更新'):$t('展开连载更新结果')" :aria-expanded="expanded" :aria-controls="'updates-'+resourceId" @click="expanded=!expanded"><ChevronDown :size="16" :style="{transform:expanded?'rotate(180deg)':''}"/></button></header>
     <div v-show="!compact || expanded" :id="'updates-'+resourceId" class="update-result">
-    <h3 v-if="compact">连载更新结果</h3>
-    <p v-if="error" role="alert" class="im-error">{{ error }}</p><p v-if="message" role="status">{{ message }}</p><p v-if="job?.status === 'paused'">新章节下载已暂停</p>
+    <h3 v-if="compact">{{ $t("连载更新结果") }}</h3>
+    <p v-if="error" role="alert" class="im-error">{{ $systemMessage(error) }}</p><p v-if="message" role="status">{{ message }}</p><p v-if="job?.status === 'paused'">{{ $t("新章节下载已暂停") }}</p>
     <template v-if="result">
-      <p class="update-source">{{ result.sourceTitle }} · 来源{{ result.sourcePublication === 'completed' ? '已完结' : '连载中' }}<time>{{ new Date(result.checkedAt).toLocaleString() }}</time></p>
-      <div class="update-selection"><label><input type="checkbox" aria-label="全选新增章节" :disabled="busy || active || !newChapters.length" :checked="newChapters.length > 0 && selected.length === newChapters.length" :indeterminate="selected.length > 0 && selected.length < newChapters.length" @change="selected = ($event.target as HTMLInputElement).checked ? newChapters.map(c => c.id) : []" />新增 {{ newChapters.length }} 章</label><span>已选 {{ selected.length }} 章</span></div>
-      <ul class="update-chapters"><li v-for="chapter in result.chapters" :key="chapter.id" :data-chapter-id="chapter.id"><input v-model="selected" type="checkbox" :value="chapter.id" :disabled="busy || active || chapter.status !== 'new'" :aria-label="`选择章节 ${chapter.title} (${chapter.id})`" /><div><strong>{{ chapter.title }}</strong><small v-if="chapter.localTitle && chapter.localTitle !== chapter.title">本地：{{ chapter.localTitle }}</small></div><span :class="`update-${chapter.status}`">{{ labels[chapter.status] }}</span><small>{{ chapter.localPages }}{{ chapter.expectedPages !== null ? ' / ' + chapter.expectedPages : '' }} 页</small></li></ul>
-      <p v-if="!newChapters.length" class="update-note">没有新增章节</p>
-      <footer v-else><button class="im-button im-primary" :disabled="!selected.length || busy || active" @click="download"><Download :size="16" />下载所选新章节</button></footer>
+      <p class="update-source">{{ $t("{p0} · 来源{p1}", {p0: (result.sourceTitle), p1: (result.sourcePublication === 'completed' ? $t('已完结') : $t('连载中'))}) }}<time>{{ new Date(result.checkedAt).toLocaleString($locale) }}</time></p>
+      <div class="update-selection"><label><input type="checkbox" :aria-label="$t('全选新增章节')" :disabled="busy || active || !newChapters.length" :checked="newChapters.length > 0 && selected.length === newChapters.length" :indeterminate="selected.length > 0 && selected.length < newChapters.length" @change="selected = ($event.target as HTMLInputElement).checked ? newChapters.map(c => c.id) : []" />{{ $t("新增 {p0} 章", {p0: (newChapters.length)}) }}</label><span>{{ $t("已选 {p0} 章", {p0: (selected.length)}) }}</span></div>
+      <ul class="update-chapters"><li v-for="chapter in result.chapters" :key="chapter.id" :data-chapter-id="chapter.id"><input v-model="selected" type="checkbox" :value="chapter.id" :disabled="busy || active || chapter.status !== 'new'" :aria-label="$t('选择章节 {p0} ({p1})', {p0: chapter.title, p1: chapter.id})" /><div><strong>{{ chapter.title }}</strong><small v-if="chapter.localTitle && chapter.localTitle !== chapter.title">{{ $t("本地：{p0}", {p0: (chapter.localTitle)}) }}</small></div><span :class="`update-${chapter.status}`">{{ labels[chapter.status] }}</span><small>{{ $t("{p0}{p1} 页", {p0: (chapter.localPages), p1: (chapter.expectedPages !== null ? ' / ' + chapter.expectedPages : '')}) }}</small></li></ul>
+      <p v-if="!newChapters.length" class="update-note">{{ $t("没有新增章节") }}</p>
+      <footer v-else><button class="im-button im-primary" :disabled="!selected.length || busy || active" @click="download"><Download :size="16" />{{ $t("下载所选新章节") }}</button></footer>
     </template>
     </div>
   </section>

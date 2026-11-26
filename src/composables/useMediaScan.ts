@@ -1,3 +1,5 @@
+
+import { locale as appLocale, tr } from '../i18n/index.ts'
 import { computed, ref } from 'vue'
 import { errorMessage, plain, videoTitle } from '@/utils'
 import { useTaskCenter } from './useTaskCenter'
@@ -15,11 +17,11 @@ function createState() {
 // 同一个 IPC 进度通道只对应一个运行任务。状态不跟路由卸载，返回库页仍可查看和停止。
 const states = { game: createState(), video: createState() }
 const tasks = useTaskCenter()
-const names: Record<MediaKind, string> = { game: '游戏', video: '影视' }
+const names: Record<MediaKind, string> = { get game() { return tr("游戏") }, get video() { return tr("影视") } }
 
 async function execute<T>(kind: MediaKind, title: string, current: string, operation: (id: string) => Promise<T>): Promise<T> {
   const state = states[kind]
-  if (state.running.value) throw new Error(names[kind] + '任务正在进行，请等待本轮结束')
+  if (state.running.value) throw new Error(names[kind] + tr("任务正在进行，请等待本轮结束"))
   state.running.value = true
   state.stopping.value = false
   state.progress.value = { phase: 'scanning', current, processed: 0, total: 0, registered: 0, failed: 0, log: '' }
@@ -31,16 +33,16 @@ async function execute<T>(kind: MediaKind, title: string, current: string, opera
       // 后端的 done 可能把候选总数当作 processed；停止后不能据此假报全部完成。
       const processed = state.stopping.value && p.phase === 'done' ? (state.progress.value?.processed ?? 0) : p.processed
       state.progress.value = { ...p, processed }
-      const message = p.log || (p.phase === 'scanning' ? '正在扫描目录'
-        : p.phase === 'done' ? '正在汇总识别结果' : `已处理 ${p.processed}${p.total > 0 ? '/' + p.total : ' 项，总数待确定'}，已注册 ${p.registered} 个`)
+      const message = p.log || (p.phase === 'scanning' ? tr('正在扫描目录')
+        : p.phase === 'done' ? tr('正在汇总识别结果') : tr('已处理 {p0}{p1}，已注册 {p2} 个', {p0: p.processed, p1: p.total > 0 ? '/' + p.total : tr(' 项，总数待确定'), p2: p.registered}))
       tasks.update(id, {
         processed, total: p.total, current: p.current,
-        message: state.stopping.value ? '正在停止，等待当前任务收尾…' : message
+        message: state.stopping.value ? tr("正在停止，等待当前任务收尾…") : message
       }, { message: p.current ? message + ' · ' + p.current : message })
     })
     return await operation(id)
   } catch (err) {
-    tasks.finish(id, 'failed', title + '失败', errorMessage(err))
+    tasks.finish(id, 'failed', title + tr("失败"), errorMessage(err))
     throw err
   } finally {
     // 订阅由任务而非页面持有，切页不丢进度，成功/失败后统一释放。
@@ -53,8 +55,8 @@ async function execute<T>(kind: MediaKind, title: string, current: string, opera
 export function useMediaScan<K extends MediaKind>(kind: K) {
   const state = states[kind]
   async function run(dirs: string[], preflightWarning = ''): Promise<Results[K]> {
-    if (!dirs.length) throw new Error('先添加至少一个扫描目录')
-    return execute(kind, names[kind] + '目录扫描', dirs.join('；'), async (id) => {
+    if (!dirs.length) throw new Error(tr('先添加至少一个扫描目录'))
+    return execute(kind, names[kind] + tr("目录扫描"), dirs.join('；'), async (id) => {
       state.result.value = null
       if (preflightWarning.trim()) tasks.log(id, 'warn', preflightWarning)
       const result = await window.baoyi[kind].scan(plain(dirs)) as Results[K]
@@ -64,13 +66,13 @@ export function useMediaScan<K extends MediaKind>(kind: K) {
       const processed = state.stopping.value
         ? Math.min(result.candidates, result.registered + result.skipped + result.failed) : result.candidates
       tasks.update(id, { processed, total: result.candidates })
-      const episodes = 'episodes' in result && result.episodes > 0 ? `（${result.episodes} 集）` : ''
+      const episodes = 'episodes' in result && result.episodes > 0 ? tr("（{p0} 集）", {p0: (result.episodes)}) : ''
       const review = entries.filter(entry => entry.status === 'review').length
-      const message = `${result.candidates} 个候选，${result.registered} 个注册${episodes}，${result.skipped} 个跳过，${result.failed} 个失败` + (review ? `，${review} 个待确认` : '')
-      if (result.failed > 0) tasks.log(id, 'warn', '存在识别失败项，可在识别日志中查看原因')
-      if (review > 0) tasks.log(id, 'warn', `${review} 个条目的资料或归属待确认，可打开作品修正，或选中后使用智能复查`)
-      tasks.log(id, 'info', `本轮消耗 ${result.tokens.toLocaleString()} tokens`)
-      tasks.finish(id, state.stopping.value ? 'cancelled' : 'success', (state.stopping.value ? '扫描已停止，已完成结果保留：' : '扫描完成：') + message)
+      const message = tr('{p0} 个候选，{p1} 个注册{p2}，{p3} 个跳过，{p4} 个失败', {p0: result.candidates, p1: result.registered, p2: episodes, p3: result.skipped, p4: result.failed}) + (review ? tr('，{p0} 个待确认', {p0: review}) : '')
+      if (result.failed > 0) tasks.log(id, 'warn', tr("存在识别失败项，可在识别日志中查看原因"))
+      if (review > 0) tasks.log(id, 'warn', tr("{p0} 个条目的资料或归属待确认，可打开作品修正，或选中后使用智能复查", {p0: (review)}))
+      tasks.log(id, 'info', tr("本轮消耗 {p0} tokens", {p0: (result.tokens.toLocaleString(appLocale.value))}))
+      tasks.finish(id, state.stopping.value ? 'cancelled' : 'success', (state.stopping.value ? tr("扫描已停止，已完成结果保留：") : tr("扫描完成：")) + message)
       return result
     })
   }
@@ -78,8 +80,8 @@ export function useMediaScan<K extends MediaKind>(kind: K) {
     if (!state.taskId || state.stopping.value || state.progress.value?.phase === 'done') return
     window.baoyi[kind].cancel()
     state.stopping.value = true
-    tasks.update(state.taskId, { message: '正在停止，等待当前任务收尾…' })
-    tasks.log(state.taskId, 'warn', '用户请求停止；已注册的结果保留，等待本轮返回')
+    tasks.update(state.taskId, { message: tr("正在停止，等待当前任务收尾…") })
+    tasks.log(state.taskId, 'warn', tr("用户请求停止；已注册的结果保留，等待本轮返回"))
   }
   return { running: state.running, stopping: state.stopping, progress: state.progress,
     result: computed(() => state.result.value as Results[K] | null), run, cancel }
@@ -87,22 +89,22 @@ export function useMediaScan<K extends MediaKind>(kind: K) {
 
 /** Directory imports use the same task lifetime and progress subscription as scans. */
 export async function importVideoDirectory(): Promise<Awaited<ReturnType<typeof window.baoyi.video.importBundle>>> {
-  return execute('video', '影视目录导入', '', async id => {
+  return execute('video', tr("影视目录导入"), '', async id => {
     const result = await window.baoyi.video.importBundle()
-    if (!result) { tasks.finish(id, 'cancelled', '未选择目录，已取消导入'); return null }
+    if (!result) { tasks.finish(id, 'cancelled', tr("未选择目录，已取消导入")); return null }
     const scan = result.scanResult
     if (scan) {
       states.video.result.value = scan
       if (scan.entries?.length) tasks.setScanResults(id, scan.entries)
       tasks.update(id, { processed: scan.registered + scan.skipped + scan.failed, total: scan.candidates })
-      if (scan.failed) tasks.log(id, 'warn', `${scan.failed} 项识别失败，可展开识别日志查看原因`)
-      tasks.log(id, 'info', `本轮消耗 ${scan.tokens.toLocaleString()} tokens`)
+      if (scan.failed) tasks.log(id, 'warn', tr("{p0} 项识别失败，可展开识别日志查看原因", {p0: (scan.failed)}))
+      tasks.log(id, 'info', tr("本轮消耗 {p0} tokens", {p0: (scan.tokens.toLocaleString(appLocale.value))}))
       tasks.finish(id, states.video.stopping.value ? 'cancelled' : 'success',
-        `导入${states.video.stopping.value ? '已停止' : '完成'}：${scan.registered} 项入库，${scan.skipped} 项跳过，${scan.failed} 项失败`)
+        states.video.stopping.value ? tr('导入已停止：{p0} 项入库，{p1} 项跳过，{p2} 项失败', { p0: scan.registered, p1: scan.skipped, p2: scan.failed }) : tr('导入完成：{p0} 项入库，{p1} 项跳过，{p2} 项失败', { p0: scan.registered, p1: scan.skipped, p2: scan.failed }))
     } else {
       tasks.update(id, { processed: result.filesAdded, total: result.filesAdded })
-      tasks.log(id, 'info', '已读取本地作品清单，无需调用在线识别')
-      tasks.finish(id, 'success', `导入完成：新增 ${result.itemsAdded} 个内容项、${result.filesAdded} 个文件`)
+      tasks.log(id, 'info', tr("已读取本地作品清单，无需调用在线识别"))
+      tasks.finish(id, 'success', tr("导入完成：新增 {p0} 个内容项、{p1} 个文件", {p0: (result.itemsAdded), p1: (result.filesAdded)}))
     }
     for (const warning of result.warnings || []) tasks.log(id, 'warn', warning)
     return result
@@ -111,20 +113,20 @@ export async function importVideoDirectory(): Promise<Awaited<ReturnType<typeof 
 
 /** 重识别与扫描共享视频进度通道/取消控制器，不能同时启动，否则进度和取消对象会串线。 */
 export async function reidentifyVideo(item: VideoItem, forceHentai: boolean): Promise<VideoItem | null> {
-  const title = (forceHentai ? '按里番重新识别：' : '重新识别：') + videoTitle(item)
+  const title = (forceHentai ? tr('按里番重新识别：') : tr('重新识别：')) + videoTitle(item)
   return execute('video', title, item.path, async (id) => {
     const updated = await window.baoyi.video.reidentify(item.id, forceHentai)
     const state = states.video
     if (state.stopping.value) {
-      tasks.finish(id, 'cancelled', '重新识别已停止，已完成的结果保留')
+      tasks.finish(id, 'cancelled', tr("重新识别已停止，已完成的结果保留"))
       return null
     }
     // 主进程失败时有时仍返回原条目，不能把「找得到旧记录」当成刮削成功。
     if (!updated || (state.progress.value?.failed ?? 0) > 0) {
-      throw new Error(state.progress.value?.log || '识别失败，可在识别日志中查看原因')
+      throw new Error(state.progress.value?.log || tr("识别失败，可在识别日志中查看原因"))
     }
     tasks.update(id, { processed: 1, total: 1 })
-    tasks.finish(id, 'success', forceHentai ? '里番重新识别完成' : '重新识别完成')
+    tasks.finish(id, 'success', forceHentai ? tr("里番重新识别完成") : tr("重新识别完成"))
     return updated
   })
 }

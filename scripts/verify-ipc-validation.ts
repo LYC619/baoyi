@@ -4,6 +4,7 @@ import vm from 'node:vm'
 import { DatabaseSync } from 'node:sqlite'
 import {
   IpcError,
+  invalidArg,
   assertSafeIpcArgs,
   optBool,
   optEnum,
@@ -29,6 +30,7 @@ import { IpcActivity, mainWindowIpc } from '../electron/ipc/main-window.ts'
 import { initSchema } from '../electron/services/storage/schema.ts'
 import { KINDS } from '../electron/kinds/index.ts'
 import { createRendererLoader } from './helpers/renderer-harness.ts'
+import { applyLanguage, systemMessage } from '../src/i18n/index.ts'
 
 test('primitive and collection validators accept valid inputs and reject invalid payloads with structured IpcError', () => {
   assert.equal(reqString(' hello ', 'name', { trim: true }), 'hello')
@@ -191,4 +193,28 @@ test('IPC handler modules reject invalid runtime arguments before hitting databa
   await assert.rejects(async () => handlers.get('game:default-entry')!(event, 'g1', null), /参数 target 无效/)
 
   db.close()
+})
+
+test('English validation messages translate reasons and limits without changing raw errors or user paths', () => {
+  applyLanguage('en')
+  try {
+    assert.throws(() => invalidArg('url', '不是合法链接'), (cause: unknown) => {
+      assert.ok(cause instanceof IpcError)
+      assert.equal(cause.message, '参数 url 无效：不是合法链接')
+      assert.equal(cause.code, 'INVALID_ARGUMENT')
+      assert.equal(systemMessage(cause.message), 'The value for url is invalid: Not a valid URL')
+      return true
+    })
+    assert.throws(() => reqString('a', 'name', { min: 3 }), (cause: unknown) => {
+      assert.ok(cause instanceof IpcError)
+      assert.equal(systemMessage(cause.message), 'Invalid parameter name: Length must be at least 3')
+      return true
+    })
+    assert.equal(systemMessage('已启动Example Game'), 'Started Example Game')
+    assert.equal(systemMessage('入口编号无效'), 'Entry ID is invalid.')
+    assert.equal(systemMessage('2026 年度设置'), '2026 年度设置', 'short UI suffixes must not mangle user titles')
+    assert.equal(systemMessage('服务器返回了 3 个'), '服务器返回了 3 个', 'short UI counters must not mangle unknown messages')
+    assert.equal(systemMessage('保存失败：C:\\资料\\已停止.txt'), 'Could not save: C:\\资料\\已停止.txt')
+    assert.equal(systemMessage('保存失败：保存失败：已停止'), 'Could not save: 保存失败：已停止', 'captured text is not recursively pattern matched')
+  } finally { applyLanguage('zh-CN') }
 })

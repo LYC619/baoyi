@@ -1,3 +1,4 @@
+import { tr } from '../system/language.ts'
 import { BrowserWindow, Menu, session } from 'electron'
 import type { DiscoverySource, DiscoverySelection } from '../../../src/types/video-discovery.ts'
 
@@ -24,22 +25,22 @@ export function createDiscoveryBrowser(getMainWindow: () => BrowserWindow | null
     const target = entry ? mode === 'play' ? entry.playUrl || entry.pageUrl : entry.pageUrl || entry.playUrl : value.homeUrl
     if (!target) throw new Error('此来源没有提供对应页面地址')
     source = structuredClone(value)
-    if (window && !window.isDestroyed()) { window.setTitle(value.name + ' · 抱一'); void window.loadURL(target).catch(() => window?.setTitle('页面加载失败，可刷新重试 · 抱一')); window.show(); return }
+    if (window && !window.isDestroyed()) { window.setTitle(tr('{p0} · 抱一', { p0: value.name })); void window.loadURL(target).catch(() => window?.setTitle(tr('页面加载失败，可刷新重试 · 抱一'))); window.show(); return }
     const browserSession = session.fromPartition(DISCOVERY_PARTITION)
-    const win = new BrowserWindow({ width: 1120, height: 820, minWidth: 720, minHeight: 500, title: value.name + ' · 抱一',
+    const win = new BrowserWindow({ width: 1120, height: 820, minWidth: 720, minHeight: 500, title: tr('{p0} · 抱一', { p0: value.name }),
       webPreferences: { session: browserSession, contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } })
     window = win
-    const navigate = (url: string) => { if (allowed(url)) void win.loadURL(url).catch(() => win.setTitle('页面加载失败，可刷新重试 · 抱一')) }
+    const navigate = (url: string) => { if (allowed(url)) void win.loadURL(url).catch(() => win.setTitle(tr('页面加载失败，可刷新重试 · 抱一'))) }
     const updateMenu = () => {
       if (win.isDestroyed()) return
       const url = pageKey(win.webContents.getURL())
       const current = source?.entries.find(item => [item.pageUrl, item.playUrl, ...item.downloads.map(option => option.url)].filter(Boolean).some(link => pageKey(link) === url))
       win.setMenu(Menu.buildFromTemplate([
-        { label: '来源主页', enabled: !!source?.homeUrl, click: () => { if (source) navigate(source.homeUrl) } },
-        { label: '后退', enabled: win.webContents.navigationHistory.canGoBack(), click: () => win.webContents.navigationHistory.goBack() },
-        { label: '前进', enabled: win.webContents.navigationHistory.canGoForward(), click: () => win.webContents.navigationHistory.goForward() },
-        { label: '刷新', accelerator: 'CmdOrCtrl+R', click: () => win.webContents.reload() },
-        { label: '保存此视频', enabled: !!current?.downloads.length, click: () => {
+        { label: tr('来源主页'), enabled: !!source?.homeUrl, click: () => { if (source) navigate(source.homeUrl) } },
+        { label: tr('后退'), enabled: win.webContents.navigationHistory.canGoBack(), click: () => win.webContents.navigationHistory.goBack() },
+        { label: tr('前进'), enabled: win.webContents.navigationHistory.canGoForward(), click: () => win.webContents.navigationHistory.goForward() },
+        { label: tr('刷新'), accelerator: 'CmdOrCtrl+R', click: () => win.webContents.reload() },
+        { label: tr('保存此视频'), enabled: !!current?.downloads.length, click: () => {
           const host = getMainWindow()
           if (source && current && host && !host.isDestroyed()) {
             const selection: DiscoverySelection = { sourceId: source.id, entryId: current.id }
@@ -48,7 +49,7 @@ export function createDiscoveryBrowser(getMainWindow: () => BrowserWindow | null
         } }
       ]))
     }
-    const guard = (event: Electron.Event, url: string) => { if (!allowed(url)) { event.preventDefault(); win.setTitle('此跳转不在来源目录中 · 抱一') } }
+    const guard = (event: Electron.Event, url: string) => { if (!allowed(url)) { event.preventDefault(); win.setTitle(tr('此跳转不在来源目录中 · 抱一')) } }
     win.webContents.on('will-navigate', guard)
     win.webContents.on('will-redirect', (event, url, _inPlace, mainFrame) => { if (mainFrame) guard(event, url) })
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

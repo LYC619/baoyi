@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { confirmDialog } from '@/composables/useDialog'
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -71,24 +73,24 @@ const ctxMenuItems = computed<ContextMenuItem[]>(() => {
   return [
     {
       id: 'launch',
-      label: isMobilePackage(s.exe_path) ? '定位安装包' : '启动',
+      label: isMobilePackage(s.exe_path) ? tr("定位安装包") : tr("启动"),
       onSelect: () => launch(s.id)
     },
     {
       id: 'reveal',
-      label: '打开所在文件夹',
+      label: tr('打开所在文件夹'),
       onSelect: async () => {
         try { await window.baoyi.software.revealInFolder(s.id) } catch (e) { error(errorMessage(e)) }
       }
     },
     {
       id: 'detail',
-      label: '查看详情',
+      label: tr('查看详情'),
       onSelect: () => open(s.id)
     },
     ...catChoices.map((cat, idx) => ({
       id: `cat:${cat}`,
-      label: `分类：${cat}`,
+      label: tr('分类：{p0}', {p0: cat}),
       checked: s.category === cat,
       separatorBefore: idx === 0,
       onSelect: async () => {
@@ -97,9 +99,9 @@ const ctxMenuItems = computed<ContextMenuItem[]>(() => {
           const moves = await previewSoftwareCategoryChanges([s.id], cat)
           if (moves.length) {
             const ok = await confirmDialog({
-              title: '同步整理目录分类',
+              title: tr('同步整理目录分类'),
               message: categoryMoveConfirmation(moves),
-              confirmText: '确认迁移'
+              confirmText: tr('确认迁移')
             })
             if (!ok) return
             const p = moves[0].preview
@@ -109,31 +111,31 @@ const ctxMenuItems = computed<ContextMenuItem[]>(() => {
             await store.update(s.id, { category: cat })
           }
           await store.reload()
-          success(`已归入「${cat}」`)
+          success(tr("已归入「{p0}」", {p0: (cat)}))
         } catch (e) { error(errorMessage(e)) }
       }
     })),
     {
       id: 'archive',
-      label: s.is_archived ? '取消归档' : '归档',
+      label: s.is_archived ? tr("取消归档") : tr("归档"),
       separatorBefore: true,
       onSelect: async () => {
         try {
           await store.update(s.id, { is_archived: !s.is_archived })
           await store.reload()
-          toast(s.is_archived ? '已取消归档' : '已归档')
+          toast(s.is_archived ? tr("已取消归档") : tr("已归档"))
         } catch (e) { error(errorMessage(e)) }
       }
     },
     {
       id: 'remove',
-      label: '从库里移除',
+      label: tr('从库里移除'),
       danger: true,
       onSelect: async () => {
         const ok = await confirmDialog({
-          title: `从软件库移除「${sName}」？`,
-          message: s.link_target ? '整理目录中的链接会一并清理，真实软件文件保留不动。' : '仅移除抱一中的库记录，不会删除本地软件文件。',
-          confirmText: '移除记录',
+          title: tr('从软件库移除「{p0}」？', {p0: sName}),
+          message: s.link_target ? tr("整理目录中的链接会一并清理，真实软件文件保留不动。") : tr("仅移除抱一中的库记录，不会删除本地软件文件。"),
+          confirmText: tr('移除记录'),
           tone: 'danger'
         })
         if (!ok) return
@@ -170,7 +172,7 @@ const busyText = computed(() => {
   if (scan.running.value) return scan.phaseLabel.value
   if (ai.running.value) {
     const p = ai.progress.value
-    return p ? `AI 正在识别 ${p.processed}/${p.total}` : 'AI 正在识别'
+    return p ? tr("AI 正在识别 {p0}/{p1}", {p0: (p.processed), p1: (p.total)}) : tr("AI 正在识别")
   }
   return ''
 })
@@ -235,7 +237,7 @@ function open(id: string): void {
 
 async function launch(id: string): Promise<void> {
   const ok = await store.launch(id)
-  if (!ok) error('启动失败，文件可能已被移动或删除')
+  if (!ok) error(tr("启动失败，文件可能已被移动或删除"))
 }
 
 /**
@@ -245,7 +247,7 @@ async function launch(id: string): Promise<void> {
 async function rescan(): Promise<void> {
   const dirs = settings.settings.software_scan_dirs
   if (dirs.length === 0) {
-    toast('还没有配置扫描目录，先去设置里添加')
+    toast(tr("还没有配置扫描目录，先去设置里添加"))
     void router.push({ name: 'settings', query: { tab: 'scan' } })
     return
   }
@@ -254,17 +256,17 @@ async function rescan(): Promise<void> {
   await store.reload()
 
   if (result.pending === 0) {
-    toast(`未发现新软件（共扫描到 ${result.found} 个程序，目录都已处理过）`)
+    toast(tr("未发现新软件（共扫描到 {p0} 个程序，目录都已处理过）", {p0: (result.found)}))
     return
   }
 
   const ok = await confirmDialog({
-    title: result.added > 0 ? `发现 ${result.added} 个新目录` : '仍有待识别目录',
-    message: `当前共 ${result.pending} 个目录等待识别，是否现在开始识别？`,
-    confirmText: '开始识别'
+    title: result.added > 0 ? tr("发现 {p0} 个新目录", {p0: (result.added)}) : tr("仍有待识别目录"),
+    message: tr("当前共 {p0} 个目录等待识别，是否现在开始识别？", {p0: (result.pending)}),
+    confirmText: tr('开始识别')
   })
   if (!ok) {
-    toast(`已记录 ${result.pending} 个待识别目录，随时可到设置里处理`)
+    toast(tr("已记录 {p0} 个待识别目录，随时可到设置里处理", {p0: (result.pending)}))
     return
   }
   await completeAi()
@@ -286,17 +288,17 @@ const { dragging: dropActive, dropHandlers } = useFileDrop(async (paths) => {
         if (m && softwareExtSet.has(m[1].toLowerCase())) exeFiles.push(entry.path)
         else unsupported.push(entry.path.split(/[\\/]/).pop() || entry.path)
       } else if (entry.kind === 'symlink') {
-        unsupported.push((entry.path.split(/[\\/]/).pop() || entry.path) + '（链接）')
+        unsupported.push((entry.path.split(/[\\/]/).pop() || entry.path) + tr("（链接）"))
       }
     }
     if (unsupported.length > 0 && exeFiles.length === 0 && folders.length === 0) {
-      toast('软件库支持拖入可执行程序、安装包或解压后的软件文件夹')
+      toast(tr("软件库支持拖入可执行程序、安装包或解压后的软件文件夹"))
       return
     }
     if (exeFiles.length > 0) {
       const added = await store.addManual(exeFiles)
       if (added.length > 0) {
-        success(`已添加 ${added.length} 个程序`)
+        success(tr("已添加 {p0} 个程序", {p0: (added.length)}))
         await completeAi(added.map((a) => a.id))
       }
     }
@@ -305,15 +307,15 @@ const { dragging: dropActive, dropHandlers } = useFileDrop(async (paths) => {
       await store.reload()
       if (result.pending > 0) {
         const ok = await confirmDialog({
-          title: result.added > 0 ? `发现 ${result.added} 个新目录` : '仍有待识别目录',
-          message: `当前共 ${result.pending} 个目录等待识别，是否现在开始识别？`,
-          confirmText: '开始识别'
+          title: result.added > 0 ? tr("发现 {p0} 个新目录", {p0: (result.added)}) : tr("仍有待识别目录"),
+          message: tr("当前共 {p0} 个目录等待识别，是否现在开始识别？", {p0: (result.pending)}),
+          confirmText: tr('开始识别')
         })
         if (ok) await completeAi()
       } else if (result.found === 0) {
-        toast('未在拖入的文件夹中发现可执行程序')
+        toast(tr("未在拖入的文件夹中发现可执行程序"))
       } else {
-        toast(`已完成目录扫描（共检查 ${result.found} 个程序，此前均已收录）`)
+        toast(tr("已完成目录扫描（共检查 {p0} 个程序，此前均已收录）", {p0: (result.found)}))
       }
     }
   } catch (err) {
@@ -324,7 +326,7 @@ const { dragging: dropActive, dropHandlers } = useFileDrop(async (paths) => {
 async function addManual(): Promise<void> {
   const added = await store.addManual()
   if (added.length === 0) return
-  success(`已添加 ${added.length} 个程序`)
+  success(tr("已添加 {p0} 个程序", {p0: (added.length)}))
   await completeAi(added.map((a) => a.id))
 }
 
@@ -334,7 +336,7 @@ async function addManual(): Promise<void> {
  */
 async function completeAi(ids?: string[]): Promise<void> {
   if (!settings.settings.ai.enabled || !settings.settings.ai.api_key) {
-    toast('未配置 AI，可在设置里填写 API Key 后手动识别')
+    toast(tr("未配置 AI，可在设置里填写 API Key 后手动识别"))
     return
   }
   let result: AIResult
@@ -342,21 +344,21 @@ async function completeAi(ids?: string[]): Promise<void> {
     result = await ai.complete(ids)
   } catch (err) {
     // 卡片墙上这个按钮是识别的主入口，抛错时不说话等同于「点了没反应」
-    error(`识别没能跑起来：${errorMessage(err)}`)
+    error(tr("识别没能跑起来：{p0}", {p0: (errorMessage(err))}))
     return
   }
   await Promise.all([store.reload(), loadReport(result.report_id)])
 
   if (result.failed > 0) {
-    error(`识别完成：${result.registered} 个成功，${result.failed} 个失败（可看报告）`)
+    error(tr("识别完成：{p0} 个成功，{p1} 个失败（可看报告）", {p0: (result.registered), p1: (result.failed)}))
     return
   }
   if (result.registered === 0) return
 
   if (ids) {
-    success(`已识别并更新 ${result.registered} 个软件`)
+    success(tr("已识别并更新 {p0} 个软件", {p0: (result.registered)}))
   } else {
-    success(`识别出 ${result.registered} 个软件，去确认面板过目后收录`)
+    success(tr("识别出 {p0} 个软件，去确认面板过目后收录", {p0: (result.registered)}))
   }
 }
 
@@ -374,20 +376,20 @@ function onSortChange(e: Event): void {
   setSort((e.target as HTMLSelectElement).value as NonNullable<SoftwareQuery['sort']>)
 }
 
-const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '没有匹配的结果', desc: '换个关键词，或清空搜索' }
+const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: tr('没有匹配的结果'), desc: tr('换个关键词，或清空搜索') }
   if (store.selection.value === 'archived')
-    return { title: '归档区是空的', desc: '在详情页把不再常用的软件归档到这里' }
+    return { title: tr('归档区是空的'), desc: tr('在详情页把不再常用的软件归档到这里') }
   if (store.selection.value === 'unused')
-    return { title: '没有长期未用的软件', desc: '当前每一个都还在你的手上' }
+    return { title: tr('没有长期未用的软件'), desc: tr('当前每一个都还在你的手上') }
   if (store.counts.all === 0)
-    return { title: '还没有收录任何软件', desc: '扫描一个目录，开始抱住那个「一」' }
-  return { title: '这里还没有内容', desc: '换个分类看看' }
+    return { title: tr('还没有收录任何软件'), desc: tr('扫描一个目录，开始抱住那个「一」') }
+  return { title: tr('这里还没有内容'), desc: tr('换个分类看看') }
 })
 </script>
 
 <template>
   <div class="home" v-on="dropHandlers" @keydown="selection.key">
-    <DropZoneOverlay :active="dropActive" title="松开以加入软件库" hint="支持直接拖入程序安装包（.exe / .msi / .apk 等）或软件文件夹" />
+    <DropZoneOverlay :active="dropActive" :title="$t('松开以加入软件库')" :hint="$t('支持直接拖入程序安装包（.exe / .msi / .apk 等）或软件文件夹')" />
     <Sidebar />
 
     <main class="home__main">
@@ -403,46 +405,38 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
           <div class="segmented">
             <button
               :class="{ on: viewMode === 'grid' }"
-              title="网格视图"
+              :title="$t('网格视图')"
               @click="setViewMode('grid')"
             >
               <LayoutGrid :size="15" />
             </button>
             <button
               :class="{ on: viewMode === 'list' }"
-              title="列表视图"
+              :title="$t('列表视图')"
               @click="setViewMode('list')"
             >
               <List :size="15" />
             </button>
           </div>
 
-          <button ref="bulkTrigger" v-if="!selecting" class="btn btn--ghost" :disabled="busy || !store.items.length || store.loading" @click="selection.toggleMode">批量管理</button>
+          <button ref="bulkTrigger" v-if="!selecting" class="btn btn--ghost" :disabled="busy || !store.items.length || store.loading" @click="selection.toggleMode">{{ $t("批量管理") }}</button>
           <div class="add" @click.stop>
             <button class="btn btn--primary" :disabled="busy" @click="addMenuOpen = !addMenuOpen">
-              <Plus :size="15" />
-              新增
-            </button>
+              <Plus :size="15" />{{ $t("新增") }}</button>
             <Transition name="fade">
               <div v-if="addMenuOpen" class="menu">
                 <button
-                  title="扫描已配置的目录，发现新增软件后可进行 AI 识别"
+                  :title="$t('扫描已配置的目录，发现新增软件后可进行 AI 识别')"
                   @click="addMenuOpen = false; rescan()"
                 >
-                  <FolderSearch :size="15" />
-                  重新扫描目录
-                </button>
+                  <FolderSearch :size="15" />{{ $t("重新扫描目录") }}</button>
                 <button @click="addMenuOpen = false; addManual()">
-                  <Plus :size="15" />
-                  手动添加路径
-                </button>
+                  <Plus :size="15" />{{ $t("手动添加路径") }}</button>
                 <button
-                  title="按分类把软件归置到整理目录下。会先出方案给你过目"
+                  :title="$t('按分类把软件归置到整理目录下。会先出方案给你过目')"
                   @click="addMenuOpen = false; router.push({ name: 'organize' })"
                 >
-                  <FolderTree :size="15" />
-                  整理到目标目录
-                </button>
+                  <FolderTree :size="15" />{{ $t("整理到目标目录") }}</button>
               </div>
             </Transition>
           </div>
@@ -471,14 +465,12 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
             :disabled="busy"
             @click="completeAi()"
           >
-            <Sparkles :size="14" />
-            识别 {{ store.todo }} 项
-          </button>
+            <Sparkles :size="14" />{{ $t("识别 {p0} 项", {p0: (store.todo)}) }}</button>
 
           <button
             class="btn btn--subtle btn--toggle"
             :class="{ on: groupByCategory }"
-            :title="groupByCategory ? '取消分类分组，回到平铺' : '按分类分组展示'"
+            :title="groupByCategory ? $t('取消分类分组，回到平铺') : $t('按分类分组展示')"
             @click="toggleGroupByCategory"
           >
             <Rows3 :size="15" />
@@ -510,19 +502,14 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
         @click="router.push({ name: 'confirm' })"
       >
         <ClipboardCheck :size="15" />
-        <span>
-          有 {{ store.counts.pending_confirm }} 个新识别的软件待确认，点这里过目后收录。
-        </span>
+        <span>{{ $t("有 {p0} 个新识别的软件待确认，点这里过目后收录。", {p0: (store.counts.pending_confirm)}) }}</span>
         <ChevronRight :size="15" class="notice__go" />
       </button>
 
       <!-- 刚跑完那一轮的整体情况。识别要跑好几分钟，用户很可能没盯着屏幕 -->
       <button v-if="report" class="notice notice--action" @click="reportOpen = true">
         <FileBarChart :size="15" />
-        <span>
-          本轮识别报告：处理 {{ report.processed }} 个目录，成功 {{ report.registered }}、
-          跳过 {{ report.skipped }}、失败 {{ report.failed }}。点这里看详情。
-        </span>
+        <span>{{ $t("本轮识别报告：处理 {p0} 个目录，成功 {p1}、 跳过 {p2}、失败 {p3}。点这里看详情。", {p0: (report.processed), p1: (report.registered), p2: (report.skipped), p3: (report.failed)}) }}</span>
         <ChevronRight :size="15" class="notice__go" />
       </button>
 
@@ -531,15 +518,12 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
         class="notice"
       >
         <Timer :size="15" />
-        <span>
-          以下 {{ store.items.length }} 个软件超过 {{ settings.settings.unused_days }}
-          天没有动静了 —— 抱一没记到启动，它们目录里的配置文件也没被改过。留不留，值得再看一眼。
-        </span>
+        <span>{{ $t("以下 {p0} 个软件超过 {p1} 天没有动静了 —— 抱一没记到启动，它们目录里的配置文件也没被改过。留不留，值得再看一眼。", {p0: (store.items.length), p1: (settings.settings.unused_days)}) }}</span>
       </div>
 
       <div v-if="store.keyword.trim() && (store.selection.kind !== 'group' || store.selection.value !== 'all')" class="kw-hint" role="status">
-        <span>当前同时按关键词「{{ store.keyword.trim() }}」过滤</span>
-        <button type="button" class="btn btn--subtle" @click="store.keyword = ''; store.load()">清空关键词</button>
+        <span>{{ $t("当前同时按关键词「{p0}」过滤", {p0: (store.keyword.trim())}) }}</span>
+        <button type="button" class="btn btn--subtle" @click="store.keyword = ''; store.load()">{{ $t("清空关键词") }}</button>
       </div>
       <section ref="content" class="home__content">
         <template v-if="store.items.length > 0">
@@ -577,12 +561,12 @@ const emptyHint = computed(() => {  if (store.keyword.trim()) return { title: '�
         <div v-else-if="!store.loading" class="empty">
           <h2>{{ emptyHint.title }}</h2>
           <p>{{ emptyHint.desc }}</p>
-          <button v-if="filtered" class="btn btn--ghost" @click="clearFilters">清空筛选</button>
+          <button v-if="filtered" class="btn btn--ghost" @click="clearFilters">{{ $t("清空筛选") }}</button>
         </div>
       </section>
     </main>
 
-    <CardContextMenu ref="ctxMenu" label="软件卡片操作" :items="ctxMenuItems" />
+    <CardContextMenu ref="ctxMenu" :label="$t('软件卡片操作')" :items="ctxMenuItems" />
     <ReportDialog v-if="report && reportOpen" :report="report" @close="reportOpen = false" />
   </div>
 </template>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
 /**
  * 影视库首页：海报墙 + 侧边栏。
@@ -76,8 +78,8 @@ let pageDisposed = false
 const { compact, pendingOnly, issue } = toRefs(videoLibraryView)
 const workflow = useVideoWorkflow()
 const privateHidden = computed(() => !workflow.privacyReady.value || workflow.hideHentai.value)
-const visibleItems = computed(() => store.items.filter(item => !privateHidden.value || item.category !== '里番'))
-const issueLabels: Record<string, string> = { poster: '待补海报', files: '文件失联', metadata: '资料待补齐', 'metadata:description': '缺简介', 'metadata:poster': '缺封面', 'metadata:review': '未经识别确认', download: '下载待处理', review: '归属待确认' }
+const visibleItems = computed(() => store.currentItems.filter(item => !privateHidden.value || item.category !== '里番'))
+const issueLabels: Record<string, string> = { get poster() { return tr('待补海报') }, get files() { return tr('文件失联') }, get metadata() { return tr('资料待补齐') }, get 'metadata:description'() { return tr('缺简介') }, get 'metadata:poster'() { return tr('缺封面') }, get 'metadata:review'() { return tr('未经识别确认') }, get download() { return tr('下载待处理') }, get review() { return tr('归属待确认') } }
 function pendingReasons(item: VideoItem): string[] {
   const reasons = [...(item.pending_reasons ?? [])]
   if (store.missingPosters?.includes(item.id) && !reasons.includes('poster')) reasons.push('poster')
@@ -199,7 +201,7 @@ function selectionKey(event: KeyboardEvent): void {
 function clearLibraryFilters() { store.keyword = ''; pendingOnly.value = false; issue.value = 'any'; store.setFilters({ publishedFrom: '', publishedTo: '', status: '', local: '' }) }
 const checkedVideoCount = computed(() => shownItems.value.every(item => typeof item.available_files === 'number')
   ? shownItems.value.reduce((sum, item) => sum + (item.available_files ?? 0), 0) : null)
-const heading = computed(() => privateHidden.value && store.inHentaiScope ? '影视库' : store.heading)
+const heading = computed(() => privateHidden.value && store.inHentaiScope ? tr('影视库') : store.heading)
 const reviewingSelected = ref(false)
 let unlistenLibrary: (() => void) | undefined
 let libraryDirty = false
@@ -219,7 +221,7 @@ watch(() => store.activeKey, () => { pendingOnly.value = false })
 
 function itemStatus(item: VideoItem): string {
   const active = workflow.jobs.value.find(job => job.resourceId === item.id && (job.status === 'running' || job.status === 'queued'))
-  if (active) return active.status === 'queued' ? '已排队' : '下载处理中'
+  if (active) return active.status === 'queued' ? tr("已排队") : tr("下载处理中")
   // 角标写具体的那几条（缺简介、未经识别确认…），多条用「、」连；"资料待补齐"这个大类只在没有细分时兜底
   const reasons = pendingReasons(item)
   const specific = reasons.filter(reason => reason !== 'metadata' || !reasons.some(other => other.startsWith('metadata:')))
@@ -233,13 +235,13 @@ function addFromLink(): void { if (store.inHentaiScope && !privateHidden.value) 
 function togglePending(): void { pendingOnly.value = !pendingOnly.value }
 
 const SORTS: Array<{ value: NonNullable<VideoQuery['sort']>; label: string }> = [
-  { value: 'published', label: '最近发布' },
-  { value: 'published-asc', label: '最早发布' },
-  { value: 'added', label: '最近加入' },
-  { value: 'updated', label: '最近更新' },
-  { value: 'year', label: '按年份' },
-  { value: 'rating', label: '按评分' },
-  { value: 'name', label: '按名称' }
+  { value: 'published', get label() { return tr("最近发布") } },
+  { value: 'published-asc', get label() { return tr("最早发布") } },
+  { value: 'added', get label() { return tr("最近加入") } },
+  { value: 'updated', get label() { return tr("最近更新") } },
+  { value: 'year', get label() { return tr("按年份") } },
+  { value: 'rating', get label() { return tr("按评分") } },
+  { value: 'name', get label() { return tr("按名称") } }
 ]
 
 async function reviewSelected(): Promise<void> {
@@ -258,7 +260,7 @@ async function reviewSelected(): Promise<void> {
       if (operation.stopping.value) break
     }
     await store.reload()
-    toast(`复查${operation.stopping.value ? '已停止' : '完成'}：${updated} 部已更新` + (failed ? `，${failed} 部失败，详见任务日志` : ''))
+    toast((operation.stopping.value ? tr('复查已停止：{p0} 部已更新', { p0: updated }) : tr('复查完成：{p0} 部已更新', { p0: updated })) + (failed ? tr("，{p0} 部失败，详见任务日志", {p0: (failed)}) : ''))
   } catch (cause) { error(errorMessage(cause)) }
   finally { reviewingSelected.value = false; bulkBusy.value = false }
 }
@@ -286,12 +288,12 @@ onBeforeUnmount(() => {
 
 const busyText = computed(() => {
   const p = progress.value
-  if (operation.stopping.value && operation.running.value) return '正在停止，等待当前任务收尾…'
-  if (!p) return '准备中'
-  if (p.phase === 'done') return '正在刷新资源库…'
-  if (p.phase === 'scanning') return `正在扫描 ${shortenPath(p.current, 40)}`
-  if (p.total <= 0) return `正在识别 · 已处理 ${p.processed} 项，总数待确定`
-  return `识别 ${Math.min(p.processed + 1, p.total)}/${p.total}　${p.log || shortenPath(p.current, 32)}`
+  if (operation.stopping.value && operation.running.value) return tr("正在停止，等待当前任务收尾…")
+  if (!p) return tr("准备中")
+  if (p.phase === 'done') return tr("正在刷新资源库…")
+  if (p.phase === 'scanning') return tr("正在扫描 {p0}", {p0: (shortenPath(p.current, 40))})
+  if (p.total <= 0) return tr("正在识别 · 已处理 {p0} 项，总数待确定", {p0: (p.processed)})
+  return tr("识别 {p0}/{p1}　{p2}", {p0: (Math.min(p.processed + 1, p.total)), p1: (p.total), p2: (p.log || shortenPath(p.current, 32))})
 })
 
 const busyPercent = computed(() => {
@@ -315,7 +317,7 @@ function openAudio(item:VideoItem,episode?:string){void router.push({name:'video
 
 function cancelScan(): void {
   try { operation.cancel() }
-  catch (err) { error('停止扫描失败：' + errorMessage(err)) }
+  catch (err) { error(tr("停止扫描失败：") + errorMessage(err)) }
 }
 
 const { dragging: dropActive, dropHandlers } = useFileDrop(async (paths) => {
@@ -341,7 +343,7 @@ const filling = ref(false)
 async function fillPosters(): Promise<void> {
   const ids = missingPosterIds.value
   if (ids.length === 0) {
-    toast('这一屏的海报都齐了')
+    toast(tr("这一屏的海报都齐了"))
     return
   }
   filling.value = true
@@ -349,9 +351,9 @@ async function fillPosters(): Promise<void> {
     await store.fillPosters(ids)
     // 补完再数一次：还缺的就是三条来路都没找着的那些，得让用户知道剩下要手动来
     const left = missingPosterIds.value.length
-    if (left === 0) success(`补齐了 ${ids.length} 张海报`)
-    else if (left < ids.length) toast(`补上 ${ids.length - left} 张，还有 ${left} 张没找到`)
-    else toast('一张也没补上。检查一下 TMDB 配置，或者在详情页手动选图')
+    if (left === 0) success(tr("补齐了 {p0} 张海报", {p0: (ids.length)}))
+    else if (left < ids.length) toast(tr("补上 {p0} 张，还有 {p1} 张没找到", {p0: (ids.length - left), p1: (left)}))
+    else toast(tr("一张也没补上。检查一下 TMDB 配置，或者在详情页手动选图"))
   } finally {
     filling.value = false
   }
@@ -368,29 +370,29 @@ async function fillPosters(): Promise<void> {
 
 
 const emptyHint = computed(() => {
-  if (pendingOnly.value) return { title: '当前范围暂无这类待处理作品', desc: '可切换问题类型或返回全部作品。' }
-  if (store.hasFilters) return { title: '没有符合筛选条件的影视', desc: '调整发布时间或状态，或在筛选中清空条件。' }
-  if (store.keyword.trim()) return { title: '没有匹配的影视', desc: '换个关键词，或清空搜索' }
+  if (pendingOnly.value) return { title: tr('当前范围暂无这类待处理作品'), desc: tr('可切换问题类型或返回全部作品。') }
+  if (store.hasFilters) return { title: tr('没有符合筛选条件的影视'), desc: tr('调整发布时间或状态，或在筛选中清空条件。') }
+  if (store.keyword.trim()) return { title: tr('没有匹配的影视'), desc: tr('换个关键词，或清空搜索') }
   if (store.selection.kind === 'status')
-    return { title: `「${store.heading}」里还没有影视`, desc: '在详情页可以改观看状态' }
+    return { title: tr('「{p0}」里还没有影视', {p0: store.heading}), desc: tr('在详情页可以改观看状态') }
   if (store.selection.kind === 'type')
-    return { title: `还没有${store.heading}`, desc: '换一格看看，或者点右上角加影视' }
+    return { title: tr('还没有{p0}', {p0: store.heading}), desc: tr('换一格看看，或者点右上角加影视') }
   if (store.counts.all === 0)
-    return { title: '影视库还是空的', desc: '扫描本地目录，或导入视频、课程和音频资源。' }
-  return { title: '这里还没有内容', desc: '换个分类看看' }
+    return { title: tr('影视库还是空的'), desc: tr('扫描本地目录，或导入视频、课程和音频资源。') }
+  return { title: tr('这里还没有内容'), desc: tr('换个分类看看') }
 })
 </script>
 
 <template>
   <div class="home" :style="{ '--card-min': cardSize + 'px' }" v-on="dropHandlers" @keydown="selectionKey">
-    <DropZoneOverlay :active="dropActive" title="松开以预览导入影视与音频" hint="支持拖入视频、音频文件或作品文件夹，确认后再正式入库" />
+    <DropZoneOverlay :active="dropActive" :title="$t('松开以预览导入影视与音频')" :hint="$t('支持拖入视频、音频文件或作品文件夹，确认后再正式入库')" />
     <Sidebar :pending-active="pendingOnly" :pending-count="pendingItems.length" :private-hidden="privateHidden" @pending="togglePending" />
 
     <main class="home__main">
       <header class="toolbar">
         <div class="toolbar__title">
           <h1>{{ heading }}</h1>
-          <span class="toolbar__count">{{ shownItems.length }} {{ audioScope ? '项音频' : '部作品' }}</span>
+          <span class="toolbar__count">{{ shownItems.length }} {{ audioScope ? $t('项音频') : $t('部作品') }}</span>
         </div>
 
         <div class="library-search">
@@ -401,12 +403,12 @@ const emptyHint = computed(() => {
             v-model="store.keyword"
             class="search__input"
             type="text"
-            placeholder="搜索作品、内容标题或文件名"
-            aria-label="搜索作品、内容标题或文件名"
+            :placeholder="$t('搜索作品、内容标题或文件名')"
+            :aria-label="$t('搜索作品、内容标题或文件名')"
             @input="onKeyword"
           />
           <kbd v-if="!store.keyword" class="search__kbd">Ctrl K</kbd>
-          <button v-if="store.keyword" class="search__clear" title="清空搜索" aria-label="清空搜索" @click="clearKeyword">
+          <button v-if="store.keyword" class="search__clear" :title="$t('清空搜索')" :aria-label="$t('清空搜索')" @click="clearKeyword">
             <X :size="14" />
           </button>
         </div>
@@ -414,104 +416,104 @@ const emptyHint = computed(() => {
         </div>
 
         <div class="toolbar__actions">
-          <button ref="organizeTrigger" type="button" class="btn btn--ghost" :disabled="bulkBusy" :aria-pressed="selecting" @click="toggleSelecting(); bulkOpen = selecting"><CheckSquare :size="15"/>{{ selecting ? '退出批量管理' : '批量管理' }}</button>
-          <select v-model="store.sort" class="select" aria-label="作品排序" @change="store.load()">
+          <button ref="organizeTrigger" type="button" class="btn btn--ghost" :disabled="bulkBusy" :aria-pressed="selecting" @click="toggleSelecting(); bulkOpen = selecting"><CheckSquare :size="15"/>{{ selecting ? $t('退出批量管理') : $t('批量管理') }}</button>
+          <select v-model="store.sort" class="select" :aria-label="$t('作品排序')" @change="store.load()">
             <option v-for="o in SORTS" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
 
 
 
-          <button v-if="audioScope" class="btn btn--primary" @click="music.open.value=true"><Search :size="15"/>找音乐</button>
-          <button v-if="!audioScope" class="btn btn--primary" title="切换来源，浏览海报墙并选择观看或保存" @click="router.push({ name: 'video-discover' })"><Link :size="15" />找视频</button>
-          <button v-if="store.inHentaiScope && !privateHidden" class="btn btn--ghost" title="粘贴 Hanime 视频页链接，或到站内挑好再下载" @click="addFromLink">从 Hanime 添加</button>
+          <button v-if="audioScope" class="btn btn--primary" @click="music.open.value=true"><Search :size="15"/>{{ $t("找音乐") }}</button>
+          <button v-if="!audioScope" class="btn btn--primary" :title="$t('切换来源，浏览海报墙并选择观看或保存')" @click="router.push({ name: 'video-discover' })"><Link :size="15" />{{ $t("找视频") }}</button>
+          <button v-if="store.inHentaiScope && !privateHidden" class="btn btn--ghost" :title="$t('粘贴 Hanime 视频页链接，或到站内挑好再下载')" @click="addFromLink">{{ $t("从 Hanime 添加") }}</button>
 
-          <button class="btn btn--subtle" :title="audioScope ? '导入专辑、播客或有声书目录' : '导入视频目录或抱一资源包'" :disabled="scanning || importing" @click="importBundle">
-            <FolderPlus :size="15" /> {{ importing ? '导入中…' : audioScope ? '导入音频' : '导入目录' }}
+          <button class="btn btn--subtle" :title="audioScope ? $t('导入专辑、播客或有声书目录') : $t('导入视频目录或抱一资源包')" :disabled="scanning || importing" @click="importBundle">
+            <FolderPlus :size="15" /> {{ importing ? $t('导入中…') : audioScope ? $t('导入音频') : $t('导入目录') }}
           </button>
 
 
 
-          <LibraryToolbarMenu label="视图">
-          <template v-if="audioScope"><button class="btn btn--subtle" :aria-pressed="audioView==='cards'" @click="audioView='cards'">音频卡片视图</button><button class="btn btn--subtle" :aria-pressed="audioView==='list'" @click="audioView='list'">音频曲目列表</button></template>
-          <button v-if="!audioScope" class="btn btn--subtle" :title="compact ? '海报视图' : '紧凑列表'" :aria-label="compact ? '海报视图' : '紧凑列表'" :aria-pressed="compact" @click="compact = !compact">
+          <LibraryToolbarMenu :label="$t('视图')">
+          <template v-if="audioScope"><button class="btn btn--subtle" :aria-pressed="audioView==='cards'" @click="audioView='cards'">{{ $t("音频卡片视图") }}</button><button class="btn btn--subtle" :aria-pressed="audioView==='list'" @click="audioView='list'">{{ $t("音频曲目列表") }}</button></template>
+          <button v-if="!audioScope" class="btn btn--subtle" :title="compact ? $t('海报视图') : $t('紧凑列表')" :aria-label="compact ? $t('海报视图') : $t('紧凑列表')" :aria-pressed="compact" @click="compact = !compact">
             <List :size="16" />
           </button>
-<label v-if="audioScope ? audioView==='cards' : !compact">卡片大小<input v-model.number="cardSize" class="card-size" type="range" min="110" max="320" step="10" title="卡片大小" aria-label="卡片大小" @change="settings.patch({ video_card_size: cardSize })" /></label>
+<label v-if="audioScope ? audioView==='cards' : !compact">{{ $t("卡片大小") }}<input v-model.number="cardSize" class="card-size" type="range" min="110" max="320" step="10" :title="$t('卡片大小')" :aria-label="$t('卡片大小')" @change="settings.patch({ video_card_size: cardSize })" /></label>
           </LibraryToolbarMenu>
-          <LibraryToolbarMenu label="更多">
-          <button v-if="seriesScope && store.selection.kind==='group' && store.selection.value==='all'" :disabled="videoUpdates.state.value.running" @click="videoUpdates.start()">检查全部系列更新</button>
-          <button v-if="seriesScope" :disabled="store.queryPending || videoUpdates.state.value.running || !(selecting ? selectedWorks : shownItems).length" @click="videoUpdates.start((selecting ? selectedWorks : shownItems).map(item=>item.id))">{{selecting?'检查所选系列更新':'检查当前范围系列更新'}}</button>
-          <button v-if="seriesScope" :disabled="store.queryPending" @click="showUpdateResults">查看当前范围检查结果</button>
+          <LibraryToolbarMenu :label="$t('更多')">
+          <button v-if="seriesScope && store.selection.kind==='group' && store.selection.value==='all'" :disabled="videoUpdates.state.value.running" @click="videoUpdates.start()">{{ $t("检查全部系列更新") }}</button>
+          <button v-if="seriesScope" :disabled="store.queryPending || videoUpdates.state.value.running || !(selecting ? selectedWorks : shownItems).length" @click="videoUpdates.start((selecting ? selectedWorks : shownItems).map(item=>item.id))">{{selecting?$t('检查所选系列更新'):$t('检查当前范围系列更新')}}</button>
+          <button v-if="seriesScope" :disabled="store.queryPending" @click="showUpdateResults">{{ $t("查看当前范围检查结果") }}</button>
           <!-- 都齐了就不出现：一个按下去只会说「无事可做」的按钮不如不在 -->
           <button
             v-if="!audioScope && missingPosterIds.length > 0"
             class="btn btn--subtle"
             :disabled="filling"
-            :title="`补 ${missingPosterIds.length} 张海报`"
+            :title="$t('补 {p0} 张海报', {p0: missingPosterIds.length})"
             @click="fillPosters"
           >
             <ImageDown :size="15" />
-            {{ filling ? '补海报…' : `补海报 ${missingPosterIds.length}` }}
+            {{ filling ? $t('补海报…') : $t('补海报 {p0}', {p0: missingPosterIds.length}) }}
           </button>
-          <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || !(selecting ? selectedWorks : shownItems).length" @click="requestAgent">智能整理</button>
-          <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || scanning || !(selecting ? selectedWorks : shownItems).length" @click="requestLayout">统一移动</button>
+          <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || !(selecting ? selectedWorks : shownItems).length" @click="requestAgent">{{ $t("智能整理") }}</button>
+          <button v-if="!selecting || selectedWorks.length" type="button" :disabled="store.queryPending || bulkBusy || scanning || !(selecting ? selectedWorks : shownItems).length" @click="requestLayout">{{ $t("统一移动") }}</button>
           </LibraryToolbarMenu>
 
         </div>
       </header>
 
       <div class="library-summary">
-        <button v-if="seriesScope && scopedUpdateCount" class="btn btn--ghost" @click="showUpdateResults">{{scopedUpdateCount}} 部作品有新集或文件缺失</button>
+        <button v-if="seriesScope && scopedUpdateCount" class="btn btn--ghost" @click="showUpdateResults">{{ $t("{p0} 部作品有新集或文件缺失", {p0: (scopedUpdateCount)}) }}</button>
         <template v-if="selecting">
-          <span role="status" title="Shift 点击可连选，仅操作当前结果">已选 {{ selectedWorks.length }} {{ audioScope ? '项音频' : '部作品' }}</span>
+          <span role="status" :title="$t('Shift 点击可连选，仅操作当前结果')">{{ $t("已选 {p0} {p1}", {p0: (selectedWorks.length), p1: (audioScope ? $t('项音频') : $t('部作品'))}) }}</span>
 
-          <button type="button" class="selection-action" :disabled="bulkBusy || store.queryPending" @click="selectAll">全选当前范围</button>
-          <button type="button" class="selection-action" :disabled="bulkBusy || !selectedWorks.length" @click="selectedIds = []">清空选择</button>
+          <button type="button" class="selection-action" :disabled="bulkBusy || store.queryPending" @click="selectAll">{{ $t("全选当前范围") }}</button>
+          <button type="button" class="selection-action" :disabled="bulkBusy || !selectedWorks.length" @click="selectedIds = []">{{ $t("清空选择") }}</button>
         </template>
-        <span v-else>{{ checkedVideoCount === null ? '媒体文件数待检查' : `当前范围已有 ${checkedVideoCount} 个${audioScope ? '音频' : '视频'}文件` }}</span>
+        <span v-else>{{ checkedVideoCount === null ? $t('媒体文件数待检查') : $t('当前范围已有 {p0} 个{p1}文件', {p0: checkedVideoCount, p1: audioScope ? $t('音频') : $t('视频')}) }}</span>
         <template v-if="pendingOnly && !selecting">
-          <CircleAlert :size="13" /><span>待处理</span>
-          <select v-model="issue" class="select" aria-label="待处理问题类型"><option value="any">全部问题</option><option v-for="(label, key) in issueLabels" :key="key" :value="key">{{ label }}</option></select>
-          <button type="button" @click="pendingOnly = false">返回全部作品</button>
+          <CircleAlert :size="13" /><span>{{ $t("待处理") }}</span>
+          <select v-model="issue" class="select" :aria-label="$t('待处理问题类型')"><option value="any">{{ $t("全部问题") }}</option><option v-for="(label, key) in issueLabels" :key="key" :value="key">{{ label }}</option></select>
+          <button type="button" @click="pendingOnly = false">{{ $t("返回全部作品") }}</button>
         </template>
         <div class="library-summary__actions">
-          <button v-if="selecting && bulkOpen && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || scanning || reviewingSelected || !selectedWorks.length" @click="reviewSelected">{{ reviewingSelected ? '正在复查…' : '智能复查所选' }}</button>
-          <button v-if="pendingOnly && !selecting" type="button" :disabled="store.queryPending || bulkBusy" @click="selectReview">选择待复查作品</button>
-          <button v-if="selecting && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || !selectedWorks.length" @click="organize('organize')">{{ audioScope ? '合并为专辑' : '创建合集' }}</button>
+          <button v-if="selecting && bulkOpen && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || scanning || reviewingSelected || !selectedWorks.length" @click="reviewSelected">{{ reviewingSelected ? $t('正在复查…') : $t('智能复查所选') }}</button>
+          <button v-if="pendingOnly && !selecting" type="button" :disabled="store.queryPending || bulkBusy" @click="selectReview">{{ $t("选择待复查作品") }}</button>
+          <button v-if="selecting && selectedWorks.length" type="button" class="btn btn--ghost" :disabled="store.queryPending || bulkBusy || !selectedWorks.length" @click="organize('organize')">{{ audioScope ? $t('合并为专辑') : $t('创建合集') }}</button>
 
 
-          <button v-if="!selecting && videoImport.pendingCount.value" type="button" class="import-pending" @click="videoImport.show()"><CircleAlert :size="13" />导入待确认 {{ videoImport.pendingCount.value }}</button>
+          <button v-if="!selecting && videoImport.pendingCount.value" type="button" class="import-pending" @click="videoImport.show()"><CircleAlert :size="13" />{{ $t("导入待确认 {p0}", {p0: (videoImport.pendingCount.value)}) }}</button>
 
         </div>
       </div>
 
-      <p v-if="store.queryPending" class="query-status" role="status">{{ store.loadFailed ? '读取失败，刷新成功后可继续选择和操作。' : '正在更新查询结果，暂不可批量操作。' }} <button class="btn btn--ghost" :disabled="store.loading" @click="store.load()">刷新结果</button></p>
+      <p v-if="store.queryPending" class="query-status" role="status">{{ store.loadFailed ? $t('读取失败，刷新成功后可继续选择和操作。') : $t('正在更新查询结果，暂不可批量操作。') }} <button class="btn btn--ghost" :disabled="store.loading" @click="store.load()">{{ $t("刷新结果") }}</button></p>
       <VideoBulkPanel v-if="selecting && bulkOpen" :audio="audioScope" :ids="selectedWorks.map(item => item.id)" :pending="store.queryPending" :groups="(audioScope ? (store.counts.audio_collections || []) : [...(store.counts.collections || []), ...(store.inHentaiScope ? store.counts.hentai_collections || [] : [])]).map(g => g.name)" @busy="bulkBusy = $event" @changed="store.reload" @remove="requestRemoval" />
       <Transition name="fade">
         <div v-if="scanning" class="progress">
           <div class="progress__bar"><i :style="{ width: `${busyPercent}%` }" /></div>
           <span class="progress__text truncate">{{ busyText }}</span>
-          <button class="btn btn--subtle" :disabled="!operation.running.value || operation.stopping.value || progress?.phase === 'done'" @click="cancelScan">停止</button>
+          <button class="btn btn--subtle" :disabled="!operation.running.value || operation.stopping.value || progress?.phase === 'done'" @click="cancelScan">{{ $t("停止") }}</button>
         </div>
       </Transition>
 
       <section ref="content" class="home__content" :aria-busy="store.loading">
-        <AudioLibrary v-if="audioScope" :items="shownItems" :view="audioView" :selecting="selecting" :selected-ids="selectedIds" @open="openAudio" @select="selectWork"/><div v-else-if="shownItems.length > 0" :class="compact ? 'list' : 'wall'">
+        <AudioLibrary v-if="audioScope && (!store.queryPending || shownItems.length > 0)" :items="shownItems" :view="audioView" :selecting="selecting" :selected-ids="selectedIds" @open="openAudio" @select="selectWork"/><div v-else-if="shownItems.length > 0" :class="compact ? 'list' : 'wall'">
           <div v-for="v in shownItems" :key="v.id" class="work-group">
             <div class="work-card" :class="{ 'work-card--expanded': expanded[v.id] && !selecting }">
               <VideoCard :item="v" :show-published="store.sort === 'published' || store.sort === 'published-asc'" :status="itemStatus(v)" :recent="recentContent(v)" :selectable="selecting" :locked="store.queryPending || bulkBusy" :selected="selectedIds.includes(v.id)" @select="selectWork" @open="open" @poster-error="store.markPosterMissing" />
-              <button v-if="v.episode_total > 1 && !selecting" class="collection-expand" :aria-expanded="!!expanded[v.id]" :aria-controls="'collection-' + v.id" @click="toggleCollection(v.id)">{{ expanded[v.id] ? '收起单集' : '展开 ' + v.episode_total + ' 集' }}</button>
+              <button v-if="v.episode_total > 1 && !selecting" class="collection-expand" :aria-expanded="!!expanded[v.id]" :aria-controls="'collection-' + v.id" @click="toggleCollection(v.id)">{{ expanded[v.id] ? $t('收起单集') : $t('展开 ') + v.episode_total + $t(' 集') }}</button>
             </div>
-            <div v-if="expanded[v.id] && !selecting" :id="'collection-' + v.id" class="collection-episodes" role="group" :aria-label="(v.name_zh || v.file_name) + '的单集'"><p class="collection-episodes__title">《{{ v.name_zh || v.file_name }}》共 {{ v.episode_total }} 集</p>
+            <div v-if="expanded[v.id] && !selecting" :id="'collection-' + v.id" class="collection-episodes" role="group" :aria-label="(v.name_zh || v.file_name) + $t('的单集')"><p class="collection-episodes__title">{{ $t("《{p0}》共 {p1} 集", {p0: (v.name_zh || v.file_name), p1: (v.episode_total)}) }}</p>
               <VideoCard v-for="ep in matchingEpisodes(v.id)" :key="ep.id" :item="v" :episode="ep" @open="router.push({ name: 'video-detail', params: { id: v.id }, query: { episode: ep.id } })" />
-              <p v-if="!matchingEpisodes(v.id).length" class="collection-empty">当前条件未命中单集；作品本身的资料匹配。</p>
+              <p v-if="!matchingEpisodes(v.id).length" class="collection-empty">{{ $t("当前条件未命中单集；作品本身的资料匹配。") }}</p>
             </div>
           </div>
         </div>
-        <div v-else-if="!store.loading" class="empty">
+        <div v-else-if="!store.queryPending" class="empty">
           <h2>{{ emptyHint.title }}</h2>
           <p>{{ emptyHint.desc }}</p>
-          <button v-if="store.keyword || store.hasFilters || pendingOnly" class="btn btn--ghost" @click="clearLibraryFilters">清空筛选</button>
+          <button v-if="store.keyword || store.hasFilters || pendingOnly" class="btn btn--ghost" @click="clearLibraryFilters">{{ $t("清空筛选") }}</button>
         </div>
       </section>
     </main>

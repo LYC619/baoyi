@@ -36,6 +36,11 @@ await test('Chromium request uses same session cookies and returns streaming Res
   assert.equal(h.options[0].redirect, 'manual'); assert.equal(h.headers.referer, 'https://hanime1.me/watch?v=123')
   assert.equal(h.headers.cookie, undefined)
 })
+await test('download cache policy reaches Chromium instead of caching partial transfers', async () => {
+  const h = harness(req => response(req, 'fresh'))
+  await (await h.fetch(url, { redirect:'manual', cache:'no-store' })).text()
+  assert.equal(h.options[0].cache,'no-store')
+})
 await test('Electron redirect EVENT becomes a 3xx Response, no automatic follow', async () => {
   const h = harness(req => req.emit('redirect', 302, 'GET', 'https://cdn2.example.test/main.mp4', {}))
   const r = await h.fetch(url, { redirect: 'manual' })
@@ -69,7 +74,7 @@ await test('abort after headers rejects body read and destroys native stream', a
   const controller = new AbortController()
   const r = await h.fetch(url, { redirect: 'manual', signal: controller.signal })
   const reading = r.text(); controller.abort(new Error('cancelled'))
-  await assert.rejects(reading, /cancelled/); assert.equal(body.destroyed, true); assert.ok(h.aborted() > 0)
+  await assert.rejects(reading, /cancelled/); await new Promise(resolve=>setImmediate(resolve)); assert.equal(body.destroyed, true); assert.equal(h.aborted(),1,'native request must only be aborted once even when stream close follows signal abort')
 })
 await test('reader cancellation closes native stream and request', async () => {
   let body: any
@@ -77,6 +82,26 @@ await test('reader cancellation closes native stream and request', async () => {
   const r = await h.fetch(url, { redirect: 'manual' }); await r.body.cancel()
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(body.destroyed, true); assert.ok(h.aborted() > 0)
+})
+await test('bounded native bridge pauses unread data and resumes without losing chunks', async () => {
+  let body:any
+  const h=harness(req=>{body=new PassThrough();body.statusCode=200;body.headers={};req.emit('response',body)})
+  const r=await h.fetch(url,{redirect:'manual'})
+  const data=Buffer.alloc(2*1024*1024,71)
+  for(let offset=0;offset<data.length;offset+=8192)body.write(data.subarray(offset,offset+8192))
+  body.end()
+  await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(body.isPaused(),true,'unread native body must stop once the byte budget is filled')
+  assert.deepEqual(Buffer.from(await r.arrayBuffer()),data)
+})
+await test('premature native close rejects the body and late data after cancellation is ignored', async () => {
+  let body:any
+  const h=harness(req=>{body=new PassThrough();body.statusCode=200;body.headers={};req.emit('response',body)})
+  const r=await h.fetch(url,{redirect:'manual'}),reading=r.text()
+  body.destroy()
+  await assert.rejects(reading,/连接中断/)
+  assert.equal(h.aborted(),1)
+  assert.doesNotThrow(()=>body.emit('data',Buffer.from('late')))
 })
 await test('late signal after fully read success does not abort completed request', async () => {
   const h = harness(req => response(req, 'ok')); const controller = new AbortController()

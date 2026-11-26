@@ -1,3 +1,5 @@
+
+import { tr } from '../i18n/index.ts'
 import { errorMessage } from '@/utils'
 import { computed, reactive, toRefs } from 'vue'
 import type {
@@ -60,17 +62,17 @@ export function useVideoDownload(resourceId: string) {
     if (state.resolving || state.downloading) return state.catalog
     state.resolving = true
     state.error = ''
-    const taskId = taskCenter.start('video-download', '解析视频下载源', { current: resourceId })
+    const taskId = taskCenter.start('video-download', tr("解析视频下载源"), { current: resourceId })
     try {
       const catalog = await window.baoyi.video.downloadSources(resourceId)
       state.catalog = catalog
       state.selectedSourceId = catalog.sources[0]?.id ?? ''
-      taskCenter.update(taskId, { processed: 1, total: 1, message: '解析完成' })
-      taskCenter.finish(taskId, 'success', `已找到 ${catalog.sources.length} 个清晰度`)
+      taskCenter.update(taskId, { processed: 1, total: 1, message: tr("解析完成") })
+      taskCenter.finish(taskId, 'success', tr("已找到 {p0} 个清晰度", {p0: (catalog.sources.length)}))
       return catalog
     } catch (error) {
       state.error = errorMessage(error)
-      taskCenter.finish(taskId, 'failed', '解析下载源失败', state.error)
+      taskCenter.finish(taskId, 'failed', tr("解析下载源失败"), state.error)
       return null
     } finally {
       state.resolving = false
@@ -80,12 +82,12 @@ export function useVideoDownload(resourceId: string) {
   async function download(sourceId = state.selectedSourceId): Promise<VideoDownloadResult | null> {
     if (state.downloading || state.resolving || !state.catalog || !sourceId) return null
     if (!state.catalog.sources.some(source => source.id === sourceId)) {
-      state.error = '清晰度选项已失效，请重新解析'
+      state.error = tr("清晰度选项已失效，请重新解析")
       return null
     }
     const requestId = `download-${nextRequestId++}`
-    const taskId = taskCenter.start('video-download', `下载：${state.catalog.title}`, {
-      current: state.catalog.title, message: '准备保存位置'
+    const taskId = taskCenter.start('video-download', tr("下载：{p0}", {p0: (state.catalog.title)}), {
+      current: state.catalog.title, message: tr("准备保存位置")
     })
     state.requestId = requestId
     state.selectedSourceId = sourceId
@@ -96,7 +98,7 @@ export function useVideoDownload(resourceId: string) {
     state.cancelling = false
     state.progress = {
       requestId, resourceId, phase: 'choosing', receivedBytes: 0,
-      totalBytes: 0, bytesPerSecond: 0, message: '请选择保存位置'
+      totalBytes: 0, bytesPerSecond: 0, message: tr("请选择保存位置")
     }
     let unsubscribe: (() => void) | undefined
     let lastMilestone = -1
@@ -133,12 +135,12 @@ export function useVideoDownload(resourceId: string) {
         taskCenter.finish(taskId, 'cancelled', result.message)
       } else {
         state.error = result.message
-        taskCenter.finish(taskId, 'failed', '视频下载失败', result.message)
+        taskCenter.finish(taskId, 'failed', tr("视频下载失败"), result.message)
       }
       return result
     } catch (error) {
       state.error = errorMessage(error)
-      taskCenter.finish(taskId, 'failed', '视频下载失败', state.error)
+      taskCenter.finish(taskId, 'failed', tr("视频下载失败"), state.error)
       return null
     } finally {
       unsubscribe?.()
@@ -148,7 +150,7 @@ export function useVideoDownload(resourceId: string) {
   }
 
   async function cancel(): Promise<{ ok: boolean; message?: string }> {
-    if (!state.downloading || !state.requestId || state.cancelling) return { ok: false, message: '当前没有可取消的下载' }
+    if (!state.downloading || !state.requestId || state.cancelling) return { ok: false, message: tr("当前没有可取消的下载") }
     state.cancelling = true
     try {
       const result = await window.baoyi.video.cancelDownload(state.requestId)

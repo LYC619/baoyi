@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { app, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { getDb } from '../services/storage/database.ts'
 import { getSettings } from '../services/storage/settings-store.ts'
@@ -92,7 +93,7 @@ export function registerVideoOrganizeIpc(getWindow: () => BrowserWindow | null, 
   })
   ipcMain.handle('video-organize:pick-directory', async event => {
     assertMain(event)
-    const result = await dialog.showOpenDialog(getWindow()!, { title: '选择作品目录', properties: ['openDirectory', 'createDirectory'] })
+    const result = await dialog.showOpenDialog(getWindow()!, { title: tr("选择作品目录"), properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : result.filePaths[0] || null
   })
 }

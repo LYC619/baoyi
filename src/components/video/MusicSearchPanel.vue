@@ -130,50 +130,47 @@ async function cancel(id: string) {
 </script>
 
 <template>
-  <ProjectDialog title="找音乐" @close="music.open.value = false">
+  <ProjectDialog :title="$t('找音乐')" @close="music.open.value = false">
     <form class="music-search" @submit.prevent="search()">
-      <select v-model="source" aria-label="音乐平台" @change="changeSource">
-        <option value="netease">网易云音乐</option>
+      <select v-model="source" :aria-label="$t('音乐平台')" @change="changeSource">
+        <option value="netease">{{ $t("网易云音乐") }}</option>
         <option value="joox">JOOX</option>
-        <option value="bilibili">哔哩哔哩</option>
-        <option value="tencent" disabled>QQ 音乐（接口暂未开放）</option>
-        <option value="kuwo" disabled>酷我（接口暂未开放）</option>
+        <option value="bilibili">{{ $t("哔哩哔哩") }}</option>
+        <option value="tencent" disabled>{{ $t("QQ 音乐（接口暂未开放）") }}</option>
+        <option value="kuwo" disabled>{{ $t("酷我（接口暂未开放）") }}</option>
       </select>
-      <input v-model="query" maxlength="160" aria-label="歌曲、歌手或专辑" placeholder="搜索歌曲、歌手或专辑" />
+      <input v-model="query" maxlength="160" :aria-label="$t('歌曲、歌手或专辑')" :placeholder="$t('搜索歌曲、歌手或专辑')" />
       <button class="pj-button pj-primary" :disabled="busy || !query.trim()">
-        <Search :size="15" />{{ busy ? '搜索中…' : '搜索' }}
+        <Search :size="15" />{{ busy ? $t('搜索中…') : $t('搜索') }}
       </button>
     </form>
-    <p class="music-note">
-      音乐来源：GD 音乐台（music.gdstudio.xyz）。当前公开接口开放网易云、JOOX 和哔哩哔哩；QQ、酷我暂未开放。优先获取可用无损音质。
-    </p>
-    <p class="music-directory">保存到 {{ directory }} <button class="pj-button" @click="pick">更改目录</button></p>
-    <p v-if="error" class="music-error" role="alert">{{ error }}</p>
+    <p class="music-note">{{ $t("音乐来源：GD 音乐台（music.gdstudio.xyz）。当前公开接口开放网易云、JOOX 和哔哩哔哩；QQ、酷我暂未开放。优先获取可用无损音质。") }}</p>
+    <p class="music-directory">{{ $t("保存到 {p0}", {p0: (directory)}) }}<button class="pj-button" @click="pick">{{ $t("更改目录") }}</button></p>
+    <p v-if="error" class="music-error" role="alert">{{ $systemMessage(error) }}</p>
     <div v-if="!rows.length && !busy" class="music-empty">
       <Music2 :size="30" />
-      <p>{{ query ? '没有搜索结果，可换平台或关键词。' : '找到喜欢的音乐，先试听，再保存到我的音频。' }}</p>
+      <p>{{ query ? $t('没有搜索结果，可换平台或关键词。') : $t('找到喜欢的音乐，先试听，再保存到我的音频。') }}</p>
     </div>
     <article v-for="track in rows" :key="track.key" class="music-row">
       <div>
         <strong>{{ track.title }}</strong>
-        <p>{{ track.artists.join(' / ') || '未知歌手' }} · {{ track.album || '未知专辑' }}</p>
+        <p>{{ track.artists.join(' / ') || $t('未知歌手') }} · {{ track.album || $t('未知专辑') }}</p>
       </div>
       <button
         v-if="completedJob(track.key)"
         class="pj-button"
-        :aria-label="'播放已下载 ' + track.title"
+        :aria-label="$t('播放已下载 ') + track.title"
         @click="playDownloaded(completedJob(track.key)?.resourceId)"
       >
-        <Play :size="15" />播放本地
-      </button>
+        <Play :size="15" />{{ $t("播放本地") }}</button>
       <button
         v-else
         class="pj-button"
         :disabled="previewing === track.key"
-        :aria-label="'试听 ' + track.title"
+        :aria-label="$t('试听 ') + track.title"
         @click="preview(track)"
       >
-        <Play :size="15" />{{ previewing === track.key ? '加载中' : '试听' }}
+        <Play :size="15" />{{ previewing === track.key ? $t('加载中') : $t('试听') }}
       </button>
       <button
         class="pj-button"
@@ -181,19 +178,19 @@ async function cancel(id: string) {
           downloading === track.key ||
           music.jobs.value.some(job => job.track.key === track.key && ['running', 'completed'].includes(job.status))
         "
-        :aria-label="'下载 ' + track.title"
+        :aria-label="$t('下载 ') + track.title"
         @click="download(track)"
       >
-        <Download :size="15" />{{ completedJob(track.key) ? '已入库' : '下载' }}
+        <Download :size="15" />{{ completedJob(track.key) ? $t('已入库') : $t('下载') }}
       </button>
     </article>
     <div v-if="rows.length || page > 1" class="music-pages">
-      <button class="pj-button" :disabled="busy || page <= 1" @click="search(page - 1)">上一页</button>
-      <span>第 {{ page }} 页</span>
-      <button class="pj-button" :disabled="busy || rows.length < 20" @click="search(page + 1)">下一页</button>
+      <button class="pj-button" :disabled="busy || page <= 1" @click="search(page - 1)">{{ $t("上一页") }}</button>
+      <span>{{ $t("第 {p0} 页", {p0: (page)}) }}</span>
+      <button class="pj-button" :disabled="busy || rows.length < 20" @click="search(page + 1)">{{ $t("下一页") }}</button>
     </div>
     <details v-if="music.jobs.value.length" open>
-      <summary>音乐下载（{{ music.jobs.value.filter(job => job.status === 'running').length }} 项进行中）</summary>
+      <summary>{{ $t("音乐下载（{p0} 项进行中）", {p0: (music.jobs.value.filter(job => job.status === 'running').length)}) }}</summary>
       <article v-for="job in music.jobs.value" :key="job.id" class="music-job">
         <div class="music-job-head">
           <strong>{{ job.track.title }}</strong>
@@ -203,18 +200,17 @@ async function cancel(id: string) {
             class="pj-button"
             @click="playDownloaded(job.resourceId)"
           >
-            <Play :size="13" />立即播放
-          </button>
+            <Play :size="13" />{{ $t("立即播放") }}</button>
         </div>
-        <span>{{ job.message }}</span>
+        <span>{{ $systemMessage(job.message) }}</span>
         <progress v-if="job.status === 'running'" :value="job.total ? job.received : undefined" :max="job.total || 1" />
-        <button v-if="job.status === 'running'" class="pj-button" @click="cancel(job.id)">停止下载</button>
-        <button v-else-if="job.status !== 'completed'" class="pj-button" @click="retry(job.id)">重试</button>
+        <button v-if="job.status === 'running'" class="pj-button" @click="cancel(job.id)">{{ $t("停止下载") }}</button>
+        <button v-else-if="job.status !== 'completed'" class="pj-button" @click="retry(job.id)">{{ $t("重试") }}</button>
       </article>
     </details>
     <template #footer>
-      <span class="music-note">关闭面板后下载继续，进度可在任务中心查看。</span>
-      <button class="pj-button" @click="music.open.value = false">关闭</button>
+      <span class="music-note">{{ $t("关闭面板后下载继续，进度可在任务中心查看。") }}</span>
+      <button class="pj-button" @click="music.open.value = false">{{ $t("关闭") }}</button>
     </template>
   </ProjectDialog>
 </template>

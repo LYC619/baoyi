@@ -1,3 +1,5 @@
+
+import { tr } from "../i18n/index.ts"
 import { errorMessage } from '@/utils'
 import { useToast } from '@/composables/useToast'
 import { computed, onScopeDispose, ref, shallowRef } from 'vue'
@@ -10,10 +12,10 @@ export type AudioPlayMode = 'sequence' | 'loop' | 'one' | 'shuffle'
 
 const PLAY_MODES: AudioPlayMode[] = ['sequence', 'loop', 'one', 'shuffle']
 export const AUDIO_MODE_LABEL: Record<AudioPlayMode, string> = {
-  sequence: '顺序播放',
-  loop: '列表循环',
-  one: '单曲循环',
-  shuffle: '随机播放'
+  get sequence() { return tr('顺序播放') },
+  get loop() { return tr('列表循环') },
+  get one() { return tr('单曲循环') },
+  get shuffle() { return tr('随机播放') }
 }
 
 function readLocal(key: string): string | null {
@@ -45,7 +47,8 @@ export const useAudioStore = defineStore('audio', () => {
   const mode = ref<AudioPlayMode>(
     savedMode && PLAY_MODES.includes(savedMode as AudioPlayMode) ? (savedMode as AudioPlayMode) : 'sequence'
   )
-  const savedVol = Number(readLocal('baoyi.audio.volume'))
+  const rawVol = readLocal('baoyi.audio.volume')
+  const savedVol = rawVol !== null && rawVol.trim() !== '' ? Number(rawVol) : NaN
   const volume = ref(Number.isFinite(savedVol) && savedVol >= 0 && savedVol <= 1 ? savedVol : 1)
   const muted = ref(readLocal('baoyi.audio.muted') === '1')
 
@@ -96,15 +99,15 @@ export const useAudioStore = defineStore('audio', () => {
     } catch {
       if (own === generation && (current.value || online.value)) {
         failure.value = online.value
-          ? '试听无法播放，请重新搜索或换来源重试。'
-          : '无法内置播放，请重试或在详情中使用系统播放器。'
+          ? tr("试听无法播放，请重新搜索或换来源重试。")
+          : tr("无法内置播放，请重试或在详情中使用系统播放器。")
       }
     }
   }
 
   async function play(track: AudioTrack, tracks?: AudioTrack[]) {
     if (track.available === false) {
-      failure.value = '曲目文件缺失或磁盘未连接'
+      failure.value = tr("曲目文件缺失或磁盘未连接")
       return
     }
     online.value = null

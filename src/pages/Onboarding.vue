@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { tr } from "../i18n/index.ts"
+
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRight, Check, FolderPlus, Loader2, SkipForward, Trash2 } from 'lucide-vue-next'
 import BaoyiLogo from '@/components/ui/BaoyiLogo.vue'
+import LanguageSelect from '@/components/ui/LanguageSelect.vue'
 import { useAI } from '@/composables/useAI'
 import { useScan } from '@/composables/useScan'
 import { useToast } from '@/composables/useToast'
@@ -49,7 +52,7 @@ async function startScan(): Promise<void> {
   try {
     await settings.patch({ software_scan_dirs: [...dirs.value] })
   } catch (err) {
-    toast.error(`保存扫描目录失败：${errorMessage(err)}`)
+    toast.error(tr('保存扫描目录失败：{p0}', {p0: errorMessage(err)}))
     return
   }
   step.value = 2
@@ -73,7 +76,7 @@ async function startAi(): Promise<void> {
       }
     })
   } catch (err) {
-    toast.error(`保存 AI 配置失败：${errorMessage(err)}`)
+    toast.error(tr('保存 AI 配置失败：{p0}', {p0: errorMessage(err)}))
     return
   }
   step.value = 4
@@ -91,7 +94,7 @@ async function skipAi(): Promise<void> {
     await settings.patch({ ai: { ...settings.settings.ai, enabled: false } })
     step.value = 5
   } catch (err) {
-    toast.error(`保存失败：${errorMessage(err)}`)
+    toast.error(tr('保存失败：{p0}', {p0: errorMessage(err)}))
   }
 }
 
@@ -100,7 +103,7 @@ async function finish(): Promise<void> {
     await settings.patch({ onboarded: true })
     await store.reload()
   } catch (err) {
-    toast.error(`保存失败：${errorMessage(err)}`)
+    toast.error(tr('保存失败：{p0}', {p0: errorMessage(err)}))
     return
   }
   // 识别结果停在暂存区等确认，这时候直接进卡片墙只会看到一片空白
@@ -111,30 +114,23 @@ async function finish(): Promise<void> {
 <template>
   <div class="onboarding">
     <div class="stage">
+      <LanguageSelect class="onboarding-language" />
       <!-- ------------------------------ 0 欢迎 ------------------------------ -->
       <section v-if="step === 0" class="step step--center">
         <BaoyiLogo :size="72" />
-        <h1 class="title">抱一</h1>
-        <p class="slogan">知止而后得。</p>
-        <p class="quote">是以圣人抱一为天下式。<br />——《道德经》第二十二章</p>
-        <p class="lead">
-          抱一不帮你囤积，它帮你掌握。<br />
-          每个品类只抱住最好的那一个，剩下的可以放下了。
-        </p>
-        <button class="btn btn--primary btn--lg" @click="step = 1">
-          开始
-          <ArrowRight :size="15" />
+        <h1 class="title">{{ $t("抱一") }}</h1>
+        <p class="slogan">{{ $t("知止而后得。") }}</p>
+        <p class="quote">{{ $t("是以圣人抱一为天下式。") }}<br />{{ $t("——《道德经》第二十二章") }}</p>
+        <p class="lead">{{ $t("抱一不帮你囤积，它帮你掌握。") }}<br />{{ $t("每个品类只抱住最好的那一个，剩下的可以放下了。") }}</p>
+        <button class="btn btn--primary btn--lg" @click="step = 1">{{ $t("开始") }}<ArrowRight :size="15" />
         </button>
       </section>
 
       <!-- ---------------------------- 1 选择目录 ---------------------------- -->
       <section v-else-if="step === 1" class="step">
-        <p class="eyebrow">第一步</p>
-        <h2 class="head">选择要扫描的目录</h2>
-        <p class="desc">
-          通常是你放绿色软件的盘符目录，或 Program Files。
-          抱一读取 EXE 的图标和版本信息，也能识别手机 APP 安装包；扫描不会移动或修改文件。
-        </p>
+        <p class="eyebrow">{{ $t("第一步") }}</p>
+        <h2 class="head">{{ $t("选择要扫描的目录") }}</h2>
+        <p class="desc">{{ $t("通常是你放绿色软件的盘符目录，或 Program Files。 抱一读取 EXE 的图标和版本信息，也能识别手机 APP 安装包；扫描不会移动或修改文件。") }}</p>
 
         <ul v-if="dirs.length" class="dirs">
           <li v-for="d in dirs" :key="d">
@@ -146,37 +142,31 @@ async function finish(): Promise<void> {
         </ul>
 
         <button class="btn btn--ghost" @click="addDir">
-          <FolderPlus :size="15" />
-          添加目录
-        </button>
+          <FolderPlus :size="15" />{{ $t("添加目录") }}</button>
 
         <div class="actions">
-          <button class="btn btn--primary btn--lg" :disabled="!canScan" @click="startScan">
-            开始扫描
-            <ArrowRight :size="15" />
+          <button class="btn btn--primary btn--lg" :disabled="!canScan" @click="startScan">{{ $t("开始扫描") }}<ArrowRight :size="15" />
           </button>
         </div>
       </section>
 
       <!-- ---------------------------- 2 扫描进度 ---------------------------- -->
       <section v-else-if="step === 2" class="step">
-        <p class="eyebrow">第二步</p>
+        <p class="eyebrow">{{ $t("第二步") }}</p>
         <!-- 失败也要有出口：原因摆出来，能重试，也能先去把 AI 配好 -->
         <template v-if="stepError">
-          <h2 class="head">扫描没有完成</h2>
+          <h2 class="head">{{ $t("扫描没有完成") }}</h2>
           <p class="err">{{ stepError }}</p>
           <div class="actions">
-            <button class="btn btn--primary btn--lg" @click="startScan">
-              重试
-              <ArrowRight :size="15" />
+            <button class="btn btn--primary btn--lg" @click="startScan">{{ $t("重试") }}<ArrowRight :size="15" />
             </button>
-            <button class="btn btn--subtle" @click="step = 3">先去配置 AI</button>
+            <button class="btn btn--subtle" @click="step = 3">{{ $t("先去配置 AI") }}</button>
           </div>
         </template>
         <template v-else>
           <h2 class="head">
             <Loader2 v-if="scan.running.value" :size="18" class="spin" />
-            {{ scan.running.value ? '正在扫描' : '扫描完成' }}
+            {{ scan.running.value ? $t('正在扫描') : $t('扫描完成') }}
           </h2>
           <p class="desc mono truncate">{{ scan.progress.value?.current || '—' }}</p>
 
@@ -185,36 +175,30 @@ async function finish(): Promise<void> {
 
           <template v-if="!scan.running.value">
             <div class="summary">
-              <div><b>{{ scanned.found }}</b><span>个程序</span></div>
-              <div><b>{{ scanned.pending }}</b><span>个目录待识别</span></div>
-              <div><b>{{ scanned.settled }}</b><span>个已识别过</span></div>
+              <div><b>{{ scanned.found }}</b><span>{{ $t("个程序") }}</span></div>
+              <div><b>{{ scanned.pending }}</b><span>{{ $t("个目录待识别") }}</span></div>
+              <div><b>{{ scanned.settled }}</b><span>{{ $t("个已识别过") }}</span></div>
             </div>
             <div class="actions">
-              <button class="btn btn--primary btn--lg" @click="step = 3">
-                下一步
-                <ArrowRight :size="15" />
+              <button class="btn btn--primary btn--lg" @click="step = 3">{{ $t("下一步") }}<ArrowRight :size="15" />
               </button>
             </div>
           </template>
           <div v-else class="actions">
-            <button class="btn btn--ghost" @click="scan.cancel()">中止扫描</button>
+            <button class="btn btn--ghost" @click="scan.cancel()">{{ $t("中止扫描") }}</button>
           </div>
         </template>
       </section>
 
       <!-- ---------------------------- 3 配置 AI ---------------------------- -->
       <section v-else-if="step === 3" class="step">
-        <p class="eyebrow">第三步</p>
-        <h2 class="head">让 AI 帮你认出它们</h2>
-        <p class="desc">
-          抱一会把每个目录交给 AI 自己去看：列目录、读 exe 信息，判断哪个是主程序、
-          哪些只是加载器，再把 32 位和 64 位合并成一条。需要一个支持工具调用的模型，
-          deepseek-chat 就够用。跳过也可以，之后随时能在设置里补。
-        </p>
+        <p class="eyebrow">{{ $t("第三步") }}</p>
+        <h2 class="head">{{ $t("让 AI 帮你认出它们") }}</h2>
+        <p class="desc">{{ $t("抱一会把每个目录交给 AI 自己去看：列目录、读 exe 信息，判断哪个是主程序、 哪些只是加载器，再把 32 位和 64 位合并成一条。需要一个支持工具调用的模型， deepseek-chat 就够用。跳过也可以，之后随时能在设置里补。") }}</p>
 
         <div class="form">
           <label class="field">
-            <span class="field__label">接口地址</span>
+            <span class="field__label">{{ $t("接口地址") }}</span>
             <input v-model="apiUrl" class="input mono" placeholder="https://api.deepseek.com/v1" />
           </label>
           <label class="field">
@@ -222,57 +206,45 @@ async function finish(): Promise<void> {
             <input v-model="apiKey" class="input mono" type="password" placeholder="sk-…" />
           </label>
           <label class="field">
-            <span class="field__label">模型</span>
+            <span class="field__label">{{ $t("模型") }}</span>
             <input v-model="model" class="input mono" placeholder="deepseek-chat" />
           </label>
         </div>
 
         <div class="actions">
-          <button class="btn btn--primary btn--lg" :disabled="!apiKey.trim()" @click="startAi">
-            开始识别
-            <ArrowRight :size="15" />
+          <button class="btn btn--primary btn--lg" :disabled="!apiKey.trim()" @click="startAi">{{ $t("开始识别") }}<ArrowRight :size="15" />
           </button>
           <button class="btn btn--subtle" @click="skipAi">
-            <SkipForward :size="14" />
-            暂时跳过
-          </button>
+            <SkipForward :size="14" />{{ $t("暂时跳过") }}</button>
         </div>
       </section>
 
       <!-- ---------------------------- 4 AI 识别 ---------------------------- -->
       <section v-else-if="step === 4" class="step">
-        <p class="eyebrow">第四步</p>
+        <p class="eyebrow">{{ $t("第四步") }}</p>
         <!-- 识别失败不能停在这个转圈上：给原因、给重试、也给跳过的出路 -->
         <template v-if="stepError">
-          <h2 class="head">识别没有跑完</h2>
+          <h2 class="head">{{ $t("识别没有跑完") }}</h2>
           <p class="err">{{ stepError }}</p>
           <div class="actions">
-            <button class="btn btn--primary btn--lg" @click="startAi">
-              重试
-              <ArrowRight :size="15" />
+            <button class="btn btn--primary btn--lg" @click="startAi">{{ $t("重试") }}<ArrowRight :size="15" />
             </button>
             <button class="btn btn--subtle" @click="skipAi">
-              <SkipForward :size="14" />
-              暂时跳过
-            </button>
+              <SkipForward :size="14" />{{ $t("暂时跳过") }}</button>
           </div>
         </template>
         <template v-else>
           <h2 class="head">
-            <Loader2 :size="18" class="spin" />
-            AI 正在识别
-          </h2>
+            <Loader2 :size="18" class="spin" />{{ $t("AI 正在识别") }}</h2>
           <p class="desc mono truncate">{{ ai.progress.value?.current || '—' }}</p>
 
           <div class="bar"><i :style="{ width: `${ai.percent.value}%` }" /></div>
           <p class="stat">
-            {{ ai.progress.value?.processed ?? 0 }} / {{ ai.progress.value?.total ?? 0 }} 个目录 ·
-            已认出 {{ ai.progress.value?.registered ?? 0 }} 个软件
-          </p>
-          <p class="stat truncate">{{ ai.activity.value || '正在启动…' }}</p>
+            {{ $t("{p0} / {p1} 个目录 · 已认出 {p2} 个软件", {p0: (ai.progress.value?.processed ?? 0), p1: (ai.progress.value?.total ?? 0), p2: (ai.progress.value?.registered ?? 0)}) }}</p>
+          <p class="stat truncate">{{ ai.activity.value || $t('正在启动…') }}</p>
 
           <div class="actions">
-            <button class="btn btn--ghost" @click="ai.cancel()">中止</button>
+            <button class="btn btn--ghost" @click="ai.cancel()">{{ $t("中止") }}</button>
           </div>
         </template>
       </section>
@@ -280,17 +252,11 @@ async function finish(): Promise<void> {
       <!-- ------------------------------ 5 完成 ------------------------------ -->
       <section v-else class="step step--center">
         <div class="done-mark"><Check :size="30" /></div>
-        <h2 class="head">好了</h2>
-        <p v-if="aiDone.registered > 0" class="lead">
-          AI 认出了 {{ aiDone.registered }} 个软件，还差你点一次头。<br />
-          它给的名字和分类不一定对，过一遍再收录 —— 错进了库，往后就没人会回头改了。
-        </p>
-        <p v-else class="lead">
-          已收录 {{ store.counts.all }} 个软件。<br />
-          接下来做的事很简单：用它，或者放下它。
-        </p>
+        <h2 class="head">{{ $t("好了") }}</h2>
+        <p v-if="aiDone.registered > 0" class="lead">{{ $t("AI 认出了 {p0} 个软件，还差你点一次头。", {p0: (aiDone.registered)}) }}<br />{{ $t("它给的名字和分类不一定对，过一遍再收录 —— 错进了库，往后就没人会回头改了。") }}</p>
+        <p v-else class="lead">{{ $t("已收录 {p0} 个软件。", {p0: (store.counts.all)}) }}<br />{{ $t("接下来做的事很简单：用它，或者放下它。") }}</p>
         <button class="btn btn--primary btn--lg" @click="finish">
-          {{ aiDone.registered > 0 ? `去确认这 ${aiDone.registered} 个` : '进入卡片墙' }}
+          {{ aiDone.registered > 0 ? $t('去确认这 {p0} 个', {p0: aiDone.registered}) : $t('进入卡片墙') }}
           <ArrowRight :size="15" />
         </button>
       </section>

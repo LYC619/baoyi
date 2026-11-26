@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 /**
  * 一轮识别的汇总报告。
  *
@@ -15,9 +17,9 @@ const props = defineProps<{ report: IdentifyReport }>()
 defineEmits<{ (e: 'close'): void }>()
 
 const STATUS_META: Record<IdentifyLogStatus, { label: string; icon: any; tone: string }> = {
-  success: { label: '成功', icon: CheckCircle2, tone: 'ok' },
-  skipped: { label: '跳过', icon: MinusCircle, tone: 'warn' },
-  failed: { label: '失败', icon: AlertTriangle, tone: 'bad' }
+  success: { get label() { return tr("成功") }, icon: CheckCircle2, tone: 'ok' },
+  skipped: { get label() { return tr("跳过") }, icon: MinusCircle, tone: 'warn' },
+  failed: { get label() { return tr("失败") }, icon: AlertTriangle, tone: 'bad' }
 }
 
 const seconds = computed(() => (props.report.duration_ms / 1000).toFixed(1))
@@ -32,36 +34,31 @@ const troubles = computed(() =>
   <div class="mask" @click.self="$emit('close')">
     <section class="dialog">
       <header class="dialog__head">
-        <h2>识别汇总报告</h2>
+        <h2>{{ $t("识别汇总报告") }}</h2>
         <span class="dialog__time mono">{{ formatDateTime(report.created_at) }}</span>
-        <button class="btn btn--subtle" title="关闭" @click="$emit('close')">
+        <button class="btn btn--subtle" :title="$t('关闭')" @click="$emit('close')">
           <X :size="16" />
         </button>
       </header>
 
       <div class="dialog__body">
         <ul class="tally">
-          <li><b>{{ report.processed }}</b><span>处理目录</span></li>
-          <li class="tally--ok"><b>{{ report.registered }}</b><span>识别出条目</span></li>
-          <li class="tally--warn"><b>{{ report.skipped }}</b><span>跳过</span></li>
-          <li class="tally--bad"><b>{{ report.failed }}</b><span>失败</span></li>
-          <li><b>{{ seconds }}s</b><span>总耗时</span></li>
-          <li><b>{{ report.tokens.toLocaleString() }}</b><span>Tokens</span></li>
+          <li><b>{{ report.processed }}</b><span>{{ $t("处理目录") }}</span></li>
+          <li class="tally--ok"><b>{{ report.registered }}</b><span>{{ $t("识别出条目") }}</span></li>
+          <li class="tally--warn"><b>{{ report.skipped }}</b><span>{{ $t("跳过") }}</span></li>
+          <li class="tally--bad"><b>{{ report.failed }}</b><span>{{ $t("失败") }}</span></li>
+          <li><b>{{ seconds }}s</b><span>{{ $t("总耗时") }}</span></li>
+          <li><b>{{ report.tokens.toLocaleString($locale) }}</b><span>Tokens</span></li>
         </ul>
 
         <p class="line">
           <Globe :size="14" />
-          <template v-if="report.searches > 0">
-            本轮共联网搜索 <b>{{ report.searches }}</b> 次。搜索按次计费的服务商可据此对账 ——
-            逐次记录在「顶部日志 → 识别与调用」。
-          </template>
-          <template v-else>
-            本轮没有用到联网搜索，全靠本地文件信息和模型自身知识判断。
-          </template>
+          <template v-if="report.searches > 0">{{ $t("本轮共联网搜索") }}<b>{{ report.searches }}</b>{{ $t("次。搜索按次计费的服务商可据此对账 —— 逐次记录在「顶部日志 → 识别与调用」。") }}</template>
+          <template v-else>{{ $t("本轮没有用到联网搜索，全靠本地文件信息和模型自身知识判断。") }}</template>
         </p>
 
         <template v-if="troubles.length > 0">
-          <h3 class="sub">没识别出来的 {{ troubles.length }} 个</h3>
+          <h3 class="sub">{{ $t("没识别出来的 {p0} 个", {p0: (troubles.length)}) }}</h3>
           <ul class="reasons">
             <li v-for="(e, i) in troubles" :key="`t${i}`" :class="`reasons--${STATUS_META[e.status].tone}`">
               <component :is="STATUS_META[e.status].icon" :size="13" />
@@ -71,15 +68,15 @@ const troubles = computed(() =>
           </ul>
         </template>
 
-        <h3 class="sub">逐条摘要</h3>
+        <h3 class="sub">{{ $t("逐条摘要") }}</h3>
         <ul class="rows">
           <li v-for="(e, i) in report.entries" :key="i" :class="`rows--${STATUS_META[e.status].tone}`">
             <component :is="STATUS_META[e.status].icon" :size="13" class="rows__icon" />
             <span class="rows__name truncate" :title="e.dir">{{ e.label }}</span>
-            <span class="rows__cost mono">{{ e.rounds }} 轮</span>
-            <span class="rows__cost mono">{{ e.tokens.toLocaleString() }} tk</span>
+            <span class="rows__cost mono">{{ $t("{p0} 轮", {p0: (e.rounds)}) }}</span>
+            <span class="rows__cost mono">{{ e.tokens.toLocaleString($locale) }} tk</span>
             <span class="rows__cost mono" :class="{ 'rows__cost--on': e.searches > 0 }">
-              {{ e.searches > 0 ? `搜索 ${e.searches}` : '—' }}
+              {{ e.searches > 0 ? $t('搜索 {p0}', {p0: e.searches}) : '—' }}
             </span>
           </li>
         </ul>

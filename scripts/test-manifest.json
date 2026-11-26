@@ -42,13 +42,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-archive-assistant-live.ts",
-    "module": "archive",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
     "file": "verify-archive-assistant-renderer.ts",
     "module": "archive",
     "kind": "unit",
@@ -116,13 +109,6 @@
     "module": "comic",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-comic-live.ts",
-    "module": "comic",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
   },
   {
     "file": "verify-comic-log.ts",
@@ -292,13 +278,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-document-insight-live.ts",
-    "module": "document",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
     "file": "verify-document-insight-service.ts",
     "module": "document",
     "kind": "unit",
@@ -375,18 +354,6 @@
     "file": "verify-download-improvements.cjs",
     "module": "video",
     "kind": "unit",
-    "status": "pass"
-  },
-  {
-    "file": "verify-download-progress-ui.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
-    "status": "pass"
-  },
-  {
-    "file": "verify-download-release-ui.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
     "status": "pass"
   },
   {
@@ -471,12 +438,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-game-covers-packaged.ts",
-    "module": "game",
-    "kind": "e2e-packaged",
-    "status": "pass"
-  },
-  {
     "file": "verify-game-covers-service.ts",
     "module": "game",
     "kind": "unit",
@@ -499,13 +460,6 @@
     "module": "game",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-game-projects-ui.ts",
-    "module": "project",
-    "kind": "real-env",
-    "status": "pass",
-    "reason": "本机 E:/Games 资料及可选日常库副本验证通过；保留 real-env 分类，不纳入普通自动入口。"
   },
   {
     "file": "verify-game-projects.ts",
@@ -592,20 +546,6 @@
     "module": "archive",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-icons.ts",
-    "module": "software",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
-    "file": "verify-identify-cdp.ts",
-    "module": "software",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
   },
   {
     "file": "verify-image-bulk-ui.ts",
@@ -695,13 +635,6 @@
     "module": "image",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-image-network-live.cjs",
-    "module": "image",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
   },
   {
     "file": "verify-image-network.ts",
@@ -899,13 +832,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-migration.ts",
-    "module": "infra",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
     "file": "verify-missav-parse.ts",
     "module": "video",
     "kind": "unit",
@@ -1005,26 +931,6 @@
     "packaged": true
   },
   {
-    "file": "verify-packaged-content.cjs",
-    "module": "infra",
-    "kind": "e2e-packaged",
-    "status": "failing",
-    "reason": "旧 0.19.9 成品与清理后的当前构建内容不同；方案 01 不重新打包"
-  },
-  {
-    "file": "verify-packaged-icons.ts",
-    "module": "software",
-    "kind": "e2e-packaged",
-    "status": "pass"
-  },
-  {
-    "file": "verify-packaged.ts",
-    "module": "infra",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
     "file": "verify-personal-optimization-ui.ts",
     "module": "personal",
     "kind": "ui-dev",
@@ -1046,12 +952,6 @@
   {
     "file": "verify-personal-revision.ts",
     "module": "personal",
-    "kind": "unit",
-    "status": "pass"
-  },
-  {
-    "file": "verify-photo-data-migration.ts",
-    "module": "image",
     "kind": "unit",
     "status": "pass"
   },
@@ -1106,13 +1006,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-project-agent-live.ts",
-    "module": "project",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
     "file": "verify-project-agent-ui.ts",
     "module": "project",
     "kind": "ui-dev",
@@ -1155,13 +1048,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-project-handoff-live.ts",
-    "module": "project",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
     "file": "verify-project-handoff-ui.ts",
     "module": "project",
     "kind": "ui-dev",
@@ -1173,13 +1059,6 @@
     "module": "project",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-project-history-live.ts",
-    "module": "project",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
   },
   {
     "file": "verify-project-history.ts",
@@ -1275,24 +1154,10 @@
     "status": "pass"
   },
   {
-    "file": "verify-proxy.cjs",
-    "module": "infra",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
     "file": "verify-release-config.cjs",
     "module": "infra",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-reset-cdp.ts",
-    "module": "infra",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
   },
   {
     "file": "verify-reset-seed.ts",
@@ -1363,13 +1228,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-settings-recovery-ui.ts",
-    "module": "settings",
-    "kind": "e2e-packaged",
-    "status": "failing",
-    "reason": "locator.click: Timeout 30000ms exceeded.；waiting for getByRole('button', { name: '网站与代理', exact: true })"
-  },
-  {
     "file": "verify-settings-routing.ts",
     "module": "settings",
     "kind": "unit",
@@ -1394,12 +1252,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-snapshot-live-db.cjs",
-    "module": "infra",
-    "kind": "unit",
-    "status": "pass"
-  },
-  {
     "file": "verify-software-category.ts",
     "module": "software",
     "kind": "unit",
@@ -1410,13 +1262,6 @@
     "module": "comic",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-source-hub-network.ts",
-    "module": "video",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
   },
   {
     "file": "verify-source-hub.ts",
@@ -1493,51 +1338,16 @@
     "packaged": true
   },
   {
-    "file": "verify-ux-packaged-integration.ts",
-    "module": "infra",
-    "kind": "e2e-packaged",
-    "status": "failing",
-    "reason": "成品布局宽度断言预期 960，实际 959；未放宽阈值"
-  },
-  {
     "file": "verify-video-acceleration.ts",
     "module": "video",
     "kind": "unit",
     "status": "pass"
   },
   {
-    "file": "verify-video-actual-packaged.ts",
-    "module": "video",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
-    "file": "verify-video-actual-snapshot.ts",
-    "module": "video",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
-    "file": "verify-video-agent-background-packaged.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
-    "status": "failing",
-    "reason": "FAIL background fixture: locator.evaluate: Timeout 15000ms exceeded.；waiting for getByRole('button', { name: '智能整理', exact: true })"
-  },
-  {
     "file": "verify-video-agent-background.ts",
     "module": "video",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-video-agent-grouping-packaged.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
-    "status": "failing",
-    "reason": "FAIL packaged grouping: locator.click: Timeout 30000ms exceeded.；waiting for getByRole('button', { name: '智能整理', exact: true })"
   },
   {
     "file": "verify-video-agent-grouping-renderer.ts",
@@ -1568,13 +1378,6 @@
     "module": "video",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-video-cdp.ts",
-    "module": "video",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
   },
   {
     "file": "verify-video-codecs-ui.ts",
@@ -1637,20 +1440,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-video-feedback-live-packaged.ts",
-    "module": "video",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
-    "file": "verify-video-feedback-packaged.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
-    "status": "failing",
-    "reason": "ExpectError: expect(locator).toContainText(expected) failed；waiting for locator('.scan-results')"
-  },
-  {
     "file": "verify-video-field-feedback-renderer.ts",
     "module": "video",
     "kind": "ui-dev",
@@ -1663,50 +1452,16 @@
     "status": "pass"
   },
   {
-    "file": "verify-video-field-retest-packaged.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
-    "status": "failing",
-    "reason": "FAIL native field retest: locator.click: Timeout 20000ms exceeded.；waiting for getByRole('button', { name: '创建合集', exact: true })"
-  },
-  {
     "file": "verify-video-field-retest.ts",
     "module": "video",
     "kind": "unit",
     "status": "pass"
   },
   {
-    "file": "verify-video-field-round2-packaged.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
-    "status": "pass"
-  },
-  {
-    "file": "verify-video-field-round2-real-db.ts",
-    "module": "video",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
-    "file": "verify-video-field-round3-real-db.ts",
-    "module": "video",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
-  },
-  {
     "file": "verify-video-field-round3.ts",
     "module": "video",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-video-field-round4-real-db.ts",
-    "module": "video",
-    "kind": "real-env",
-    "status": "failing",
-    "reason": "需要真实资料、网络、模型或手动运行环境，本轮未执行"
   },
   {
     "file": "verify-video-field-round4.ts",
@@ -1745,13 +1500,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-video-import-preview-packaged.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
-    "status": "failing",
-    "reason": "FAIL native import preview: Error: expect(locator).toHaveText(expected) failed；waiting for locator('.episode-reading__head h2').first()"
-  },
-  {
     "file": "verify-video-import-preview.ts",
     "module": "video",
     "kind": "unit",
@@ -1782,12 +1530,6 @@
     "status": "pass"
   },
   {
-    "file": "verify-video-library-usability-packaged.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
-    "status": "pass"
-  },
-  {
     "file": "verify-video-library-usability.ts",
     "module": "video",
     "kind": "unit",
@@ -1798,13 +1540,6 @@
     "module": "video",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-video-local-structure-packaged.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
-    "status": "failing",
-    "reason": "ExpectError: expect(locator).toHaveCount(expected) failed；waiting for locator('.video-item')"
   },
   {
     "file": "verify-video-local-structure.ts",
@@ -1841,13 +1576,6 @@
     "module": "video",
     "kind": "unit",
     "status": "pass"
-  },
-  {
-    "file": "verify-video-packaged-ui.ts",
-    "module": "video",
-    "kind": "e2e-packaged",
-    "status": "failing",
-    "reason": "locator.click: Timeout 30000ms exceeded.；waiting for locator('.sidebar .row').filter({ hasText: '其他分类' })"
   },
   {
     "file": "verify-video-posters.ts",
@@ -1967,6 +1695,24 @@
   },
   {
     "file": "verify-workspace.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "check-i18n.ts",
+    "module": "infra",
+    "kind": "unit",
+    "status": "pass"
+  },
+  {
+    "file": "verify-site-ui.cjs",
+    "module": "infra",
+    "kind": "ui-dev",
+    "status": "pass"
+  },
+  {
+    "file": "verify-site.mjs",
     "module": "infra",
     "kind": "unit",
     "status": "pass"

@@ -1,3 +1,5 @@
+
+import { tr, systemMessage } from "../i18n/index.ts"
 import type { RelocatePreview } from '../types'
 
 export interface SoftwareCategoryMove { id: string; name: string; preview: RelocatePreview }
@@ -17,13 +19,13 @@ export async function previewSoftwareCategoryChanges(ids: string[], category: st
   const targets = new Set<string>()
   for (const change of changes) {
     const key = change.preview.to.toLowerCase()
-    if (targets.has(key)) throw new Error('多个软件的目标文件夹重名，请到“已整理”页分别归置')
+    if (targets.has(key)) throw new Error(tr('多个软件的目标文件夹重名，请到“已整理”页分别归置'))
     targets.add(key)
   }
   return changes
 }
 
 export function categoryMoveConfirmation(moves: SoftwareCategoryMove[]): string {
-  return `修改分类会重新归置 ${moves.length} 个已整理软件。实体目录将移动，链接只改变入口位置。\n\n` +
-    moves.map(m => `${m.name}\n从：${m.preview.from}\n到：${m.preview.to}${m.preview.warning ? '\n' + m.preview.warning : ''}`).join('\n\n') + '\n\n确认继续？'
+  return tr("修改分类会重新归置 {p0} 个已整理软件。实体目录将移动，链接只改变入口位置。\n\n", {p0: (moves.length)}) +
+    moves.map(m => tr("{p0}\n从：{p1}\n到：{p2}{p3}", {p0: (m.name), p1: (m.preview.from), p2: (m.preview.to), p3: (m.preview.warning ? '\n' + systemMessage(m.preview.warning) : '')})).join('\n\n') + '\n\n' + tr('确认继续？')
 }

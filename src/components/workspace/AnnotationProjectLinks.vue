@@ -97,33 +97,31 @@ onBeforeUnmount(() => {
           references
             .filter((r) => r.projectId === reference.projectId)
             .map((r) =>
-              r.ownerType === 'event' ? '项目事件引用' : '项目直接引用',
+              r.ownerType === 'event' ? $t('项目事件引用') : $t('项目直接引用'),
             )
             .join(' · ')
         "
         @click="go(reference)"
-      >
-        已引用 → {{ reference.projectName }}
+      >{{ $t("已引用 → {p0}", {p0: (reference.projectName)}) }}
       </button>
     </div>
     <button
       ref="trigger"
       class="ws-button annotation-link-trigger"
-      aria-label="引用到项目"
+      :aria-label="$t('引用到项目')"
       :aria-expanded="opened"
       @click="opened ? close() : open()"
-    >
-      引用到项目 <span aria-hidden="true">▾</span>
+    >{{ $t("引用到项目") }}<span aria-hidden="true">▾</span>
     </button>
     <section
       v-if="opened"
       class="annotation-project-picker"
-      aria-label="选择引用项目"
+      :aria-label="$t('选择引用项目')"
       @keydown.esc.stop="close"
     >
       <header>
-        <strong>引用到项目</strong
-        ><button class="ws-icon" aria-label="关闭项目选择器" @click="close">
+        <strong>{{ $t("引用到项目") }}</strong
+        ><button class="ws-icon" :aria-label="$t('关闭项目选择器')" @click="close">
           ×
         </button>
       </header>
@@ -131,14 +129,14 @@ onBeforeUnmount(() => {
         ref="input"
         v-model="search"
         type="search"
-        aria-label="搜索引用项目"
-        placeholder="搜索项目名称…"
+        :aria-label="$t('搜索引用项目')"
+        :placeholder="$t('搜索项目名称…')"
       />
       <label class="archived-toggle"
-        ><input v-model="archived" type="checkbox" />显示归档项目</label
+        ><input v-model="archived" type="checkbox" />{{ $t("显示归档项目") }}</label
       >
-      <p v-if="error" class="ws-error" role="alert">{{ error }}</p>
-      <p v-if="loading" class="ws-muted" role="status">正在读取项目…</p>
+      <p v-if="error" class="ws-error" role="alert">{{ $systemMessage(error) }}</p>
+      <p v-if="loading" class="ws-muted" role="status">{{ $t("正在读取项目…") }}</p>
       <div v-else class="picker-projects">
         <button
           v-for="project in filtered"
@@ -150,24 +148,22 @@ onBeforeUnmount(() => {
           {{ project.name
           }}<small>{{
             busy === project.id
-              ? '正在引用…'
+              ? $t('正在引用…')
               : linked.some((r) => r.projectId === project.id)
-                ? '已关联'
+                ? $t('已关联')
                 : project.state === 'archived'
-                  ? '已归档'
+                  ? $t('已归档')
                   : ''
           }}</small>
         </button>
         <p v-if="!filtered.length" class="ws-muted">
-          {{ projects.length ? '没有匹配的项目' : '还没有项目' }}
+          {{ projects.length ? $t('没有匹配的项目') : $t('还没有项目') }}
         </p>
         <button
           v-if="!projects.length"
           class="ws-button"
           @click="router.push('/project')"
-        >
-          前往项目模块
-        </button>
+        >{{ $t("前往项目模块") }}</button>
       </div>
     </section>
   </div>

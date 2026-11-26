@@ -66,11 +66,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section ref="bar" v-if="audio.current || audio.online" class="audio-mini" aria-label="全局音频播放器">
+  <section ref="bar" v-if="audio.current || audio.online" class="audio-mini" :aria-label="$t('全局音频播放器')">
     <Music2 :size="22" class="audio-mini-icon" />
     <button
       class="audio-mini-title"
-      :title="audio.current ? '查看歌词与音频详情' : audio.online?.title"
+      :title="audio.current ? $t('查看歌词与音频详情') : audio.online?.title"
       :disabled="!audio.current"
       @click="
         audio.current &&
@@ -89,21 +89,21 @@ onBeforeUnmount(() => {
       }}</small>
     </button>
 
-    <button aria-label="上一曲" :disabled="!audio.hasPrevious" @click="audio.next(-1)">
+    <button :aria-label="$t('上一曲')" :disabled="!audio.hasPrevious" @click="audio.next(-1)">
       <SkipBack :size="17" />
     </button>
-    <button :aria-label="audio.playing ? '暂停音频' : '播放音频'" @click="audio.toggle">
+    <button :aria-label="audio.playing ? $t('暂停音频') : $t('播放音频')" @click="audio.toggle">
       <Pause v-if="audio.playing" :size="20" />
       <Play v-else :size="20" />
     </button>
-    <button aria-label="下一曲" :disabled="!audio.hasNext" @click="audio.next()">
+    <button :aria-label="$t('下一曲')" :disabled="!audio.hasNext" @click="audio.next()">
       <SkipForward :size="17" />
     </button>
 
     <input
       class="audio-mini-seek"
       type="range"
-      aria-label="音频播放进度"
+      :aria-label="$t('音频播放进度')"
       min="0"
       :max="audio.duration || 0"
       step="0.1"
@@ -118,8 +118,8 @@ onBeforeUnmount(() => {
       v-if="!audio.online"
       type="button"
       class="audio-mini-mode"
-      :title="'播放顺序：' + AUDIO_MODE_LABEL[audio.mode] + '（点击切换）'"
-      :aria-label="'播放模式：' + AUDIO_MODE_LABEL[audio.mode]"
+      :title="$t('播放顺序：') + AUDIO_MODE_LABEL[audio.mode] + $t('（点击切换）')"
+      :aria-label="$t('播放模式：') + AUDIO_MODE_LABEL[audio.mode]"
       @click="audio.cycleMode"
     >
       <Repeat1 v-if="audio.mode === 'one'" :size="16" />
@@ -131,8 +131,8 @@ onBeforeUnmount(() => {
     <div class="audio-mini-vol">
       <button
         type="button"
-        :title="audio.muted || audio.volume === 0 ? '取消静音' : '静音'"
-        :aria-label="audio.muted || audio.volume === 0 ? '取消静音' : '静音'"
+        :title="audio.muted || audio.volume === 0 ? $t('取消静音') : $t('静音')"
+        :aria-label="audio.muted || audio.volume === 0 ? $t('取消静音') : $t('静音')"
         @click="audio.toggleMute"
       >
         <VolumeX v-if="audio.muted || audio.volume === 0" :size="16" />
@@ -141,7 +141,7 @@ onBeforeUnmount(() => {
       <input
         class="audio-mini-vol-slider"
         type="range"
-        aria-label="音量"
+        :aria-label="$t('音量')"
         min="0"
         max="1"
         step="0.02"
@@ -157,31 +157,30 @@ onBeforeUnmount(() => {
       class="audio-mini-queue-btn"
       :class="{ active: queueOpen }"
       :aria-expanded="queueOpen"
-      aria-label="播放清单"
-      title="查看当前播放清单"
+      :aria-label="$t('播放清单')"
+      :title="$t('查看当前播放清单')"
       @click="queueOpen = !queueOpen"
     >
       <ListMusic :size="17" />
       <span>{{ audio.queue.length }}</span>
     </button>
 
-    <button aria-label="关闭音频播放器" title="关闭播放器" @click="audio.close">
+    <button :aria-label="$t('关闭音频播放器')" :title="$t('关闭播放器')" @click="audio.close">
       <X :size="18" />
     </button>
 
-    <div v-if="queueOpen && audio.queue.length > 0" ref="queuePanel" class="audio-queue-panel" role="region" aria-label="当前播放清单">
+    <div v-if="queueOpen && audio.queue.length > 0" ref="queuePanel" class="audio-queue-panel" role="region" :aria-label="$t('当前播放清单')">
       <header class="audio-queue-head">
         <div>
-          <strong>播放清单</strong>
-          <span>共 {{ audio.queue.length }} 首</span>
+          <strong>{{ $t("播放清单") }}</strong>
+          <span>{{ $t("共 {p0} 首", {p0: (audio.queue.length)}) }}</span>
         </div>
         <div class="audio-queue-actions">
           <button type="button" class="btn btn--ghost" @click="audio.cycleMode">
             {{ AUDIO_MODE_LABEL[audio.mode] }}
           </button>
-          <button type="button" class="btn btn--ghost" title="清空清单并停止播放" @click="audio.close">
-            <Trash2 :size="13" />清空
-          </button>
+          <button type="button" class="btn btn--ghost" :title="$t('清空清单并停止播放')" @click="audio.close">
+            <Trash2 :size="13" />{{ $t("清空") }}</button>
         </div>
       </header>
       <ul class="audio-queue-list">
@@ -202,8 +201,8 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="audio-queue-remove"
-            :aria-label="'从清单移除 ' + item.title"
-            title="从播放清单移除"
+            :aria-label="$t('从清单移除 ') + item.title"
+            :title="$t('从播放清单移除')"
             @click="audio.removeFromQueue(item.id)"
           >
             <X :size="14" />
@@ -223,8 +222,8 @@ onBeforeUnmount(() => {
       @ended="audio.ended()"
       @error="
         audio.failure = audio.online
-          ? '试听无法播放，请重新搜索或换来源重试。'
-          : '此文件无法内置播放，可在详情中使用系统播放器打开。'
+          ? $t('试听无法播放，请重新搜索或换来源重试。')
+          : $t('此文件无法内置播放，可在详情中使用系统播放器打开。')
       "
     />
     <p v-if="audio.failure" class="audio-mini-error" role="alert">{{ audio.failure }}</p>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { computed } from 'vue'
 import type { Episode } from '@/types'
 import { videoEpisodeLabel, videoSeasonLabel } from '@/utils/video-content'
@@ -8,14 +10,14 @@ defineEmits<{ 'update:modelValue':[id:string] }>()
 const groups = computed(() => {
   const seasons = [...new Set(props.episodes.map(episode => episode.season))].sort((a, b) => a - b)
   if (seasons.length <= 1 && !seasons.some(season => season > 0)) return [{ season: 0, label: '', episodes: props.episodes }]
-  return seasons.map(season => ({ season, label: videoSeasonLabel(season, props.withoutSeason) || (props.withoutSeason ? '未分部' : '未分季'), episodes: props.episodes.filter(episode => episode.season === season) }))
+  return seasons.map(season => ({ season, label: videoSeasonLabel(season, props.withoutSeason) || (props.withoutSeason ? tr("未分部") : tr("未分季")), episodes: props.episodes.filter(episode => episode.season === season) }))
 })
 </script>
-<template><div class="scope-switch" role="group" :aria-label="notes ? '选择笔记范围' : '选择简介范围'">
-  <button type="button" :aria-pressed="!modelValue" @click="$emit('update:modelValue','')">{{ notes ? '作品笔记' : '作品简介' }}</button>
+<template><div class="scope-switch" role="group" :aria-label="notes ? $t('选择笔记范围') : $t('选择简介范围')">
+  <button type="button" :aria-pressed="!modelValue" @click="$emit('update:modelValue','')">{{ notes ? $t('作品笔记') : $t('作品简介') }}</button>
   <template v-for="group in groups" :key="group.season">
     <span v-if="group.label" class="scope-switch__season">{{ group.label }}</span>
-    <button v-for="episode in group.episodes" :key="episode.id" type="button" :aria-pressed="modelValue === episode.id" :title="episode.original_title || episode.title" @click="$emit('update:modelValue',episode.id)">{{ group.label ? '第 ' + episode.episode + ' 集' : videoEpisodeLabel(episode, withoutSeason) }}</button>
+    <button v-for="episode in group.episodes" :key="episode.id" type="button" :aria-pressed="modelValue === episode.id" :title="episode.original_title || episode.title" @click="$emit('update:modelValue',episode.id)">{{ group.label ? $t('第 ') + episode.episode + $t(' 集') : videoEpisodeLabel(episode, withoutSeason) }}</button>
   </template>
 </div></template>
 <style scoped>

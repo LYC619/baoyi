@@ -39,6 +39,7 @@ export class IpcError extends Error {
 }
 
 export function invalidArg(field: string, reason: string): never {
+  // Keep the raw Chinese contract for main-process classification; translate at the UI boundary.
   throw new IpcError('INVALID_ARGUMENT', `参数 ${field} 无效：${reason}`, field)
 }
 
@@ -211,6 +212,10 @@ export function reqEnum<T extends string>(value: unknown, allowed: readonly T[],
 export function optEnum<T extends string>(value: unknown, allowed: readonly T[], field: string): T | undefined {
   if (value === undefined || value === null) return undefined
   return reqEnum(value, allowed, field)
+}
+
+export function validateLanguageSetting(value: unknown): 'system' | 'zh-CN' | 'en' {
+  return reqEnum(value, ['system', 'zh-CN', 'en'] as const, 'language')
 }
 
 export function reqUrl(value: unknown, field: string, protocols: readonly string[] = ['http:', 'https:']): string {

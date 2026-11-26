@@ -1,3 +1,5 @@
+
+import { tr } from '../i18n/core.ts'
 import type { Episode } from '@/types'
 
 export function videoDateLabel(stamp?: number): string {
@@ -12,13 +14,13 @@ export function videoDateLabel(stamp?: number): string {
  */
 export function videoEpisodeLabel(episode: Pick<Episode, 'season' | 'episode' | 'display_label'>, withoutSeason = false): string {
   if (episode.episode >= 0) return episode.season > 0
-    ? `${withoutSeason ? '第 ' + episode.season + ' 部' : '第 ' + episode.season + ' 季'} · 第 ${episode.episode} 集` : `第 ${episode.episode} 集`
-  return episode.display_label || '未标注集数'
+    ? tr('{p0} · 第 {p1} 集', {p0: videoSeasonLabel(episode.season, withoutSeason), p1: episode.episode}) : tr('第 {p0} 集', {p0: episode.episode})
+  return episode.display_label || tr('未标注集数')
 }
 
 /** 分组标题：普通剧集「第 N 季」，里番「第 N 部」；season 0 不分组（返回空串） */
 export function videoSeasonLabel(season: number, withoutSeason = false): string {
-  return season > 0 ? (withoutSeason ? `第 ${season} 部` : `第 ${season} 季`) : ''
+  return season > 0 ? (withoutSeason ? tr('第 {p0} 部', {p0: season}) : tr('第 {p0} 季', {p0: season})) : ''
 }
 
 /** Site catalogue entries have neither a recorded video path nor a video asset. */

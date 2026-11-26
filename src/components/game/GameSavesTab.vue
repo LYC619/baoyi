@@ -60,16 +60,10 @@ function isStale(target: string): boolean {
   >
     <section class="panel">
       <p v-if="projectOf(item)?.saveScope" class="save-scope">{{ projectOf(item)?.saveScope }}</p>
-      <p class="save-scope">
-        下方仅列出你已指定的活跃存档位置；随附预设、测试档和安卓包中的文件不会自动作为玩家存档。多目录、注册表或浏览器存储需按单作工具说明备份。
-      </p>
+      <p class="save-scope">{{ $t("下方仅列出你已指定的活跃存档位置；随附预设、测试档和安卓包中的文件不会自动作为玩家存档。多目录、注册表或浏览器存储需按单作工具说明备份。") }}</p>
       <h2 class="sec-title">
-        <HardDriveDownload :size="14" />
-        存档位置
-        <button type="button" class="sec-title__act" @click="emit('add-save-path')">
-          <FolderPlus :size="13" />
-          添加
-        </button>
+        <HardDriveDownload :size="14" />{{ $t("存档位置") }}<button type="button" class="sec-title__act" @click="emit('add-save-path')">
+          <FolderPlus :size="13" />{{ $t("添加") }}</button>
       </h2>
 
       <ul v-if="item.save_paths.length > 0" class="paths">
@@ -77,7 +71,7 @@ function isStale(target: string): boolean {
           <button
             type="button"
             class="path__text mono truncate"
-            :title="`${s.path}（点击复制）`"
+            :title="$t('{p0}（点击复制）', {p0: s.path})"
             @click="emit('copy-path', s.path)"
           >
             {{ s.path }}
@@ -85,27 +79,25 @@ function isStale(target: string): boolean {
           <span
             v-if="isStale(s.path)"
             class="path__note path__note--stale"
-            title="打开游戏库检查时发现该路径暂不可用，可能已移动、卸载，或所在磁盘尚未连接"
+            :title="$t('打开游戏库检查时发现该路径暂不可用，可能已移动、卸载，或所在磁盘尚未连接')"
           >
-            <Unlink :size="11" />
-            路径失效
-          </span>
+            <Unlink :size="11" />{{ $t("路径失效") }}</span>
           <span v-else class="path__note">
-            {{ s.verified_at ? `${formatDate(s.verified_at)} 验证过` : '未验证' }}
+            {{ s.verified_at ? $t('{p0} 验证过', {p0: formatDate(s.verified_at)}) : $t('未验证') }}
           </span>
           <input
             v-model="noteDrafts[s.path]"
             type="text"
             class="path__memo"
             maxlength="80"
-            placeholder="备份备注（可选）"
-            aria-label="备份备注"
+            :placeholder="$t('备份备注（可选）')"
+            :aria-label="$t('备份备注')"
             :disabled="!!backingUp || !!restoring"
           />
           <button
             type="button"
             class="btn btn--ghost btn--sm"
-            title="重新检查存档目录是否存在"
+            :title="$t('重新检查存档目录是否存在')"
             :disabled="verifying === s.path"
             @click="emit('verify-save-path', s.path)"
           >
@@ -113,12 +105,11 @@ function isStale(target: string): boolean {
               :is="verifying === s.path ? Loader2 : BadgeCheck"
               :size="13"
               :class="{ spin: verifying === s.path }"
-            />重新验证
-          </button>
+            />{{ $t("重新验证") }}</button>
           <button
             type="button"
             class="btn btn--primary btn--sm"
-            title="立即备份这份存档"
+            :title="$t('立即备份这份存档')"
             :disabled="!!backingUp || !!restoring"
             @click="triggerBackup(s.path)"
           >
@@ -126,31 +117,24 @@ function isStale(target: string): boolean {
               :is="backingUp === s.path ? Loader2 : Save"
               :size="13"
               :class="{ spin: backingUp === s.path }"
-            />立即备份
-          </button>
+            />{{ $t("立即备份") }}</button>
           <button
             type="button"
             class="path__del"
-            title="移除这条存档路径"
+            :title="$t('移除这条存档路径')"
             @click="emit('remove-save-path', s.path)"
           >
             <Trash2 :size="13" />
           </button>
         </li>
       </ul>
-      <p v-else class="hint">
-        尚未登记存档目录。点击右上角「添加」指定一个目录，系统会当场检查其中的文件情况；确认后再开启备份。
-      </p>
-      <p v-if="item.save_paths.length > 0" class="hint">
-        存档备份存放在「设置 › 游戏 › 存档与备份」指定的目录中，每次独立保存一份，不会覆盖历史备份。超出保留上限时会询问是否清理最早的旧备份。
-      </p>
+      <p v-else class="hint">{{ $t("尚未登记存档目录。点击右上角「添加」指定一个目录，系统会当场检查其中的文件情况；确认后再开启备份。") }}</p>
+      <p v-if="item.save_paths.length > 0" class="hint">{{ $t("存档备份存放在「设置 › 游戏 › 存档与备份」指定的目录中，每次独立保存一份，不会覆盖历史备份。超出保留上限时会询问是否清理最早的旧备份。") }}</p>
     </section>
 
     <section v-if="backups.length > 0" class="panel">
       <h2 class="sec-title">
-        <History :size="14" />
-        存档备份
-        <span class="sec-title__count">{{ backups.length }}</span>
+        <History :size="14" />{{ $t("存档备份") }}<span class="sec-title__count">{{ backups.length }}</span>
       </h2>
       <ul class="backups">
         <li v-for="b in backups" :key="b.id" class="backup">
@@ -158,22 +142,20 @@ function isStale(target: string): boolean {
             <button
               type="button"
               class="backup__when"
-              :title="`${b.backup_dir}（点击打开备份文件夹）`"
+              :title="$t('{p0}（点击打开备份文件夹）', {p0: b.backup_dir})"
               @click="emit('open-backup', b)"
             >
               {{ formatDateTime(b.created_at) }}
             </button>
             <span v-if="b.note" class="backup__note">{{ b.note }}</span>
             <span class="backup__meta">
-              {{ b.file_count }} 个文件　{{ formatBytes(b.size_bytes) }}
+              {{ $t("{p0} 个文件 {p1}", {p0: (b.file_count), p1: (formatBytes(b.size_bytes))}) }}
             </span>
             <span class="backup__from mono truncate" :title="b.save_path">{{ b.save_path }}</span>
           </div>
           <div class="backup__acts">
-            <label>
-              还原到
-              <select
-                aria-label="还原目标"
+            <label>{{ $t("还原到") }}<select
+                :aria-label="$t('还原目标')"
                 :value="restoreTargets[b.id] ?? ''"
                 :disabled="!!backingUp || !!restoring"
                 @change="
@@ -184,7 +166,7 @@ function isStale(target: string): boolean {
                   )
                 "
               >
-                <option value="">原位置：{{ b.save_path }}</option>
+                <option value="">{{ $t("原位置：{p0}", {p0: (b.save_path)}) }}</option>
                 <option
                   v-for="s in item.save_paths.filter((s) => s.path !== b.save_path)"
                   :key="s.path"
@@ -204,14 +186,12 @@ function isStale(target: string): boolean {
                 :is="restoring === b.id ? Loader2 : RotateCcw"
                 :size="13"
                 :class="{ spin: restoring === b.id }"
-              />
-              还原
-            </button>
+              />{{ $t("还原") }}</button>
             <button
               type="button"
               class="path__del"
               :disabled="!!backingUp || !!restoring"
-              title="删掉这份备份"
+              :title="$t('删掉这份备份')"
               @click="emit('drop-backup', b)"
             >
               <Trash2 :size="13" />

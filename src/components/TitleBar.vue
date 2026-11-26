@@ -82,7 +82,7 @@ function go(key: ModuleKey): void {
   <header class="titlebar">
     <div class="titlebar__brand">
       <BaoyiLogo :size="22" />
-      <span class="titlebar__name">抱一</span>
+      <span class="titlebar__name">{{ $t("抱一") }}</span>
     </div>
 
     <nav v-if="showTabs" class="tabs">
@@ -91,7 +91,7 @@ function go(key: ModuleKey): void {
         :key="tab.key"
         class="tab"
         :class="{ 'tab--on': activeModule === tab.key }"
-        :title="activeModule === tab.key ? `返回${tab.label}首页` : `切换到${tab.label}`"
+        :title="activeModule === tab.key ? $t('返回{p0}首页', {p0: tab.label}) : $t('切换到{p0}', {p0: tab.label})"
         @click="go(tab.key)"
       >
         <span>{{ tab.label }}</span>
@@ -100,25 +100,25 @@ function go(key: ModuleKey): void {
         <span
           v-if="activeModule !== tab.key && stats[tab.key].pending > 0"
           class="tab__dot"
-          :title="`${stats[tab.key].pending} 个待确认`"
+          :title="$t('{p0} 个待确认', {p0: stats[tab.key].pending})"
         />
       </button>
     </nav>
 
     <TaskCenter />
-    <button v-if="showTabs" class="ctl titlebar-settings" title="全局搜索 · Ctrl K" aria-label="全局搜索" @click="globalSearch.openGlobalSearch()"><Search :size="16"/></button>
-    <button v-if="showTabs" class="ctl titlebar-settings" :class="{'assistant-active':archiveAssistant.busy.value}" title="归档助理 · Ctrl J" aria-label="归档助理" @click="archiveAssistant.open.value?archiveAssistant.open.value=false:archiveAssistant.show()"><MessageSquare :size="17"/></button>
-    <button v-if="showTabs" class="ctl titlebar-settings" title="设置" aria-label="设置" @click="router.push({ name: 'settings', query: { module: activeModule, scope: 'module' } })"><Settings :size="16"/></button>
+    <button v-if="showTabs" class="ctl titlebar-settings" :title="$t('全局搜索 · Ctrl K')" :aria-label="$t('全局搜索')" @click="globalSearch.openGlobalSearch()"><Search :size="16"/></button>
+    <button v-if="showTabs" class="ctl titlebar-settings" :class="{'assistant-active':archiveAssistant.busy.value}" :title="$t('归档助理 · Ctrl J')" :aria-label="$t('归档助理')" @click="archiveAssistant.open.value?archiveAssistant.open.value=false:archiveAssistant.show()"><MessageSquare :size="17"/></button>
+    <button v-if="showTabs" class="ctl titlebar-settings" :title="$t('设置')" :aria-label="$t('设置')" @click="router.push({ name: 'settings', query: { module: activeModule, scope: 'module' } })"><Settings :size="16"/></button>
 
     <div class="titlebar__controls">
-      <button class="ctl" title="最小化" @click="minimize">
+      <button class="ctl" :title="$t('最小化')" @click="minimize">
         <Minus :size="15" />
       </button>
-      <button class="ctl" :title="maximized ? '还原' : '最大化'" @click="toggleMaximize">
+      <button class="ctl" :title="maximized ? $t('还原') : $t('最大化')" @click="toggleMaximize">
         <Copy v-if="maximized" :size="13" />
         <Square v-else :size="12" />
       </button>
-      <button class="ctl ctl--close" title="关闭" @click="close">
+      <button class="ctl ctl--close" :title="$t('关闭')" @click="close">
         <X :size="15" />
       </button>
     </div>

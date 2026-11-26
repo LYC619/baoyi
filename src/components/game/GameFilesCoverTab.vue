@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { ref } from 'vue'
 import { Image, ImageOff, Loader2, X } from 'lucide-vue-next'
 import GameCover from '@/components/game/GameCover.vue'
@@ -7,8 +9,8 @@ import { isWindowsGameEntry } from '@/utils/game-entry'
 import { formatBytes } from '@/utils'
 import type { CoverCandidate, GameCoverDiagnostic, GameItem } from '@/types'
 
-const COVER_SOURCE_LABEL = { local: '本地图片', official: '官方', steam: 'Steam', search: '图片搜索' }
-const COVER_STAGE_LABEL = { identity: '名称核对', lookup: '检索', network: '网络', decode: '解析', cache: '缓存', write: '保存' }
+const COVER_SOURCE_LABEL = { get local() { return tr('本地图片') }, get official() { return tr('官方') }, steam: 'Steam', get search() { return tr('图片搜索') } }
+const COVER_STAGE_LABEL = { get identity() { return tr('名称核对') }, get lookup() { return tr('检索') }, get network() { return tr('网络') }, get decode() { return tr('解析') }, get cache() { return tr('缓存') }, get write() { return tr('保存') } }
 
 defineProps<{
   item: GameItem
@@ -62,78 +64,63 @@ function focusCover(event: MouseEvent) {
     class="detail-panel detail-panel--files"
   >
     <section class="panel entry-panel">
-      <h2 class="sec-title">{{ isWindowsGameEntry(item.path) ? '启动入口' : '安装包与资源' }}</h2>
-      <p v-if="!isWindowsGameEntry(item.path)" class="hint">
-        打开顶部文件夹可取用安装包；设备安装、导出与恢复范围见精修记录。
-      </p>
+      <h2 class="sec-title">{{ isWindowsGameEntry(item.path) ? $t('启动入口') : $t('安装包与资源') }}</h2>
+      <p v-if="!isWindowsGameEntry(item.path)" class="hint">{{ $t("打开顶部文件夹可取用安装包；设备安装、导出与恢复范围见精修记录。") }}</p>
       <div v-for="entry in entries" :key="entry.path" class="entry-row">
         <div>
           <b>{{ entry.label }}</b>
           <small class="mono" :title="entry.path">{{ entry.path }}</small>
         </div>
-        <span v-if="entry.path === item.path" class="default-badge">★ 默认</span>
-        <button v-else type="button" class="btn btn--subtle" @click="emit('default-entry', entry.path)">
-          设为默认
-        </button>
+        <span v-if="entry.path === item.path" class="default-badge">{{ $t("★ 默认") }}</span>
+        <button v-else type="button" class="btn btn--subtle" @click="emit('default-entry', entry.path)">{{ $t("设为默认") }}</button>
         <button
           type="button"
           class="btn btn--ghost btn--sm"
           :disabled="launchDisabledFn(entry.path)"
           @click="emit('launch-entry', entry.path)"
-        >
-          启动
-        </button>
+        >{{ $t("启动") }}</button>
       </div>
     </section>
 
     <section class="panel cover-panel">
-      <h2 class="sec-title">封面 <small>点击图片设置裁切焦点</small></h2>
+      <h2 class="sec-title">{{ $t("封面") }}<small>{{ $t("点击图片设置裁切焦点") }}</small></h2>
       <div class="cover-pair">
         <div v-for="shape in ['vert', 'wide'] as const" :key="shape">
           <button
             type="button"
             class="cover-preview"
             :class="'cover-preview--' + shape"
-            :aria-label="'设置' + (shape === 'vert' ? '竖版' : '横版') + '封面焦点'"
+            :aria-label="$t('设置') + (shape === 'vert' ? $t('竖版') : $t('横版')) + $t('封面焦点')"
             @click="focusCover"
           >
             <GameCover
               :item="item"
               :shape="shape"
-              @loaded="coverInfo[shape] = $event.composed ? '保留全图自动构图' : $event.width + ' × ' + $event.height"
+              @loaded="coverInfo[shape] = $event.composed ? $t('保留全图自动构图') : $event.width + ' × ' + $event.height"
             />
           </button>
           <small>
-            {{ shape === 'vert' ? '竖版' : '横版' }} ·
-            {{ item.cover_path || item.background_path ? coverInfo[shape] || '加载中' : '文字封面' }}
+            {{ shape === 'vert' ? $t('竖版') : $t('横版') }} ·
+            {{ item.cover_path || item.background_path ? coverInfo[shape] || $t('加载中') : $t('文字封面') }}
           </small>
         </div>
       </div>
 
       <div class="cover-provenance">
-        <p>
-          竖图来源：{{
-            item.cover_source === 'manual'
-              ? '手动选择的本地图片'
+        <p>{{ $t("竖图来源：{p0}", {p0: (item.cover_source === 'manual'
+              ? $t('手动选择的本地图片')
               : item.cover_source
                 ? COVER_SOURCE_LABEL[item.cover_source]
-                : '未记录'
-          }}
-          <span v-if="item.cover_source_url"> · {{ item.cover_source_url }}</span>
+                : $t('未记录'))}) }}<span v-if="item.cover_source_url"> · {{ item.cover_source_url }}</span>
         </p>
-        <p>
-          横图：{{
-            item.background_path
-              ? '已保存的本地图片 · ' + item.background_path
-              : '未单独设置；由竖图自动构图'
-          }}
+        <p>{{ $t("横图：{p0}", {p0: (item.background_path
+              ? $t('已保存的本地图片 · ') + item.background_path
+              : $t('未单独设置；由竖图自动构图'))}) }}
         </p>
         <p v-if="item.cover_detail">{{ item.cover_detail }}</p>
       </div>
 
-      <label class="focus-control">
-        横向焦点
-        <input
+      <label class="focus-control">{{ $t("横向焦点") }}<input
           type="range"
           min="0"
           max="100"
@@ -145,9 +132,7 @@ function focusCover(event: MouseEvent) {
           "
         />
       </label>
-      <label class="focus-control">
-        纵向焦点
-        <input
+      <label class="focus-control">{{ $t("纵向焦点") }}<input
           type="range"
           min="0"
           max="100"
@@ -159,17 +144,13 @@ function focusCover(event: MouseEvent) {
           "
         />
       </label>
-      <label class="cover-field">
-        游戏身份
-        <input
+      <label class="cover-field">{{ $t("游戏身份") }}<input
           :value="item.identity_name"
-          placeholder="实际游戏名称"
+          :placeholder="$t('实际游戏名称')"
           @change="emit('save', { identity_name: ($event.target as HTMLInputElement).value.trim() })"
         />
       </label>
-      <label class="cover-field">
-        封面关键词
-        <input
+      <label class="cover-field">{{ $t("封面关键词") }}<input
           :value="item.identity_query"
           :placeholder="item.identity_name || title"
           @change="emit('save', { identity_query: ($event.target as HTMLInputElement).value.trim() })"
@@ -177,49 +158,37 @@ function focusCover(event: MouseEvent) {
       </label>
       <div class="cover-buttons">
         <button type="button" class="btn btn--ghost" :disabled="coverSearching" @click="emit('search-covers')">
-          {{ coverSearching ? '搜索中…' : '搜封面' }}
+          {{ coverSearching ? $t('搜索中…') : $t('搜封面') }}
         </button>
-        <button type="button" class="btn btn--ghost" @click="emit('pick-cover')">选择竖版图</button>
-        <button type="button" class="btn btn--ghost" @click="emit('pick-background', false)">横版图片</button>
+        <button type="button" class="btn btn--ghost" @click="emit('pick-cover')">{{ $t("选择竖版图") }}</button>
+        <button type="button" class="btn btn--ghost" @click="emit('pick-background', false)">{{ $t("横版图片") }}</button>
         <button
           v-if="item.background_path"
           type="button"
           class="btn btn--subtle"
           @click="emit('pick-background', true)"
-        >
-          清除横图
-        </button>
+        >{{ $t("清除横图") }}</button>
         <button
           v-if="item.cover_focus"
           type="button"
           class="btn btn--subtle"
           @click="emit('save', { cover_focus: '' })"
-        >
-          恢复自动构图
-        </button>
-        <button type="button" class="btn btn--subtle" :disabled="!item.cover_path" @click="emit('clear-cover')">
-          恢复默认封面
-        </button>
+        >{{ $t("恢复自动构图") }}</button>
+        <button type="button" class="btn btn--subtle" :disabled="!item.cover_path" @click="emit('clear-cover')">{{ $t("恢复默认封面") }}</button>
         <button
           v-if="item.cover_source_url && (coverBroken || !item.cover_path)"
           type="button"
           class="btn btn--subtle"
           @click="emit('recover-cover')"
-        >
-          恢复封面缓存
-        </button>
+        >{{ $t("恢复封面缓存") }}</button>
       </div>
     </section>
 
     <section v-if="coverHits.length > 0 || coverMiss || coverDiagnostics.length" class="panel">
       <h2 class="sec-title">
-        <Image :size="14" />
-        候选封面
-        <span v-if="coverQuery" class="sec-title__note">按「{{ coverQuery }}」检索</span>
-        <button type="button" class="sec-title__act" title="收起" @click="emit('close-cover-hits')">
-          <X :size="13" />
-          收起
-        </button>
+        <Image :size="14" />{{ $t("候选封面") }}<span v-if="coverQuery" class="sec-title__note">{{ $t("按「{p0}」检索", {p0: (coverQuery)}) }}</span>
+        <button type="button" class="sec-title__act" :title="$t('收起')" @click="emit('close-cover-hits')">
+          <X :size="13" />{{ $t("收起") }}</button>
       </h2>
 
       <p v-if="coverMiss" class="hint">{{ coverMiss }}</p>
@@ -246,20 +215,20 @@ function focusCover(event: MouseEvent) {
             class="coverPick__img"
             @error="emit('preview-failed', c)"
           />
-          <span v-else class="coverPick__placeholder" role="img" :aria-label="`${c.label}预览不可用`">
+          <span v-else class="coverPick__placeholder" role="img" :aria-label="$t('{p0}预览不可用', {p0: c.label})">
             <ImageOff :size="20" />
-            <small>预览不可用</small>
+            <small>{{ $t("预览不可用") }}</small>
           </span>
           <span class="coverPick__label">{{ c.title || c.label }}</span>
           <span class="coverPick__meta">
             {{ COVER_SOURCE_LABEL[c.source] }} ·
-            {{ c.status === 'failed' || brokenPreviews.has(c.url) ? '不可用' : '可用' }}
+            {{ c.status === 'failed' || brokenPreviews.has(c.url) ? $t('不可用') : $t('可用') }}
           </span>
           <span v-if="c.width && c.height" class="coverPick__meta">
             {{ c.width }} × {{ c.height }}<template v-if="c.bytes"> · {{ formatBytes(c.bytes) }}</template>
           </span>
           <span v-if="c.message" class="coverPick__meta coverPick__error">
-            {{ c.stage ? COVER_STAGE_LABEL[c.stage] + '：' : '' }}{{ c.message }}
+            {{ c.stage ? COVER_STAGE_LABEL[c.stage] + '：' : '' }}{{ $systemMessage(c.message) }}
           </span>
           <span v-if="coverPicking === c.url" class="coverPick__busy">
             <Loader2 :size="18" class="spin" />
@@ -268,14 +237,14 @@ function focusCover(event: MouseEvent) {
       </div>
 
       <details v-if="coverDiagnostics.length" class="coverDiagnostics">
-        <summary>查看检索过程</summary>
+        <summary>{{ $t("查看检索过程") }}</summary>
         <ul>
           <li
             v-for="(entry, index) in coverDiagnostics"
             :key="index"
             :class="{ coverDiagnostics__failed: entry.status === 'failed' }"
           >
-            <span>{{ COVER_SOURCE_LABEL[entry.source] }} · {{ COVER_STAGE_LABEL[entry.stage] }}：{{ entry.message }}</span>
+            <span>{{ COVER_SOURCE_LABEL[entry.source] }} · {{ COVER_STAGE_LABEL[entry.stage] }}：{{ $systemMessage(entry.message) }}</span>
             <small v-if="entry.route">{{ entry.route }}</small>
           </li>
         </ul>
@@ -287,35 +256,31 @@ function focusCover(event: MouseEvent) {
     </section>
 
     <section class="panel">
-      <h2 class="sec-title">文件位置</h2>
+      <h2 class="sec-title">{{ $t("文件位置") }}</h2>
       <div class="row">
-        <button type="button" class="btn btn--ghost" :disabled="relocating" @click="emit('relocate', 'directory')">
-          重新定位文件夹
-        </button>
-        <button type="button" class="btn btn--subtle" :disabled="relocating" @click="emit('relocate', 'file')">
-          更换主程序
-        </button>
+        <button type="button" class="btn btn--ghost" :disabled="relocating" @click="emit('relocate', 'directory')">{{ $t("重新定位文件夹") }}</button>
+        <button type="button" class="btn btn--subtle" :disabled="relocating" @click="emit('relocate', 'file')">{{ $t("更换主程序") }}</button>
       </div>
       <dl class="facts">
-        <dt>主程序</dt>
+        <dt>{{ $t("主程序") }}</dt>
         <dd>
           <button
             type="button"
             class="mono truncate link"
-            :title="`${item.path}（点击复制）`"
+            :title="$t('{p0}（点击复制）', {p0: item.path})"
             @click="emit('copy-path', item.path)"
           >
             {{ item.file_name }}
           </button>
         </dd>
-        <dt>大小</dt>
+        <dt>{{ $t("大小") }}</dt>
         <dd>{{ formatBytes(item.file_size) }}</dd>
-        <dt>目录</dt>
+        <dt>{{ $t("目录") }}</dt>
         <dd>
           <button
             type="button"
             class="mono truncate link"
-            :title="`${item.source_dir}（点击复制）`"
+            :title="$t('{p0}（点击复制）', {p0: item.source_dir})"
             @click="emit('copy-path', item.source_dir)"
           >
             {{ item.source_dir }}

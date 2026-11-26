@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from "../../i18n/index.ts"
+
 import { errorMessage } from '@/utils'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDockBoundary } from '@/composables/useFloatingDock'
@@ -148,7 +150,7 @@ const skills = ref<any>(null)
 const renaming = ref('')
 const newTitle = ref('')
 
-const title = computed(() => a.sessions.value.find((s) => s.id === a.selected.value)?.title || '新对话')
+const title = computed(() => a.sessions.value.find((s) => s.id === a.selected.value)?.title || tr('新对话'))
 
 const blocks = computed<LiveBlock[]>(() => {
   const calls = new Map<string, any>()
@@ -223,12 +225,12 @@ const displayBlocks = computed(() => groupBlocks(blocks.value))
 const displayLive = computed(() => groupBlocks(a.visibleLive.value))
 
 const activeHere = computed(() => a.active.value?.sessionId === a.selected.value)
-const appliedActionsCount = computed(() => a.actions.value.filter((act) => act.state !== 'undone').length)
+const turnActionsCount = computed(() => a.turnActions.value.length)
 const actionDiffMap = computed(() =>
   new Map(a.actions.value.map((act) => [act.id, actionDiffRows(act.before, act.after)]))
 )
 const taskStatus = computed(() =>
-  a.active.value?.status === 'starting' ? '正在准备归档助理…' : activeHere.value ? '正在处理，随时可以补充要求' : ''
+  a.active.value?.status === 'starting' ? tr("正在准备归档助理…") : activeHere.value ? tr("正在处理，随时可以补充要求") : ''
 )
 
 function scroll() {
@@ -364,7 +366,7 @@ async function saveMemory(remove = false, text = memoryOld.value, target = memor
     memory.value = result
     memoryOld.value = undefined
     memoryDraft.value = ''
-    a.notice.value = remove ? '记忆已删除' : '记忆已保存，下次对话会使用'
+    a.notice.value = remove ? tr("记忆已删除") : tr("记忆已保存，下次对话会使用")
   } catch (e) {
     if (scope === a.privacyRevision.value) a.error.value = errorMessage(e)
   } finally {
@@ -391,46 +393,46 @@ async function rename() {
 }
 
 const ACTION_FIELD_LABELS: Record<string, string> = {
-  name: '名称',
-  type: '分类',
-  category: '分类',
-  groupId: '分类',
-  customGroupId: '分组',
-  group: '分组',
-  author: '作者',
-  counterpart: '相关方',
-  issuedOn: '日期',
-  expiresOn: '到期日',
-  summary: '摘要',
-  description: '简介',
-  notes: '笔记',
-  body: '正文',
-  tags: '标签',
-  readState: '阅读状态',
-  read: '已读',
-  submodule: '所属子库',
-  favorite: '收藏',
-  pinned: '置顶',
-  source: '来源',
-  state: '状态',
-  publication: '出版信息',
-  data: '扩展属性'
+  get name() { return tr('名称') },
+  get type() { return tr('分类') },
+  get category() { return tr('分类') },
+  get groupId() { return tr('分类') },
+  get customGroupId() { return tr('分组') },
+  get group() { return tr('分组') },
+  get author() { return tr('作者') },
+  get counterpart() { return tr('相关方') },
+  get issuedOn() { return tr('日期') },
+  get expiresOn() { return tr('到期日') },
+  get summary() { return tr('摘要') },
+  get description() { return tr("简介") },
+  get notes() { return tr('笔记') },
+  get body() { return tr('正文') },
+  get tags() { return tr('标签') },
+  get readState() { return tr('阅读状态') },
+  get read() { return tr('已读') },
+  get submodule() { return tr('所属子库') },
+  get favorite() { return tr('收藏') },
+  get pinned() { return tr('置顶') },
+  get source() { return tr('来源') },
+  get state() { return tr('状态') },
+  get publication() { return tr('出版信息') },
+  get data() { return tr('扩展属性') }
 }
 const ENUM_VALUE_LABELS: Record<string, Record<string, string>> = {
-  readState: { unread: '未读', reading: '在读', finished: '已读' },
-  submodule: { archive: '资料', reading: '阅读' },
-  source: { unknown: '来源未标记', self: '自己建立', 'third-party': '第三方', mixed: '混合来源' },
-  state: { active: '使用中', maintaining: '维护中', paused: '已暂停', completed: '已完成', archived: '已归档' },
-  publication: { ongoing: '连载中', completed: '已完结' }
+  readState: { get unread() { return tr('未读') }, get reading() { return tr('在读') }, get finished() { return tr('已读') } },
+  submodule: { get archive() { return tr('资料') }, get reading() { return tr('阅读') } },
+  source: { get unknown() { return tr('来源未标记') }, get self() { return tr('自己建立') }, get 'third-party'() { return tr('第三方') }, get mixed() { return tr('混合来源') } },
+  state: { get active() { return tr('使用中') }, get maintaining() { return tr('维护中') }, get paused() { return tr('已暂停') }, get completed() { return tr('已完成') }, get archived() { return tr('已归档') } },
+  publication: { get ongoing() { return tr('连载中') }, get completed() { return tr('已完结') } }
 }
 function formatFieldValue(key: string, v: unknown): string {
-  if (v === null || v === undefined || v === '') return '（空）'
-  if (typeof v === 'boolean') return v ? '是' : '否'
+  if (v === null || v === undefined || v === '') return tr('（空）')
+  if (typeof v === 'boolean') return v ? tr('是') : tr('否')
   if (typeof v === 'string' && ENUM_VALUE_LABELS[key]?.[v]) return ENUM_VALUE_LABELS[key][v]
-  if (Array.isArray(v)) return v.length ? v.map((x) => String(x)).join('、') : '（无）'
+  if (Array.isArray(v)) return v.length ? v.map((x) => String(x)).join('、') : tr('（无）')
   if (typeof v === 'object') {
     const entries = Object.entries(v as Record<string, unknown>).filter(([, val]) => val !== undefined && val !== '')
-    return entries.length ? entries.map(([k, val]) => `${k}: ${String(val)}`).join('；') : '（无）'
+    return entries.length ? entries.map(([k, val]) => `${k}: ${String(val)}`).join('；') : tr('（无）')
   }
   return String(v)
 }
@@ -443,12 +445,12 @@ function actionDiffRows(before: Record<string, unknown> | null, after: Record<st
     .map((k) => ({
       key: k,
       label: ACTION_FIELD_LABELS[k] || k,
-      before: before ? formatFieldValue(k, b[k]) : '尚未创建',
-      after: after ? formatFieldValue(k, aObj[k]) : '已移除'
+      before: before ? formatFieldValue(k, b[k]) : tr("尚未创建"),
+      after: after ? formatFieldValue(k, aObj[k]) : tr("已移除")
     }))
 }
 function changeText(value: Record<string, unknown> | null) {
-  return value ? JSON.stringify(value, (key, item) => (key === '_protection' ? undefined : item), 2) : '尚未创建'
+  return value ? JSON.stringify(value, (key, item) => (key === '_protection' ? undefined : item), 2) : tr('尚未创建')
 }
 function shortcut(e: KeyboardEvent) {
   if (e.isComposing || document.querySelector?.('dialog[open]')) return
@@ -474,74 +476,74 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
     class="archive-panel"
     :style="panelInlineStyle"
     :class="{ wide: a.wide.value, resizing: isResizing }"
-    aria-label="归档助理"
+    :aria-label="$t('归档助理')"
   >
-    <div v-if="!a.wide.value" class="panel-resizer" title="拖拽调整宽度" @pointerdown="startResize" />
+    <div v-if="!a.wide.value" class="panel-resizer" :title="$t('拖拽调整宽度')" @pointerdown="startResize" />
     <header class="panel-top">
       <BaoyiLogo :size="24" />
       <div>
-        <strong>归档助理</strong>
-        <small>{{ a.busy.value ? '任务进行中' : '找回、理解、整理你的收藏' }}</small>
+        <strong>{{ $t("归档助理") }}</strong>
+        <small>{{ a.busy.value ? $t('任务进行中') : $t('找回、理解、整理你的收藏') }}</small>
       </div>
-      <button class="icon" title="历史对话" aria-label="历史对话" @click="history = !history">
+      <button class="icon" :title="$t('历史对话')" :aria-label="$t('历史对话')" @click="history = !history">
         <History :size="17" />
       </button>
-      <button class="icon" title="新对话" aria-label="新对话" @click="fresh">
+      <button class="icon" :title="$t('新对话')" :aria-label="$t('新对话')" @click="fresh">
         <Plus :size="18" />
       </button>
-      <button class="icon expand" :title="a.wide.value ? '缩小' : '展开'" @click="a.wide.value = !a.wide.value">
+      <button class="icon expand" :title="a.wide.value ? $t('缩小') : $t('展开')" @click="a.wide.value = !a.wide.value">
         <Minimize2 v-if="a.wide.value" :size="16" />
         <Maximize2 v-else :size="16" />
       </button>
-      <button class="icon" title="收起助理 · Ctrl J" aria-label="收起归档助理" @click="a.open.value = false">
+      <button class="icon" :title="$t('收起助理 · Ctrl J')" :aria-label="$t('收起归档助理')" @click="a.open.value = false">
         <X :size="18" />
       </button>
     </header>
 
     <nav class="panel-nav">
-      <button :class="{ on: section === 'chat' }" @click="view('chat')">对话</button>
-      <button :class="{ on: section === 'memory' }" @click="view('memory')">记忆</button>
-      <button :class="{ on: section === 'actions' }" @click="view('actions')">修改记录</button>
-      <button :class="{ on: section === 'skills' }" @click="view('skills')">归档方法</button>
+      <button :class="{ on: section === 'chat' }" @click="view('chat')">{{ $t("对话") }}</button>
+      <button :class="{ on: section === 'memory' }" @click="view('memory')">{{ $t("记忆") }}</button>
+      <button :class="{ on: section === 'actions' }" @click="view('actions')">{{ $t("修改记录") }}</button>
+      <button :class="{ on: section === 'skills' }" @click="view('skills')">{{ $t("归档方法") }}</button>
       <span v-if="a.selected.value" :title="title">{{ title }}</span>
     </nav>
 
     <div v-if="a.error.value" class="banner error" role="alert">
-      {{ a.error.value }}
-      <button class="icon" aria-label="关闭提示" @click="a.error.value = ''"><X :size="13" /></button>
+      {{ $systemMessage(a.error.value) }}
+      <button class="icon" :aria-label="$t('关闭提示')" @click="a.error.value = ''"><X :size="13" /></button>
     </div>
     <div v-if="a.notice.value" class="banner" role="status">
       {{ a.notice.value }}
-      <button class="icon" aria-label="关闭提示" @click="a.notice.value = ''"><X :size="13" /></button>
+      <button class="icon" :aria-label="$t('关闭提示')" @click="a.notice.value = ''"><X :size="13" /></button>
     </div>
 
     <section v-if="history" class="history-pane">
       <div class="history-heading">
-        <button class="icon" aria-label="返回对话" @click="history = false"><ChevronLeft :size="18" /></button>
-        <h3>历史对话</h3>
+        <button class="icon" :aria-label="$t('返回对话')" @click="history = false"><ChevronLeft :size="18" /></button>
+        <h3>{{ $t("历史对话") }}</h3>
         <span>{{ a.sessions.value.length }}</span>
       </div>
       <label class="search">
         <Search :size="15" />
-        <input v-model="query" placeholder="搜索历史对话" aria-label="搜索历史对话" />
+        <input v-model="query" :placeholder="$t('搜索历史对话')" :aria-label="$t('搜索历史对话')" />
       </label>
-      <p v-if="!a.sessions.value.length" class="muted">还没有匹配的对话。完成的任务会保留在这里。</p>
+      <p v-if="!a.sessions.value.length" class="muted">{{ $t("还没有匹配的对话。完成的任务会保留在这里。") }}</p>
       <article v-for="s in a.sessions.value" :key="s.id" class="history-row" :class="{ selected: s.id === a.selected.value }">
         <form v-if="renaming === s.id" @submit.prevent="rename">
-          <input v-model="newTitle" aria-label="对话标题" maxlength="100" />
-          <button class="icon" aria-label="保存标题"><Check :size="16" /></button>
+          <input v-model="newTitle" :aria-label="$t('对话标题')" maxlength="100" />
+          <button class="icon" :aria-label="$t('保存标题')"><Check :size="16" /></button>
         </form>
         <button v-else class="session-title" @click="choose(s.id)">
-          <strong>{{ s.title || '归档对话' }}</strong>
-          <small>{{ new Date((s.last_active || s.started_at) * 1000).toLocaleDateString() }} · {{ s.message_count }} 条记录</small>
+          <strong>{{ s.title || $t('归档对话') }}</strong>
+          <small>{{ $t("{p0} · {p1} 条记录", {p0: (new Date((s.last_active || s.started_at) * 1000).toLocaleDateString($locale)), p1: (s.message_count)}) }}</small>
         </button>
-        <button class="icon" title="重命名" aria-label="重命名对话" @click="renaming = s.id; newTitle = s.title">
+        <button class="icon" :title="$t('重命名')" :aria-label="$t('重命名对话')" @click="renaming = s.id; newTitle = s.title">
           <Pencil :size="13" />
         </button>
         <button
           class="icon"
-          title="收起这段历史"
-          aria-label="收起这段历史"
+          :title="$t('收起这段历史')"
+          :aria-label="$t('收起这段历史')"
           :disabled="a.active.value?.sessionId === s.id"
           @click="archiveSession(s.id)"
         >
@@ -553,36 +555,35 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
     <template v-else-if="section === 'chat'">
       <div ref="transcript" class="transcript" @scroll="scroll">
         <div v-if="!blocks.length && !a.visibleLive.value.length && !a.loading.value" class="welcome">
-          <span class="eyebrow">你的归档，可以直接问</span>
-          <h2>想找什么，<br />或整理些什么？</h2>
-          <p>从已收藏的资料里找答案，也把零散的记录整理妥当。</p>
+          <span class="eyebrow">{{ $t("你的归档，可以直接问") }}</span>
+          <h2>{{ $t("想找什么，") }}<br />{{ $t("或整理些什么？") }}</h2>
+          <p>{{ $t("从已收藏的资料里找答案，也把零散的记录整理妥当。") }}</p>
           <div class="starters">
-            <button @click="a.draft.value = '帮我看看最近归档了什么，按类型简要整理，并附上来源。'; input?.focus()">
-              <History :size="17" /><span>看看最近收藏了什么</span>
+            <button @click="a.draft.value = $t('帮我看看最近归档了什么，按类型简要整理，并附上来源。'); input?.focus()">
+              <History :size="17" /><span>{{ $t("看看最近收藏了什么") }}</span>
             </button>
-            <button @click="a.draft.value = '查找资料库中可能找不到原文件的资料，先核验并告诉我结果。'; input?.focus()">
-              <FileText :size="17" /><span>检查资料还能不能打开</span>
+            <button @click="a.draft.value = $t('查找资料库中可能找不到原文件的资料，先核验并告诉我结果。'); input?.focus()">
+              <FileText :size="17" /><span>{{ $t("检查资料还能不能打开") }}</span>
             </button>
-            <button @click="a.draft.value = '帮我整理文库里尚未归类的资料，先阅读必要内容，再建议适合的分类和标签。'; input?.focus()">
-              <BookOpen :size="17" /><span>理一理还没归好的资料</span>
+            <button @click="a.draft.value = $t('帮我整理文库里尚未归类的资料，先阅读必要内容，再建议适合的分类和标签。'); input?.focus()">
+              <BookOpen :size="17" /><span>{{ $t("理一理还没归好的资料") }}</span>
             </button>
           </div>
           <div v-if="!a.configured.value" class="setup">
-            <p>连接你的模型，就可以开始。</p>
+            <p>{{ $t("连接你的模型，就可以开始。") }}</p>
             <button @click="router.push({ name: 'settings', query: { scope: 'global', tab: 'ai' } }); a.open.value = false">
-              <Settings :size="14" />配置 AI 模型
-            </button>
+              <Settings :size="14" />{{ $t("配置 AI 模型") }}</button>
           </div>
         </div>
 
-        <p v-if="a.loading.value" class="muted">正在读取对话…</p>
+        <p v-if="a.loading.value" class="muted">{{ $t("正在读取对话…") }}</p>
 
         <template v-for="row in displayBlocks" :key="row.key">
           <ArchiveMessage v-if="row.kind === 'single'" :block="row.block" @source="source" />
           <details v-else class="tool-group">
             <summary>
               <Check :size="13" />
-              <span>已查阅 {{ row.items.length }} 步资料记录</span>
+              <span>{{ $t("已查阅 {p0} 步资料记录", {p0: (row.items.length)}) }}</span>
               <ChevronRight class="chevron" :size="13" />
             </summary>
             <div class="tool-group__body">
@@ -596,7 +597,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
           <details v-else class="tool-group">
             <summary>
               <Check :size="13" />
-              <span>已查阅 {{ row.items.length }} 步资料记录</span>
+              <span>{{ $t("已查阅 {p0} 步资料记录", {p0: (row.items.length)}) }}</span>
               <ChevronRight class="chevron" :size="13" />
             </summary>
             <div class="tool-group__body">
@@ -605,12 +606,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
           </details>
         </template>
 
-        <div v-if="a.selected.value && appliedActionsCount > 1 && !activeHere" class="turn-actions-bar">
-          <span>本段对话已修改 {{ appliedActionsCount }} 处资料</span>
-          <button type="button" @click="view('actions')">查看明细</button>
+        <div v-if="a.selected.value && turnActionsCount > 1 && !activeHere" class="turn-actions-bar">
+          <span>{{ $t("本轮已修改 {p0} 处资料", {p0: (turnActionsCount)}) }}</span>
+          <button type="button" @click="view('actions')">{{ $t("查看明细") }}</button>
           <button type="button" :disabled="a.busy.value" @click="a.undoAll()">
-            <Undo2 :size="12" />一键撤回本轮修改
-          </button>
+            <Undo2 :size="12" />{{ $t("一键撤回本轮修改") }}</button>
         </div>
 
         <div v-if="activeHere" class="working" role="status"><span class="pulse" />{{ taskStatus }}</div>
@@ -618,20 +618,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
           v-else-if="a.lastRun.value && a.lastRun.value.sessionId === a.selected.value && ['interrupted', 'failed'].includes(a.lastRun.value.status)"
           class="resume"
         >
-          <strong>{{ a.lastRun.value.status === 'failed' ? '这次任务尚未完成' : '任务已暂停' }}</strong>
-          <p>{{ a.lastRun.value.error || '已完成的操作保留在历史中，可以从这里继续。' }}</p>
-          <button @click="a.draft.value = '继续上次任务，先核对已经完成的操作和当前状态。'; send()">继续处理</button>
+          <strong>{{ a.lastRun.value.status === 'failed' ? $t('这次任务尚未完成') : $t('任务已暂停') }}</strong>
+          <p>{{ a.lastRun.value.error || $t('已完成的操作保留在历史中，可以从这里继续。') }}</p>
+          <button @click="a.draft.value = $t('继续上次任务，先核对已经完成的操作和当前状态。'); send()">{{ $t("继续处理") }}</button>
         </div>
       </div>
 
-      <button v-if="a.active.value && !activeHere" class="other-task" @click="choose(a.active.value.sessionId)">
-        有一个归档任务正在进行 · 返回查看
-      </button>
+      <button v-if="a.active.value && !activeHere" class="other-task" @click="choose(a.active.value.sessionId)">{{ $t("有一个归档任务正在进行 · 返回查看") }}</button>
 
       <form class="composer" @submit.prevent="send">
         <div v-if="a.context.value.length || unattachedCurrentSource" class="context">
           <template v-if="a.context.value.length">
-            <span>附带资料</span>
+            <span>{{ $t("附带资料") }}</span>
             <button v-for="(item, i) in a.context.value" :key="item.id" type="button" :title="item.name" @click="a.context.value.splice(i, 1)">
               <FileText :size="12" />{{ item.name }}<X :size="12" />
             </button>
@@ -640,36 +638,35 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
             v-if="unattachedCurrentSource"
             type="button"
             class="attach-current"
-            :title="'把当前页面正在查看的「' + unattachedCurrentSource.name + '」附带进对话'"
+            :title="$t('把当前页面正在查看的「') + unattachedCurrentSource.name + $t('」附带进对话')"
             @click="attachCurrentSource"
           >
-            <Plus :size="12" />附带当前条目：{{ unattachedCurrentSource.name }}
+            <Plus :size="12" />{{ $t("附带当前条目：{p0}", {p0: (unattachedCurrentSource.name)}) }}
           </button>
         </div>
         <textarea
           ref="input"
           v-model="a.draft.value"
-          :placeholder="activeHere ? '补充要求，直接交给当前任务…' : '描述你想找的资料，或交代一件归档的事…'"
-          aria-label="给归档助理发消息"
+          :placeholder="activeHere ? $t('补充要求，直接交给当前任务…') : $t('描述你想找的资料，或交代一件归档的事…')"
+          :aria-label="$t('给归档助理发消息')"
           maxlength="30000"
           rows="3"
           @keydown="key"
         />
         <div class="composer-footer">
-          <select v-model="a.profileId.value" aria-label="助理使用的模型" :disabled="a.busy.value">
-            <option value="">{{ a.model.value || '全局模型' }}</option>
+          <select v-model="a.profileId.value" :aria-label="$t('助理使用的模型')" :disabled="a.busy.value">
+            <option value="">{{ a.model.value || $t('全局模型') }}</option>
             <option v-for="p in a.profiles.value" :key="p.id" :value="p.id">{{ p.name }} · {{ p.model }}</option>
           </select>
-          <span>Shift Enter 换行</span>
-          <button v-if="a.busy.value" class="stop" type="button" aria-label="停止任务" @click="a.stop">
-            <Square :size="12" />停止
-          </button>
+          <span>{{ $t("Shift Enter 换行") }}</span>
+          <button v-if="a.busy.value" class="stop" type="button" :aria-label="$t('停止任务')" @click="a.stop">
+            <Square :size="12" />{{ $t("停止") }}</button>
           <button
             class="send"
             type="submit"
             :disabled="!a.draft.value.trim() || a.sending.value"
-            :aria-label="activeHere ? '补充要求' : '发送消息'"
-            :title="activeHere ? '补充要求' : '发送'"
+            :aria-label="activeHere ? $t('补充要求') : $t('发送消息')"
+            :title="activeHere ? $t('补充要求') : $t('发送')"
           >
             <ArrowUp :size="18" />
           </button>
@@ -679,63 +676,62 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
 
     <section v-else-if="section === 'memory'" class="secondary-pane">
       <div class="section-heading">
-        <span class="eyebrow">让下次交流更顺手</span>
-        <h2>记住你的归档习惯</h2>
-        <p>明确保存的偏好会用于后续对话。随时修改或删除。</p>
+        <span class="eyebrow">{{ $t("让下次交流更顺手") }}</span>
+        <h2>{{ $t("记住你的归档习惯") }}</h2>
+        <p>{{ $t("明确保存的偏好会用于后续对话。随时修改或删除。") }}</p>
       </div>
       <template v-for="target in ['user', 'memory'] as const" :key="target">
         <div class="memory-title">
-          <h3>{{ target === 'user' ? '关于你与偏好' : '长期背景' }}</h3>
-          <button @click="editMemory(target)"><Plus :size="13" />添加</button>
+          <h3>{{ target === 'user' ? $t('关于你与偏好') : $t('长期背景') }}</h3>
+          <button @click="editMemory(target)"><Plus :size="13" />{{ $t("添加") }}</button>
         </div>
-        <p v-if="!memory?.[target].length" class="muted">尚未保存内容</p>
+        <p v-if="!memory?.[target].length" class="muted">{{ $t("尚未保存内容") }}</p>
         <article v-for="entry in memory?.[target] || []" :key="entry" class="memory-entry">
           <p>{{ entry }}</p>
-          <button class="icon" aria-label="编辑记忆" :disabled="a.busy.value" @click="editMemory(target, entry)">
+          <button class="icon" :aria-label="$t('编辑记忆')" :disabled="a.busy.value" @click="editMemory(target, entry)">
             <Pencil :size="14" />
           </button>
-          <button class="icon" aria-label="删除记忆" :disabled="a.busy.value || memoryBusy" @click="saveMemory(true, entry, target)">
+          <button class="icon" :aria-label="$t('删除记忆')" :disabled="a.busy.value || memoryBusy" @click="saveMemory(true, entry, target)">
             <Trash2 :size="14" />
           </button>
         </article>
       </template>
       <form class="memory-editor" @submit.prevent="saveMemory()">
         <label>
-          {{ memoryOld ? '修改' : '添加' }}{{ memoryTarget === 'user' ? '偏好' : '背景' }}
+          {{ memoryOld ? $t('修改') : $t('添加') }}{{ memoryTarget === 'user' ? $t('偏好') : $t('背景') }}
           <textarea
             v-model="memoryDraft"
             rows="4"
-            placeholder="例如：同一资料的不同版本都保留，文件名里保留年份。"
-            aria-label="记忆内容"
+            :placeholder="$t('例如：同一资料的不同版本都保留，文件名里保留年份。')"
+            :aria-label="$t('记忆内容')"
           />
         </label>
-        <button :disabled="!memoryDraft.trim() || a.busy.value || memoryBusy">{{ memoryBusy ? '保存中…' : '保存记忆' }}</button>
-        <small v-if="a.busy.value">当前任务结束后可修改记忆。</small>
+        <button :disabled="!memoryDraft.trim() || a.busy.value || memoryBusy">{{ memoryBusy ? $t('保存中…') : $t('保存记忆') }}</button>
+        <small v-if="a.busy.value">{{ $t("当前任务结束后可修改记忆。") }}</small>
       </form>
     </section>
 
     <section v-else-if="section === 'actions'" class="secondary-pane">
       <div class="section-heading">
-        <span class="eyebrow">每次整理都有来处</span>
-        <h2>{{ a.selected.value ? '本次对话的修改' : '最近的修改' }}</h2>
-        <p>撤销会核对当前内容，保留你后来的手动编辑。</p>
+        <span class="eyebrow">{{ $t("每次整理都有来处") }}</span>
+        <h2>{{ a.selected.value ? $t('本次对话的修改') : $t('最近的修改') }}</h2>
+        <p>{{ $t("撤销会核对当前内容，保留你后来的手动编辑。") }}</p>
         <button
-          v-if="appliedActionsCount > 1"
+          v-if="a.selected.value && turnActionsCount > 1"
           type="button"
           class="batch-undo"
           :disabled="a.busy.value"
           @click="a.undoAll()"
         >
-          <Undo2 :size="13" />一键撤回本轮修改（{{ appliedActionsCount }}）
-        </button>
+          <Undo2 :size="13" />{{ $t("一键撤回本轮修改（{p0}）", {p0: (turnActionsCount)}) }}</button>
       </div>
-      <p v-if="!a.actions.value.length" class="muted">这里会记录归档助理保存的资料修改，随时可以核对或撤销。</p>
+      <p v-if="!a.actions.value.length" class="muted">{{ $t("这里会记录归档助理保存的资料修改，随时可以核对或撤销。") }}</p>
       <article v-for="action in a.actions.value" :key="action.id" class="change">
         <div>
           <button class="source-title" @click="source(action.targetId)">{{ action.name }}</button>
-          <small>{{ new Date(action.createdAt).toLocaleString() }}</small>
+          <small>{{ new Date(action.createdAt).toLocaleString($locale) }}</small>
         </div>
-        <p>{{ action.reason }}</p>
+        <p>{{ $systemMessage(action.reason) }}</p>
         <div v-if="actionDiffMap.get(action.id)?.length" class="diff-rows">
           <div v-for="row in actionDiffMap.get(action.id)" :key="row.key" class="diff-row">
             <span class="diff-row__label">{{ row.label }}</span>
@@ -745,34 +741,34 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
           </div>
         </div>
         <details class="raw-diff">
-          <summary>查看原始字段记录</summary>
+          <summary>{{ $t("查看原始字段记录") }}</summary>
           <div class="diff">
             <pre>{{ changeText(action.before) }}</pre>
             <pre>{{ changeText(action.after) }}</pre>
           </div>
         </details>
         <button :disabled="action.state === 'undone' || a.busy.value" @click="a.undo(action.id)">
-          <Undo2 :size="13" />{{ action.state === 'undone' ? '已撤销' : '撤销这次修改' }}
+          <Undo2 :size="13" />{{ action.state === 'undone' ? $t('已撤销') : $t('撤销这次修改') }}
         </button>
       </article>
     </section>
 
     <section v-else class="secondary-pane">
       <div class="section-heading">
-        <span class="eyebrow">把有效做法留下来</span>
-        <h2>可复用的归档方法</h2>
-        <p>助理会按任务读取相关方法。你也可以在对话中要求保存、改进或删除某个方法。</p>
+        <span class="eyebrow">{{ $t("把有效做法留下来") }}</span>
+        <h2>{{ $t("可复用的归档方法") }}</h2>
+        <p>{{ $t("助理会按任务读取相关方法。你也可以在对话中要求保存、改进或删除某个方法。") }}</p>
       </div>
       <div v-if="skills" class="skill-list">
         <article v-for="skill in skills.skills || []" :key="skill.name">
           <BookOpen :size="18" />
           <div>
-            <strong>{{ skill.name === 'document-deep-reader' ? '文档精读' : skill.name }}</strong>
+            <strong>{{ skill.name === 'document-deep-reader' ? $t('文档精读') : skill.name }}</strong>
             <p>{{ skill.description }}</p>
-            <button class="method-load" :disabled="a.busy.value" @click="a.loadMethod(skill.name)">加载到输入框</button>
+            <button class="method-load" :disabled="a.busy.value" @click="a.loadMethod(skill.name)">{{ $t("加载到输入框") }}</button>
           </div>
         </article>
-        <p v-if="!skills.skills?.length" class="muted">还没有保存归档方法。完成一项任务后，可以告诉助理“把这套做法记下来”。</p>
+        <p v-if="!skills.skills?.length" class="muted">{{ $t("还没有保存归档方法。完成一项任务后，可以告诉助理“把这套做法记下来”。") }}</p>
       </div>
     </section>
   </aside>

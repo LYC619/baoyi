@@ -1,3 +1,4 @@
+import { tr } from '../services/system/language.ts'
 import { app, dialog, safeStorage, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -25,7 +26,7 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
   handle('download-target',(provider,id,group)=>downloadTarget(getDb(),app.getPath('userData'),comicProvider(provider),id,group))
   handle('choose-download-root',async(provider,current)=>{
     provider=comicProvider(provider)
-    const selected=await dialog.showOpenDialog(getWindow()!,{title:'选择漫画存放根目录',defaultPath:typeof current==='string'?current:undefined,properties:['openDirectory','createDirectory']})
+    const selected=await dialog.showOpenDialog(getWindow()!,{title:tr("选择漫画存放根目录"),defaultPath:typeof current==='string'?current:undefined,properties:['openDirectory','createDirectory']})
     restoreWindowFocus(getWindow());if(selected.canceled||!selected.filePaths[0])return null
     const root=await validateDownloadRoot(selected.filePaths[0]);await rememberDownloadRoot(app.getPath('userData'),provider,root);return root
   })
@@ -60,7 +61,7 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
     const {work,chapters}=await source.detail(workId),chosen=chapters.filter(c=>selected.includes(c.id))
     if(!chosen.length)throw new Error('请选择有效章节')
     if(root!==undefined){const target=await downloadTarget(getDb(),app.getPath('userData'),'pica',workId,groupId);return queue.enqueue(work,chosen,await validateDownloadRoot(target.locked?target.root:root),target.locked?target.groupId:groupId)}
-    const result=await dialog.showOpenDialog(getWindow()!,{title:'选择漫画下载根目录（补章请选择原根目录）',properties:['openDirectory','createDirectory']})
+    const result=await dialog.showOpenDialog(getWindow()!,{title:tr("选择漫画下载根目录（补章请选择原根目录）"),properties:['openDirectory','createDirectory']})
     restoreWindowFocus(getWindow())
     if(result.canceled||!result.filePaths[0])return null
     return queue.enqueue(work,chosen,result.filePaths[0],groupId)
@@ -69,7 +70,7 @@ export function registerImageSourceIpc(getWindow:()=>BrowserWindow|null,ipc:Pick
     if(!token)throw new Error('请先登录哔咔')
     if(!Array.isArray(workIds)||workIds.length<1||workIds.length>200)throw new Error('一次请选择 1 到 200 部漫画')
     if(root!==undefined)return queue.enqueueBatch(workIds,await validateDownloadRoot(root),groupId)
-    const result=await dialog.showOpenDialog(getWindow()!,{title:`选择 ${workIds.length} 部漫画的下载根目录`,properties:['openDirectory','createDirectory']})
+    const result=await dialog.showOpenDialog(getWindow()!,{title:tr("选择 {p0} 部漫画的下载根目录", {p0: (workIds.length)}),properties:['openDirectory','createDirectory']})
     restoreWindowFocus(getWindow())
     if(result.canceled||!result.filePaths[0])return null
     return queue.enqueueBatch(workIds,result.filePaths[0],groupId)

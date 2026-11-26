@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../../i18n/index.ts'
+
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/utils'
 import { computed,onBeforeUnmount,ref,shallowRef,shallowReactive,watch } from 'vue'
@@ -15,7 +17,7 @@ const nextInput=ref<HTMLTextAreaElement>(),ruleStates=ref<ProjectRuleStatus[]>([
 let ruleRequest=0
 const ruleType=ref<'path'|'entry'>('path'),ruleValue=ref(''),ruleLabel=ref(''),localError=ref(''),details=ref(false)
 const state=computed(()=>{void tick.value;return editor.value!})
-const status=computed(()=>state.value.saving?'正在保存…':state.value.error?'保存未完成':state.value.loading?'正在载入…':state.value.dirty?'尚未保存':state.value.loaded?'已保存到本机':'尚未载入')
+const status=computed(()=>state.value.saving?tr("正在保存…"):state.value.error?tr("保存未完成"):state.value.loading?tr("正在载入…"):state.value.dirty?tr("尚未保存"):state.value.loaded?tr("已保存到本机"):tr("尚未载入"))
 watch(()=>props.item.id,id=>{
   editor.value?.dispose();ruleValue.value='';ruleLabel.value='';localError.value=''
   editor.value=shallowReactive(new ProjectNotesSession(id,window.baoyi.workspace.timeline,()=>tick.value++))
@@ -32,8 +34,8 @@ function edit(field:'current'|'next'|'prompt',event:Event){state.value.edit({[fi
 function addRule(){
   const value=ruleValue.value.trim(),entry=props.item.entries.find(e=>e.id===value)
   const label=ruleLabel.value.trim()||(ruleType.value==='entry'?entry?.label:value)
-  if(!value||!label){localError.value='填写规则文件路径，或选择一个已有入口';return}
-  if(state.value.value.rules.length>=20){localError.value='最多保留 20 个规则链接';return}
+  if(!value||!label){localError.value=tr("填写规则文件路径，或选择一个已有入口");return}
+  if(state.value.value.rules.length>=20){localError.value=tr("最多保留 20 个规则链接");return}
   localError.value='';state.value.edit({rules:[...state.value.value.rules,{type:ruleType.value,value,label}]})
   ruleValue.value='';ruleLabel.value=''
 }
@@ -56,27 +58,24 @@ defineExpose({flush,focusNext})
 </script>
 
 <template>
-  <section class="project-notes" aria-label="项目便签" @compositionstart="state.composition(true)" @compositionend="state.composition(false)" @keydown.ctrl.enter.prevent.stop="flush">
-    <header><div><FileText :size="17"/><h3>接着上次继续</h3></div><span role="status" :class="{failed:state.error}">{{status}}<small v-if="state.saved.updatedAt" class="saved-time"> · {{new Date(state.saved.updatedAt).toLocaleString()}}</small></span><button class="pj-icon" aria-label="保存项目便签" :disabled="state.saving||!state.dirty" @click="flush"><Save :size="16"/></button></header>
+  <section class="project-notes" :aria-label="$t('项目便签')" @compositionstart="state.composition(true)" @compositionend="state.composition(false)" @keydown.ctrl.enter.prevent.stop="flush">
+    <header><div><FileText :size="17"/><h3>{{ $t("接着上次继续") }}</h3></div><span role="status" :class="{failed:state.error}">{{status}}<small v-if="state.saved.updatedAt" class="saved-time"> · {{new Date(state.saved.updatedAt).toLocaleString($locale)}}</small></span><button class="pj-icon" :aria-label="$t('保存项目便签')" :disabled="state.saving||!state.dirty" @click="flush"><Save :size="16"/></button></header>
     <div class="note-grid">
-      <label>当前情况<textarea :value="state.value.current" :disabled="!state.loaded" maxlength="4000" placeholder="上次做到哪里，有什么值得记住？" @input="edit('current',$event)" @blur="saveOnBlur"/></label>
-      <label>下一步<textarea ref="nextInput" :value="state.value.next" :disabled="!state.loaded" maxlength="2000" placeholder="下次打开时，从哪一步开始？" @input="edit('next',$event)" @blur="saveOnBlur"/></label>
+      <label>{{ $t("当前情况") }}<textarea :value="state.value.current" :disabled="!state.loaded" maxlength="4000" :placeholder="$t('上次做到哪里，有什么值得记住？')" @input="edit('current',$event)" @blur="saveOnBlur"/></label>
+      <label>{{ $t("下一步") }}<textarea ref="nextInput" :value="state.value.next" :disabled="!state.loaded" maxlength="2000" :placeholder="$t('下次打开时，从哪一步开始？')" @input="edit('next',$event)" @blur="saveOnBlur"/></label>
     </div>
-    <button class="more" :aria-expanded="details" @click="details=!details">{{details?'收起':'展开'}}关键 Prompt 与规则 <span v-if="state.value.rules.length">· {{state.value.rules.length}} 个链接</span></button>
+    <button class="more" :aria-expanded="details" @click="details=!details">{{ $t("{p0}关键 Prompt 与规则", {p0: (details?$t('收起'):$t('展开'))}) }}<span v-if="state.value.rules.length">{{ $t("· {p0} 个链接", {p0: (state.value.rules.length)}) }}</span></button>
     <div v-if="details" class="note-details">
-      <label>关键 Prompt <span>{{state.value.prompt.length}} / 8000</span><textarea class="prompt" :value="state.value.prompt" :disabled="!state.loaded" maxlength="8000" placeholder="保留可复用的要求、背景和交接提示词。" @input="edit('prompt',$event)" @blur="saveOnBlur"/></label>
-      <button class="pj-button" :disabled="!state.value.prompt" @click="copyPrompt"><Copy :size="14"/>{{copied?'已复制 Prompt':'复制 Prompt'}}</button><h4>规则与参考</h4>
-      <ul v-if="state.value.rules.length"><li v-for="(rule,index) in state.value.rules" :key="index"><button class="rule-link" @click="openRule(rule)">{{rule.label}}<small>{{rule.type==='path'?rule.value:'项目入口'}} · {{ruleState(rule)?.message||'待检查'}}</small></button><button class="pj-icon" :aria-label="'移除规则 '+rule.label" @click="removeRule(index)"><X :size="14"/></button></li></ul>
-      <form class="rule-form" @submit.prevent="addRule"><select v-model="ruleType" aria-label="规则链接类型" @change="ruleValue=''"><option value="path">项目内文件</option><option value="entry">已有入口</option></select><input v-if="ruleType==='path'" v-model="ruleValue" aria-label="规则相对路径" placeholder="如 AGENTS.md 或 docs/规范.md" maxlength="2048"/><select v-else v-model="ruleValue" aria-label="选择规则入口"><option value="">选择入口</option><option v-for="entry in item.entries.filter(e=>e.type!=='command')" :key="entry.id" :value="entry.id">{{entry.label}}</option></select><input v-model="ruleLabel" aria-label="规则显示名称" placeholder="显示名称（可选）" maxlength="160"/><button class="pj-button" :disabled="!state.loaded" type="submit"><Plus :size="14"/>添加</button></form>
+      <label>{{ $t("关键 Prompt") }}<span>{{state.value.prompt.length}} / 8000</span><textarea class="prompt" :value="state.value.prompt" :disabled="!state.loaded" maxlength="8000" :placeholder="$t('保留可复用的要求、背景和交接提示词。')" @input="edit('prompt',$event)" @blur="saveOnBlur"/></label>
+      <button class="pj-button" :disabled="!state.value.prompt" @click="copyPrompt"><Copy :size="14"/>{{copied?$t('已复制 Prompt'):$t('复制 Prompt')}}</button><h4>{{ $t("规则与参考") }}</h4>
+      <ul v-if="state.value.rules.length"><li v-for="(rule,index) in state.value.rules" :key="index"><button class="rule-link" @click="openRule(rule)">{{rule.label}}<small>{{rule.type==='path'?rule.value:$t('项目入口')}} · {{ruleState(rule)?.message||$t('待检查')}}</small></button><button class="pj-icon" :aria-label="$t('移除规则 ')+rule.label" @click="removeRule(index)"><X :size="14"/></button></li></ul>
+      <form class="rule-form" @submit.prevent="addRule"><select v-model="ruleType" :aria-label="$t('规则链接类型')" @change="ruleValue=''"><option value="path">{{ $t("项目内文件") }}</option><option value="entry">{{ $t("已有入口") }}</option></select><input v-if="ruleType==='path'" v-model="ruleValue" :aria-label="$t('规则相对路径')" :placeholder="$t('如 AGENTS.md 或 docs/规范.md')" maxlength="2048"/><select v-else v-model="ruleValue" :aria-label="$t('选择规则入口')"><option value="">{{ $t("选择入口") }}</option><option v-for="entry in item.entries.filter(e=>e.type!=='command')" :key="entry.id" :value="entry.id">{{entry.label}}</option></select><input v-model="ruleLabel" :aria-label="$t('规则显示名称')" :placeholder="$t('显示名称（可选）')" maxlength="160"/><button class="pj-button" :disabled="!state.loaded" type="submit"><Plus :size="14"/>{{ $t("添加") }}</button></form>
     </div>
     <p v-if="localError" class="pj-error" role="alert">{{localError}}</p>
-    <section v-if="state.error" class="note-error" role="alert"><p>{{state.error}}</p><button class="pj-button" @click="state.loaded?flush():state.load()"><RefreshCw :size="14"/>重试</button><button v-if="state.loaded" class="pj-button" @click="state.compare()">比较最新内容</button>
-      <div v-if="state.latest" class="note-compare"><h4>当前保存的版本</h4><pre>当前情况：{{state.latest.current}}
-下一步：{{state.latest.next}}
-关键 Prompt：{{state.latest.prompt}}
-规则：{{state.latest.rules.map(r=>r.label+' ('+r.value+')').join('\n')}}</pre><p>上方编辑区仍保留你的输入。选择要保存的版本后再继续。</p><button class="pj-button" @click="state.useLatest()">采用已保存版本</button><button class="pj-button pj-primary" @click="state.keepMine()">保留我的内容并保存</button></div>
+    <section v-if="state.error" class="note-error" role="alert"><p>{{$systemMessage(state.error)}}</p><button class="pj-button" @click="state.loaded?flush():state.load()"><RefreshCw :size="14"/>{{ $t("重试") }}</button><button v-if="state.loaded" class="pj-button" @click="state.compare()">{{ $t("比较最新内容") }}</button>
+      <div v-if="state.latest" class="note-compare"><h4>{{ $t("当前保存的版本") }}</h4><pre>{{ $t("当前情况：{p0} 下一步：{p1} 关键 Prompt：{p2} 规则：{p3}", {p0: (state.latest.current), p1: (state.latest.next), p2: (state.latest.prompt), p3: (state.latest.rules.map(r=>r.label+' ('+r.value+')').join('\n'))}) }}</pre><p>{{ $t("上方编辑区仍保留你的输入。选择要保存的版本后再继续。") }}</p><button class="pj-button" @click="state.useLatest()">{{ $t("采用已保存版本") }}</button><button class="pj-button pj-primary" @click="state.keepMine()">{{ $t("保留我的内容并保存") }}</button></div>
     </section>
-    <div class="handoff-entry"><button class="pj-button" :disabled="!state.loaded" @click="openHandoff">生成下一步 Prompt</button></div>
+    <div class="handoff-entry"><button class="pj-button" :disabled="!state.loaded" @click="openHandoff">{{ $t("生成下一步 Prompt") }}</button></div>
     <ProjectHandoff v-if="handoff" :id="item.id" @close="closeHandoff"/>
   </section>
 </template>
