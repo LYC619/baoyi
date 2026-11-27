@@ -1,4 +1,4 @@
-import { tr } from '../system/language.ts'
+import { onNativeLanguageChange, tr } from '../system/language.ts'
 import { BrowserWindow, Menu, clipboard, type Session } from 'electron'
 import { HANIME_BROWSER_UA, isHanimeHost } from './hanime-network-rules.ts'
 import { toVideoCode } from '../../kinds/video/hentai/selectors.ts'
@@ -12,11 +12,14 @@ function allowedPage(input: string): boolean {
 /** A persistent site window, isolated from the application's renderer and IPC. */
 export function createHanimeBrowser(deps: { getSession: () => Session; getMainWindow: () => BrowserWindow | null; isHidden: () => boolean }) {
   let window: BrowserWindow | null = null
+  let refreshMenu: () => void = () => {}
   function close(): void { if (window && !window.isDestroyed()) window.close() }
   function open(input?: string): boolean {
     if (deps.isHidden()) throw new Error('里番内容已隐藏，请先在设置中恢复显示')
     if (input !== undefined && !allowedPage(input)) throw new Error('只能在此窗口打开 Hanime 站点')
     if (window && !window.isDestroyed()) {
+      window.setTitle(tr('Hanime · 抱一'))
+      refreshMenu()
       if (input) void window.loadURL(input).catch(cause => { console.error(cause); if (window && !window.isDestroyed()) window.setTitle(tr('加载失败，可刷新重试 · Hanime')) })
       if (window.isMinimized()) window.restore()
       window.show(); window.focus(); return true
@@ -61,9 +64,15 @@ export function createHanimeBrowser(deps: { getSession: () => Session; getMainWi
     // Site downloads go through the app's explicit download workflow instead.
     const blockDirectDownload = (event: Electron.Event, _item: Electron.DownloadItem, sender: Electron.WebContents) => { if (sender === contents) event.preventDefault() }
     session.on('will-download',blockDirectDownload)
+    refreshMenu = updateMenu
+    const offLang = onNativeLanguageChange(() => {
+      if (win.isDestroyed()) return
+      win.setTitle(tr('Hanime · 抱一'))
+      updateMenu()
+    })
     const parentClosed = () => { if (!win.isDestroyed()) win.close() }
     main.once('closed',parentClosed)
-    win.once('closed',()=>{ session.removeListener('will-download',blockDirectDownload); main.removeListener('closed',parentClosed); if(window===win)window=null })
+    win.once('closed',()=>{ offLang(); session.removeListener('will-download',blockDirectDownload); main.removeListener('closed',parentClosed); if(window===win)window=null })
     win.setMenuBarVisibility(true)
     updateMenu(); navigate(input || HOME)
     return true

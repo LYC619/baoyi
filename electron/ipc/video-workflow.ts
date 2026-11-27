@@ -178,11 +178,22 @@ export function registerVideoWorkflowIpc(getWindow: () => BrowserWindow | null, 
   })
   ipcMain.handle('video:relocate-asset', async (event, assetId: string) => {
     assertMain(event)
-    const asset = getDb().prepare('SELECT resource_id FROM video_assets WHERE id = ?').get(reqId(assetId, 'assetId')) as { resource_id: string } | undefined
+    const safeId = reqId(assetId, 'assetId')
+    const asset = getDb().prepare('SELECT resource_id FROM video_assets WHERE id = ?').get(safeId) as { resource_id: string } | undefined
     if (!asset) return false
-    const result = await dialog.showOpenDialog(getWindow()!, { title: tr("重新定位视频文件"), properties: ['openFile'], filters: [{ name: tr("视频"), extensions: ['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'mpg', 'mpeg'] }] })
+    const item = getVideoItem(asset.resource_id)
+    const isAudio = item?.media_kind === 'audio'
+    const result = await dialog.showOpenDialog(getWindow()!, {
+      title: isAudio ? tr('重新定位音频文件') : tr('重新定位视频文件'),
+      properties: ['openFile'],
+      filters: [
+        isAudio
+          ? { name: tr('音频'), extensions: ['mp3', 'flac', 'wav', 'm4a', 'aac', 'ogg', 'opus', 'wma', 'ape'] }
+          : { name: tr('视频'), extensions: ['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'mpg', 'mpeg'] }
+      ]
+    })
     if (result.canceled || !result.filePaths[0]) return false
-    const changed = relocateVideoAsset(getDb(), assetId, result.filePaths[0]); send('video:library-changed', asset.resource_id); return changed
+    const changed = relocateVideoAsset(getDb(), safeId, result.filePaths[0]); send('video:library-changed', asset.resource_id); return changed
   })
   ipcMain.handle('video:play-asset', async (event, assetId: string) => {
     assertMain(event)

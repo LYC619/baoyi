@@ -43,7 +43,7 @@ async function save() {
       <template v-else>
         <label>{{ $t("暂缓时长") }}<select v-model="duration" :aria-label="$t('暂缓时长')"><option value="7">{{ $t("7 天") }}</option><option value="30">{{ $t("30 天") }}</option><option value="custom">{{ $t("到指定日期") }}</option></select></label>
         <label v-if="duration === 'custom'">{{ $t("暂缓至") }}<input v-model="customDate" type="date" required :min="today" /></label>
-        <p class="ws-muted">{{ $t("{p0}这项仍会显示在背包里。", {p0: (until ? $t('暂缓至 ') + until + $t('，当天恢复提醒。') : $t('请选择晚于今天的日期。'))}) }}</p>
+        <p class="ws-muted">{{ until ? $t('暂缓至 {p0}，当天恢复提醒。这项仍会显示在背包里。', { p0: until }) : $t('请选择晚于今天的日期。这项仍会显示在背包里。') }}</p>
       </template>
     </form>
     <template #footer><button class="ws-button" :disabled="busy" @click="emit('close')">{{ $t("取消") }}</button><button class="ws-button primary" form="asset-reminder-form" type="submit" :disabled="busy">{{ busy ? $t('正在保存…') : mode === 'renew' ? $t('确认续费') : $t('确认暂缓') }}</button></template>

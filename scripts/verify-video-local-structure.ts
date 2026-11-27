@@ -8,7 +8,7 @@ import { KINDS } from '../electron/kinds/index.ts'
 import { getVideo, listEpisodes, type VideoPayload } from '../electron/kinds/video/db.ts'
 import { catalogueIdentity, episodeFilename, numberedEpisode } from '../electron/kinds/video/episode-identity.ts'
 import { registerVideoContent, registerVideoPayload, registerVideoBundle } from '../electron/kinds/video/registration.ts'
-import { getVideoWorkLibrary } from '../electron/kinds/video/library.ts'
+import { getVideoWorkLibrary, relocateVideoAsset } from '../electron/kinds/video/library.ts'
 import { readVideoBundle, writeBundleFiles } from '../electron/kinds/video/bundle.ts'
 import { videoEpisodeLabel } from '../src/utils/video-content.ts'
 import { persistVideoWorkBundle, syncVideoWorkFiles } from '../electron/kinds/video/local-sync.ts'
@@ -300,6 +300,33 @@ await test('renumbering episodes into parts persists season and number to the ma
   // 跨部换号：第 2 集和第 2 部第 1 集互换编号，一组提交
   assert.deepEqual(reconcileEpisodeSlots(f.db, f.id, new Map([[second.id, { season: 2, number: 1 }], [third.id, { season: 0, number: 2 }]])), [])
   assert.deepEqual(listEpisodes(f.db, f.id).filter(ep => [second.id, third.id].includes(ep.id)).map(ep => `${ep.id === second.id ? 'second' : 'third'}:S${ep.season}E${ep.episode}`).sort(), ['second:S2E1', 'third:S0E2'])
+})
+
+await test('relocating a single-file work updates video_meta.parts and does not resurrect missing assets', f => {
+  const oldFile = path.join(f.root, 'SingleMovie', 'film.mp4')
+  const newFile = path.join(f.root, 'MovedMovie', 'film-relocated.mp4')
+  fs.mkdirSync(path.dirname(oldFile), { recursive: true })
+  fs.mkdirSync(path.dirname(newFile), { recursive: true })
+  fs.writeFileSync(oldFile, 'movie-bytes')
+  const movie = registerVideoPayload(f.db, {
+    ...f.payload(2),
+    path: oldFile,
+    source_dir: path.dirname(oldFile),
+    file_size: 11,
+    name_zh: '单文件电影',
+    hanime_id: '',
+    official_url: '',
+    parts: [{ path: oldFile, label: '', file_size: 11, duration_sec: 60 }]
+  })
+  const initialLib = getVideoWorkLibrary(f.db, movie.id)
+  fs.renameSync(oldFile, newFile)
+  assert.equal(relocateVideoAsset(f.db, initialLib.assets[0].id, newFile), true)
+  const afterLib = getVideoWorkLibrary(f.db, movie.id)
+  assert.equal(afterLib.assets.length, 1)
+  assert.equal(afterLib.assets[0].path, newFile)
+  assert.equal(afterLib.assets[0].state, 'present')
+  assert.equal(getVideo(f.db, movie.id)?.parts[0]?.path, newFile)
+  assert.equal(getVideo(f.db, movie.id)?.path, newFile)
 })
 
 console.log(`Video local structure: ${passed} passed / ${failed} failed`)

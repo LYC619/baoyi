@@ -239,6 +239,8 @@ export interface ResetSummary {
    * 磁盘上那些备份文件一个都没动，记录留着才找得到它们。
    */
   saveBackupsKept: number
+  /** 保留下来的文库回收站待还原资料数，暂存盘里的真实文件未动 */
+  recycledDocumentsKept?: number
   settingsCleared: boolean
 }
 
@@ -410,6 +412,10 @@ export interface BaoyiApi {
     backupSave(id: string, savePath: string, note?: string): Promise<SaveBackupResult>
     /** 一个游戏的备份，新的在前 */
     backups(id: string): Promise<SaveBackup[]>
+    /** 原游戏条目已移除或重置后保留的独立存档备份 */
+    orphanBackups(): Promise<SaveBackup[]>
+    /** 将独立存档备份重新绑定到当前库内游戏 */
+    rebindBackup(backupId: string, gameId: string): Promise<{ ok: boolean; message: string }>
     /** 还原一份备份。会先把当前存档自动备份一份 */
     previewRestore(backupId: string,target?: string): Promise<SaveRestorePreview>
     restoreBackup(backupId: string,target?: string,expected?: string): Promise<SaveRestoreResult>

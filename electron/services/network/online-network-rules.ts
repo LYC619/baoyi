@@ -12,6 +12,6 @@ export function onlineConnectionClosed(cause: unknown): boolean {
 export function onlineErrorMessage(cause: unknown): string {
   const message = cause instanceof Error ? cause.message : String(cause)
   const code = message.match(/(?:net::)?(ERR_[A-Z_]+)/)?.[1]
-  if (code) return `网站连接失败（${code}）。请在右上角设置 → 影视 → 找视频 · 网站与代理检查线路，或打开来源网页完成验证后重试。已缓存的资料仍保留。`
+  if (code) return `网站连接失败（${code}）。请在「设置 → 网络代理」检查线路，或打开来源网页完成验证后重试。已缓存的资料仍保留。`
   return message
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { locale, tr } from "../../i18n/index.ts"
+import { locale, systemMessage, tr } from "../../i18n/index.ts"
 
 import {isWindowsGameEntry} from '@/utils/game-entry'
 import LibraryToolbarMenu from '@/components/library/LibraryToolbarMenu.vue'
@@ -276,9 +276,11 @@ async function fillMissingCovers(): Promise<void> {
   let off: (() => void) | undefined
   try {
     off = window.baoyi.game.onCoverProgress((p) => {
-      const message = p.current ? `${p.current}：${p.message}` : p.message
+      const translated = systemMessage(p.message)
+      const sep = locale.value === 'en' ? ': ' : '：'
+      const message = p.current ? `${p.current}${sep}${translated}` : translated
       coverSummary.value = message
-      tasks.update(taskId, { processed: p.processed, total: p.total, current: p.current, message: p.message }, { level: p.message.includes('失败') ? 'warn' : 'info', message })
+      tasks.update(taskId, { processed: p.processed, total: p.total, current: p.current, message: translated }, { level: p.message.includes('失败') ? 'warn' : 'info', message })
     })
     const result = await window.baoyi.game.rebuildCovers(ids)
     const skipped = Math.max(0, result.processed - result.updated - result.failed)
@@ -329,7 +331,7 @@ async function scanGameDirectories(dirs: string[]): Promise<void> {
     } else if (r.candidates === 0) {
       toast(tr("未在这些文件夹中发现可识别的游戏程序"))
     } else if (r.registered > 0) {
-      const message = tr('识别出 ') + r.registered + tr(' 个游戏') + (r.skipped > 0 ? tr('，跳过 ') + r.skipped + tr(' 个') : '') + (r.failed > 0 ? '，' + r.failed + tr(' 个失败') : '')
+      const message = tr('识别出 ') + r.registered + tr(' 个游戏') + (r.skipped > 0 ? tr('，跳过 ') + r.skipped + tr(' 个') : '') + (r.failed > 0 ? tr('，{p0} 个失败', { p0: r.failed }) : '')
       if (r.failed > 0) toast(message)
       else success(message)
     } else if (r.failed > 0) {
@@ -420,7 +422,7 @@ async function addGames(): Promise<void> {
     } else if (r.registered > 0) {
       const message = tr('识别出 ') + r.registered + tr(' 个游戏') +
         (r.skipped > 0 ? tr('，跳过 ') + r.skipped + tr(' 个') : '') +
-        (r.failed > 0 ? '，' + r.failed + tr(' 个失败') : '')
+        (r.failed > 0 ? tr('，{p0} 个失败', { p0: r.failed }) : '')
       if (r.failed > 0) toast(message)
       else success(message)
     } else if (r.failed > 0) {

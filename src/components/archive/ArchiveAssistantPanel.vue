@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from "../../i18n/index.ts"
 
-import { errorMessage } from '@/utils'
+import { errorMessage, hasBlockingOverlay } from '@/utils'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDockBoundary } from '@/composables/useFloatingDock'
 import { useRoute, useRouter } from 'vue-router'
@@ -454,12 +454,20 @@ function changeText(value: Record<string, unknown> | null) {
 }
 function shortcut(e: KeyboardEvent) {
   if (e.isComposing || document.querySelector?.('dialog[open]')) return
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
+    if (hasBlockingOverlay()) return
     e.preventDefault()
     if (a.open.value) a.open.value = false
     else void a.show()
+    return
   }
-  if (e.key === 'Escape' && a.open.value) {
+  if (
+    e.key === 'Escape' &&
+    a.open.value &&
+    !e.defaultPrevented &&
+    !hasBlockingOverlay() &&
+    (panel.value?.contains(document.activeElement) || window.innerWidth < 1080)
+  ) {
     e.preventDefault()
     if (history.value) history.value = false
     else a.open.value = false
@@ -513,7 +521,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
       <button class="icon" :aria-label="$t('关闭提示')" @click="a.error.value = ''"><X :size="13" /></button>
     </div>
     <div v-if="a.notice.value" class="banner" role="status">
-      {{ a.notice.value }}
+      {{ $systemMessage(a.notice.value) }}
       <button class="icon" :aria-label="$t('关闭提示')" @click="a.notice.value = ''"><X :size="13" /></button>
     </div>
 
@@ -619,7 +627,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
           class="resume"
         >
           <strong>{{ a.lastRun.value.status === 'failed' ? $t('这次任务尚未完成') : $t('任务已暂停') }}</strong>
-          <p>{{ a.lastRun.value.error || $t('已完成的操作保留在历史中，可以从这里继续。') }}</p>
+          <p>{{ a.lastRun.value.error ? $systemMessage(a.lastRun.value.error) : $t('已完成的操作保留在历史中，可以从这里继续。') }}</p>
           <button @click="a.draft.value = $t('继续上次任务，先核对已经完成的操作和当前状态。'); send()">{{ $t("继续处理") }}</button>
         </div>
       </div>
@@ -638,7 +646,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
             v-if="unattachedCurrentSource"
             type="button"
             class="attach-current"
-            :title="$t('把当前页面正在查看的「') + unattachedCurrentSource.name + $t('」附带进对话')"
+            :title="$t('把当前页面正在查看的「{p0}」附带进对话', { p0: unattachedCurrentSource.name })"
             @click="attachCurrentSource"
           >
             <Plus :size="12" />{{ $t("附带当前条目：{p0}", {p0: (unattachedCurrentSource.name)}) }}
@@ -698,7 +706,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
       </template>
       <form class="memory-editor" @submit.prevent="saveMemory()">
         <label>
-          {{ memoryOld ? $t('修改') : $t('添加') }}{{ memoryTarget === 'user' ? $t('偏好') : $t('背景') }}
+          {{ memoryTarget === 'user' ? (memoryOld ? $t('修改偏好') : $t('添加偏好')) : (memoryOld ? $t('修改背景') : $t('添加背景')) }}
           <textarea
             v-model="memoryDraft"
             rows="4"

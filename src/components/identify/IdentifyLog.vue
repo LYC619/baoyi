@@ -70,27 +70,46 @@ const spread = ref(new Set<string>())
 
 /** 上次真正发起过查询的关键词。blur 在单纯移开焦点时也会触发，没改动就不该重打 IPC */
 let queriedKeyword = ''
-const readLogs = latestOnly((options: Parameters<typeof window.baoyi.logs.list>[0]) => window.baoyi.logs.list(options))
+const readLogsAndReports = latestOnly(
+  async (options: Parameters<typeof window.baoyi.logs.list>[0], withReports: boolean, kind?: string) => {
+    const [list, reportRows] = await Promise.all([
+      window.baoyi.logs.list(options),
+      withReports ? window.baoyi.logs.reports(kind) : Promise.resolve(null)
+    ])
+    return { list, reportRows }
+  }
+)
 
-async function load(): Promise<void> {
+async function fetchLogs(withReports: boolean): Promise<void> {
   const kw = keyword.value.trim()
   queriedKeyword = kw
   loading.value = true
   loadError.value = ''
   try {
-    const result = await readLogs({
-      status: filter.value === 'all' ? undefined : filter.value,
-      keyword: kw || undefined,
-      resource_kind: props.resourceKind,
-      ...(taskScoped.value ? { limit: 300 } : {})
-    })
+    const result = await readLogsAndReports(
+      {
+        status: filter.value === 'all' ? undefined : filter.value,
+        keyword: kw || undefined,
+        resource_kind: props.resourceKind,
+        ...(taskScoped.value ? { limit: 300 } : {})
+      },
+      withReports && !taskScoped.value,
+      props.resourceKind
+    )
     if (result === STALE) return
-    logs.value = result.filter(log => (props.since === undefined || log.created_at >= props.since)
+    logs.value = result.list.filter(log => (props.since === undefined || log.created_at >= props.since)
       && (props.until === undefined || log.created_at <= props.until))
+    if (withReports) reports.value = taskScoped.value ? [] : (result.reportRows ?? [])
   } catch (cause) {
-    logs.value = []; loadError.value = errorMessage(cause)
+    logs.value = []
+    if (withReports) reports.value = []
+    loadError.value = errorMessage(cause)
   }
   loading.value = false
+}
+
+function load(): Promise<void> {
+  return fetchLogs(false)
 }
 
 function blurSearch(): void {
@@ -98,14 +117,12 @@ function blurSearch(): void {
 }
 
 // 切换模块时重新加载日志和报告
-watch(() => [props.resourceKind, props.since, props.until], async () => {
-  await load()
-  reports.value = taskScoped.value ? [] : await window.baoyi.logs.reports(props.resourceKind)
+watch(() => [props.resourceKind, props.since, props.until], () => {
+  void fetchLogs(true)
 })
 
-onMounted(async () => {
-  await load()
-  if (!taskScoped.value) reports.value = await window.baoyi.logs.reports(props.resourceKind)
+onMounted(() => {
+  void fetchLogs(true)
 })
 
 function pick(value: Filter): void {

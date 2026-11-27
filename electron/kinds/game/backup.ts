@@ -429,28 +429,38 @@ export async function createBackup(
 
 /* ============================== 读 ============================== */
 
-function readManifestNoteSync(dir: string): string {
-  if (!dir) return ''
+function readManifestMetaSync(dir: string): { note: string; game: string } {
+  if (!dir) return { note: '', game: '' }
+  let note = ''
+  let game = ''
   try {
     const parsed = JSON.parse(readFileSync(path.join(dir, MANIFEST), 'utf-8')) as Partial<Manifest>
-    return typeof parsed?.note === 'string' ? parsed.note : ''
+    if (typeof parsed?.note === 'string') note = parsed.note
+    if (typeof parsed?.game === 'string') game = parsed.game.trim()
   } catch {
-    return ''
+    /* 兼容手工删过说明文件的旧目录 */
   }
+  if (!game) {
+    const parent = path.basename(path.dirname(dir))
+    const stripped = parent.replace(/_[0-9a-f]{6}$/i, '').trim()
+    if (stripped && stripped !== '.' && stripped !== path.parse(dir).root) game = stripped
+  }
+  return { note, game }
 }
 
 function rowToBackup(row: Record<string, any>): SaveBackup {
+  const dir = String(row.backup_dir ?? '')
+  const meta = readManifestMetaSync(dir)
   return {
     id: String(row.id),
     resource_id: String(row.resource_id),
     save_path: String(row.save_path ?? ''),
-    backup_dir: String(row.backup_dir ?? ''),
+    backup_dir: dir,
     size_bytes: Number(row.size_bytes) || 0,
     file_count: Number(row.file_count) || 0,
     created_at: Number(row.created_at) || 0,
-    ...(readManifestNoteSync(String(row.backup_dir ?? ''))
-      ? { note: readManifestNoteSync(String(row.backup_dir ?? '')) }
-      : {})
+    ...(meta.note ? { note: meta.note } : {}),
+    ...(meta.game ? { game_name: meta.game } : {})
   }
 }
 
@@ -460,6 +470,25 @@ export function listBackups(d: SqlDb, resourceId: string): SaveBackup[] {
     .prepare('SELECT * FROM save_backups WHERE resource_id = ? ORDER BY created_at DESC')
     .all(resourceId) as Array<Record<string, any>>
   return rows.map(rowToBackup)
+}
+
+/** 原游戏记录已被移除或清空后仍保留的存档备份 */
+export function listOrphanBackups(d: SqlDb): SaveBackup[] {
+  const rows = d
+    .prepare(
+      'SELECT * FROM save_backups WHERE NOT EXISTS (SELECT 1 FROM game g WHERE g.id = save_backups.resource_id) ORDER BY created_at DESC'
+    )
+    .all() as Array<Record<string, any>>
+  return rows.map(rowToBackup)
+}
+
+export function rebindBackupRecord(d: SqlDb, id: string, gameId: string): { ok: boolean; message: string } {
+  const backup = getBackup(d, id)
+  if (!backup) return { ok: false, message: '找不到这条备份记录' }
+  const game = d.prepare('SELECT id FROM game WHERE id = ?').get(gameId) as { id: string } | undefined
+  if (!game) return { ok: false, message: '找不到目标游戏记录' }
+  d.prepare('UPDATE save_backups SET resource_id = ? WHERE id = ?').run(gameId, id)
+  return { ok: true, message: '已将存档备份绑定到所选游戏' }
 }
 
 export function getBackup(d: SqlDb, id: string): SaveBackup | null {
@@ -508,17 +537,54 @@ export function overRetention(
  * 顺序和备份时相反，理由同样是「不留下对不上的账」：目录删不掉时记录必须留着，
  * 否则那几个 GB 会永远躺在备份根里，而用户再也没有入口能看到它。
  */
-export async function deleteBackup(d: SqlDb, id: string): Promise<{ ok: boolean; message: string }> {
+export function deleteBlocked(d: SqlDb, backup: SaveBackup): string {
+  const dir = backup.backup_dir.trim()
+  if (!dir) return ''
+  if (!path.isAbsolute(dir)) return `备份路径不是绝对路径，已拒绝删除：${dir}`
+  if (isDriveRoot(dir)) return `备份路径是磁盘根目录（${dir}），已拒绝删除`
+  const sys = systemish(dir)
+  if (sys) return `备份路径落在系统目录 ${sys} 之下，已拒绝删除：${dir}`
+  if (backup.save_path.trim() && (nestedInside(dir, backup.save_path) || nestedInside(backup.save_path, dir))) {
+    return `备份目录与存档路径重合或相互包含，已拒绝删除：${dir}`
+  }
+  const resources = d.prepare('SELECT path FROM resource').all() as Array<{ path?: string }>
+  for (const r of resources) {
+    if (r.path && nestedInside(dir, r.path)) {
+      return `备份目录包含已登记资源路径，已拒绝删除：${dir}`
+    }
+  }
+  return ''
+}
+
+export async function deleteBackup(
+  d: SqlDb,
+  id: string,
+  removeDir?: (dir: string) => Promise<void>
+): Promise<{ ok: boolean; message: string }> {
   const backup = getBackup(d, id)
   if (!backup) return { ok: false, message: '找不到这条备份记录' }
 
+  const blocked = deleteBlocked(d, backup)
+  if (blocked) return { ok: false, message: blocked }
+
   if (backup.backup_dir && (await exists(backup.backup_dir))) {
+    const dir = path.resolve(backup.backup_dir)
     try {
-      await fsp.rm(backup.backup_dir, { recursive: true, force: true })
+      const stat = await fsp.lstat(dir)
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        return { ok: false, message: `备份路径不是普通文件夹，已拒绝自动删除：${dir}` }
+      }
+      const entries = await fsp.readdir(dir)
+      const allowed = new Set([PAYLOAD, MANIFEST])
+      if (entries.some((name) => !allowed.has(name))) {
+        return { ok: false, message: `备份目录包含其他文件，为保护数据已拒绝自动删除：${dir}` }
+      }
+      if (removeDir) await removeDir(dir)
+      else await fsp.rm(dir, { recursive: true, force: true })
     } catch (err: any) {
       return {
         ok: false,
-        message: `备份目录删不掉（${err?.code ?? '被占用'}），记录先留着：${backup.backup_dir}`
+        message: `备份目录删不掉（${err?.code || err?.message || '被占用'}），记录先留着：${backup.backup_dir}`
       }
     }
   }
@@ -614,11 +680,13 @@ export async function restoreBackup(
 
   const staging = `${target}${RESTORE_TMP}`
   const replaced = `${target}${REPLACED_TMP}`
-  for (const [p, label] of [[staging, '临时'], [replaced, '暂存']] as const) {
+  for (const [p, isStaging] of [[staging, true], [replaced, false]] as const) {
     if (await exists(p)) {
       return {
         ok: false,
-        message: `${label}目录 ${p} 已存在，可能是上一次还原中断留下的。请先手工清理。`,
+        message: isStaging
+          ? `临时目录 ${p} 已存在，可能是上一次还原中断留下的。请先手工清理。`
+          : `暂存目录 ${p} 已存在，可能是上一次还原中断留下的。请先手工清理。`,
         safety
       }
     }

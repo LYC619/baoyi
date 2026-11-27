@@ -20,17 +20,19 @@ const directory = ref('')
 const previewing = ref('')
 const downloading = ref('')
 let revision = 0
+let previewRun = 0
 let disposed = false
 
 onMounted(() => {
   void window.baoyi.music
     .directory()
     .then(value => (directory.value = value))
-    .catch(e => (error.value = String(e)))
+    .catch(e => (error.value = errorMessage(e)))
 })
 onBeforeUnmount(() => {
   disposed = true
   revision++
+  previewRun++
 })
 
 async function search(next = 1) {
@@ -52,6 +54,7 @@ async function search(next = 1) {
 
 function changeSource() {
   revision++
+  previewRun++
   previewing.value = ''
   rows.value = []
   page.value = 1
@@ -60,15 +63,16 @@ function changeSource() {
 }
 
 async function preview(track: MusicTrack) {
+  const own = ++previewRun
   previewing.value = track.key
   error.value = ''
   try {
     const value = await window.baoyi.music.preview(track.key)
-    if (!disposed && previewing.value === track.key) audio.playOnline(value)
+    if (!disposed && own === previewRun && previewing.value === track.key) audio.playOnline(value)
   } catch (e) {
-    if (!disposed) error.value = errorMessage(e)
+    if (!disposed && own === previewRun) error.value = errorMessage(e)
   } finally {
-    if (previewing.value === track.key) previewing.value = ''
+    if (own === previewRun && previewing.value === track.key) previewing.value = ''
   }
 }
 

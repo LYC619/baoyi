@@ -278,6 +278,8 @@ const api: BaoyiApi = {
       ipcRenderer.invoke('game:backup-save', id, savePath, note),
 
     backups: (id: string) => ipcRenderer.invoke('game:backups', id),
+    orphanBackups: () => ipcRenderer.invoke('game:orphan-backups'),
+    rebindBackup: (backupId: string, gameId: string) => ipcRenderer.invoke('game:rebind-backup', backupId, gameId),
     previewRestore: (id: string, target?: string) => ipcRenderer.invoke('game:preview-restore',id,target),
     restoreBackup: (id: string, target?: string, expected?: string) => ipcRenderer.invoke('game:restore-backup',id,target,expected),
     deleteBackup: (backupId: string) => ipcRenderer.invoke('game:delete-backup', backupId),

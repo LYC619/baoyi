@@ -281,12 +281,28 @@ export class DocumentLibrary {
   async register(file: string, categoryId?: string, allowOther = false, submodule?: DocumentSubmodule | null, customGroupId?: string): Promise<DocumentItem> {
     file = path.resolve(file)
     const { format, size } = await this.inspect(file, allowOther)
+    const releaseInactivePath = (resourceId: string) => {
+      const rec = this.db.prepare("SELECT state, payload FROM document_recycle WHERE resource_id=? AND state!='restored' LIMIT 1").get(resourceId) as { state: string; payload: string } | undefined
+      if (!rec) return false
+      if (rec.state === 'indexed' || rec.state === 'purged') {
+        this.db.prepare('DELETE FROM resource WHERE id=?').run(resourceId)
+        return true
+      }
+      const parsed = JSON.parse(rec.payload) as { id: string; root: string; files?: Array<{ source: string; stored: string }> }
+      const match = parsed.files?.find(f => f.source.toLowerCase() === file.toLowerCase() && f.stored)
+      const holder = match?.stored || path.join(parsed.root || path.dirname(file), '.recycled-' + parsed.id + path.extname(file))
+      v.transaction(this.db, () => {
+        this.db.prepare('UPDATE resource SET path=? WHERE id=? AND path=? COLLATE NOCASE').run(holder, resourceId, file)
+        this.db.prepare('UPDATE document_files SET path=? WHERE resource_id=? AND path=? COLLATE NOCASE').run(holder, resourceId, file)
+      })
+      return true
+    }
     const copy = this.db.prepare('SELECT resource_id FROM document_files WHERE path=? COLLATE NOCASE').get(file) as { resource_id: string } | undefined
-    if (copy) return this.require(copy.resource_id)
+    if (copy && !releaseInactivePath(copy.resource_id)) return this.require(copy.resource_id)
     const old = this.db.prepare('SELECT id,kind FROM resource WHERE path=? COLLATE NOCASE').get(file) as Row | undefined
     if (old) {
       if (old.kind !== 'document') throw new Error('文件已在其他资源库登记，请直接关联已有资源')
-      return this.require(old.id)
+      if (!releaseInactivePath(old.id)) return this.require(old.id)
     }
     let catId = categoryId
     if (!catId) {
@@ -375,8 +391,8 @@ export class DocumentLibrary {
             format,
             size: stat.size,
             existing: !!(
-              this.db.prepare('SELECT 1 FROM resource WHERE path=? COLLATE NOCASE').get(file) ||
-              this.db.prepare('SELECT 1 FROM document_files WHERE path=? COLLATE NOCASE').get(file)
+              this.db.prepare("SELECT 1 FROM resource r WHERE r.path=? COLLATE NOCASE AND NOT EXISTS(SELECT 1 FROM document_recycle x WHERE x.resource_id=r.id AND x.state!='restored')").get(file) ||
+              this.db.prepare("SELECT 1 FROM document_files f WHERE f.path=? COLLATE NOCASE AND NOT EXISTS(SELECT 1 FROM document_recycle x WHERE x.resource_id=f.resource_id AND x.state!='restored')").get(file)
             ),
             ...inferred,
           })

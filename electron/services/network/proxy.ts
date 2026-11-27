@@ -1,4 +1,4 @@
-import { tr } from '../system/language.ts'
+import { onNativeLanguageChange, tr } from '../system/language.ts'
 /**
  * 出站代理：把设置里的那串规则铺到 Hanime 专用 Chromium session 上，并把
  * hanime 的取页切到该 session 的 `fetch`（才吃得到这份代理配置）。
@@ -67,6 +67,7 @@ export { normalizeProxyRules }
 /** 记住上一次铺下去的规则，避免每次设置保存都白跑一趟 setProxy */
 let applied: string | null = null
 let hanimeSession: Session | null = null
+let imageSourceSession: Session | null = null
 
 /**
  * 内置 Hosts 的运行时状态。`enabled` 来自设置（main.ts 启动时、设置页改动时写入）；
@@ -98,6 +99,11 @@ export function getHanimeSession(): Session {
   return (hanimeSession ??= session.fromPartition('persist:hanime-network'))
 }
 
+export function getImageSourceSession(): Session {
+  if (!app.isReady()) throw new Error('在线漫画网络会话尚未就绪')
+  return (imageSourceSession ??= session.fromPartition('persist:image-source-network'))
+}
+
 /**
  * 把代理铺到 Hanime 专用 session，并按需把 hanime 的取页切到该 session 的 fetch。
  *
@@ -112,7 +118,8 @@ export async function applyProxy(raw: string): Promise<string> {
   const rules = serializeProxyInput(input)
   if (rules === applied) return rules
 
-  await getHanimeSession().setProxy(toElectronProxyConfig(input))
+  const proxyCfg = toElectronProxyConfig(input)
+  await Promise.all([getHanimeSession().setProxy(proxyCfg), getImageSourceSession().setProxy(proxyCfg)])
   applied = rules
   proxyDirect = input.mode === 'direct'
 
@@ -217,9 +224,13 @@ async function openHanimeChallenge(url: string): Promise<string | null> {
       autoHideMenuBar: true,
       webPreferences: { session: getHanimeSession(), contextIsolation: true, nodeIntegration: false }
     })
+    const offLang = onNativeLanguageChange(() => {
+      if (!win.isDestroyed()) win.setTitle(tr('Hanime Cloudflare 验证'))
+    })
     const attempt = { window: win, url, result: Promise.resolve<string | null>(null) }
     challenge = attempt
     attempt.result = waitForHanimePage(win, url).catch(() => { return null /* 页面未就绪或已关闭时返回无可用页面。 */ }).finally(() => {
+      offLang()
       // An old closed/load/evaluation continuation must only clean up its owner.
       if (challenge === attempt) challenge = null
       if (!win.isDestroyed()) win.close()
@@ -361,7 +372,7 @@ export async function initProxy(read: () => string): Promise<void> {
     // 首次启动就填了坏代理时，仍要让 Hanime 走 Chromium session，才能吃到
     // 启动前注入的内置 Hosts 规则。回退失败才退到默认 fetch。
     try {
-      await getHanimeSession().setProxy({ mode: 'direct' })
+      await Promise.all([getHanimeSession().setProxy({ mode: 'direct' }), getImageSourceSession().setProxy({ mode: 'direct' })])
       proxyDirect = true
       setHanimeFetch(hanimeFetch)
     } catch {
@@ -386,6 +397,6 @@ export async function reapplyProxy(raw: string): Promise<{ ok: boolean; message:
 
 /** 诊断用：问 Chromium 某个地址实际会走哪条代理 */
 export async function resolveProxyFor(url: string): Promise<string> {
-  if (!app.isReady()) return '（应用还没 ready）'
+  if (!app.isReady()) return '（正在准备网络环境…）'
   return getHanimeSession().resolveProxy(url)
 }

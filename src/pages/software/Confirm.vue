@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { tr } from "../../i18n/index.ts"
+import { locale, tr } from "../../i18n/index.ts"
 
 import { confirmDialog } from '@/composables/useDialog'
 /**
@@ -210,11 +210,13 @@ async function confirm(ids: string[]): Promise<void> {
   try {
     const r = await window.baoyi.pending.confirm(plain(ids))
     await Promise.all([load(), categories.load(), store.reload()])
+    const sep = locale.value === 'en' ? ', ' : '，'
+    const listSep = locale.value === 'en' ? ', ' : '、'
     const extra = [
-      r.categories.length ? tr("新建分类「{p0}」", {p0: (r.categories.join('、'))}) : '',
+      r.categories.length ? tr("新建分类「{p0}」", {p0: (r.categories.join(listSep))}) : '',
       r.tags.length ? tr("{p0} 个标签入池", {p0: (r.tags.length)}) : ''
     ].filter(Boolean)
-    success(tr("已收录 {p0} 个软件{p1}", {p0: (r.registered), p1: (extra.length ? `，${extra.join('，')}` : '')}))
+    success(tr("已收录 {p0} 个软件{p1}", {p0: (r.registered), p1: (extra.length ? `${sep}${extra.join(sep)}` : '')}))
     if (items.value.length === 0) void router.push({ name: 'home' })
   } catch (err) {
     error(tr("写入失败：{p0}", {p0: (errorMessage(err))}))

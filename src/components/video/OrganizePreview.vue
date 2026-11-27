@@ -29,7 +29,7 @@ const collisions = computed(() => props.preview.collisions.filter(collision => p
           <li v-for="episode in orderedEpisodes" :key="episode.id">
             <div class="organize-episode-title"><strong>{{ episode.title || $t('未命名内容') }}</strong><small>{{ preview.works.find(work => work.resourceId === episode.resourceId)?.name }}</small></div>
             <label v-if="showSeasons"><span>{{ $t("季") }}</span><input type="number" min="0" max="1000" :value="episodeNumbers[episode.id]?.season ?? episode.season" :aria-label="(episode.title || $t('未命名内容')) + $t(' 的季数')" :disabled="disabled" @input="$emit('number', episode.id, Number(($event.target as HTMLInputElement).value), episodeNumbers[episode.id]?.episode ?? episode.episode)" /></label>
-            <label><span>{{ audio ? $t('曲序 #') : $t('第') }}</span><input type="number" min="0" max="10000" :value="episodeNumbers[episode.id]?.episode ?? episode.episode" :aria-label="(episode.title || $t('未命名内容')) + (audio ? $t(' 的曲序') : $t(' 的集数'))" :disabled="disabled" @input="$emit('number', episode.id, episodeNumbers[episode.id]?.season ?? episode.season, Number(($event.target as HTMLInputElement).value))" /><span v-if="!audio">{{ $t("集") }}</span></label>
+            <label><span>{{ audio ? $t('曲序 #') : $t('集 #') }}</span><input type="number" min="0" max="10000" :value="episodeNumbers[episode.id]?.episode ?? episode.episode" :aria-label="(episode.title || $t('未命名内容')) + (audio ? $t(' 的曲序') : $t(' 的集数'))" :disabled="disabled" @input="$emit('number', episode.id, episodeNumbers[episode.id]?.season ?? episode.season, Number(($event.target as HTMLInputElement).value))" /></label>
           </li>
         </ul>
       </section>
@@ -48,7 +48,7 @@ const collisions = computed(() => props.preview.collisions.filter(collision => p
     </template>
     <template v-else>
       <h3>{{ preview.request.mode === 'rebind' ? $t('重新绑定已有目录') : $t('复制整个作品目录') }}</h3>
-      <p class="organize-preview__impact">{{ $t("{p0}作品身份、资料、观看记录和原文件保留；任何文件失败都不会切换整个目录。", {p0: (preview.request.mode === 'rebind' ? $t('核对你已移动或复制的目录后，更新作品、内容和文件的位置。') : $t('复制视频、字幕、海报、附件及子目录，全部核对成功后切换作品位置。'))}) }}</p>
+      <p class="organize-preview__impact">{{ preview.request.mode === 'rebind' ? $t('核对你已移动或复制的目录后，更新作品、内容和文件的位置。') : $t('复制视频、字幕、海报、附件及子目录，全部核对成功后切换作品位置。') }}{{ $locale === 'en' ? ' ' : '' }}{{ $t('作品身份、资料、观看记录和原文件保留；任何文件失败都不会切换整个目录。') }}</p>
       <p class="organize-path">{{ $t("原目录：{p0}", {p0: (preview.sourceDirectory)}) }}</p>
       <p v-if="preview.directories.length">{{ $t("包含 {p0} 个子目录（含空目录）。", {p0: (preview.directories.length)}) }}</p>
     </template>
@@ -61,7 +61,7 @@ const collisions = computed(() => props.preview.collisions.filter(collision => p
       <p class="organize-path organize-preview__target">{{ $t("目标目录：{p0}", {p0: (preview.targetDirectory || $t('请填写目标目录'))}) }}</p>
       <ul v-if="preview.warnings.length" class="organize-warnings"><li v-for="(warning, index) in preview.warnings" :key="index">{{ $systemMessage(warning) }}</li></ul>
       <h3>{{ $t("文件计划 · {p0} 个", {p0: (preview.files.length)}) }}</h3>
-      <p v-if="preview.kind === 'organize'" class="organize-hint">{{ $t("{p0}同名目标不会覆盖，修改文件名后自动更新预览。", {p0: (preview.request.transfer === 'move' ? $t('移动会在全部文件和清单校验成功后移除原件，可在整理记录回退。') : $t('复制后保留原件。'))}) }}</p>
+      <p v-if="preview.kind === 'organize'" class="organize-hint">{{ preview.request.transfer === 'move' ? $t('移动会在全部文件和清单校验成功后移除原件，可在整理记录回退。') : $t('复制后保留原件。') }}{{ $locale === 'en' ? ' ' : '' }}{{ $t('同名目标不会覆盖，修改文件名后自动更新预览。') }}</p>
       <ul class="organize-files" :aria-label="$t('源文件与目标文件')">
         <li v-for="file in preview.files" :key="file.id">
           <div><strong>{{ basename(file.source) }}</strong><small>{{ formatBytes(file.size) }} · {{ stateLabels[file.state] }} · {{ actionLabels[file.action] }}</small></div>

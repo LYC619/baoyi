@@ -262,6 +262,7 @@ function outside(event: Event): void {
   if (opened.value && !panel.value?.contains(target) && !trigger.value?.contains(target)) closePanel(false)
 }
 function keydown(event: KeyboardEvent): void {
+  if (event.defaultPrevented || document.querySelector('dialog[open]')) return
   if (opened.value && event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
@@ -336,7 +337,7 @@ onBeforeUnmount(() => {
               <div v-if="runningTasks.length === 0 && history.length === 0 && projectRuns.length === 0 && insightRuns.length===0" class="task-panel__empty">
                 <ScrollText :size="30" :stroke-width="1.3" />
                 <h3>{{ $t("暂无任务") }}</h3>
-                <p>{{ $t("{p0}模块的任务进度和历史会显示在这里。", {p0: (identifyKindLabel)}) }}<template v-if="activeModule === 'video'">{{ $t("下载在「下载记录」页签。") }}</template></p>
+                <p>{{ $t("{p0}模块的任务进度和历史会显示在这里。", {p0: (identifyKindLabel)}) }}<template v-if="activeModule === 'video'">{{ ($locale === 'en' ? ' ' : '') + $t("下载在「下载记录」页签。") }}</template></p>
               </div>
               <section v-if="insightRuns.length" class="task-group" :aria-label="$t('资料精读任务')"><h3 class="task-group__heading">{{ $t("资料精读") }}<span>{{insightRuns.length}}</span></h3><article v-for="run in insightRuns" :key="run.id" class="task-card"><div class="task-card__head"><h4>{{run.name}}</h4><span class="task-card__status">{{ $systemMessage(run.phase) }}</span></div><p v-if="run.error" class="task-card__error">{{ $systemMessage(run.error) }}</p><div class="task-card__actions"><button v-if="['queued','running'].includes(run.status)" @click="insightQueue.cancel(run.id)">{{ $t("停止精读") }}</button><button v-else @click="insightQueue.open([run.documentId]);closePanel()">{{ $t("重新精读") }}</button></div></article></section>
               <section v-if="projectRuns.length" class="task-group" :aria-label="$t('项目命令运行')"><h3 class="task-group__heading">{{ $t("项目命令") }}<span>{{projectRuns.length}}</span></h3><article v-for="run in projectRuns" :key="run.id" class="task-card"><div class="task-card__head"><h4>{{run.profileName}}</h4><span class="task-card__status">{{projectRunLabels[run.status]}}</span></div><p class="task-card__meta">{{ $t("{p0} · 仅保留本机运行记录", {p0: (new Date(run.startedAt).toLocaleString($locale))}) }}</p><p v-if="run.error" class="task-card__error">{{ $systemMessage(run.error) }}</p><div class="task-card__actions"><button type="button" @click="showProjectRuns">{{ $t("查看输出与运行详情") }}</button></div></article></section>

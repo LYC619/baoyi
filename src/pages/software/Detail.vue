@@ -79,17 +79,27 @@ async function checkExePresent(): Promise<void> {
   } catch { exeMissing.value = false }
 }
 const loading = ref(true)
+const loadError = ref('')
+let loadRun = 0
 
 async function load(): Promise<void> {
+  const run = ++loadRun
+  const targetId = props.id
   loading.value = true
+  loadError.value = ''
   try {
-    item.value = await window.baoyi.software.get(props.id)
+    const next = await window.baoyi.software.get(targetId)
+    if (run !== loadRun || props.id !== targetId) return
+    item.value = next
     await checkExePresent()
   } catch (err) {
-    error(tr("读取条目失败：{p0}", {p0: (errorMessage(err))}))
+    if (run !== loadRun || props.id !== targetId) return
+    const msg = errorMessage(err)
+    loadError.value = msg
+    error(tr("读取条目失败：{p0}", {p0: (msg)}))
     item.value = null
   } finally {
-    loading.value = false
+    if (run === loadRun && props.id === targetId) loading.value = false
   }
 }
 
@@ -192,8 +202,8 @@ async function setDefaultLauncher(launcherPath: string): Promise<void> {
       success(tr("已切换默认启动端"))
       await checkExePresent()
     }
-  } catch {
-    error(tr("切换失败：该程序已登记在另一个条目下"))
+  } catch (err) {
+    error(tr("切换失败：{p0}", { p0: errorMessage(err) }))
   }
 }
 
@@ -398,8 +408,11 @@ async function dropLink(): Promise<void> {
   <div class="detail">
     <div v-if="loading" class="detail__state">{{ $t("载入中…") }}</div>
     <div v-else-if="!item" class="detail__state">
-      <p>{{ $t("这条记录不存在或已被移除。") }}</p>
-      <button type="button" class="btn btn--ghost" @click="router.push({ name: 'home' })">{{ $t("返回软件库") }}</button>
+      <p>{{ loadError || $t("这条记录不存在或已被移除。") }}</p>
+      <div style="display: flex; gap: 8px; justify-content: center">
+        <button v-if="loadError" type="button" class="btn btn--ghost" @click="load">{{ $t("重新加载") }}</button>
+        <button type="button" class="btn btn--ghost" @click="router.push({ name: 'home' })">{{ $t("返回软件库") }}</button>
+      </div>
     </div>
 
     <template v-else>

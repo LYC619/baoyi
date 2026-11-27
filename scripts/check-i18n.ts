@@ -74,10 +74,14 @@ export function createChecker(catalog: Record<string, string>) {
       if (main) {
         if (ts.isNewExpression(n) && /Error$/.test(n.expression.getText(ast))) for (const arg of n.arguments || []) checkSystem(arg)
         if (ts.isPropertyAssignment(n) && /^(message|reason|error|phase|warning|transferMessage)$/.test(n.name.getText(ast))) checkSystem(n.initializer)
+        if (ts.isPropertyAssignment(n) && n.name.getText(ast) === 'note' && /[\\/]organize[\\/]/.test(file)) checkSystem(n.initializer)
         if (ts.isPropertyAssignment(n) && n.name.getText(ast) === 'label' && insideMenu(n)) checkUi(n.initializer)
         if (ts.isNewExpression(n) && n.expression.getText(ast) === 'BrowserWindow') for (const arg of n.arguments || []) if (ts.isObjectLiteralExpression(arg)) for (const p of arg.properties) if (ts.isPropertyAssignment(p) && p.name.getText(ast) === 'title') checkUi(p.initializer)
         if (ts.isCallExpression(n)) {
           const call = n.expression.getText(ast)
+          if (/^(?:Type|Range|Syntax)?Error$/.test(call) && n.arguments[0]) checkSystem(n.arguments[0])
+          if (/^(?:fail|noBackup)$/.test(call) && !/[\\/]services[\\/]agent[\\/]/.test(file) && n.arguments[0]) checkSystem(n.arguments[0])
+          if (call === 'addCollision' && n.arguments[3]) checkSystem(n.arguments[3])
           if (call === 'invalidArg' && n.arguments[1]) checkSystem(n.arguments[1], true)
           if (/\.(showErrorBox|setTitle)$/.test(call)) for (const arg of n.arguments) checkUi(arg)
           const fieldArg = /^(?:v\.)?(?:text|number|projectRelative|array)$/.test(call) ? n.arguments[1] : call === 'str' ? n.arguments[2] : undefined

@@ -3,7 +3,7 @@ let lastCopyAnnouncement = ''
 </script>
 
 <script setup lang="ts">
-import { tr } from "../../i18n/index.ts"
+import { systemMessage, tr } from '../../i18n/index.ts'
 
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { marked } from 'marked'
@@ -108,11 +108,20 @@ const sources = computed(() => {
     : value?.items || value?.matches || [value?.resource || value?.source || value]
   return items.filter((x: any) => x?.id && x?.kind && x?.name).slice(0, 20)
 })
+const KIND_LABELS: Record<string, string> = {
+  get software() { return tr('软件') },
+  get game() { return tr('游戏') },
+  get video() { return tr('影视') },
+  get image() { return tr('图片') },
+  get document() { return tr('文库') },
+  get project() { return tr('项目') },
+  get personal() { return tr('个人') }
+}
 const tasks = computed(() => result.value?.todos || [])
 const summary = computed(
   () =>
-    failure.value ||
-    result.value?.reason ||
+    (failure.value ? systemMessage(failure.value) : '') ||
+    (result.value?.reason ? systemMessage(result.value.reason) : '') ||
     (typeof result.value?.changed === 'number' ? tr("已保存 {p0} 项", {p0: (result.value.changed)}) : '') ||
     (typeof result.value?.succeeded === 'number'
       ? result.value.failed ? tr('完成 {p0} 项，{p1} 项待处理', { p0: result.value.succeeded, p1: result.value.failed }) : tr('完成 {p0} 项', { p0: result.value.succeeded })
@@ -184,12 +193,12 @@ function follow(e: MouseEvent) {
       <button v-for="item in sources" :key="item.id" class="source-row" @click="emit('source', item.id)">
         <FileText :size="14" />
         <span>{{ item.name }}</span>
-        <small>{{ item.page ? $t('第 {p0} 页', {p0: item.page}) : item.kind }}</small>
+        <small>{{ item.page ? $t('第 {p0} 页', {p0: item.page}) : (KIND_LABELS[item.kind] || item.kind) }}</small>
       </button>
       <p v-if="result?.text" class="source-text">{{ result.text }}</p>
-      <p v-if="failure" role="alert">{{ failure }}</p>
+      <p v-if="failure" role="alert">{{ $systemMessage(failure) }}</p>
       <p v-if="result?.unread?.length">
-        {{ $t("{p0} 份未能读取：{p1}", {p0: (result.unread.length), p1: (result.unread.map((x: any) => `${x.name}（${x.reason}）`).join('；'))}) }}
+        {{ $t("{p0} 份未能读取：{p1}", {p0: (result.unread.length), p1: (result.unread.map((x: any) => $locale === 'en' ? `${x.name} (${$systemMessage(x.reason)})` : `${x.name}（${$systemMessage(x.reason)}）`).join($locale === 'en' ? '; ' : '；'))}) }}
       </p>
       <details class="raw">
         <summary>{{ $t("查看操作明细") }}</summary>

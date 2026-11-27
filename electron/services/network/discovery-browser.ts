@@ -1,4 +1,4 @@
-import { tr } from '../system/language.ts'
+import { onNativeLanguageChange, tr } from '../system/language.ts'
 import { BrowserWindow, Menu, session } from 'electron'
 import type { DiscoverySource, DiscoverySelection } from '../../../src/types/video-discovery.ts'
 
@@ -8,6 +8,7 @@ export const DISCOVERY_PARTITION = ONLINE_SOURCE_PARTITION
 export function createDiscoveryBrowser(getMainWindow: () => BrowserWindow | null) {
   let window: BrowserWindow | null = null
   let source: DiscoverySource | null = null
+  let refreshMenu: () => void = () => {}
   const pageKey = (raw: string) => { try { const url = new URL(raw); url.hash = ''; return url.href } catch { return '' } }
   const allowed = (raw: string) => {
     try {
@@ -25,7 +26,7 @@ export function createDiscoveryBrowser(getMainWindow: () => BrowserWindow | null
     const target = entry ? mode === 'play' ? entry.playUrl || entry.pageUrl : entry.pageUrl || entry.playUrl : value.homeUrl
     if (!target) throw new Error('此来源没有提供对应页面地址')
     source = structuredClone(value)
-    if (window && !window.isDestroyed()) { window.setTitle(tr('{p0} · 抱一', { p0: value.name })); void window.loadURL(target).catch(() => window?.setTitle(tr('页面加载失败，可刷新重试 · 抱一'))); window.show(); return }
+    if (window && !window.isDestroyed()) { window.setTitle(tr('{p0} · 抱一', { p0: value.name })); refreshMenu(); void window.loadURL(target).catch(() => window?.setTitle(tr('页面加载失败，可刷新重试 · 抱一'))); window.show(); return }
     const browserSession = session.fromPartition(DISCOVERY_PARTITION)
     const win = new BrowserWindow({ width: 1120, height: 820, minWidth: 720, minHeight: 500, title: tr('{p0} · 抱一', { p0: value.name }),
       webPreferences: { session: browserSession, contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } })
@@ -56,9 +57,15 @@ export function createDiscoveryBrowser(getMainWindow: () => BrowserWindow | null
     win.webContents.on('did-navigate', updateMenu); win.webContents.on('did-navigate-in-page', updateMenu)
     const blockDownload = (event: Electron.Event, _item: Electron.DownloadItem, sender: Electron.WebContents) => { if (sender === win.webContents) event.preventDefault() }
     browserSession.on('will-download', blockDownload)
+    refreshMenu = updateMenu
+    const offLang = onNativeLanguageChange(() => {
+      if (win.isDestroyed()) return
+      if (source) win.setTitle(tr('{p0} · 抱一', { p0: source.name }))
+      updateMenu()
+    })
     const parentClosed = () => { if (!win.isDestroyed()) win.close() }
     main.once('closed', parentClosed)
-    win.once('closed', () => { browserSession.removeListener('will-download', blockDownload); main.removeListener('closed', parentClosed); window = null })
+    win.once('closed', () => { offLang(); browserSession.removeListener('will-download', blockDownload); main.removeListener('closed', parentClosed); window = null })
     updateMenu(); navigate(target)
   }
   return { open }

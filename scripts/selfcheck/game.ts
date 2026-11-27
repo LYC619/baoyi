@@ -16,7 +16,7 @@ import { candidatePrompt, ENGINE_SAVE_RULES, fillGameSystem } from '../../electr
 import { addLinks, COVER_EXTS, coverFileName, coverSiblings, guessLinkType, hasLink, isCoverExt, LINK_TYPES, MAX_LABEL, MAX_LINKS, relabelLink, removeLink } from '../../electron/kinds/game/links.ts'
 import { acceptImageUrl, candidatesFromSearch, cleanQuery, coverQueries, extFromContentType, finalizeCandidates, MAX_CANDIDATES, MAX_COVER_BYTES, pickSteamApps, steamCoverCandidates } from '../../electron/kinds/game/covers.ts'
 import { imageSearchAvailable, imageSearchWhyNot } from '../../electron/services/network/searchService.ts'
-import { backupFolder, createBackup, deleteBackup, gameFolder, listBackups, MANIFEST, overRetention, PAYLOAD, restoreBackup, restoreBlocked, stamp, type GameLike } from '../../electron/kinds/game/backup.ts'
+import { backupFolder, createBackup, deleteBackup, gameFolder, listBackups, listOrphanBackups, MANIFEST, overRetention, PAYLOAD, rebindBackupRecord, restoreBackup, restoreBlocked, stamp, type GameLike } from '../../electron/kinds/game/backup.ts'
 import { expandTemplate, lookupSavePaths, normalizeGameName, truncateTemplate, type SaveDbHandle } from '../../electron/kinds/game/savedb.ts'
 import { elapsedSeconds, endSession, MIN_SESSION_SEC } from '../../electron/kinds/game/session.ts'
 import { isDriveRoot, nestedInside as nestedInsideShared } from '../../electron/services/system/fstree.ts'
@@ -916,6 +916,52 @@ export async function saveBackupSection(): Promise<void> {
     const r = await deleteBackup(d as any, made.backup!.id)
     assert.ok(r.ok, r.message)
     assert.equal(listBackups(d as any, HK.id).length, 0)
+    d.close()
+  })
+
+  await check('删除备份护栏：含非备份文件、与存档路径重合或盘根一律拒绝物理删除', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档Guard')
+    const made = await createBackup(d as any, HK, save, { backupRoot })
+    const strayFile = path.join(made.backup!.backup_dir, 'important-doc.txt')
+    await fsp.writeFile(strayFile, 'do-not-delete')
+
+    const refused = await deleteBackup(d as any, made.backup!.id)
+    assert.equal(refused.ok, false)
+    assert.ok(fs.existsSync(strayFile), '非备份文件必须原封不动保留')
+    assert.equal(listBackups(d as any, HK.id).length, 1, '拒绝删除时记录保留')
+
+    d.prepare('UPDATE save_backups SET backup_dir = ? WHERE id = ?').run('C:\\', made.backup!.id)
+    const rootRefused = await deleteBackup(d as any, made.backup!.id)
+    assert.equal(rootRefused.ok, false)
+    d.close()
+  })
+
+  await check('孤儿存档备份：移除游戏后可列出原游戏名并重绑到新条目', async () => {
+    const d = freshDb()
+    const save = await makeSave('存档Orphan')
+    const made = await createBackup(d as any, HK, save, { backupRoot, note: '二周目' })
+    assert.equal(listOrphanBackups(d as any).length, 1)
+    assert.equal(listOrphanBackups(d as any)[0].game_name, '空洞骑士')
+
+    const { id: newId } = insertGame(d as any, {
+      exe_path: path.join(base, 'HollowKnight2', 'hk.exe'),
+      name_zh: '空洞骑士',
+      name_en: 'Hollow Knight',
+      summary: '',
+      description: '',
+      category: '动作',
+      tags: [],
+      official_url: '',
+      source_dir: path.join(base, 'HollowKnight2'),
+      file_size: 100,
+      save_paths: [],
+      linked_files: []
+    })
+    const rebound = rebindBackupRecord(d as any, made.backup!.id, newId)
+    assert.equal(rebound.ok, true)
+    assert.equal(listOrphanBackups(d as any).length, 0)
+    assert.equal(listBackups(d as any, newId).length, 1)
     d.close()
   })
 

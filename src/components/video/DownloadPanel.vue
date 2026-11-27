@@ -51,6 +51,7 @@ async function enqueue(): Promise<void> {
   if (job) emit('queued', job.id)
 }
 function keydown(event: KeyboardEvent): void {
+  if (event.defaultPrevented || document.querySelector('dialog[open]')) return
   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return }
   if (event.key !== 'Tab' || !panel.value) return
   const controls = [...panel.value.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')]

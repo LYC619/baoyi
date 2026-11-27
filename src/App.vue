@@ -31,8 +31,11 @@ import { useVideoWorkflow } from '@/composables/useVideoWorkflow'
 import { watch } from 'vue'
 import ArchiveAssistantPanel from '@/components/archive/ArchiveAssistantPanel.vue'
 import { useArchiveAssistant } from '@/composables/useArchiveAssistant'
+import { useToast } from '@/composables/useToast'
+import { BLOCKING_OVERLAY_SELECTOR, hasBlockingOverlay } from '@/utils'
 
 const router = useRouter()
+const toast = useToast()
 const audio = useAudioStore()
 const videoUpdates = useVideoUpdates()
 const music = useMusic()
@@ -62,11 +65,12 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function findVisiblePageSearch(): HTMLInputElement | null {
+  if (hasBlockingOverlay()) return null
   const candidates = document.querySelectorAll<HTMLInputElement>(
     '.search__input, .pj-search input, input[aria-label*="搜索"], input[aria-label*="Search"], input[aria-label*="search"], .app__view input[type="search"]'
   )
   for (const el of candidates) {
-    if (el.closest('.archive-panel, dialog, [popover]')) continue
+    if (el.closest(`.archive-panel, dialog, [popover], ${BLOCKING_OVERLAY_SELECTOR}`)) continue
     const rect = el.getBoundingClientRect()
     if (rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden') {
       return el
@@ -78,7 +82,7 @@ function findVisiblePageSearch(): HTMLInputElement | null {
 function onGlobalKeydown(e: KeyboardEvent): void {
   if (e.isComposing) return
   const mod = e.ctrlKey || e.metaKey
-  const openModal = document.querySelector('dialog[open]')
+  const openModal = hasBlockingOverlay()
 
   if (mod && e.shiftKey && e.key.toLowerCase() === 'k') {
     if (openModal && !globalSearch.open.value) return
@@ -143,12 +147,19 @@ function onGlobalKeydown(e: KeyboardEvent): void {
 let offNavigate: (() => void) | null = null
 
 onMounted(() => {
+  try {
+    const notice = sessionStorage.getItem('baoyi.postResetNotice')
+    if (notice) {
+      sessionStorage.removeItem('baoyi.postResetNotice')
+      toast.success(notice)
+    }
+  } catch { /* best-effort */ }
   if (typeof window.baoyi.video.checkLibraryUpdates === 'function') {
     void videoUpdates.start(undefined, true)
   }
   window.addEventListener('keydown', onGlobalKeydown, true)
   offNavigate = window.baoyi.win.onNavigate?.((dir) => {
-    if (document.querySelector('dialog[open]')) return
+    if (hasBlockingOverlay()) return
     if (dir === 'back') router.back()
     else if (dir === 'forward') router.forward()
   }) ?? null

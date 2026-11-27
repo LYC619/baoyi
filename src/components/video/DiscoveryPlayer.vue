@@ -10,7 +10,8 @@ function stop() { if (video.value) { video.value.pause(); video.value.removeAttr
 function close() { stop(); emit('close') }
 function download() { stop(); emit('download') }
 function keydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') { event.stopPropagation(); close() }
+  if (event.defaultPrevented || document.querySelector('dialog[open]')) return
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() }
   if (event.key !== 'Tab' || !panel.value) return
   const controls = [...panel.value.querySelectorAll<HTMLElement>('button:not(:disabled),video')]
   const first = controls[0], last = controls.at(-1)

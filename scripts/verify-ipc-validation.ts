@@ -216,5 +216,11 @@ test('English validation messages translate reasons and limits without changing 
     assert.equal(systemMessage('服务器返回了 3 个'), '服务器返回了 3 个', 'short UI counters must not mangle unknown messages')
     assert.equal(systemMessage('保存失败：C:\\资料\\已停止.txt'), 'Could not save: C:\\资料\\已停止.txt')
     assert.equal(systemMessage('保存失败：保存失败：已停止'), 'Could not save: 保存失败：已停止', 'captured text is not recursively pattern matched')
+    assert.equal(systemMessage('文件不在了：D:\\Media\\demo.mp4'), 'File not found: D:\\Media\\demo.mp4')
+    assert.equal(systemMessage('来源目录格式版本不受支持，请使用第 1 版目录文件'), 'This source catalog format is not supported. Use a version 1 catalog file.')
+    assert.equal(
+      systemMessage('网站连接失败（ERR_CONNECTION_TIMED_OUT）。请在「设置 → 网络代理」检查线路，或打开来源网页完成验证后重试。已缓存的资料仍保留。'),
+      'Connection failed (ERR_CONNECTION_TIMED_OUT). Check your route in Settings → Network proxy, or open the source webpage to complete verification and try again. Cached items are kept.'
+    )
   } finally { applyLanguage('zh-CN') }
 })

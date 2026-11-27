@@ -156,6 +156,7 @@ function updateReaderSettings(patch: Partial<ReaderSettingsModel>) {
 }
 
 const readIndex = latestOnly((encoding?: string) => workspace.documents.textIndex(props.id, encoding))
+const readContent = latestOnly((encoding?: string) => workspace.documents.content(props.id, encoding))
 async function reloadEncoding() {
   if (!item.value) return
   setDocumentSavedEncoding(props.id, readerSettings.value.encoding)
@@ -168,8 +169,8 @@ async function reloadEncoding() {
       novelIndex.value = index
       pageCount.value = Math.max(1, novelIndex.value?.chapters.length || 1)
     } else if (['txt', 'md', 'markdown'].includes(item.value.format)) {
-      const nextContent = await workspace.documents.content(props.id, enc)
-      if (disposed) return
+      const nextContent = await readContent(enc)
+      if (nextContent === STALE || disposed) return
       content.value = nextContent
     }
   } catch (e) {
@@ -595,7 +596,7 @@ async function ready() {
           quote: evidence.quote,
           location: { page: evidence.page || 1, offset: 0 },
           line: evidence.startLine,
-          label: evidence.page ? tr("第 ") + evidence.page + tr(" 页") : tr("原文引文"),
+          label: evidence.page ? tr('第 {p0} 页', { p0: evidence.page }) : tr('原文引文'),
         })
       } else {
         error.value = tr("这条精读证据已不可用，可从速览重新打开")

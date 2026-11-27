@@ -583,7 +583,7 @@ async function find(query: string, direction: 1 | -1 = 1) {
         await loadChapter(match.page - 1)
         highlightQueryInElement(prose.value, viewport.value, query, match.occurrence)
         lastMatch = { query: term, page: match.page, start: match.start, occurrence: match.occurrence }
-        searchMessage.value = tr("已找到 · 第 ") + match.page + tr(" 章")
+        searchMessage.value = tr("已找到 · 第 {p0} 章", { p0: match.page })
       } else {
         const chapters = props.novelIndex.chapters
         const total = chapters.length
@@ -607,7 +607,7 @@ async function find(query: string, direction: 1 | -1 = 1) {
           await loadChapter(chIdx)
           highlightQueryInElement(prose.value, viewport.value, query, occurrence)
           lastMatch = { query: term, page: chIdx + 1, start: found, occurrence }
-          searchMessage.value = tr("已找到 · 第 ") + (chIdx + 1) + tr(" 章")
+          searchMessage.value = tr("已找到 · 第 {p0} 章", { p0: chIdx + 1 })
           return
         }
         searchMessage.value = tr("未找到匹配内容")
@@ -638,7 +638,7 @@ async function find(query: string, direction: 1 | -1 = 1) {
         const occurrence = countOccurrenceBefore(lower, term, start)
         highlightQueryInElement(pdfLayer(n), viewport.value, query, occurrence)
         lastMatch = { query: term, page: n, start, occurrence }
-        searchMessage.value = tr("已找到 · 第 ") + n + tr(" 页")
+        searchMessage.value = tr("已找到 · 第 {p0} 页", { p0: n })
         return
       }
       searchMessage.value = tr("未找到匹配内容（扫描页需文字层）")
@@ -670,13 +670,13 @@ async function find(query: string, direction: 1 | -1 = 1) {
           occurrence
         )
         lastMatch = { query: term, page: n + 1, start, occurrence }
-        searchMessage.value = tr("已找到 · 第 ") + (n + 1) + tr(" 段")
+        searchMessage.value = tr("已找到 · 第 {p0} 段", { p0: n + 1 })
         return
       }
       searchMessage.value = tr("未找到匹配内容")
     }
   } catch (e) {
-    if (!disposed) searchMessage.value = tr("搜索失败：") + errorMessage(e)
+    if (!disposed) searchMessage.value = tr("搜索失败：{p0}", { p0: errorMessage(e) })
   } finally {
     searching.value = false
   }

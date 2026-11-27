@@ -721,8 +721,8 @@ async function recoverOrganize(id: string) {
 }
 
 .settings-subtabs button.active {
-  color: var(--primary, #3b82f6);
-  border-bottom-color: var(--primary, #3b82f6);
+  color: var(--accent-ink);
+  border-bottom-color: var(--accent);
 }
 
 .settings-subpage {
@@ -903,7 +903,7 @@ async function recoverOrganize(id: string) {
   margin-top: 14px;
   padding: 10px 14px;
   border-radius: 6px;
-  background: rgba(16, 185, 129, 0.1);
+  background: var(--success-bg);
   color: var(--text-main);
   font-size: 13px;
 }
@@ -930,13 +930,13 @@ async function recoverOrganize(id: string) {
   font-size: 12px;
   padding: 2px 8px;
   border-radius: 12px;
-  background: var(--bg-hover, #eee);
+  background: var(--hover-surface);
 }
 
-.stat-pill.ready { background: rgba(16, 185, 129, 0.15); color: #059669; }
-.stat-pill.skip { background: rgba(156, 163, 175, 0.15); color: #6b7280; }
-.stat-pill.conflict { background: rgba(245, 158, 11, 0.15); color: #d97706; }
-.stat-pill.missing { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+.stat-pill.ready { background: var(--success-bg); color: var(--success); }
+.stat-pill.skip { background: var(--hover-surface); color: var(--text-sub); }
+.stat-pill.conflict { background: var(--warning-bg); color: var(--warning); }
+.stat-pill.missing { background: var(--danger-bg); color: var(--danger); }
 
 .preview-table-wrapper {
   max-height: 360px;
@@ -958,7 +958,7 @@ async function recoverOrganize(id: string) {
 }
 
 .preview-table th {
-  background: var(--bg-hover, rgba(0, 0, 0, 0.03));
+  background: var(--bg-elevated);
   position: sticky;
   top: 0;
   font-weight: 500;
@@ -990,10 +990,10 @@ async function recoverOrganize(id: string) {
   font-size: 11px;
 }
 
-.badge-ready { background: rgba(16, 185, 129, 0.15); color: #059669; }
-.badge-skip { background: rgba(156, 163, 175, 0.15); color: #6b7280; }
-.badge-conflict { background: rgba(245, 158, 11, 0.15); color: #d97706; }
-.badge-missing { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+.badge-ready { background: var(--success-bg); color: var(--success); }
+.badge-skip { background: var(--hover-surface); color: var(--text-sub); }
+.badge-conflict { background: var(--warning-bg); color: var(--warning); }
+.badge-missing { background: var(--danger-bg); color: var(--danger); }
 
 .block-hint {
   display: block;

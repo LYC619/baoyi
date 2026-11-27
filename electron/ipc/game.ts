@@ -25,11 +25,13 @@ import {
   isGameRunning,
   launchGame,
   listGameItems,
+  listOrphanSaveBackups,
   listSaveBackups,
   onGameSession,
   openGameLink,
   previewSaveBackup,
   previewSaveRestore,
+  rebindSaveBackup,
   rebuildMissingGameCovers,
   registerManualGame,
   removeGame,
@@ -178,6 +180,10 @@ export function registerGameIpc(
     backupSavePath(reqId(id), reqString(savePath, 'savePath', { max: 4096 }), optString(note, 'note', { max: 200, trim: true }))
   )
   ipcMain.handle('game:backups', (_e, id: string) => listSaveBackups(reqId(id)))
+  ipcMain.handle('game:orphan-backups', () => listOrphanSaveBackups())
+  ipcMain.handle('game:rebind-backup', (_e, backupId: string, gameId: string) =>
+    rebindSaveBackup(reqId(backupId, 'backupId'), reqId(gameId, 'gameId'))
+  )
   ipcMain.handle('game:preview-restore', (_e, id: string, target?: string) =>
     previewSaveRestore(reqId(id), optString(target, 'target', { max: 4096 }))
   )

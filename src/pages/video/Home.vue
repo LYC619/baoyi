@@ -58,11 +58,8 @@ const content = ref<HTMLElement | null>(null)
 const searchInput = ref<HTMLInputElement | null>(null)
 function onSearchShortcut(e: KeyboardEvent): void {
   if (e.isComposing || document.querySelector?.('dialog[open]')) return
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+  if (e.key === 'Escape' && searchInput.value && document.activeElement === searchInput.value) {
     e.preventDefault()
-    searchInput.value?.focus()
-    searchInput.value?.select()
-  } else if (e.key === 'Escape' && searchInput.value && document.activeElement === searchInput.value) {
     clearKeyword()
     searchInput.value.blur()
   }
@@ -108,8 +105,15 @@ const importing = computed(() => !!videoImport.busy.value)
 const userExpanded = ref<Record<string, boolean>>({}), autoExpanded = ref<Record<string, boolean>>({})
 const expandedEpisodes = ref<Record<string, VideoWorkContent[]>>({})
 const expanded = computed<Record<string, boolean>>(() => ({ ...autoExpanded.value, ...userExpanded.value }))
-async function loadEpisodes(id: string): Promise<VideoWorkContent[]> {
-  try { return expandedEpisodes.value[id] = (await window.baoyi.video.library(id)).contents } catch (e) { error(errorMessage(e)); return [] }
+async function loadEpisodes(id: string, run?: number): Promise<VideoWorkContent[]> {
+  try {
+    const contents = (await window.baoyi.video.library(id)).contents
+    if (run === undefined || run === expandRun) expandedEpisodes.value[id] = contents
+    return contents
+  } catch (e) {
+    if (run === undefined || run === expandRun) error(errorMessage(e))
+    return []
+  }
 }
 async function toggleCollection(id: string) {
   const next = !expanded.value[id]
@@ -124,14 +128,15 @@ function matchingEpisodes(id: string, episodes = expandedEpisodes.value[id] || [
 }
 const searching = computed(() => store.selection.kind === 'tag' || !!store.keyword.trim())
 let expandRun = 0
-watch(() => [shownItems.value, store.selection, store.keyword], async () => {
-  // 关键词连着改时前一轮还在等 IPC，等它回来条件已经不是它算的那个了 —— 晚到的一轮直接作废
+watch(() => [shownItems.value, store.queryPending], async () => {
+  // 关键词连着改时等 store 防抖查询稳定后再读单集，晚到的一轮直接作废
   const run = ++expandRun
+  if (store.queryPending) return
   expandedEpisodes.value = {}
   autoExpanded.value = {}
   for (const item of shownItems.value) {
     if (item.episode_total <= 1 || (!userExpanded.value[item.id] && !searching.value)) continue
-    const episodes = await loadEpisodes(item.id)
+    const episodes = await loadEpisodes(item.id, run)
     if (run !== expandRun) return
     // 只有单集真的命中条件才自动展开；作品自身匹配而单集不匹配的，展开也只是一行空态
     if (!userExpanded.value[item.id] && matchingEpisodes(item.id, episodes).length) autoExpanded.value[item.id] = true

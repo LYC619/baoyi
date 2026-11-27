@@ -73,3 +73,26 @@ test('回收备份拒绝行与载荷编号不一致和目录外文件',async t=>
  const payload=JSON.parse(rows[0].payload);payload.documentId='forged';rows[0].payload=JSON.stringify(payload)
  assert.throws(()=>restoreLibraryBackup(f.db,backup),/回收|recycle|ownership|disagree/)
 })
+test('移除索引、回收暂存与到期清退均释放原路径，重新扫描与重新导入不被旧墓碑锁死',async t=>{
+ const f=await fixture(t)
+ await f.recycle.remove(await f.recycle.plan(f.doc.id,[]))
+ const scannedAfterIndex=await f.docs.scan([f.root])
+ assert.equal(scannedAfterIndex.items.find(i=>i.path===f.source)?.existing,false)
+ const reimported=await f.docs.register(f.source)
+ assert.equal(reimported.path,f.source)
+
+ const rec=await f.recycle.remove(await f.recycle.plan(reimported.id,[f.source]))
+ await fs.writeFile(f.source,'同名新文档')
+ const freshWhileRecycled=await f.docs.register(f.source)
+ assert.notEqual(freshWhileRecycled.id,reimported.id)
+ assert.equal(f.recycle.get(rec.id).state,'recycled')
+ const altTarget=path.join(f.root,'旧版找回.txt')
+ await f.recycle.restore(rec.id,{[f.source]:altTarget})
+ assert.equal(await fs.readFile(altTarget,'utf8'),'留住证据')
+})
+test('资料库备份恢复拒绝盘根或相对路径的 save_backups 记录',async t=>{
+ const f=await fixture(t)
+ const backup=buildLibraryBackup(f.db)
+ ;(backup as any).tables.save_backups=[{id:'sb-1',resource_id:'g-1',save_path:'C:\\Saves\\game',backup_dir:'C:\\',size_bytes:10,file_count:1,created_at:1}]
+ assert.throws(()=>restoreLibraryBackup(f.db,backup),/save backup path invalid/)
+})

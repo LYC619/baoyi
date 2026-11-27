@@ -71,7 +71,7 @@ function requestOnce(url: URL, ip: string, init: FetchInit, timeout: number): Pr
     const body = init?.body
     if (body === undefined || body === null) req.end()
     else if (typeof body === 'string' || body instanceof Uint8Array) req.end(body)
-    else reject(new Error('直连回退只支持字符串或二进制请求体'))
+    else reject(new Error('当前请求内容无法通过备用直连发送，请检查「设置 → 网络代理」后重试'))
   })
 }
 
@@ -81,7 +81,7 @@ function requestOnce(url: URL, ip: string, init: FetchInit, timeout: number): Pr
  */
 export async function fetchViaAddress(input: FetchInput, ip: string, init?: FetchInit, timeout = 15_000): Promise<Response> {
   let url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
-  if (url.protocol !== 'https:') throw new Error('直连回退只支持 https')
+  if (url.protocol !== 'https:') throw new Error('备用直连仅支持 HTTPS 安全链接')
   for (let hop = 0; ; hop++) {
     const res = await requestOnce(url, ip, init, timeout)
     const location = res.headers.get('location')

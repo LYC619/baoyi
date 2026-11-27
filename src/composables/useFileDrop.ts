@@ -1,4 +1,5 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { hasBlockingOverlay } from '@/utils'
 
 export interface UseFileDropOptions {
   disabled?: () => boolean
@@ -41,8 +42,8 @@ export function useFileDrop(
   function isDisabled(): boolean {
     if (options.disabled?.()) return true
     if (
-      typeof document !== 'undefined' &&
-      document.querySelector('dialog[open], [role="dialog"], .im-overlay, .pj-dialog-backdrop, .image-reader')
+      hasBlockingOverlay() ||
+      (typeof document !== 'undefined' && !!document.querySelector('.im-overlay, .pj-dialog-backdrop'))
     ) {
       return true
     }

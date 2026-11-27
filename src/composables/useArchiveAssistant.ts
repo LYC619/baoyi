@@ -1,5 +1,5 @@
 
-import { tr } from "../i18n/index.ts"
+import { locale, systemMessage, tr } from '../i18n/index.ts'
 import { latestOnly, STALE } from './latestOnly'
 import { errorMessage } from '@/utils'
 import { computed, ref } from 'vue'
@@ -262,7 +262,7 @@ async function stop() {
 async function undo(id: string) {
   try {
     const result = await window.baoyi.archive.undo(id)
-    notice.value = result.reason
+    notice.value = systemMessage(result.reason)
     actions.value = await window.baoyi.archive.actions(selected.value || undefined)
   } catch (e) {
     error.value = errorMessage(e)
@@ -301,19 +301,21 @@ async function undoAll() {
         undoneCount++
       } else {
         keptCount++
-        if (result?.reason) keptReasons.add(result.reason)
+        if (result?.reason) keptReasons.add(systemMessage(result.reason))
       }
     }
     const refreshed = await window.baoyi.archive.actions(sessionId)
     if (scopeGen !== generation || scopeRev !== revision) return
     actions.value = refreshed
-    const reasonText = [...keptReasons].join('；')
+    const sep = locale.value === 'en' ? '; ' : '；'
+    const reasonText = [...keptReasons].join(sep)
+    const reasonWrap = reasonText ? (locale.value === 'en' ? ` (${reasonText})` : `（${reasonText}）`) : ''
     if (undoneCount > 0 && keptCount === 0) {
       notice.value = tr("已撤回本轮 {p0} 项修改", {p0: (undoneCount)})
     } else if (undoneCount > 0 && keptCount > 0) {
-      notice.value = tr("已撤回 {p0} 项修改，{p1} 项已保留现状{p2}", {p0: (undoneCount), p1: (keptCount), p2: (reasonText ? `（${reasonText}）` : '')})
+      notice.value = tr("已撤回 {p0} 项修改，{p1} 项已保留现状{p2}", {p0: (undoneCount), p1: (keptCount), p2: reasonWrap})
     } else if (keptCount > 0) {
-      notice.value = tr("未撤回任何修改：{p0} 项已保留现状{p1}", {p0: (keptCount), p1: (reasonText ? `（${reasonText}）` : '')})
+      notice.value = tr("未撤回任何修改：{p0} 项已保留现状{p1}", {p0: (keptCount), p1: reasonWrap})
     }
   } catch (e) {
     if (scopeGen === generation && scopeRev === revision) {

@@ -8,7 +8,7 @@ export function linkExtras(file:LinkedFile):Partial<LinkedFile>{
  if(file.purpose!==undefined){if(!['modifier','backup','inspection','patch','mixed'].includes(file.purpose))throw Error('工具用途无效');out.purpose=file.purpose}
  for(const key of ['usage','version','fit_version','source'] as const){if(file[key]!==undefined&&typeof file[key]!=='string')throw Error('工具说明须为文本');if(typeof file[key]==='string')out[key]=file[key]!.trim().slice(0,key==='usage'?4000:500)}
  if(file.features!==undefined){if(!Array.isArray(file.features)||file.features.length>100)throw Error('最多填写 100 项工具功能');out.features=file.features.map(f=>{if(!f||typeof f.key!=='string'||typeof f.label!=='string')throw Error('工具功能格式不正确');return {key:f.key.slice(0,60),label:f.label.slice(0,200)}})}
- if(file.launch_with_game!==undefined){if(typeof file.launch_with_game!=='boolean')throw Error('随游戏启动须为开关');out.launch_with_game=file.type==='trainer'&&file.role!=='usage'&&/\.(exe|bat|cmd|lnk)$/i.test(file.path)?file.launch_with_game:false}
+ if(file.launch_with_game!==undefined){if(typeof file.launch_with_game!=='boolean')throw Error('随游戏启动设置无效');out.launch_with_game=file.type==='trainer'&&file.role!=='usage'&&/\.(exe|bat|cmd|lnk)$/i.test(file.path)?file.launch_with_game:false}
  if(file.read_progress!==undefined){if(typeof file.read_progress!=='number'||!Number.isFinite(file.read_progress)||file.read_progress<0||file.read_progress>1)throw Error('阅读进度须在 0 到 1 之间');out.read_progress=file.read_progress}
  return out
 }

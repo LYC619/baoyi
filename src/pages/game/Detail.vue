@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { tr } from "../../i18n/index.ts"
+import { systemMessage, tr } from "../../i18n/index.ts"
 
 import { latestOnly, STALE } from '@/composables/latestOnly'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -197,17 +197,22 @@ const findCovers = latestOnly((action: () => ReturnType<typeof window.baoyi.game
   action()
 )
 
+const loadError = ref('')
+
 async function load(): Promise<void> {
   closeCoverHits()
   void chooseCover(async () => null)
   coverPicking.value = ''
   loading.value = true
+  loadError.value = ''
   try {
     const result = await readGame()
     if (result === STALE) return
     item.value = result
   } catch (err) {
-    error(tr("读取游戏失败：{p0}", {p0: (errorMessage(err))}))
+    const msg = errorMessage(err)
+    loadError.value = msg
+    error(tr("读取游戏失败：{p0}", {p0: (msg)}))
     item.value = null
   }
   loading.value = false
@@ -435,7 +440,7 @@ function previewFailed(candidate: CoverCandidate): void {
     stage: 'cache',
     status: 'failed',
     message: tr("本地预览无法显示，请重新搜索封面"),
-    route: '本地预览缓存',
+    route: tr("本地预览缓存"),
     url: candidate.url,
   })
 }
@@ -539,9 +544,7 @@ function beginSaveAction(): AbortSignal {
   return saveAction.signal
 }
 const askSaveConfirm = (titleText: string, messageText: string, confirmText?: string): Promise<boolean> =>
-  typeof confirmDialog === 'function'
-    ? confirmDialog({ title: titleText, message: messageText, confirmText })
-    : Promise.resolve(window.confirm(messageText))
+  confirmDialog({ title: titleText, message: messageText, confirmText })
 onBeforeUnmount(() => saveAction?.abort())
 
 async function loadBackups(): Promise<void> {
@@ -619,7 +622,7 @@ async function pruneOver(over: SaveBackup[]): Promise<void> {
   }
   await refreshBackups()
   if (done > 0) success(tr("已清理 {p0} 份旧备份", {p0: (done)}))
-  if (failed.length > 0) error(tr("{p0} 份未能清理：{p1}", {p0: (failed.length), p1: (failed[0])}))
+  if (failed.length > 0) error(tr("{p0} 份未能清理：{p1}", {p0: (failed.length), p1: (systemMessage(failed[0]))}))
 }
 
 async function restore(b: SaveBackup): Promise<void> {
@@ -765,8 +768,11 @@ async function removeItem(): Promise<void> {
     >
       <div v-if="loading" class="detail__state">{{ $t("载入中…") }}</div>
       <div v-else-if="!item" class="detail__state">
-        <p>{{ $t("这条记录不存在或已被移除。") }}</p>
-        <button type="button" class="btn btn--ghost" @click="router.push({ name: 'game-home' })">{{ $t("返回游戏库") }}</button>
+        <p>{{ loadError || $t("这条记录不存在或已被移除。") }}</p>
+        <div style="display: flex; gap: 8px; justify-content: center">
+          <button v-if="loadError" type="button" class="btn btn--ghost" @click="loadAll">{{ $t("重新加载") }}</button>
+          <button type="button" class="btn btn--ghost" @click="router.push({ name: 'game-home' })">{{ $t("返回游戏库") }}</button>
+        </div>
       </div>
 
       <template v-else>

@@ -20,6 +20,8 @@ import {closeVideoPreview} from './video-preview.ts'
 import {exportAssistantState,stageAssistantState,installAssistantState,discardAssistantStage} from '../archive/backup.ts'
 
 import {musicBusy} from './music.ts'
+import {softwareOrganizeBusy} from '../kinds/software/organize/mutation.ts'
+import {gameActivityBusy} from '../kinds/game/service.ts'
 
 const MAX_BACKUP_BYTES = 256 * 1024 * 1024
 let restoreCommit=false
@@ -29,7 +31,7 @@ export const libraryRestoreInProgress=()=>restoreCommit
 export function assertLibraryIdle(fromArchive=false,fromRestore=false): void {
   if(restoreCommit&&!fromRestore)throw new Error('资料库正在恢复，请等待重启')
   const db = getDb()
-  if (musicBusy() || (!fromArchive&&archiveAssistantBusy()) || agentQueue.busy() || workspaceBusy() || videoOrganizationBusy() || videoAgentOrganizationBusy() || videoImportBusy() || imageLibraryBusy() || projectLibraryBusy()
+  if (musicBusy() || softwareOrganizeBusy() || gameActivityBusy() || (!fromArchive&&archiveAssistantBusy()) || agentQueue.busy() || workspaceBusy() || videoOrganizationBusy() || videoAgentOrganizationBusy() || videoImportBusy() || imageLibraryBusy() || projectLibraryBusy()
     || db.prepare("SELECT id FROM image_download_jobs WHERE status IN ('queued','running') LIMIT 1").get()
     || db.prepare("SELECT id FROM task_records WHERE status = 'running' LIMIT 1").get()
     || db.prepare("SELECT id FROM video_download_jobs WHERE status IN ('queued', 'running') LIMIT 1").get()) {

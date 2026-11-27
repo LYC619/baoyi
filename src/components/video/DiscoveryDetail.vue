@@ -9,7 +9,8 @@ const panel = ref<HTMLElement | null>(null), notes = ref(props.card.mark.notes)
 let previousFocus: HTMLElement | null = null
 watch(() => props.card.mark.notes, value => { notes.value = value })
 function keydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') { event.stopPropagation(); emit('close') }
+  if (event.defaultPrevented || document.querySelector('dialog[open]')) return
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); emit('close') }
   if (event.key !== 'Tab' || !panel.value) return
   const controls = [...panel.value.querySelectorAll<HTMLElement>('button:not(:disabled),select:not(:disabled),textarea:not(:disabled)')]
   const first = controls[0], last = controls.at(-1)

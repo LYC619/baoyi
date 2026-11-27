@@ -44,7 +44,9 @@ function toggle(node: OutlineNode) {
         v-if="node.children.length"
         class="outline-toggle"
         :aria-label="
-          (collapsed.has(node.id) ? $t('展开') : $t('收起')) + $t('章节 ') + node.title
+          collapsed.has(node.id)
+            ? $t('展开章节 {p0}', { p0: node.title })
+            : $t('收起章节 {p0}', { p0: node.title })
         "
         :aria-expanded="!collapsed.has(node.id)"
         @click="toggle(node)"

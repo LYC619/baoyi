@@ -74,9 +74,13 @@ function legacyProjectPostersDir(): string {
  * 「不设置也能用」比「先去设置里指一个」少一道门槛，而想换位置的人随时能换。
  * 目录创建失败时让 IPC 调用方显示真实错误。
  */
-export function saveBackupRoot(): string {
+export function resolveSaveBackupRoot(): string {
   const configured = getSettings(getDb()).save_backup_root.trim()
-  const dir = configured || path.join(app.getPath('userData'), 'save-backups')
+  return configured || path.join(app.getPath('userData'), 'save-backups')
+}
+
+export function saveBackupRoot(): string {
+  const dir = resolveSaveBackupRoot()
   fs.mkdirSync(dir, { recursive: true })
   return dir
 }
@@ -213,6 +217,8 @@ export interface ResetSummary {
   posters: number
   /** 保留下来的存档备份记录数。磁盘上那些备份文件一个都没动，见下面的注释 */
   saveBackupsKept: number
+  /** 保留下来的文库回收站待还原记录数。暂存目录里的真实文件与原路径索引一并保留 */
+  recycledDocumentsKept: number
   settingsCleared: boolean
 }
 
@@ -297,21 +303,30 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
   const units = count('SELECT COUNT(*) AS n FROM scan_units')
   // 先数下来，因为下面刻意不删它 —— 报给用户的是「留了多少」，不是「清了多少」
   const saveBackupsKept = count('SELECT COUNT(*) AS n FROM save_backups')
+  const recycledDocumentsKept = count("SELECT COUNT(*) AS n FROM document_recycle WHERE state IN ('recycled', 'attention')")
 
   const tx = d.transaction(() => {
     // 打在 resource 上，各品类的私有表（software_meta / game_meta）靠 CASCADE 跟着走。
-    // 不带 WHERE：所有品类一起清，理由见上面那段注释。
-    //
-    // save_backups 刻意**不在**这里 —— 它没有外键，所以这句 DELETE 碰不到它，
-    // 而这正是当初不给它建外键的目的：那张表不是日志而是索引，每行的 backup_dir
-    // 指向磁盘上一份真实存在的存档拷贝。删掉记录不会删掉那些文件，
-    // 只会让用户再也找不到它们。「用户重置了抱一」不等于「用户愿意扔掉存档备份」。
-    // 代价是留下一批孤儿行，等「孤儿备份清理」那一屏再回收；
-    // 在那之前至少要让用户知道它们还在，所以 saveBackupsKept 进了 ResetSummary。
-    d.prepare('DELETE FROM resource').run()
+    // save_backups 刻意没有外键而得以保留；document_recycle 有 ON DELETE CASCADE，
+    // 但处于 recycled / attention 状态的记录握着 <资料目录>/回收站 里的真实用户文件与唯一原名索引，
+    // 一旦跟着级联删掉，暂存文件就会沦为无法还原的无名 UUID 文件，因此同步保留其宿主行。
+    d.prepare("DELETE FROM document_recycle WHERE state NOT IN ('recycled', 'attention')").run()
+    d.prepare('DELETE FROM document_annotations').run()
+    d.prepare('DELETE FROM document_insights').run()
+    d.prepare('DELETE FROM document_insight_runs').run()
+    d.prepare('DELETE FROM document_file_operations').run()
+    if (mode === 'all' && recycledDocumentsKept > 0) {
+      d.prepare(
+        "UPDATE document_meta SET category_id = NULL, custom_group_id = NULL WHERE resource_id IN (SELECT resource_id FROM document_recycle WHERE state IN ('recycled', 'attention'))"
+      ).run()
+    }
+    d.prepare(
+      "DELETE FROM resource WHERE NOT EXISTS (SELECT 1 FROM document_recycle r WHERE r.resource_id = resource.id AND r.state IN ('recycled', 'attention'))"
+    ).run()
     d.prepare('DELETE FROM scan_units').run()
     d.prepare('DELETE FROM pending_software').run()
     d.prepare('DELETE FROM skip_list').run()
+    d.prepare('DELETE FROM video_scan_ignores').run()
     // 没被认可过的 AI 标签跟着识别数据一起清；用户建的和确认过的是资产，留着。
     // 不再限定 kind：条目全清了，哪个品类的 AI 标签都一样没了主人
     d.prepare(`DELETE FROM tags WHERE source = 'ai'`).run()
@@ -330,6 +345,8 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
       d.prepare('DELETE FROM personal_records').run()
       d.prepare('DELETE FROM skill_proposal').run()
       d.prepare('DELETE FROM workspace_sessions').run()
+      d.prepare('DELETE FROM archive_actions').run()
+      d.prepare('DELETE FROM archive_runs').run()
       d.prepare('DELETE FROM document_categories').run()
       d.prepare('DELETE FROM resource_links').run()
       // 识别日志只在恢复出厂时清。反复调 prompt 时要的正是「改之前那次是怎么判断的」，
@@ -340,13 +357,25 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
       d.prepare('DELETE FROM categories').run()
       d.prepare('DELETE FROM tags').run()
       d.prepare('DELETE FROM image_groups').run()
+      d.prepare('DELETE FROM image_collections').run()
+      d.prepare('DELETE FROM video_discovery_sources').run()
+      d.prepare('DELETE FROM video_discovery_artwork').run()
     }
   })
   tx()
 
   // 恢复出厂把内置分类、内置标签和版本号一并装回去。少了最后一项，下次启动
   // 会以为还没迁移过，白跑一遍重建。分类同样来自品类注册表，不是写死的
-  if (mode === 'all') { seedDefaults(d, KINDS);migrateDocumentSchema(d,0); for (const kind of KINDS.filter(k => k.kind === 'image')) kind.schema.migrate?.(d, 0) }
+  if (mode === 'all') {
+    seedDefaults(d, KINDS)
+    migrateDocumentSchema(d, 0)
+    if (recycledDocumentsKept > 0) {
+      d.prepare(
+        "UPDATE document_meta SET category_id = CASE WHEN submodule = 'archive' THEN 'archive_other' ELSE 'reading_other' END WHERE category_id IS NULL"
+      ).run()
+    }
+    for (const kind of KINDS.filter(k => k.kind === 'image')) kind.schema.migrate?.(d, 0)
+  }
 
   const icons = clearIcons()
   const covers = clearCovers()
@@ -371,6 +400,7 @@ export function resetData(mode: 'library' | 'all'): ResetSummary {
     covers,
     posters,
     saveBackupsKept,
+    recycledDocumentsKept,
     settingsCleared: mode === 'all'
   }
 }

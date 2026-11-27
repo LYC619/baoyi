@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { tr } from '../../../i18n/index.ts'
+import { systemMessage, tr } from '../../../i18n/index.ts'
 
 import { onMounted, ref, watch } from 'vue'
-import { FolderOpen, FolderPlus } from 'lucide-vue-next'
+import { FolderOpen, FolderPlus, Link2, RotateCcw, Trash2 } from 'lucide-vue-next'
+import { confirmDialog } from '@/composables/useDialog'
 import { useToast } from '@/composables/useToast'
 import { useSettingsStore } from '@/stores/settings'
+import type { GameItem, SaveBackup } from '@/types'
 
-import { errorMessage } from '@/utils'
+import { errorMessage, formatBytes, formatDateTime } from '@/utils'
 const settings = useSettingsStore()
 
 const { success, error } = useToast()
@@ -16,9 +18,126 @@ const { success, error } = useToast()
  * 那个字段为空时含义是「用默认」，而默认值要拼用户数据目录，渲染进程拼不出来。
  */
 const backupRoot = ref('')
+const rootError = ref('')
+const orphans = ref<SaveBackup[]>([])
+const games = ref<GameItem[]>([])
+const rebindTargets = ref<Record<string, string>>({})
+const busyId = ref('')
 
 async function loadBackupRoot(): Promise<void> {
-  backupRoot.value = await window.baoyi.data.saveBackupRoot()
+  try {
+    rootError.value = ''
+    backupRoot.value = await window.baoyi.data.saveBackupRoot()
+  } catch (cause) {
+    rootError.value = errorMessage(cause)
+    error(rootError.value)
+  }
+}
+
+async function loadOrphans(): Promise<void> {
+  if (typeof window.baoyi.game?.orphanBackups !== 'function') return
+  try {
+    const [orphanRows, gameRows] = await Promise.all([
+      window.baoyi.game.orphanBackups(),
+      window.baoyi.game.list()
+    ])
+    orphans.value = orphanRows
+    games.value = gameRows
+    for (const b of orphanRows) {
+      if (!rebindTargets.value[b.id] && b.game_name) {
+        const matched = gameRows.find(
+          (g) => (g.name_zh || g.name_en || g.file_name).toLowerCase() === b.game_name!.toLowerCase()
+        )
+        if (matched) rebindTargets.value[b.id] = matched.id
+      }
+    }
+  } catch (cause) {
+    error(errorMessage(cause))
+  }
+}
+
+async function openOrphanDir(backup: SaveBackup): Promise<void> {
+  try {
+    await window.baoyi.game.openBackup(backup.id)
+  } catch (cause) {
+    error(errorMessage(cause))
+  }
+}
+
+async function restoreOrphan(b: SaveBackup): Promise<void> {
+  busyId.value = b.id
+  try {
+    const p = await window.baoyi.game.previewRestore(b.id, b.save_path)
+    const lines = [
+      [tr('新增'), p.added],
+      [tr('替换'), p.changed],
+      [tr('移出当前目录'), p.removed]
+    ] as const
+    const detail = lines
+      .map(([label, files]) => `${label} ${files.length}: ${files.slice(0, 8).join(', ')}${files.length > 8 ? '…' : ''}`)
+      .join('\n')
+    const ok = await confirmDialog({
+      title: tr('还原「{p0}」存档备份', { p0: formatDateTime(b.created_at) }),
+      message: tr('目标：{p0}\n{p1}\n保持相同 {p2} 个文件\n\n还原前会先自动备份当前存档，请确认游戏已关闭。', {
+        p0: p.target,
+        p1: detail,
+        p2: p.unchanged
+      }),
+      confirmText: tr('确认还原')
+    })
+    if (!ok) return
+    const r = await window.baoyi.game.restoreBackup(b.id, p.target, p.expected)
+    await loadOrphans()
+    if (r.ok) success(systemMessage(r.message))
+    else error(systemMessage(r.message))
+  } catch (cause) {
+    error(tr('还原未完成：{p0}', { p0: errorMessage(cause) }))
+  } finally {
+    busyId.value = ''
+  }
+}
+
+async function rebindOrphan(b: SaveBackup): Promise<void> {
+  const targetGameId = rebindTargets.value[b.id]
+  if (!targetGameId) return
+  busyId.value = b.id
+  try {
+    const r = await window.baoyi.game.rebindBackup(b.id, targetGameId)
+    if (!r.ok) {
+      error(systemMessage(r.message))
+      return
+    }
+    await loadOrphans()
+    success(systemMessage(r.message))
+  } catch (cause) {
+    error(errorMessage(cause))
+  } finally {
+    busyId.value = ''
+  }
+}
+
+async function dropOrphan(b: SaveBackup): Promise<void> {
+  const ok = await confirmDialog({
+    title: tr('删除「{p0}」这份备份？', { p0: formatDateTime(b.created_at) }),
+    message: tr('{p0}\n\n备份文件夹将移入系统回收站并移除记录。', { p0: b.backup_dir }),
+    confirmText: tr('删除备份'),
+    tone: 'danger'
+  })
+  if (!ok) return
+  busyId.value = b.id
+  try {
+    const r = await window.baoyi.game.deleteBackup(b.id)
+    if (!r.ok) {
+      error(systemMessage(r.message))
+      return
+    }
+    await loadOrphans()
+    success(systemMessage(r.message))
+  } catch (cause) {
+    error(errorMessage(cause))
+  } finally {
+    busyId.value = ''
+  }
 }
 
 const openBackupRoot = async (): Promise<void> => { try { await window.baoyi.data.openSaveBackupRoot() } catch (cause) { error(errorMessage(cause)) } }
@@ -60,7 +179,10 @@ async function saveKeep(): Promise<void> {
 }
 
 watch(() => settings.settings.save_backup_keep, (v) => { keep.value = v })
-onMounted(loadBackupRoot)
+onMounted(() => {
+  void loadBackupRoot()
+  void loadOrphans()
+})
 </script>
 
 <template>
@@ -70,10 +192,10 @@ onMounted(loadBackupRoot)
     <span class="datadir__label">{{ $t("存放位置") }}</span>
     <button
       class="datadir__path mono truncate"
-      :title="backupRoot"
+      :title="backupRoot || rootError"
       @click="openBackupRoot"
     >
-      {{ backupRoot || $t('读取中…') }}
+      {{ backupRoot || rootError || $t('读取中…') }}
     </button>
     <button class="btn btn--subtle" :title="$t('在资源管理器中打开')" @click="openBackupRoot">
       <FolderOpen :size="14" />
@@ -115,6 +237,61 @@ onMounted(loadBackupRoot)
           : $t('填 0 表示不限，永不提示')
       }}
     </span>
+  </div>
+</section>
+
+<section v-if="orphans.length > 0" class="panel" style="margin-top: 16px">
+  <h2 class="sec-head">{{ $t('未绑定游戏的保留备份（{p0}）', { p0: orphans.length }) }}</h2>
+  <p class="sec-desc">{{ $t('移除游戏条目或清空识别数据后保留下来的存档备份。可直接还原回原存档路径、重新绑定到入库的游戏，或删除不再需要的备份。') }}</p>
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <div
+      v-for="b in orphans"
+      :key="b.id"
+      style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface)"
+    >
+      <div style="min-width: 0; flex: 1 1 260px">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--text-sm)">
+          <strong>{{ b.game_name || $t('未命名游戏') }}</strong>
+          <span class="hint">{{ formatDateTime(b.created_at) }}</span>
+          <span class="hint">{{ formatBytes(b.size_bytes) }} · {{ $t('{p0} 个文件', { p0: b.file_count }) }}</span>
+          <span v-if="b.note" class="hint">· {{ b.note }}</span>
+        </div>
+        <div class="mono truncate hint" :title="b.save_path" style="margin-top: 4px">{{ b.save_path }}</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
+        <template v-if="games.length > 0">
+          <select
+            v-model="rebindTargets[b.id]"
+            class="input"
+            style="max-width: 180px; height: 28px; padding: 0 8px; font-size: var(--text-xs)"
+            :disabled="busyId === b.id"
+            :aria-label="$t('选择要绑定的游戏')"
+          >
+            <option :value="''">{{ $t('选择游戏…') }}</option>
+            <option v-for="g in games" :key="g.id" :value="g.id">
+              {{ g.name_zh || g.name_en || g.file_name }}
+            </option>
+          </select>
+          <button
+            type="button"
+            class="btn btn--subtle"
+            :disabled="!rebindTargets[b.id] || busyId === b.id"
+            @click="rebindOrphan(b)"
+          >
+            <Link2 :size="13" />{{ $t('绑定') }}
+          </button>
+        </template>
+        <button type="button" class="btn btn--subtle" :disabled="busyId === b.id" @click="openOrphanDir(b)">
+          <FolderOpen :size="13" />{{ $t('打开目录') }}
+        </button>
+        <button type="button" class="btn btn--ghost" :disabled="busyId === b.id" @click="restoreOrphan(b)">
+          <RotateCcw :size="13" />{{ $t('还原') }}
+        </button>
+        <button type="button" class="btn btn--subtle" :disabled="busyId === b.id" @click="dropOrphan(b)">
+          <Trash2 :size="13" />{{ $t('删除') }}
+        </button>
+      </div>
+    </div>
   </div>
 </section>
 </template>

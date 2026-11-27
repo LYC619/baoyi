@@ -25,7 +25,7 @@ import {
   renameTag,
   upsertCategory
 } from '../services/taxonomy/taxonomy-store.ts'
-import { dataStats, getDb, resetData, saveBackupRoot } from '../services/storage/database'
+import { dataStats, getDb, resetData, resolveSaveBackupRoot } from '../services/storage/database'
 import { getSettings, patchSettings } from '../services/storage/settings-store.ts'
 import { clearTaskRecords, listTaskRecords, saveTaskRecord } from '../services/storage/task-records.ts'
 import { isPortable } from '../services/storage/portable'
@@ -189,6 +189,7 @@ export function registerSystemIpc(
   ipcMain.handle('settings:patch', async (_e, patch: Partial<AppSettings>) => {
     patch = reqRecord(patch, 'patch') as Partial<AppSettings>
     if ('language' in patch) patch.language = validateLanguageSetting(patch.language)
+    if ('proxy' in patch) parseProxyInput(patch.proxy ?? '')
     if ('video_online_proxy' in patch) parseProxyInput(patch.video_online_proxy ?? 'system://')
     const previousPrivacy = getSettings(getDb()).hide_hentai
     const next = patchSettings(getDb(), patch)
@@ -198,7 +199,10 @@ export function registerSystemIpc(
       if (!next.hide_hentai) reopenComicIngest()
     }
     if (next.hide_hentai) hanimeBrowser.close()
-    if ('proxy' in patch) await reapplyProxy(next.proxy)
+    if ('proxy' in patch) {
+      const applied = await reapplyProxy(next.proxy)
+      if (!applied.ok) throw new Error(applied.message)
+    }
     if ('video_online_proxy' in patch) await ensureOnlineNetwork()
     if ('hanime_builtin_hosts' in patch) setHanimeHostsEnabled(next.hanime_builtin_hosts !== false)
     return next
@@ -248,9 +252,9 @@ export function registerSystemIpc(
     return ''
   })
   ipcMain.handle('data:stats', () => dataStats())
-  ipcMain.handle('data:save-backup-root', () => saveBackupRoot())
+  ipcMain.handle('data:save-backup-root', () => resolveSaveBackupRoot())
   ipcMain.handle('data:open-save-backup-root', async () => {
-    const dir = saveBackupRoot()
+    const dir = resolveSaveBackupRoot()
     const customRoot = getSettings(getDb()).save_backup_root.trim()
     if (!customRoot) {
       await fs.mkdir(dir, { recursive: true })
@@ -285,6 +289,8 @@ export function registerSystemIpc(
         assertLibraryIdle()
         const entries = [
           'cache/comic-covers',
+          'cache/document-covers',
+          'cache/novel-index',
           'comic-logs',
           ...(all
             ? ['archive-assistant', 'comic-preferences.json', 'comic-download-targets.json', 'comic-authorizations']

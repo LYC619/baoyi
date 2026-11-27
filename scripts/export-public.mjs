@@ -27,7 +27,7 @@ export async function publicFiles(projectRoot=root){
     if(stat.isSymbolicLink())throw new Error('Public export refuses links: '+relative)
     if(stat.isDirectory()){
       for(const entry of await fs.readdir(absolute)){
-        if(blockedParts.has(entry)||entry.startsWith('.env')||/\.(log|pyc|pyo|db|sqlite|sqlite3|bak)$/i.test(entry))continue
+        if(blockedParts.has(entry)||entry.startsWith('.env')||/\.(log|pyc|pyo|db|db-wal|db-shm|sqlite|sqlite3|sqlite-wal|sqlite-shm|bak)$/i.test(entry))continue
         if(relative==='scripts'&&!supportScripts.has(entry)&&!suites.has(entry))continue
         await add(relative+'/'+entry)
       }

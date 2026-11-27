@@ -35,7 +35,7 @@ onBeforeUnmount(() => dialog.value?.close())
           <ul><li v-for="work in group.preview.works" :key="work.resourceId">{{ work.name }}</li></ul>
           <details><summary>{{ $t("查看各集、文件去向与冲突") }}</summary><OrganizePreview :preview="group.preview" :file-names="{}" :copy-files="plan.actions.transfer !== 'none'" :without-season="works.filter(work => group.resourceIds.includes(work.id)).every(work => work.category === '里番')" disabled /></details>
         </section>
-        <p v-if="plan.actions.artwork || plan.actions.metadata" class="agent-note">{{ $t("确认后，为这 {p0} 部所选作品{p1}{p2}{p3}。合并后的各集仍分别处理。", {p0: (plan.works.length), p1: (plan.actions.artwork ? $t('补封面') : ''), p2: (plan.actions.artwork && plan.actions.metadata ? '、' : ''), p3: (plan.actions.metadata ? $t('补资料') : '')}) }}</p>
+        <p v-if="plan.actions.artwork || plan.actions.metadata" class="agent-note">{{ plan.actions.artwork && plan.actions.metadata ? $t('确认后，为这 {p0} 部所选作品补封面与补资料。合并后的各集仍分别处理。', { p0: plan.works.length }) : plan.actions.artwork ? $t('确认后，为这 {p0} 部所选作品补封面。合并后的各集仍分别处理。', { p0: plan.works.length }) : $t('确认后，为这 {p0} 部所选作品补资料。合并后的各集仍分别处理。', { p0: plan.works.length }) }}</p>
       </template>
       <details v-if="plan?.log || analysisLog" class="agent-log"><summary>{{ $t("分析日志") }}</summary><pre>{{ plan?.log || analysisLog }}</pre></details>
       <section v-if="result" class="agent-results" :aria-label="$t('智能整理结果')"><h3>{{ result.cancelled ? $t('已停止，已完成的结果保留') : $t('处理结果') }}</h3><ul><li v-for="(outcome, index) in result.outcomes" :key="index"><strong>{{ outcome.title }}</strong><p :class="{ 'agent-error': !outcome.ok }">{{ $systemMessage(outcome.message) }}</p></li></ul></section>

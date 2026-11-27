@@ -59,10 +59,10 @@ export function parseCatalogue(raw: unknown): DiscoverySource {
     try { raw = JSON.parse(raw) } catch { throw new Error('来源目录不是有效 JSON') }
   }
   const obj = record(raw)
-  if (obj.schemaVersion !== 1) throw new Error('不支持的来源目录版本，应为 schemaVersion: 1')
+  if (obj.schemaVersion !== 1) throw new Error('来源目录格式版本不受支持，请使用第 1 版目录文件')
   const id = text(obj.id, '来源编号', 48, true)
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(id)) throw new Error('来源编号仅支持小写字母、数字、下划线和短横线')
-  if (!Array.isArray(obj.entries)) throw new Error('来源目录缺少 entries 作品列表')
+  if (!Array.isArray(obj.entries)) throw new Error('来源目录缺少作品列表')
   const seen = new Set<string>()
   const entries = array(obj.entries, '作品目录', 2000).map(value => {
     // Local source ownership is case-insensitive; catalogue keys must agree.

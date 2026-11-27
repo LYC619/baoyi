@@ -229,7 +229,7 @@ async function apply() {
         </button>
       </fieldset>
       <div v-if="confirming" class="bulk-confirm" role="alert">
-        <span>{{ $t("将 {p0} 项移出资料库。原文件保留，库内资料需要重新导入。{p1}确认继续？", {p0: (ids.length), p1: (kind === 'software' ? $t('整理目录里属于它们的链接会一并删除。') : '')}) }}</span>
+        <span>{{ kind === 'software' ? $t('将 {p0} 项移出资料库。原文件保留，库内资料需要重新导入。整理目录里属于它们的链接会一并删除。确认继续？', { p0: ids.length }) : $t('将 {p0} 项移出资料库。原文件保留，库内资料需要重新导入。确认继续？', { p0: ids.length }) }}</span>
         <button class="btn bulk-danger" type="submit" :disabled="busy || pending">{{ $t("确认移出 {p0} 项", {p0: (ids.length)}) }}</button>
         <button class="btn btn--subtle" type="button" @click="confirming = false">{{ $t("取消") }}</button>
       </div>

@@ -339,7 +339,7 @@ function prepareOrganize(d: SqlDb, input: VideoOrganizeRequest): Prepared {
   const assetSlots = new Map<string, Row>()
   for (const a of assets) {
     const key = `${keyPath(a.path)}:${a.role}`, other = assetSlots.get(key)
-    if (other && other.id !== a.id) addCollision(collisions, 'asset-slot', 'logical', '同一路径存在不同资产身份，需先明确保留方式', { resourceIds: [other.resource_id, a.resource_id], path: a.path })
+    if (other && other.id !== a.id) addCollision(collisions, 'asset-slot', 'logical', '同一文件同时关联了不同用途，请先确认保留哪一项', { resourceIds: [other.resource_id, a.resource_id], path: a.path })
     else assetSlots.set(key, a)
   }
   const files = [...fileMap.values()]
@@ -365,7 +365,7 @@ function prepareOrganize(d: SqlDb, input: VideoOrganizeRequest): Prepared {
       } else destinations.set(keyPath(f.destination), f)
       if (['copy','move'].includes(f.action) && fs.existsSync(f.destination)) addCollision(collisions, 'destination-exists', 'file', '目标文件已存在，不会覆盖', { fileId: f.id, path: f.destination })
     } catch (error) { addCollision(collisions, 'unsafe-path', 'file', textError(error), { fileId: f.id, path: f.destination }) }
-    if (f.state !== 'present') addCollision(collisions, f.state, 'file', f.state === 'offline' ? '源文件所在磁盘离线或不可读' : '源文件缺失或不是普通文件', { fileId: f.id, path: f.source })
+    if (f.state !== 'present') addCollision(collisions, f.state, 'file', f.state === 'offline' ? '源文件所在磁盘离线或不可读' : '未找到源文件，或该路径不是有效文件', { fileId: f.id, path: f.source })
   }
   let manifest: string | null = null
   if (target) {
@@ -631,7 +631,7 @@ function ensureTargetDirectory(j: Journal, directory = j.targetDirectory): void 
 async function copyVerified(d: SqlDb, j: Journal, f: FileResult): Promise<void> {
   checkDestination(j.preview.root, f.destination)
   const source = inspectFile(f.source)
-  if (source.state !== 'present' || !source.stamp) throw new Error(source.state === 'offline' ? '源磁盘离线或不可读' : '源文件不存在或不是普通文件')
+  if (source.state !== 'present' || !source.stamp) throw new Error(source.state === 'offline' ? '源磁盘离线或不可读' : '源文件不存在或不是有效文件')
   if (f.action === 'keep') {
     f.sha256 = await fileHash(f.source); f.sourceIdentity = source.stamp
     f.status = 'unchanged'; save(d, j); return

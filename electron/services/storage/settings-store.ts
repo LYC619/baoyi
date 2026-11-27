@@ -94,6 +94,9 @@ export function getSettings(d: SqlDb): AppSettings {
 }
 
 export function patchSettings(d: SqlDb, patch: Partial<AppSettings>): AppSettings {
+  for (const key of Object.keys(patch)) {
+    if (key !== 'scan_dirs' && !Object.hasOwn(DEFAULT_SETTINGS, key)) throw new Error('未知设置项：' + key)
+  }
   if(patch.music_download_root!==undefined&&(typeof patch.music_download_root!=='string'||patch.music_download_root!==''&&!path.isAbsolute(patch.music_download_root)))throw new Error('音乐保存目录必须是绝对路径')
   if(patch.video_player_path!==undefined&&(typeof patch.video_player_path!=='string'||(patch.video_player_path!==''&&(!path.isAbsolute(patch.video_player_path)||!/\.exe$/i.test(patch.video_player_path)))))throw new Error('视频播放器路径必须是本地 .exe 程序路径')
   if(patch.video_updates_weekly!==undefined&&typeof patch.video_updates_weekly!=='boolean')throw new Error('每周检查设置必须为开关值')

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from "../../i18n/index.ts"
 
-import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { BookOpen, Plus, FolderOpen, Maximize, Minimize, Search, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { GameItem, LinkedFile } from '@/types'
@@ -337,7 +337,24 @@ watch(reader, (el) => {
   resizeObserver.observe(el)
 })
 
+function onFullKeydown(e: KeyboardEvent): void {
+  if (!full.value || e.defaultPrevented || document.querySelector('dialog[open]')) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    full.value = false
+  }
+}
+
+function retryCurrent(): void {
+  const target = links.value.find((f) => f.path === selected.value) || links.value[0]
+  if (target) void read(target)
+}
+
+onMounted(() => document.addEventListener('keydown', onFullKeydown))
+
 onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onFullKeydown)
   disposed = true
   generation++
   resizeObserver?.disconnect()
@@ -462,7 +479,10 @@ onBeforeUnmount(() => {
 
       <div ref="reader" class="doc-reader reader-viewport" @scroll="scrolled">
         <p v-if="loading" role="status">{{ $t("读取中…") }}</p>
-        <p v-else-if="failure" role="alert">{{ failure }}</p>
+        <div v-else-if="failure" role="alert" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+          <span>{{ failure }}</span>
+          <button type="button" class="btn btn--ghost" @click="retryCurrent">{{ $t("重试") }}</button>
+        </div>
         <template v-else-if="doc">
           <GameMarkdown v-if="doc.kind === 'md'" ref="markdown" :text="doc.text" :images="doc.images" />
           <pre v-else-if="doc.kind === 'txt'">{{ doc.text }}</pre>

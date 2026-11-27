@@ -111,15 +111,57 @@ export function setDefaultVideoAsset(d: SqlDb, episodeId: string, assetId: strin
 }
 
 export function relocateVideoAsset(d: SqlDb, assetId: string, target: string): boolean {
-  if (!path.isAbsolute(target) || !fs.statSync(target).isFile()) throw new Error('请选择实际视频文件')
+  if (!path.isAbsolute(target) || !fs.statSync(target).isFile()) throw new Error('请选择实际媒体文件')
+  target = path.resolve(target)
   const asset = d.prepare('SELECT * FROM video_assets WHERE id = ?').get(assetId) as { path: string; resource_id: string } | undefined
   if (!asset) return false
+  const otherAsset = d.prepare('SELECT resource_id FROM video_assets WHERE path = ? COLLATE NOCASE AND id != ?').get(target, assetId) as { resource_id: string } | undefined
+  if (otherAsset && otherAsset.resource_id !== asset.resource_id) throw new Error('该文件已登记在其他条目下，请先处理重复项')
+  const otherResource = d.prepare('SELECT id FROM resource WHERE path = ? COLLATE NOCASE AND id != ?').get(target, asset.resource_id) as { id: string } | undefined
+  if (otherResource) throw new Error('该文件已登记在其他条目下，请先处理重复项')
   d.exec('SAVEPOINT relocate_video_asset')
   try {
     const size = fs.statSync(target).size
-    d.prepare("UPDATE video_assets SET path = ?, state = 'present', checked_at = ?, file_size = ? WHERE id = ?").run(path.resolve(target), Date.now(), size, assetId)
+    const now = Date.now()
+    if (otherAsset && otherAsset.resource_id === asset.resource_id) {
+      d.prepare('DELETE FROM video_assets WHERE path = ? COLLATE NOCASE AND id != ?').run(target, assetId)
+    }
+    d.prepare("UPDATE video_assets SET path = ?, state = 'present', checked_at = ?, file_size = ? WHERE id = ?").run(target, now, size, assetId)
     d.prepare('UPDATE episode SET path = ?, file_size = ? WHERE resource_id = ? AND path = ? COLLATE NOCASE').run(target, size, asset.resource_id, asset.path)
-    d.prepare('UPDATE resource SET path = ?, updated_at = ? WHERE id = ? AND path = ? COLLATE NOCASE').run(target, Date.now(), asset.resource_id, asset.path)
+    const meta = d.prepare('SELECT parts FROM video_meta WHERE resource_id = ?').get(asset.resource_id) as { parts?: string } | undefined
+    let updatedSinglePart = false
+    if (meta?.parts) {
+      try {
+        const parts = JSON.parse(meta.parts) as Array<{ path: string; label?: string; file_size?: number; duration_sec?: number }>
+        if (Array.isArray(parts)) {
+          let changed = false
+          const nextParts = parts.map((p) => {
+            if (String(p.path || '').toLowerCase() === asset.path.toLowerCase()) {
+              changed = true
+              return { ...p, path: target, file_size: size }
+            }
+            return p
+          })
+          if (changed) {
+            d.prepare('UPDATE video_meta SET parts = ? WHERE resource_id = ?').run(JSON.stringify(nextParts), asset.resource_id)
+            updatedSinglePart = nextParts.length === 1
+          }
+        }
+      } catch { /* keep unparsed parts intact */ }
+    }
+    const resRow = d.prepare('SELECT path FROM resource WHERE id = ?').get(asset.resource_id) as { path: string } | undefined
+    if (resRow && (resRow.path.toLowerCase() === asset.path.toLowerCase() || (updatedSinglePart && !fs.existsSync(resRow.path)))) {
+      d.prepare('UPDATE resource SET path = ?, file_name = ?, file_size = ?, source_dir = ?, updated_at = ? WHERE id = ?').run(
+        target,
+        path.basename(target),
+        size,
+        path.dirname(target),
+        now,
+        asset.resource_id
+      )
+    } else {
+      d.prepare('UPDATE resource SET updated_at = ? WHERE id = ?').run(now, asset.resource_id)
+    }
     d.exec('RELEASE SAVEPOINT relocate_video_asset'); return true
   } catch (error) { d.exec('ROLLBACK TO SAVEPOINT relocate_video_asset'); d.exec('RELEASE SAVEPOINT relocate_video_asset'); throw error }
 }

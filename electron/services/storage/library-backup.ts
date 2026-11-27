@@ -288,6 +288,15 @@ function validateRow(table: LibraryBackupTableName, input: unknown, at: string, 
     }
     if (table === 'project_sessions') validateProjectSession(result,budget,at)
     if (table === 'workspace_sessions') validateWorkspaceSession(result,budget,at)
+    if (table === 'save_backups') {
+      const backupDir = String(result.backup_dir ?? '').trim()
+      const savePath = String(result.save_path ?? '').trim()
+      const paths = /^[A-Za-z]:[\\/]/.test(backupDir || savePath) ? path.win32 : path
+      const rootLike = (p: string) => /^[A-Za-z]:[\\/]?$/.test(p) || paths.dirname(paths.resolve(p)) === paths.resolve(p)
+      if (!backupDir || !savePath || !paths.isAbsolute(backupDir) || !paths.isAbsolute(savePath) || rootLike(backupDir) || rootLike(savePath)) {
+        invalid(at + ' save backup path invalid')
+      }
+    }
     if(table==='document_recycle'){
       const r=keys(json(result.payload,'object',at+'.payload',budget),['id','documentId','name','root','createdAt','expiresAt','state','files','snapshot','error'],at+'.recycle',['restoring'])
       for(const key of ['id','documentId','name','root','error'])string(r[key],at+'.'+key)

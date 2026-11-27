@@ -122,15 +122,21 @@ async function reset(mode: 'library' | 'all'): Promise<void> {
     }
 
     // 保留的存档备份只在真有的时候提 —— 一句「保留 0 份备份」只会让人愣一下
-    const kept = summary.saveBackupsKept
+    const keptSaves = summary.saveBackupsKept
       ? tr("；保留 {p0} 份存档备份", {p0: (summary.saveBackupsKept)})
       : ''
-    success(
+    const keptDocs = summary.recycledDocumentsKept
+      ? tr("；保留 {p0} 份回收站待还原资料", {p0: (summary.recycledDocumentsKept)})
+      : ''
+    const notice =
       tr("已清空 {p0} 个软件条目、{p1} 个游戏条目、", {p0: (summary.software), p1: (summary.games)}) +
-        tr("{p0} 个影视条目（{p1} 集）、{p2} 个项目、", {p0: (summary.videos), p1: (summary.episodes), p2: (summary.projects)}) +
-        tr("{p0} 个目录记录、{p1} 个图标、{p2} 张封面、", {p0: (summary.units), p1: (summary.icons), p2: (summary.covers)}) +
-        tr("{p0} 张海报{p1}", {p0: (summary.posters), p1: (kept)})
-    )
+      tr("{p0} 个影视条目（{p1} 集）、{p2} 个项目、", {p0: (summary.videos), p1: (summary.episodes), p2: (summary.projects)}) +
+      tr("{p0} 个目录记录、{p1} 个图标、{p2} 张封面、", {p0: (summary.units), p1: (summary.icons), p2: (summary.covers)}) +
+      tr("{p0} 张海报{p1}", {p0: (summary.posters), p1: (keptSaves + keptDocs)})
+    try {
+      sessionStorage.setItem('baoyi.postResetNotice', notice)
+    } catch { /* best-effort */ }
+    success(notice)
     window.location.reload()
   } catch (err) {
     // 不给反馈的话，失败看起来和成功一模一样 —— 按钮变回可点，什么都没发生

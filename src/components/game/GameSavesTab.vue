@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import {
   BadgeCheck,
   FolderPlus,
@@ -42,8 +42,17 @@ const noteDrafts = ref<Record<string, string>>({})
 function triggerBackup(target: string): void {
   const raw = (noteDrafts.value[target] || '').trim()
   emit('backup-save', target, raw || undefined)
-  noteDrafts.value[target] = ''
 }
+
+watch(
+  () => props.backups[0]?.id,
+  (nextId, prevId) => {
+    if (nextId && prevId !== undefined && nextId !== prevId) {
+      const latest = props.backups[0]
+      if (latest?.save_path) noteDrafts.value[latest.save_path] = ''
+    }
+  }
+)
 
 function isStale(target: string): boolean {
   return props.stalePaths.includes(target)

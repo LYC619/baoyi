@@ -107,8 +107,8 @@ export class DocumentRecycle {
       }
       transaction(this.db,()=>{
         for(const file of record.files.filter(f=>f.restoredTo)){
-          this.db.prepare('UPDATE resource SET path=?,file_name=?,source_dir=? WHERE id=? AND path=? COLLATE NOCASE').run(file.restoredTo,path.basename(file.restoredTo),path.dirname(file.restoredTo),record.documentId,file.source)
-          this.db.prepare('UPDATE document_files SET path=? WHERE resource_id=? AND path=? COLLATE NOCASE').run(file.restoredTo,record.documentId,file.source)
+          this.db.prepare('UPDATE resource SET path=?,file_name=?,source_dir=? WHERE id=? AND (path=? COLLATE NOCASE OR path=? COLLATE NOCASE)').run(file.restoredTo,path.basename(file.restoredTo),path.dirname(file.restoredTo),record.documentId,file.source,file.stored)
+          this.db.prepare('UPDATE document_files SET path=? WHERE resource_id=? AND (path=? COLLATE NOCASE OR path=? COLLATE NOCASE)').run(file.restoredTo,record.documentId,file.source,file.stored)
         }
         record.state='restored';record.error='';this.save(record)
       });return record
@@ -123,7 +123,14 @@ export class DocumentRecycle {
           if(existsSync(file.stored)){await this.stored(record,file);await fs.unlink(file.stored)}
           file.state='purged';this.save(record)
         }
-        record.state='purged';record.error=''
+        const tombstone=record.files[0]?.stored||path.join(record.root||path.dirname(record.snapshot.path),'.purged-'+record.id)
+        transaction(this.db,()=>{
+          this.db.prepare('DELETE FROM document_files WHERE resource_id=?').run(record.documentId)
+          this.db.prepare('UPDATE resource SET path=? WHERE id=?').run(tombstone,record.documentId)
+          record.state='purged';record.error='';this.save(record)
+        })
+        results.push(record)
+        continue
       }catch(e){record.error=(e as Error).message}
       results.push(this.save(record))
     }

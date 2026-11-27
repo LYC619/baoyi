@@ -2,7 +2,7 @@
 import { tr } from '../../i18n/index.ts'
 
 import { errorMessage } from '@/utils'
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { FolderOpen, X, Archive } from 'lucide-vue-next'
 import type { ImageImportPreview, ImageType } from '@/types/image'
 import { useImageStore } from '@/stores/image'
@@ -19,7 +19,12 @@ async function choose(droppedPaths?: string[]) {
     if (result) { preview.value=result; selected.value=result.items.filter(i=>i.pages>0).map(i=>i.index) }
   } catch(cause) { error.value=errorMessage(cause) } finally { busy.value=false }
 }
-onMounted(() => { if (props.initialPaths?.length) void choose(props.initialPaths) })
+function onEscape(e: KeyboardEvent) {
+  if (e.defaultPrevented || document.querySelector('dialog[open]')) return
+  if (e.key === 'Escape' && !busy.value) { e.preventDefault(); e.stopPropagation(); emit('close') }
+}
+onMounted(() => { document.addEventListener('keydown', onEscape); if (props.initialPaths?.length) void choose(props.initialPaths) })
+onBeforeUnmount(() => document.removeEventListener('keydown', onEscape))
 async function confirm() {
   if (!preview.value) return
   busy.value=true; error.value=''

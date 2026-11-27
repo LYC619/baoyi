@@ -23,6 +23,13 @@ const DAY = 86_400_000
  *
  * 抛出点在 async 函数里，于是表现成一次静默 reject —— 「点了没反应」。
  */
+export const BLOCKING_OVERLAY_SELECTOR =
+  'dialog[open], [role="dialog"][aria-modal="true"], .mask > .dialog, .docs-panel--full, .image-reader:not(.minimized)'
+
+export function hasBlockingOverlay(): boolean {
+  return typeof document !== 'undefined' && !!document.querySelector(BLOCKING_OVERLAY_SELECTOR)
+}
+
 export function plain<T>(value: T): T {
   return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T)
 }

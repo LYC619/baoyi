@@ -316,15 +316,7 @@ const unsubscribe = workspace.onChanged(() => {
   invalidateDocumentCovers()
 })
 
-function onSearchShortcut(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-    e.preventDefault()
-    searchInput.value?.focus()
-  }
-}
-
 onMounted(async () => {
-  window.addEventListener('keydown', onSearchShortcut)
   resumeDocumentCovers()
   await store.refresh()
   await nextTick()
@@ -332,7 +324,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onSearchShortcut)
   revision++
   unsubscribe()
   void pauseDocumentCovers()

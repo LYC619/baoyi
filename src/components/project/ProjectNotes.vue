@@ -64,7 +64,7 @@ defineExpose({flush,focusNext})
       <label>{{ $t("当前情况") }}<textarea :value="state.value.current" :disabled="!state.loaded" maxlength="4000" :placeholder="$t('上次做到哪里，有什么值得记住？')" @input="edit('current',$event)" @blur="saveOnBlur"/></label>
       <label>{{ $t("下一步") }}<textarea ref="nextInput" :value="state.value.next" :disabled="!state.loaded" maxlength="2000" :placeholder="$t('下次打开时，从哪一步开始？')" @input="edit('next',$event)" @blur="saveOnBlur"/></label>
     </div>
-    <button class="more" :aria-expanded="details" @click="details=!details">{{ $t("{p0}关键 Prompt 与规则", {p0: (details?$t('收起'):$t('展开'))}) }}<span v-if="state.value.rules.length">{{ $t("· {p0} 个链接", {p0: (state.value.rules.length)}) }}</span></button>
+    <button class="more" :aria-expanded="details" @click="details=!details">{{ details ? $t('收起关键 Prompt 与规则') : $t('展开关键 Prompt 与规则') }}<span v-if="state.value.rules.length">{{ $t("· {p0} 个链接", {p0: (state.value.rules.length)}) }}</span></button>
     <div v-if="details" class="note-details">
       <label>{{ $t("关键 Prompt") }}<span>{{state.value.prompt.length}} / 8000</span><textarea class="prompt" :value="state.value.prompt" :disabled="!state.loaded" maxlength="8000" :placeholder="$t('保留可复用的要求、背景和交接提示词。')" @input="edit('prompt',$event)" @blur="saveOnBlur"/></label>
       <button class="pj-button" :disabled="!state.value.prompt" @click="copyPrompt"><Copy :size="14"/>{{copied?$t('已复制 Prompt'):$t('复制 Prompt')}}</button><h4>{{ $t("规则与参考") }}</h4>

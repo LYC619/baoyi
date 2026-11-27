@@ -458,13 +458,13 @@ defineExpose({ openCreate });
         <p v-if="recordFormError" class="ws-error" role="alert">{{ recordFormError }}</p>
         <label>{{ $t("选择指标") }}<select v-model="recordForm.metricKey" :aria-label="$t('记录指标')" required>
             <option v-for="m in currentMetrics(currentCard)" :key="m.key" :value="m.key">
-              {{ m.label }}{{ m.unit ? `（${m.unit}）` : '' }}
+              {{ m.unit ? `${m.label}${$locale === 'en' ? ` (${m.unit})` : `（${m.unit}）`}` : m.label }}
             </option>
           </select>
         </label>
         <div class="ws-two">
           <label>
-            {{ selectedRecordMetric?.type === 'number' ? $t('本次数值{p0}', {p0: selectedRecordMetric.unit ? '（' + selectedRecordMetric.unit + '）' : ''}) : selectedRecordMetric?.type === 'date' ? $t('日期值') : $t('记录内容') }}
+            {{ selectedRecordMetric?.type === 'number' ? (selectedRecordMetric.unit ? $t('本次数值（{p0}）', { p0: selectedRecordMetric.unit }) : $t('本次数值')) : selectedRecordMetric?.type === 'date' ? $t('日期值') : $t('记录内容') }}
             <input
               v-if="selectedRecordMetric?.type === 'number'"
               v-model.number="recordForm.value"

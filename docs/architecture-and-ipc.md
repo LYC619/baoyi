@@ -6,10 +6,10 @@
 
 | 维度 | 当前值 |
 |---|---|
-| 应用版本 | `0.20.8` |
+| 应用版本 | `0.20.9` |
 | SQLite Schema 版本 | `v33`（共 66 张数据表） |
 | 主进程服务域 | 7 个子目录 / 51 个模块文件 |
-| IPC 通道 | 502 条主进程通道（24 个模块）；Preload 暴露 25 个命名空间（495 invoke / 7 send / 29 event） |
+| IPC 通道 | 504 条主进程通道（24 个模块）；Preload 暴露 25 个命名空间（497 invoke / 7 send / 29 event） |
 | 前端路由 | 19 条（Hash 路由；详情页按 `meta.remountOnId` 防迟到响应） |
 | 归档助理工具 | 22 项（均含 JSON Schema 与离线 Eval 覆盖） |
 | Preload ↔ Main 一致性 | 缺失 handle: 0，缺失 on: 0 |
@@ -136,7 +136,7 @@
 | `electron/ipc/comic-ingest.ts` | 14 | `comic:browse`、`comic:cancel-browse`、`comic:cancel-preview`、`comic:clean`、`comic:cover`、`comic:defaults`、`comic:dismiss`、`comic:jobs`、`comic:logs`、`comic:preview`、`comic:retry`、`comic:revalidate`、`comic:start`、`comic:stop` |
 | `electron/ipc/game-project.ts` | 6 | `game:check-projects`、`game:import-projects`、`game:link-states`、`game:preview-projects`、`game:read-link`、`game:restore-project-artwork` |
 | `electron/ipc/game-workspace.ts` | 9 | `game:background:clear`、`game:background:pick`、`game:default-entry`、`game:link:patch`、`game:link:preview`、`game:notes:export`、`game:notes:list`、`game:notes:remove`、`game:notes:save` |
-| `electron/ipc/game.ts` | 31 | `game:add-manual`、`game:backup-save`、`game:backups`、`game:cancel` *(on)*、`game:check-save-paths`、`game:clear-cover`、`game:counts`、`game:delete-backup`、`game:get`、`game:launch`、`game:list`、`game:open-backup`、`game:open-link`、`game:pick-cover`、`game:pick-dirs`、`game:pick-links`、`game:pick-save-dir`、`game:preview-backup`、`game:preview-restore`、`game:rebuild-covers`、`game:relocate`、`game:remove`、`game:restore-backup`、`game:reveal`、`game:reveal-link`、`game:running`、`game:scan`、`game:search-covers`、`game:set-cover-url`、`game:update`、`game:verify-save` |
+| `electron/ipc/game.ts` | 33 | `game:add-manual`、`game:backup-save`、`game:backups`、`game:cancel` *(on)*、`game:check-save-paths`、`game:clear-cover`、`game:counts`、`game:delete-backup`、`game:get`、`game:launch`、`game:list`、`game:open-backup`、`game:open-link`、`game:orphan-backups`、`game:pick-cover`、`game:pick-dirs`、`game:pick-links`、`game:pick-save-dir`、`game:preview-backup`、`game:preview-restore`、`game:rebind-backup`、`game:rebuild-covers`、`game:relocate`、`game:remove`、`game:restore-backup`、`game:reveal`、`game:reveal-link`、`game:running`、`game:scan`、`game:search-covers`、`game:set-cover-url`、`game:update`、`game:verify-save` |
 | `electron/ipc/image-source.ts` | 25 | `image:cancel-job`、`image:check-updates`、`image:choose-download-root`、`image:dismiss-job`、`image:download`、`image:download-batch`、`image:download-options`、`image:download-target`、`image:download-updates`、`image:job-logs`、`image:jobs`、`image:move-job`、`image:pause-job`、`image:repair`、`image:resume-job`、`image:retry-job`、`image:source-cover`、`image:source-detail`、`image:source-favorites`、`image:source-login`、`image:source-logout`、`image:source-owned`、`image:source-ranking`、`image:source-search`、`image:source-status` |
 | `electron/ipc/image.ts` | 30 | `image:audit`、`image:bookmarks`、`image:bulk-update`、`image:collections`、`image:confirm-import`、`image:gallery`、`image:get`、`image:groups`、`image:list`、`image:move`、`image:page-info`、`image:pages`、`image:preferences`、`image:prepare-import`、`image:progress`、`image:reader-preferences`、`image:relocate`、`image:remove`、`image:remove-bookmark`、`image:remove-collection`、`image:remove-group`、`image:rename-tag`、`image:rescan`、`image:reveal`、`image:save-bookmark`、`image:save-chapter`、`image:save-collection`、`image:save-group`、`image:tag-counts`、`image:update` |
 | `electron/ipc/library-backup.ts` | 2 | `data:export-json`、`data:restore-json` |

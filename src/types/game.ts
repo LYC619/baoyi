@@ -70,6 +70,7 @@ export interface SaveBackup {
   file_count: number
   created_at: number
   note?: string
+  game_name?: string
 }
 
 /** 备份一次的结果。失败时 backup 为 null，磁盘上不会留下半成品 */

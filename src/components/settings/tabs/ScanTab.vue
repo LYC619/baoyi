@@ -285,12 +285,16 @@ const skippedExpanded = ref(false)
 const skippedCount = ref(0)
 
 async function loadSkipped(): Promise<void> {
-  const [count, list] = await Promise.all([
-    window.baoyi.pending.skippedCount(),
-    window.baoyi.pending.listSkipped().catch(() => [] as SkippedItem[])
-  ])
-  skippedCount.value = count
-  skippedItems.value = list
+  try {
+    const [count, list] = await Promise.all([
+      window.baoyi.pending.skippedCount(),
+      window.baoyi.pending.listSkipped()
+    ])
+    skippedCount.value = count
+    skippedItems.value = list
+  } catch (err) {
+    error(errorMessage(err))
+  }
 }
 
 async function restoreOneSkipped(item: SkippedItem): Promise<void> {

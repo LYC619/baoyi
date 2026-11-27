@@ -29,7 +29,7 @@ import type {
 } from '../../../src/types'
 import { app, net, nativeImage, session, shell } from 'electron'
 import { runAgent, type AgentEvent } from '../../services/agent/loop'
-import { coversDir, getDb, saveBackupRoot } from '../../services/storage/database'
+import { coversDir, getDb, resolveSaveBackupRoot, saveBackupRoot } from '../../services/storage/database'
 import { getSettings } from '../../services/storage/settings-store.ts'
 import { listCategories, tagPool } from '../../services/taxonomy/taxonomy-store.ts'
 import { saveIdentifyLog } from '../../services/storage/identify-records.ts'
@@ -64,7 +64,9 @@ import {
   deleteBackup,
   getBackup,
   listBackups,
+  listOrphanBackups,
   overRetention,
+  rebindBackupRecord,
   restoreBackup,
   previewRestore,
   type GameLike
@@ -908,7 +910,15 @@ export async function setGameCoverFromUrl(
     } else if (!file) {
       const candidate = await cacheCandidatePreview({ url, source, label: '所选封面', portrait: false, rank: 0 })
       if (coverRevision(id) !== revision || !getGame(getDb(), id)) return { ok: false, message: '封面已有更新，已取消旧选择' }
-      if (candidate.status !== 'ready') return fail(`${candidate.stage === 'decode' ? '图片解码' : candidate.stage === 'cache' ? '缓存写入' : '网络请求'}失败：${candidate.message}`)
+      if (candidate.status !== 'ready') {
+        return fail(
+          candidate.stage === 'decode'
+            ? `图片解码失败：${candidate.message}`
+            : candidate.stage === 'cache'
+              ? `缓存写入失败：${candidate.message}`
+              : `网络请求失败：${candidate.message}`
+        )
+      }
       file = previewFile(url)
     }
     if (coverRevision(id) !== revision || !getGame(getDb(), id)) return { ok: false, message: '封面已有更新，已取消旧选择' }
@@ -988,6 +998,9 @@ export async function backupSavePath(id: string, savePath: string, note?: string
 }
 
 export const listSaveBackups = (id: string): SaveBackup[] => listBackups(getDb(), id)
+export const listOrphanSaveBackups = (): SaveBackup[] => listOrphanBackups(getDb())
+export const rebindSaveBackup = (backupId: string, gameId: string): { ok: boolean; message: string } =>
+  rebindBackupRecord(getDb(), backupId, gameId)
 export const getSaveBackup = (backupId: string): SaveBackup | null => getBackup(getDb(), backupId)
 
 /**
@@ -1007,7 +1020,7 @@ export async function previewSaveBackup(id:string,target:string){
   if(!game?.save_paths.some(s=>path.resolve(s.path).toLowerCase()===path.resolve(target).toLowerCase()))throw new Error('存档路径未登记到这个游戏')
   return backupScope(target)
 }
-function restoreOptions(backupId:string,target?:string) {
+function restoreOptions(backupId:string,target?:string,ensureDir=false) {
   const backup=getBackup(getDb(),backupId)
   if(!backup)throw new Error('找不到这条备份记录')
   if(mutatingSaves.size)throw new Error('这个游戏的存档操作正在进行，请等待完成')
@@ -1017,22 +1030,22 @@ function restoreOptions(backupId:string,target?:string) {
     const game=getGame(getDb(),backup.resource_id)
     if(!game?.save_paths.some(s=>path.resolve(s.path).toLowerCase()===path.resolve(target).toLowerCase()))throw new Error('迁移目标须为这个游戏已登记的存档路径')
   }
-  return {backup,options:{backupRoot:saveBackupRoot(),target}}
+  return {backup,options:{backupRoot:ensureDir?saveBackupRoot():resolveSaveBackupRoot(),target}}
 }
 export async function previewSaveRestore(backupId:string,target?:string) {
-  const {options}=restoreOptions(backupId,target)
+  const {options}=restoreOptions(backupId,target,false)
   return previewRestore(getDb(),backupId,options)
 }
 export async function restoreSaveBackup(backupId:string,target?:string,expected?:string):Promise<SaveRestoreResult> {
   if(!expected)throw new Error('请先预览还原差异')
-  const {backup,options}=restoreOptions(backupId,target)
+  const {backup,options}=restoreOptions(backupId,target,true)
   return mutateSaveFiles(backup.resource_id,()=>restoreBackup(getDb(),backupId,gameLike(backup.resource_id),{...options,expected}))
 }
 
 export async function deleteSaveBackup(backupId:string):Promise<{ok:boolean;message:string}>{
   const backup=getBackup(getDb(),backupId)
   if(!backup)return {ok:false,message:'找不到这条备份记录'}
-  return mutateSaveFiles(backup.resource_id,()=>deleteBackup(getDb(),backupId))
+  return mutateSaveFiles(backup.resource_id,()=>deleteBackup(getDb(),backupId,dir=>shell.trashItem(dir)))
 }
 
 /**
@@ -1185,6 +1198,7 @@ export function finalizeGameSessions(): void {
 
 /** 这个游戏此刻是不是正被抱一跟着 */
 export const isGameRunning = (id: string): boolean => playing.has(id)
+export const gameActivityBusy = (): boolean => mutatingSaves.size > 0 || launchingGames.size > 0 || playing.size > 0
 
 /**
  * 打开游戏库时扫一遍所有已记下的存档路径，把当下不存在的那些报回去。

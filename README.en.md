@@ -2,6 +2,8 @@
 
 [简体中文](README.md) · **English**
 
+> Know where to stop, and keep what matters.
+
 A local Windows workspace for the files, projects and personal records you want to keep.
 
 BaoYi connects a collection with its context: a document can belong to a project, a project can support a skill, and your notes stay alongside the work. The library lives on your computer. Optional AI and online-source features connect to the services you configure.
@@ -21,7 +23,7 @@ Extract the complete Windows package and open `抱一.exe`. Keep all included li
 | --- | --- |
 | Documents | Read PDF, Markdown and text; save bookmarks and excerpts; link evidence to projects |
 | Projects | Keep current notes, related files, editor and terminal entries, and local launch commands together |
-| Personal | Record skills and practice, costs and expiry dates, metrics and small tasks |
+| Personal | Record skills and practice, costs and expiry dates, metrics, experiences and small tasks |
 | Software and games | Scan folders, review entries, launch programs, attach guides and manage supported save backups |
 | Media | Organize video and audio, browse photos and comics, and use supported online sources |
 | Archive assistant | Search and read your collection; maintain supported records and preview file organization |

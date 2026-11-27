@@ -76,6 +76,7 @@ async function recover(id: string, action: 'retry' | 'rollback'): Promise<void> 
   if (error.value && body.value) body.value.scrollTop = 0
 }
 function keydown(event: KeyboardEvent): void {
+  if (event.defaultPrevented || document.querySelector('dialog[open]')) return
   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); emit('close'); return }
   if (event.key !== 'Tab' || !panel.value) return
   const controls = [...panel.value.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, [tabindex="0"]')]
@@ -133,7 +134,7 @@ onBeforeUnmount(() => {
                   <fieldset class="organize-file-actions" :disabled="inputLocked"><legend>{{ $t("文件整理") }}</legend><label><input v-model="fileAction" type="radio" value="none" />{{ $t("保留位置") }}</label><label><input v-model="fileAction" type="radio" value="move" />{{ $t("移动") }}</label><label><input v-model="fileAction" type="radio" value="copy" />{{ $t("复制") }}</label></fieldset>
                   <template v-if="copyFiles">
                     <div class="organize-field"><span>{{ $t("整理根目录") }}</span><p class="organize-path">{{ targetDirectory || $t('请先在设置中保存影视整理根目录') }}</p><p class="organize-hint">{{ $t("将在根目录下新建以合集名命名的文件夹。") }}</p><p class="organize-hint">{{ $t("修改位置：右上角设置 → 影视 → 目录整理。") }}</p></div>
-                    <p class="organize-hint">{{ $t("{p0}下方列出各文件去向，目标重名时不会覆盖。", {p0: (transfer === 'move' ? $t('全部复制并校验成功后移除原文件，共享文件保留原件。') : $t('复制后保留原件。'))}) }}</p>
+                    <p class="organize-hint">{{ transfer === 'move' ? $t('全部复制并校验成功后移除原文件，共享文件保留原件。') : $t('复制后保留原件。') }}{{ $locale === 'en' ? ' ' : '' }}{{ $t('下方列出各文件去向，目标重名时不会覆盖。') }}</p>
                   </template>
                 </div>
               </template>
@@ -217,7 +218,6 @@ onBeforeUnmount(() => {
 .organize-panel__footer { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--divider); padding: 12px 20px; }
 .organize-panel__footer p { flex: 1 1 220px; color: var(--text-sub); font-size: 11px; line-height: 1.6; }
 .organize-panel__footer > div { display: flex; flex-wrap: wrap; gap: 8px; }
-.organize-panel .btn--primary { background: #6652c8; color: #fff; }
 .organize-panel :is(button, input, select, summary, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .spin { animation: organize-spin 1s linear infinite; }
 @keyframes organize-spin { to { transform: rotate(360deg); } }

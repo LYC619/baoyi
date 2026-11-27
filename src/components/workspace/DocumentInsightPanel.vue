@@ -40,7 +40,7 @@ async function history(){if(note.value?.sessionId){const assistant=useArchiveAss
       <details><summary>{{ $t("原文证据与覆盖范围") }}</summary>
         <p>{{ $t("{p0} · {p1} 字符", {p0: (note.coverage.complete?$t('完整文字提取'):$t('局部精读')), p1: (note.coverage.characters.toLocaleString($locale))}) }}<span v-if="note.coverage.totalPages">{{ $t("· {p0} / {p1} 页", {p0: (note.coverage.pages.length), p1: (note.coverage.totalPages)}) }}</span></p>
         <p v-for="reason in note.coverage.reasons" :key="reason" class="ws-muted">{{reason}}</p>
-        <button v-for="evidence in note.evidence" :key="evidence.id" class="insight-quote" @click="source(evidence)"><small>{{evidence.page?$t('第 ')+evidence.page+$t(' 页'):$t('第 ')+(evidence.startLine||1)+$t(' 行')}}</small><q>{{evidence.quote}}</q></button>
+        <button v-for="evidence in note.evidence" :key="evidence.id" class="insight-quote" @click="source(evidence)"><small>{{evidence.page?$t('第 {p0} 页', { p0: evidence.page }):$t('第 {p0} 行', { p0: evidence.startLine || 1 })}}</small><q>{{evidence.quote}}</q></button>
         <p v-for="limitation in note.limitations" :key="limitation">{{limitation}}</p>
       </details>
       <small class="ws-muted">{{data?.sourceMessage}} · {{new Date(note.generatedAt).toLocaleString($locale)}} · {{note.model}}</small>

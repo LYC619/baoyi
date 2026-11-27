@@ -105,8 +105,9 @@ async function inspectLooseExeBlockReason(dir: string, exePath: string): Promise
     try {
       entries = await fsp.readdir(currentDir, { withFileTypes: true })
     } catch (err: any) {
-      const code = err?.code ? `（${err.code}）` : ''
-      return `无法读取所在目录内容${code}，无法确认主程序是否独立，已阻止自动移动；请检查权限或手工移入独立文件夹后重新定位`
+      return err?.code
+        ? `无法读取所在目录内容（${err.code}），无法确认主程序是否独立，已阻止自动移动；请检查权限或手工移入独立文件夹后重新定位`
+        : '无法读取所在目录内容，无法确认主程序是否独立，已阻止自动移动；请检查权限或手工移入独立文件夹后重新定位'
     }
     if (entries.length > MAX_ENTRIES_PER_DIR) {
       return '所在目录内容较多，无法自动确认主程序是否独立无依赖；为避免拆散依赖文件，已阻止自动移动，请先手工移入独立文件夹并重新定位'

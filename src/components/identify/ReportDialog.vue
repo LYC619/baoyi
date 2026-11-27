@@ -8,13 +8,24 @@ import { tr } from "../../i18n/index.ts"
  * 跑了多少、哪些没成、花了多少 token、搜索额度用掉几次。内容全部由已有的
  * 识别结果汇总而来，不额外消耗任何 token。
  */
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { AlertTriangle, CheckCircle2, Globe, MinusCircle, X } from 'lucide-vue-next'
 import type { IdentifyLogStatus, IdentifyReport } from '@/types'
 import { formatDateTime } from '@/utils'
 
 const props = defineProps<{ report: IdentifyReport }>()
-defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{ (e: 'close'): void }>()
+
+function onEscape(e: KeyboardEvent): void {
+  if (e.defaultPrevented || document.querySelector('dialog[open]')) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    emit('close')
+  }
+}
+onMounted(() => document.addEventListener('keydown', onEscape))
+onBeforeUnmount(() => document.removeEventListener('keydown', onEscape))
 
 const STATUS_META: Record<IdentifyLogStatus, { label: string; icon: any; tone: string }> = {
   success: { get label() { return tr("成功") }, icon: CheckCircle2, tone: 'ok' },
@@ -31,12 +42,12 @@ const troubles = computed(() =>
 </script>
 
 <template>
-  <div class="mask" @click.self="$emit('close')">
-    <section class="dialog">
+  <div class="mask" @click.self="emit('close')">
+    <section class="dialog" role="dialog" aria-modal="true" :aria-label="$t('识别汇总报告')">
       <header class="dialog__head">
         <h2>{{ $t("识别汇总报告") }}</h2>
         <span class="dialog__time mono">{{ formatDateTime(report.created_at) }}</span>
-        <button class="btn btn--subtle" :title="$t('关闭')" @click="$emit('close')">
+        <button class="btn btn--subtle" :title="$t('关闭')" @click="emit('close')">
           <X :size="16" />
         </button>
       </header>

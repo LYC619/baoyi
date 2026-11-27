@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from 'node-html-parser'
-import { buildSite, rewriteMarkdownLinks } from './build-site.mjs'
+import { buildSite, renderMarkdown, rewriteMarkdownLinks } from './build-site.mjs'
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..')
 if (process.argv.includes('--build') || process.env.BAOYI_TEST_DATA_DIR) await buildSite()
@@ -37,8 +37,19 @@ for(const lang of ['en','zh-CN'])for(const slug of slugs){
     let target=path.join(output,decodeURIComponent(link.pathname.slice(base.pathname.length)))
     if((await fs.stat(target)).isDirectory())target=path.join(target,'index.html')
     await fs.access(target)
+    if(link.hash){
+      const targetDoc=parse(await fs.readFile(target,'utf8'))
+      const fragmentId=decodeURIComponent(link.hash.slice(1))
+      assert.ok(targetDoc.querySelector(`[id="${fragmentId}"]`),'Cross-page fragment target: '+raw)
+    }
+  }
+  if(slug){
+    const h2s=page.querySelectorAll('article.prose h2')
+    assert.ok(h2s.length>0&&h2s.every(h=>!!h.getAttribute('id')),'Doc h2 headings must have ids: '+relative)
   }
 }
+const rootIndex=parse(await fs.readFile(path.join(output,'index.html'),'utf8'))
+assert.ok(rootIndex.querySelector('main.language-home')&&rootIndex.querySelector('a[href$="en/"]')&&rootIndex.querySelector('a[href$="zh-CN/"]'))
 const sitemap=await fs.readFile(path.join(output,'sitemap.xml'),'utf8')
 assert.equal((sitemap.match(/<loc>/g)||[]).length,slugs.length*2)
 assert.ok(sitemap.includes('xmlns:xhtml="http://www.w3.org/1999/xhtml"'))
@@ -51,6 +62,8 @@ assert.equal(missing.querySelector('link[rel="stylesheet"]').getAttribute('href'
 assert.ok(missing.querySelector('main.language-home'))
 assert.equal(rewriteMarkdownLinks('<a href="guide.md#language">Language</a><a href="faq.md">FAQ</a>'), '<a href="../guide/#language">Language</a><a href="../faq/">FAQ</a>')
 assert.equal(rewriteMarkdownLinks('<a href="https://example.org/guide.md#language">External</a>'), '<a href="https://example.org/guide.md#language">External</a>')
+assert.ok(renderMarkdown('# Top\n\n## Install and open\n\n## 语言切换\n').includes('<h2 id="install-and-open">Install and open</h2>'))
+assert.ok(renderMarkdown('# Top\n\n## 语言切换\n').includes('<h2 id="语言切换">语言切换</h2>'))
 if(process.env.SITE_URL&&base.pathname==='/'&&!base.hostname.endsWith('.github.io'))assert.equal((await fs.readFile(path.join(output,'CNAME'),'utf8')).trim(),base.hostname)
 else await assert.rejects(fs.access(path.join(output,'CNAME')),{code:'ENOENT'})
 console.log('PASS bilingual pages, internal links, language alternates, canonical URLs, metadata, sitemap and social image')
